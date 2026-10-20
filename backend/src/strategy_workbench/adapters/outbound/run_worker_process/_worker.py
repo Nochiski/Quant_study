@@ -139,7 +139,7 @@ def serve(
     # 코드 지문은 boot 의 마지막 단계다. 지금 불러온 프로젝트 모듈이 판본 대조에 든 코드이고, run 이
     # 이 뒤에 처음 불러오는 모듈은 commit 앞에서 거절한다(spec D7, #591 2차 리뷰 P3-1).
     booted_modules = project_modules()
-    sender(ReadyMessage(booted.versions))
+    sender(ReadyMessage(booted.versions, os.getpid()))
     line = stdin.readline()
     if not line:
         # 예비로 기다리던 중 부모가 사라졌다(POSIX 의 부모 사망 경로, Windows 는 Job Object).

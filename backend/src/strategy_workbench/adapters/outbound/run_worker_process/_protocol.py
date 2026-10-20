@@ -1,4 +1,4 @@
-"""run worker IPC 프로토콜 v2 의 인코딩·디코딩(run-worker spec D3·D7·D11).
+"""run worker IPC 프로토콜 v3 의 인코딩·디코딩(run-worker spec D3·D7·D8·D11).
 
 부모와 worker 가 이 모듈 하나로 줄을 쓰고 읽는다. 한 줄은 UTF-8 JSON 객체 하나이고 `protocol`·
 `type` 칸을 싣는다. 버전이 다르면 양쪽 모두 `ProtocolError` 로 거절한다.
@@ -9,7 +9,9 @@
   (종결은 뒤의 둘)
 
 v2 는 설정을 job 에서 떼어 `boot` 로 먼저 보낸다. 예비 worker 는 run 이 정해지기 전에 `ready` 까지
-부팅해 두므로(spec D7) 부팅에 쓸 설정이 job 보다 먼저 와야 한다.
+부팅해 두므로(spec D7) 부팅에 쓸 설정이 job 보다 먼저 와야 한다. v3 는 `ready` 에 worker 의 pid 를
+싣는다. 부모가 띄운 프로세스가 실제 인터프리터가 아닐 수 있어(Windows venv 의 python.exe 는 런처다)
+메모리 가드가 그 pid 로 worker 의 RSS 를 잰다(spec D8).
 
 작업 입력은 pickle 이 아니라 기존 직렬화 계약으로 옮긴다. spec 은
 `ResolvedBacktestRunSpec.to_wire()` 의 pydantic 표현(HTTP 요청 본문과 같은 검증)이고, worker 가
@@ -35,7 +37,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategyProvenance,
 )
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 
 _T = TypeVar("_T")
 
@@ -111,6 +113,8 @@ class VersionBundle:
 @dataclass(frozen=True)
 class ReadyMessage:
     versions: VersionBundle
+    # 계산을 도는 인터프리터의 pid(`os.getpid()`). 메모리 가드가 이 pid 의 RSS 를 잰다(spec D8).
+    pid: int
 
 
 @dataclass(frozen=True)

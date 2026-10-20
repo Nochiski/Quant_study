@@ -51,6 +51,7 @@ from .ports.outgoing.run_execution import (
     RunCancelled,
     RunCommitted,
     RunFailed,
+    RunFootprint,
     RunJob,
     RunOutcome,
 )
@@ -175,7 +176,7 @@ class RunComputation:
         try:
             # require_engine_compatible 은 start() 의 preflight 판정을 되풀이하는 심층 방어다 —
             # 같은 순수 판정이라 정상 경로에서는 발동하지 않는다.
-            preview = self.portfolio_design.run_pipeline(
+            pipeline = self.portfolio_design.run_pipeline(
                 PortfolioPreviewRequest(strategy, environment=environment),
                 options=PortfolioPipelineOptions(
                     require_engine_compatible=True, parameter_values=spec.parameter_values
@@ -187,9 +188,19 @@ class RunComputation:
                     _TAPE_PROGRESS_START + fraction * (_TAPE_PROGRESS_END - _TAPE_PROGRESS_START),
                     message,
                 ),
-            ).preview
+            )
         except PortfolioPipelineCancelledError as error:
             raise RunCancelledError("run cancelled while compiling target tape") from error
+        preview = pipeline.preview
+        footprint = RunFootprint(
+            sessions=pipeline.raw_sessions,
+            fields=pipeline.raw_fields,
+            factors=len(strategy.factors),
+            observation_rows=len(pipeline.raw_observations),
+        )
+        # 원시 관측·팩터 평가는 tape 뒤에 쓰지 않는다. 쥐고 있으면 data·engine 단계 내내 수백만
+        # 객체가 살아 최대 RSS 가 커진다.
+        del pipeline
         tape = preview.tape
         if tape.strategy_hash != job.provenance.spec_hash:
             raise RuntimeError(
@@ -269,6 +280,7 @@ class RunComputation:
             session_sharpe=session_sharpe,
             metric_registry_version=result.manifest.metric_registry_version,
             headline=headline,
+            footprint=footprint,
         )
 
 

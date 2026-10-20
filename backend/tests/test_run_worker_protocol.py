@@ -38,6 +38,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
     RunCommitted,
+    RunFootprint,
     RunHeadline,
     RunJob,
 )
@@ -124,7 +125,9 @@ def test_boot_line_carries_the_settings_before_any_job(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "event",
     [
-        ReadyMessage(VersionBundle("snap:판", "engine-v7", "metric-v5", "fe-v1", "fr-v1", "c0de")),
+        ReadyMessage(
+            VersionBundle("snap:판", "engine-v7", "metric-v5", "fe-v1", "fr-v1", "c0de"), pid=4242
+        ),
         ProgressMessage("tape", 0.25, "팩터 계산"),
         EngineReadyMessage(),
         CommittedMessage(
@@ -133,6 +136,7 @@ def test_boot_line_carries_the_settings_before_any_job(tmp_path: Path) -> None:
                 session_sharpe=None,
                 metric_registry_version="metric-v5",
                 headline=RunHeadline(total_return=0.1, sharpe=None, max_drawdown=-0.2),
+                footprint=RunFootprint(sessions=532, fields=4, factors=1, observation_rows=9000),
             ),
             max_rss_bytes=123,
         ),

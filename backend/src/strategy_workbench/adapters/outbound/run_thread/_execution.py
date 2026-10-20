@@ -10,6 +10,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     RunHandle,
     RunJob,
     RunListener,
+    RunMemory,
 )
 
 
@@ -43,6 +44,14 @@ class ThreadRunExecution:
             daemon=True,
         ).start()
         return handle
+
+    def memory(self) -> RunMemory | None:
+        """run 이 모두 이 프로세스에 있어 run 마다 메모리를 따로 잴 수 없다 — 메모리 가드를 쓰지
+        않는다(spec D8, 가드는 worker 프로세스 전송의 것이다)."""
+        return None
+
+    def set_memory_hold(self, held: bool) -> None:
+        """예비가 없어 미룰 것이 없다."""
 
     def shutdown(self) -> None:
         """도는 스레드는 데몬이라 프로세스와 함께 끝난다 — 따로 정리할 것이 없다."""

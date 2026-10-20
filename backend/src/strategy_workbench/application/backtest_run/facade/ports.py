@@ -27,9 +27,11 @@ from strategy_workbench.application.backtest_run.ports.outgoing.run_execution im
     RunCommitted,
     RunExecutionPort,
     RunFailed,
+    RunFootprint,
     RunHandle,
     RunJob,
     RunListener,
+    RunMemory,
     RunOutcome,
 )
 from strategy_workbench.application.backtest_run.ports.outgoing.run_repository import (
@@ -73,9 +75,11 @@ __all__ = [
     "RunCommitted",
     "RunExecutionPort",
     "RunFailed",
+    "RunFootprint",
     "RunHandle",
     "RunJob",
     "RunListener",
+    "RunMemory",
     "RunOutcome",
     "TrialLedgerRecords",
     "TrialLineageAlreadyMergedError",

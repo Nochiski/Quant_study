@@ -58,6 +58,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     RunHandle,
     RunJob,
     RunListener,
+    RunMemory,
     RunOutcome,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
@@ -95,6 +96,7 @@ def _service(
     command: list[str] | tuple[str, ...] = WORKER_COMMAND,
     *,
     wrap: type[_CommitBarrier] | None = None,
+    memory_reserve_gb: float | None = None,
 ) -> tuple[BacktestRunService, Path]:
     container = build_container(artifact_root=tmp_path / "unused")
     root = tmp_path / "artifacts"
@@ -118,6 +120,7 @@ def _service(
         run_repository=SQLiteBacktestRunRepository(tmp_path / "research.sqlite3"),
         new_id=lambda: str(uuid4()),
         run_execution=transport,
+        memory_reserve_gb=memory_reserve_gb,
     )
     return service, root
 
@@ -171,6 +174,30 @@ def test_cancel_ends_the_run_within_two_seconds_at_every_stage(tmp_path: Path, s
     assert _leftovers(root, run_id) == []
 
 
+def test_a_run_held_for_memory_starts_when_the_running_worker_ends(tmp_path: Path) -> None:
+    """spec D8: 도는 worker 가 있으면 가드가 실제 메모리를 읽고, 모자란 run 은 `queued` 로 기다린다.
+
+    예약치를 기계보다 크게 고정해 판정이 늘 "모자람"이게 한다. 도는 run 이 끝나면 가드를 쓰지 않아
+    기다리던 run 이 뜬다(굶주림 없음).
+    """
+    marker = tmp_path / "marker"
+    service, _ = _service(tmp_path, hook_command("tape", marker), memory_reserve_gb=1_000_000.0)
+    first = service.start(_request()).run.run_id
+    wait_for_marker(marker)
+    marker.unlink()
+    second = service.start(replace(_request(), initial_cash=99_999_999.0)).run.run_id
+
+    held = service.state(second)
+    assert (held.status, held.message) == (RunStatus.QUEUED, "Waiting for free memory")
+    service.cancel(first)
+    assert wait_for_terminal_run(service, first, timeout_s=TIMEOUT_S).status is RunStatus.CANCELLED
+    wait_for_marker(marker)
+
+    assert service.state(second).status is RunStatus.RUNNING
+    service.cancel(second)
+    assert wait_for_terminal_run(service, second, timeout_s=TIMEOUT_S).status is RunStatus.CANCELLED
+
+
 def test_a_killed_worker_fails_the_run_and_its_renamed_result_is_removed(tmp_path: Path) -> None:
     """worker 강제 종료는 `worker_exited` 이고, 이미 rename 된 결과 디렉터리도 지운다(D5 2·3)."""
     marker = tmp_path / "marker"
@@ -206,6 +233,12 @@ class _CommitBarrier:
 
     def start(self, job: RunJob, listener: RunListener) -> RunHandle:
         return self._inner.start(job, _BarrierListener(listener, self))
+
+    def memory(self) -> RunMemory:
+        return self._inner.memory()
+
+    def set_memory_hold(self, held: bool) -> None:
+        self._inner.set_memory_hold(held)
 
     def shutdown(self) -> None:
         self._inner.shutdown()

@@ -106,6 +106,21 @@ def test_the_e2e_trial_hold_is_off_unless_a_non_negative_number_is_set(
         _http.runtime_trial_hold_seconds()
 
 
+@pytest.mark.parametrize("configured", ["0", "-2", "big", "inf", "nan"])
+def test_the_run_memory_reserve_is_estimated_unless_a_positive_number_of_gb_is_set(
+    monkeypatch, configured: str
+) -> None:
+    """run-worker spec D8: 메모리 가드의 예약치는 추정식이고, 설정하면 그 GB 로 고정한다."""
+    monkeypatch.delenv(_http.RUN_MEMORY_RESERVE_GB_ENV, raising=False)
+    assert _http.runtime_run_memory_reserve_gb() is None
+    monkeypatch.setenv(_http.RUN_MEMORY_RESERVE_GB_ENV, " 3.5 ")
+    assert _http.runtime_run_memory_reserve_gb() == 3.5
+
+    monkeypatch.setenv(_http.RUN_MEMORY_RESERVE_GB_ENV, configured)
+    with pytest.raises(ValueError, match="positive number of GB"):
+        _http.runtime_run_memory_reserve_gb()
+
+
 def test_run_isolation_comes_from_the_environment_and_unknown_values_stop_the_build(
     monkeypatch, tmp_path: Path
 ) -> None:

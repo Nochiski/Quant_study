@@ -7,9 +7,20 @@ worker 프로세스가 예외 객체 대신 코드와 문장을 보낼 수 있�
 from __future__ import annotations
 
 import weakref
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import date
+from pathlib import Path
 from typing import cast
 
+from strategy_workbench.adapters.outbound.artifact_local.facade.store import LocalArtifactStore
+from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
+    BacktestEngineExecutorAdapter,
+)
+from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
+    BacktestEnginePortfolioAdapter,
+)
+from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -20,16 +31,28 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataQuery,
     BacktestDataset,
     BacktestDataUnavailableError,
+    BacktestExecutionRequest,
     BacktestExecutorPort,
+    CancellationCheck,
+    ProgressCallback,
     RunCancelled,
     RunCancelledError,
+    RunCommitted,
     RunFailed,
+    RunFootprint,
     RunJob,
 )
-from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
+from strategy_workbench.application.portfolio_design.facade.design import (
+    PortfolioDesignService,
+    PortfolioPipelineOptions,
+    PortfolioPipelineResult,
+    PortfolioPreviewRequest,
+)
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import (
+    BacktestRunResult,
     BacktestRunSpec,
     ResolvedBacktestRunSpec,
     RunStage,
@@ -157,3 +180,85 @@ def test_a_failed_computation_does_not_keep_its_intermediate_results_alive() -> 
     assert outcome.exception.__traceback__ is not None
     assert data.payload_ref is not None
     assert data.payload_ref() is None
+
+
+class _WatchedPipeline(PortfolioDesignService):
+    """파이프라인 결과를 weakref 로 지켜본다. 계산은 그대로 한다."""
+
+    result_ref: weakref.ref[PortfolioPipelineResult] | None = None
+
+    def run_pipeline(
+        self,
+        request: PortfolioPreviewRequest,
+        *,
+        options: PortfolioPipelineOptions | None = None,
+        cancelled: Callable[[], bool] = lambda: False,
+        progress: Callable[[float, str], None] = lambda fraction, message: None,
+    ) -> PortfolioPipelineResult:
+        result = super().run_pipeline(
+            request, options=options, cancelled=cancelled, progress=progress
+        )
+        self.result_ref = weakref.ref(result)
+        return result
+
+
+class _EngineWatch(BacktestEngineExecutorAdapter):
+    """엔진 단계에 들어설 때 파이프라인 결과가 아직 살아 있는지 적는다."""
+
+    def __init__(self, pipeline: _WatchedPipeline) -> None:
+        super().__init__(build_default_metric_registry())
+        self._pipeline = pipeline
+        self.pipeline_alive: bool | None = None
+
+    def execute(
+        self,
+        request: BacktestExecutionRequest,
+        *,
+        progress: ProgressCallback,
+        cancelled: CancellationCheck,
+    ) -> BacktestRunResult:
+        ref = self._pipeline.result_ref
+        self.pipeline_alive = ref is not None and ref() is not None
+        return super().execute(request, progress=progress, cancelled=cancelled)
+
+
+def test_a_committed_run_reports_its_input_size_and_drops_the_raw_observations_before_the_engine(
+    tmp_path: Path,
+) -> None:
+    """spec D8: 커밋은 읽은 입력의 크기(세션·필드·팩터·관측 행)를 로그용으로 싣는다.
+
+    그 크기를 구하려고 파이프라인 결과를 쥐면 원시 관측 수백만 객체가 data·engine 단계 내내 살아
+    최대 RSS 가 커진다 — 엔진 앞에서는 이미 놓았다.
+    """
+    adapter = MockEquityDataAdapter.demo()
+    pipeline = _WatchedPipeline(
+        adapter,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=adapter,
+        factor_registry_version="test-registry",
+    )
+    executor = _EngineWatch(pipeline)
+    job = _job()
+    # 월간 리밸런싱이 두 번 드는 mock 구간, 벤치마크 없음.
+    environment = replace(job.spec.environment, start=date(2026, 1, 2), end=date(2026, 2, 20))
+    job = replace(job, spec=replace(job.spec, environment=environment, benchmark_security_id=None))
+
+    outcome = RunComputation(pipeline, adapter, executor, LocalArtifactStore(tmp_path)).compute(
+        job, progress=lambda stage, fraction, message: None, cancelled=lambda: False
+    )
+
+    assert isinstance(outcome, RunCommitted), outcome
+    assert executor.pipeline_alive is False
+    expected = PortfolioDesignService(
+        adapter,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=adapter,
+        factor_registry_version="test-registry",
+    ).run_pipeline(PortfolioPreviewRequest(job.spec.strategy, environment=job.spec.environment))
+    rows = expected.raw_observations
+    assert outcome.footprint == RunFootprint(
+        sessions=len({row.as_of for row in rows}),
+        fields=len({field.field_id for row in rows for field in row.fields}),
+        factors=len(job.spec.strategy.factors),
+        observation_rows=len(rows),
+    )

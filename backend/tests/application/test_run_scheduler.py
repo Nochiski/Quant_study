@@ -95,3 +95,22 @@ def test_moving_a_run_to_its_own_lane_keeps_its_place() -> None:
     queue.move("a2", "B")
 
     assert (kept, queue.pop(experiments=True), queue.pop(experiments=True)) == ("a1", "a2", None)
+
+
+def test_peek_names_the_next_pop_and_keeps_the_turn_count() -> None:
+    """run-worker spec D8: 메모리 가드는 꺼내기 전에 본다. 들여다봐도 차례 수가 줄지 않는다."""
+    queue: RunQueue[str] = RunQueue()
+    queue.configure("A", paused=False, weight=2)
+    for item in ("a1", "a2", "a3"):
+        queue.push(item, "A")
+    queue.push("b1", "B")
+
+    seen = [queue.peek(experiments=True) for _ in range(3)]
+    assert queue.peek(experiments=False) is None
+    order: list[str] = []
+    while (item := queue.peek(experiments=True)) is not None:
+        assert queue.pop(experiments=True) == item
+        order.append(item)
+
+    # 들여다본 수가 A 의 차례(2)를 써 버렸다면 b1 이 a2 보다 먼저 나간다.
+    assert (seen, order) == (["a1", "a1", "a1"], ["a1", "a2", "b1", "a3"])

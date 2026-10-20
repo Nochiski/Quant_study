@@ -101,6 +101,7 @@ from ._factor_regression import (
     factor_regression_spec,
     strategy_period_returns,
 )
+from ._memory_guard import estimated_sessions, gb_bytes, memory_verdict, run_reserve_bytes
 from ._scheduler import RunLaneControls, RunQueue, experiment_slots
 from ._validation_report import RunValidationReport
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
@@ -129,6 +130,8 @@ _MIN_TAPE_PROGRESS_STEP = 0.01
 # 덮어쓴다). 실데이터 긴 구간 run 한 건이 CPU 수백 초·RSS 약 5GB 를 쓰므로(#158·#161) 넘는 run 은
 # 스레드 없이 `queued` 로 기다린다. 배정 순서는 `_scheduler.py` 가 정한다.
 DEFAULT_RUN_SLOTS = 2
+# 메모리 가드가 슬롯이 비었는데도 대기시킨 run 의 상태 설명(spec D8). 상태는 `queued` 그대로다.
+_MEMORY_WAIT_MESSAGE = "Waiting for free memory"
 
 
 class BacktestParameterValueError(InvalidBacktestRunError):
@@ -169,6 +172,8 @@ class RunAdmission:
     lineage_id: str | None
     strategy_source: StrategySource | None
     lineage_strategy_id: str | None
+    # 원시 관측이 시작일 앞에서 읽을 워밍업 세션 수(메모리 예약치의 입력, run-worker spec D8).
+    history_sessions: int
 
     @property
     def spec(self) -> BacktestRunSpec:
@@ -239,6 +244,9 @@ class _RunRecord:
     experiment_slot: bool = False
     # 전송이 돌려준 손잡이(띄운 뒤에만 있다). 취소를 전송에 알린다.
     handle: RunHandle | None = None
+    # 메모리 가드가 이 run 몫으로 잡는 바이트와 그 근거인 세션 수 어림(spec D8, 접수 때 정한다).
+    reserve_bytes: int = 0
+    estimated_sessions: int = 0
 
 
 class _RunListener:
@@ -285,6 +293,7 @@ class BacktestRunService:
         run_execution: Callable[[RunComputation], RunExecutionPort],
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         run_slots: int = DEFAULT_RUN_SLOTS,
+        memory_reserve_gb: float | None = None,
         factor_registry: FactorRegistry | None = None,
         background: Callable[[Callable[[], None]], None] | None = None,
     ) -> None:
@@ -293,9 +302,19 @@ class BacktestRunService:
         서비스가 자기 포트로 만든 계산(`RunComputation`)을 받는다. 같은 프로세스의 전송은 그 계산을
         부르고, 다른 프로세스의 전송은 자기 쪽에서 같은 계산을 다시 조립한다. 어느 전송을 쓸지는
         composition root 가 정한다.
+
+        `memory_reserve_gb` 는 메모리 가드가 run 마다 잡는 예약치를 추정식 대신 고정한다(spec D8).
         """
         if run_slots < 1:
             raise ValueError(f"run_slots must be at least 1 — run_slots={run_slots!r}")
+        if memory_reserve_gb is not None and not 0 < memory_reserve_gb < float("inf"):
+            raise ValueError(
+                "memory_reserve_gb must be a positive number of GB — "
+                f"memory_reserve_gb={memory_reserve_gb!r}"
+            )
+        self._fixed_reserve_bytes = (
+            None if memory_reserve_gb is None else gb_bytes(memory_reserve_gb)
+        )
         self._portfolio_design = portfolio_design
         self._strategy_repository = strategy_repository
         self._artifact_store = artifact_store
@@ -417,6 +436,15 @@ class BacktestRunService:
                 join_key=join_key,
                 owners={owner},
             )
+            # 예약치는 접수 때 데이터를 읽지 않고 정한다(spec D8). 고정값 설정이 있으면 그 값이다.
+            record.estimated_sessions = estimated_sessions(
+                spec.environment.start, spec.environment.end, admission.history_sessions
+            )
+            record.reserve_bytes = (
+                self._fixed_reserve_bytes
+                if self._fixed_reserve_bytes is not None
+                else run_reserve_bytes(record.estimated_sessions)
+            )
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
             # 저장이 실패하면 접수하지 않는다 — 기록 없는 run 이 돌면 재시작 뒤 흔적이 없다.
             self._repository.add(
@@ -449,9 +477,10 @@ class BacktestRunService:
         )
         spec = replace(spec, environment=environment)
         # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
-        engine = self._portfolio_design.preflight(
+        preflight = self._portfolio_design.preflight(
             PortfolioPreviewRequest(strategy, environment=environment)
         )
+        engine = preflight.engine
         if not engine.compatible:
             raise InvalidBacktestRunError(
                 "strategy exceeds engine capabilities — " + _describe_engine_issues(engine)
@@ -501,6 +530,7 @@ class BacktestRunService:
             lineage_id,
             request.strategy_source,
             request.lineage_strategy_id,
+            preflight.history_sessions,
         )
 
     def preview_trial(self, request: BacktestRunSpec) -> TrialPreview:
@@ -868,6 +898,9 @@ class BacktestRunService:
                 self._emit(
                     record, RunStatus.CANCELLED, record.state.progress, "cancelled", "Run cancelled"
                 )
+                # 메모리 가드가 붙잡던 run 이었으면 뒤의 run 을 다시 판정하고, 미룬 예비 채우기를
+                # 푼다(spec D8).
+                self._dispatch()
             else:
                 if record.handle is not None:
                     # 도는 계산에 알린다. 막히지 않고, 멈춘 결과는 전송이 종결로 알린다.
@@ -1077,14 +1110,22 @@ class BacktestRunService:
 
         대기 run 에는 스레드가 없다 — run 마다 스레드를 먼저 띄워 두면 스레드 수가 상한 없이 는다
         (#161).
+
+        꺼내기 전에 메모리 가드를 판정한다(spec D8). 모자라면 슬롯이 비어도 그 run 을 대기열 앞에
+        두고 멈춘다 — 뒤의 작은 run 이 앞지르지 않는다. 판정 결과는 전송에 알려, 대기시키는 동안
+        예비 worker 를 다시 채우지 않게 한다(#591 리뷰).
         """
 
+        held = False
         while self._running < self._run_slots:
-            record = self._waiting.pop(
-                experiments=self._running_experiments < experiment_slots(self._run_slots)
-            )
+            experiments = self._running_experiments < experiment_slots(self._run_slots)
+            record = self._waiting.peek(experiments=experiments)
             if record is None:
-                return
+                break
+            if not self._memory_admits(record):
+                held = True
+                break
+            self._waiting.pop(experiments=experiments)
             try:
                 record.handle = self._run_execution.start(
                     RunJob(
@@ -1113,6 +1154,49 @@ class BacktestRunService:
                 record.experiment_slot = None not in record.owners
                 self._running += 1
                 self._running_experiments += record.experiment_slot
+                logger.info(
+                    "backtest run dispatched — run_id=%s reserve_bytes=%s estimated_sessions=%s",
+                    record.state.run_id,
+                    record.reserve_bytes,
+                    record.estimated_sessions,
+                )
+        self._run_execution.set_memory_hold(held)
+
+    def _memory_admits(self, record: _RunRecord) -> bool:
+        """메모리 가드: 대기열 앞의 `record` 를 지금 띄워도 되는가(spec D8). 잠금 안에서 부른다.
+
+        도는 run 이 없으면 가드를 쓰지 않는다 — 기계 메모리보다 큰 어림의 run 도 혼자서는
+        돈다(굶주림 없음). 전송이 run 마다 메모리를 잴 수 없으면(스레드) 쓰지 않는다.
+        """
+        running = [
+            (item.state.run_id, item.reserve_bytes)
+            for item in self._records.values()
+            if item.handle is not None and not item.state.status.is_terminal
+        ]
+        if not running:
+            return True
+        memory = self._run_execution.memory()
+        if memory is None:
+            return True
+        verdict = memory_verdict(memory, running, record.reserve_bytes)
+        if verdict.admitted:
+            return True
+        if record.state.message != _MEMORY_WAIT_MESSAGE:
+            # 처음 대기시킬 때만 남긴다. 상태는 `queued` 그대로라 저장하지 않는다.
+            logger.info(
+                "backtest run waits for memory — run_id=%s reserve_bytes=%s available_bytes=%s "
+                "overhead_bytes=%s running_remaining_bytes=%s running_runs=%s",
+                record.state.run_id,
+                verdict.reserve_bytes,
+                verdict.available_bytes,
+                verdict.overhead_bytes,
+                verdict.running_remaining_bytes,
+                len(running),
+            )
+            self._emit(
+                record, RunStatus.QUEUED, record.state.progress, "queued", _MEMORY_WAIT_MESSAGE
+            )
+        return False
 
     def _finish(self, record: _RunRecord, outcome: RunOutcome) -> None:
         """전송이 알린 종결을 상태로 옮기고 자리를 내놓는다. 끝나면 대기열의 다음 run 을 띄운다

@@ -30,6 +30,7 @@ ALLOWED_ORIGINS_ENV = "STRATEGY_WORKBENCH_ALLOWED_ORIGINS"
 RUN_SLOTS_ENV = "STRATEGY_WORKBENCH_RUN_SLOTS"
 E2E_TRIAL_HOLD_SECONDS_ENV = "STRATEGY_WORKBENCH_E2E_TRIAL_HOLD_SECONDS"
 RUN_ISOLATION_ENV = "STRATEGY_WORKBENCH_RUN_ISOLATION"
+RUN_MEMORY_RESERVE_GB_ENV = "STRATEGY_WORKBENCH_RUN_MEMORY_RESERVE_GB"
 DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = ("http://localhost:5173",)
 ASSISTANT_DB_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_DB_PATH"
 ASSISTANT_SECRETS_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH"
@@ -85,6 +86,23 @@ def runtime_trial_hold_seconds() -> float:
             f"{E2E_TRIAL_HOLD_SECONDS_ENV}={configured!r}"
         )
     return seconds
+
+
+def runtime_run_memory_reserve_gb() -> float | None:
+    """메모리 가드가 run 마다 잡는 예약치를 고정하는 GB(run-worker spec D8). 없으면 추정식이다."""
+    configured = os.environ.get(RUN_MEMORY_RESERVE_GB_ENV, "").strip()
+    if not configured:
+        return None
+    try:
+        reserve_gb = float(configured)
+    except ValueError:
+        reserve_gb = -1.0
+    if not 0 < reserve_gb < float("inf"):
+        raise ValueError(
+            "run memory reserve env var must be a positive number of GB — "
+            f"{RUN_MEMORY_RESERVE_GB_ENV}={configured!r}"
+        )
+    return reserve_gb
 
 
 def runtime_run_isolation() -> str:
@@ -167,6 +185,7 @@ def build_http_app(
     run_slots: int = DEFAULT_RUN_SLOTS,
     trial_hold_seconds: float = 0.0,
     run_isolation: str = DEFAULT_RUN_ISOLATION,
+    run_memory_reserve_gb: float | None = None,
     equity_adapter: str = "mock",
     equity_root: Path | None = None,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
@@ -180,6 +199,7 @@ def build_http_app(
         run_slots=run_slots,
         trial_hold_seconds=trial_hold_seconds,
         run_isolation=run_isolation,
+        run_memory_reserve_gb=run_memory_reserve_gb,
         equity_adapter=equity_adapter,
         equity_root=equity_root,
         assistant=assistant,
@@ -215,6 +235,7 @@ def build_runtime_http_app():
         run_slots=runtime_run_slots(),
         trial_hold_seconds=runtime_trial_hold_seconds(),
         run_isolation=runtime_run_isolation(),
+        run_memory_reserve_gb=runtime_run_memory_reserve_gb(),
         equity_adapter=adapter,
         equity_root=root,
         assistant=runtime_assistant_settings(),

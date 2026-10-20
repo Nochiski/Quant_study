@@ -7,7 +7,7 @@ MVP 범위는 `split`·`reverse_split`·`bonus`·`capred` 4종이다. `event_typ
 **모집단(pool) 과 범위(scope)**: 원천 행을 법인 → 티커로 전개한 leg 행 전부가 pool 이고,
 조정할 가격이 없는 사건은 **범위 밖**(scope_out) 이라 격리도 산출도 아니다 — 서버 1차 빌드
 (09-05)에서 사업보고서 증자(감자)현황이 창립 이래(1963~) 이력을 회고 기재해 격리 8,834 / 산출
-3,865 로 EG7 이 깨진 것이 근거. 범위 밖 4종(`SCOPE_OUT_VOCAB`)은 EG3_corp_event 기록형 metric.
+3,865 로 EG7 이 깨진 것이 근거. 범위 밖 사유(`SCOPE_OUT_VOCAB`)는 EG3_corp_event 기록형 metric.
 `stg_capital.isu_dcrs_stock_knd` 종류 어휘는 아래 **대응표 튜플**이 정본이고 `.sql` 의 IN 리터럴이
 그것을 그대로 옮긴다(tests 가 대조) — 오타·동의어·표기 변형을 명시적 문자열로 폐쇄 어휘에 대응하고
 모호한 것은 unknown 에 남긴다(공백·개행 정규화는 stage PR #70 몫). 보통주 계열인데 상장 보통주가
@@ -63,7 +63,8 @@ REJECT_REASONS: tuple[str, ...] = ("ticker_unresolved", "effective_unresolved", 
                                    "effective_before_announce")
 # 범위 밖 사유(격리 아님, 기록형) — sql/corp_event.sql pool.scope_out
 SCOPE_OUT_VOCAB: tuple[str, ...] = ("out_of_calendar", "unlisted_class", "class_unknown",
-                                    "pre_listing", "krx_par_only", "share_unchanged")
+                                    "class_ambiguous", "pre_listing", "krx_par_only",
+                                    "share_unchanged")
 # 방향 불변식(EG3_corp_event 폐기형, 원천 무관): ratio 는 주식수 배수이므로 유형이 방향을 못 박는다.
 # 비율의 출처 어휘. `source` 로는 안 갈린다 — 자본변동 행의 비율은 원천이 capital 이지만 값은
 # KRX 상장주식수에서 유도한 것이다(RATIO_RECOVERY.md). 소비자가 공시값과 유도값을 가려 봐야 한다.
@@ -374,6 +375,8 @@ eg3_corp_event.gate_name = "EG3_corp_event"     # type: ignore[attr-defined]
 # (`FACT_ONLY_TYPES`). `rights` 는 아직 싣지 않아 `event.capital_raise_amount` 는 `cb_issue` 행만 읽는다.
 # 선언은 행이 없을 때도 남긴다 — S19 가 커버율 0 을 재고 S20 EG10 이 blocked(no_observations)로
 # 드러내야 "필드가 없다" 와 "필드는 있는데 값이 없다" 가 구별된다(GATES §6 EG10 의 왜).
+# 자사주 취득 금액은 주식 종류별이다(#589) — 보통주식분은 보통주 티커에, 기타주식분은 결정일에
+# 상장돼 있던 우선주 티커가 하나일 때만 그 티커에 실린다(`sql/corp_event.sql` 의 `tsstk_estk`).
 # `row_filter` 의 `event_type` 은 원장 사건 어휘다(원천 표 이름 `tsstk_aq` 가 아니다). 워크벤치
 # 어댑터의 같은 필터가 이 선언과 같은지는 backend 계약 테스트가 본다(#583).
 # 랙 1 세션: 원천이 전부 stage `lag_known=false` 이고 공시는 장중·장후 어느 쪽이든 접수된다.
@@ -383,9 +386,12 @@ FIELDS_CORP_EVENT: tuple[FieldProfile, ...] = (
         unit="KRW", value_type="amount", frequency="event", recommended_lag_sessions=1,
         recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
         disclosure_basis="자기주식취득결정 공시 접수일(rcept_dt)",
-        evidence="corp_event.amount_krw WHERE event_type='treasury_buy' ← stg_event_tsstk_aq. "
-                 "S19 실측 커버율 0 — MVP 적재 범위 밖(S05 후속). 사업보고서 확정치 축은 "
-                 "event.treasury_acquired(S16)로 축·시점이 다르다.",
+        evidence="corp_event.amount_krw WHERE event_type='treasury_buy' ← stg_event_tsstk_aq "
+                 "(e1.9.0 부터 적재). 금액은 주식 종류별 취득예정금액이다(e1.20.0, #589) — "
+                 "보통주 티커는 aqpln_prc_ostk, 우선주 티커는 aqpln_prc_estk 이다. 기타주식분은 "
+                 "결정일에 상장돼 있던 우선주가 하나일 때만 싣고, 없으면 unlisted_class, 둘 "
+                 "이상이면 어느 우선주인지 몰라 class_ambiguous 로 범위 밖이다. 사업보고서 "
+                 "확정치 축은 event.treasury_acquired(S16)로 축·시점이 다르다.",
         coverage_axis="table_rows", row_filter="event_type = 'treasury_buy'"),
     FieldProfile(
         field_id="event.capital_raise_amount", columns=("amount_krw",),
@@ -395,7 +401,8 @@ FIELDS_CORP_EVENT: tuple[FieldProfile, ...] = (
         disclosure_basis="유상증자결정·전환사채발행결정 공시 접수일(rcept_dt)",
         evidence="equity 내부 스코프(레지스트리 42 밖). FACTORS 정본 E06 의 재료이고 "
                  "corp_event.amount_krw WHERE event_type IN ('rights','cb_issue') 다. "
-                 "S19 실측 커버율 0 — MVP 적재 범위 밖.",
+                 "e1.9.0 부터 cb_issue(← stg_event_cvbd_is)만 실린다 — 유상증자(rights)는 "
+                 "가격 축 효력일을 못 정해 아직 싣지 않는다.",
         coverage_axis="table_rows", scope="internal",
         row_filter="event_type IN ('rights', 'cb_issue')"),
 )
@@ -435,15 +442,16 @@ CORP_EVENT = register(EquityTable(
                          "available_date", "available_basis"),
         "stg_capital": ("rcept_no", "corp_code", "isu_dcrs_de", "isu_dcrs_stle",
                         "isu_dcrs_stock_knd", "available_date", "available_basis"),
-        "stg_event_tsstk_aq": ("rcept_no", "corp_code", "aq_dd", "aqpln_prc_ostk",
-                               "aqpln_prc_estk", "available_date", "available_basis"),
+        "stg_event_tsstk_aq": ("rcept_no", "corp_code", "aq_dd", "aqpln_stk_ostk",
+                               "aqpln_stk_estk", "aqpln_prc_ostk", "aqpln_prc_estk",
+                               "available_date", "available_basis"),
         "stg_event_cvbd_is": ("rcept_no", "corp_code", "bddd", "bd_fta",
                               "available_date", "available_basis"),
         "stg_listing_daily": ("ticker", "date", "par_value_krw", "list_shrs",
                               "available_basis"),
         "corp_ticker": ("ticker", "isin8", "corp_code", "is_common"),
         "trading_calendar": ("date", "prev_td"),
-        "security_span": ("ticker", "first_date")},
+        "security_span": ("ticker", "first_date", "last_date", "end_reason")},
     available_basis=("derived", "default"),
     content_date_column="announce_date",
     reject_reasons=REJECT_REASONS,

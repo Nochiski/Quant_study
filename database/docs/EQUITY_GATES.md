@@ -1341,7 +1341,7 @@ count(price_adj_daily) = count(price_daily)
 | FX-6-001 | `dataset_profile` | `price.close` | `available_date_basis`, `recommended_lag_sessions` | decl:rules_s04 | `default`, `0`(가격류 당일 관측) |
 | FX-6-002 | `dataset_profile` | `consensus.forward_eps` | `recommended_lag_sessions` | decl:rules_s17 | `1` — v3 는 collected = base + 1영업일 |
 | FX-6-003 | `dataset_profile` | `price.market_cap` | `recommended_lag_sessions` | decl:rules_s04 | `1` — 주식수가 `stg_listing_daily`(lag_known=false) |
-| FX-6-004 | `dataset_profile` | `event.buyback_amount` | `column_scope` | decl:rules_s05 | `amount_krw`(커버율 0 은 pytest 손계산으로 이동) |
+| FX-6-004 | `dataset_profile` | `event.buyback_amount` | `column_scope` | decl:rules_s05 | `amount_krw`(커버율은 pytest 손계산으로 이동) |
 | FX-6-005 | `dataset_profile` | `classification.sector` | `point_in_time` | decl:rules_s01 | `false`(GAP-07) |
 | FX-6-006 | `dataset_profile` | `price.adj_close` | `table_name`, `available_date_basis`, `field_scope` | decl:rules_s06 · rules_s19 | `v_adj_price_fwd`, `default\|derived`, `internal` |
 | FX-6-007 | `dataset_profile` | `event.insider_net_buy` | `column_scope` | decl:rules_s15 | `qty_change_shr`(롤링 2년 창은 pytest) |
@@ -1357,8 +1357,9 @@ count(price_adj_daily) = count(price_daily)
 | FX-6-019 | `factor_readiness` | `Q01` | `required_columns`, `owner` | decl:rules_s20 ⋈ profile | `[fin_std.net_income, fin_std.total_equity]`, `factor_layer` |
 
 절단본 손계산으로 옮긴 실측 단언: `event.insider_net_buy` 창 2024-08-26~2026-08-26 · GAP-02
-3계정 커버·첫 관측일 · `event.buyback_amount`·`event.capital_raise_amount` 커버 0 ·
-M01/V05 `first_usable_date` · E05/E06 `no_observations` · 커버율 ↔ 정수 분자·분모 항등.
+3계정 커버·첫 관측일 · `event.buyback_amount`·`event.capital_raise_amount` 커버(09-06 에는 0,
+e1.9.0 부터 값이 실린다 — 절단본 80% · 100%) · M01/V05 `first_usable_date` · E05/E06 판정(09-06
+`no_observations` → e1.9.0 부터 ready) · 커버율 ↔ 정수 분자·분모 항등.
 
 ### 부정 픽스처 (§7-5)
 
@@ -1842,7 +1843,7 @@ workspace/dongmin/src/equity/
 | baseline 상수 | — | S04 는 새 상수 없음(`baseline_seed_s04.json` 이 이유를 기록). EG7 비율은 코드 기본값, 2회차 이관은 오케스트레이터 | §1 EG7 |
 | §3-⑨ `n_dedup` 출처 (S05, 09-05) | "dedup 은 `_meta.n_dedup` 이 낸다" | 프레임 `build.py` 가 `_meta.n_dedup` 을 0 으로 고정하므로 `corp_event` 는 산출 컬럼 `n_src_rows` 로 접힌 수를 싣고 EG1 좌변을 `count(out) + Σ(n_src_rows−1)` 로, `n_dedup` 은 `EG3_corp_event` metric 으로 낸다. 우변은 등록표 `rules_s05.SOURCES`(= `_reg_corp_event_source`) 합. reject 후보는 접지 않고 각각 격리해 `Σ후보 = Σ_out n_src_rows + n_reject` 가 성립한다 | DESIGN §4-2 · P21 (22 = 8 + 14 + 0) |
 | ⑨ KRX 원천 유형·방향 불변식 (S05 3차, 09-05) | KRX 행은 액면가 방향으로 split/reverse_split, ratio 는 주식수 비 | 서버 EGC-04 fail(`007195:split:2013-05-24` share_factor 0.833 — 감자 뒤 액면 변경, 모순 11건/split 268). 유형은 **주식수 비 방향**(ratio > 1 split · < 1 reverse_split, 액면가 변화는 트리거만) · 주식수 불변 액면 변경(|ratio−1| ≤ `corp_event.krx_share_change_tol` 1e-3)은 범위 밖 `krx_par_only`(기록형) · **EG3_corp_event 에 방향 불변식 추가(폐기형, 원천 무관)**: split·bonus → ratio > 1, reverse_split·capred → ratio < 1. 재판정 CLI(`gate`)가 빌드와 같은 `_const` 를 만들도록 `__main__._cmd_gate` 에 `make_consts` 1줄 추가(EG1 우변이 pool CTE 의 상수를 읽는다) | DESIGN §4-2 · P21 |
-| §3-⑨ 모집단 = 범위 안 후보 (S05 2차, 09-05) | "Σ 원천 행수" — 원천 행 전부가 모집단 | 서버 1차 빌드가 EG7 에서 폐기(격리 8,834 / 산출 3,865): 자본변동은 창립 이래 이력을 회고 기재해 캘린더 밖(1963~2009)·비상장 종류주·상장 전 사건이 격리로 쏟아졌다. 조정할 가격이 없는 행은 **격리가 아니라 모집단 밖**(`scope_out` 4종: out_of_calendar·unlisted_class·class_unknown·pre_listing, 기록형 metric)이고 EG1 우변은 `pool WHERE scope_out IS NULL`(원천별 합). 우변 SQL 은 `.sql` 의 pool CTE 를 재사용한다(모집단 정의 단일화) — 대신 전개 전 원천 행수를 stage 뷰로 독립 기록하고 산출 행의 캘린더·상장 전 위반 0 을 `EG3_corp_event` 가 독립 재검사한다 | DESIGN §4-2 · P21 |
+| §3-⑨ 모집단 = 범위 안 후보 (S05 2차, 09-05) | "Σ 원천 행수" — 원천 행 전부가 모집단 | 서버 1차 빌드가 EG7 에서 폐기(격리 8,834 / 산출 3,865): 자본변동은 창립 이래 이력을 회고 기재해 캘린더 밖(1963~2009)·비상장 종류주·상장 전 사건이 격리로 쏟아졌다. 조정할 가격이 없는 행은 **격리가 아니라 모집단 밖**(`scope_out` 7종: out_of_calendar·unlisted_class·class_unknown·class_ambiguous·pre_listing·krx_par_only·share_unchanged, 기록형 metric — 09-05 도입 때는 out_of_calendar·unlisted_class·class_unknown·pre_listing 4종이었고 krx_par_only·share_unchanged(S05 3·4차)·class_ambiguous(e1.20.0, #589)가 뒤에 더해졌다. 정본은 `rules_s05.SCOPE_OUT_VOCAB`)이고 EG1 우변은 `pool WHERE scope_out IS NULL`(원천별 합). 우변 SQL 은 `.sql` 의 pool CTE 를 재사용한다(모집단 정의 단일화) — 대신 전개 전 원천 행수를 stage 뷰로 독립 기록하고 산출 행의 캘린더·상장 전 위반 0 을 `EG3_corp_event` 가 독립 재검사한다 | DESIGN §4-2 · P21 |
 | EG7 비율 분모 (S05) | `Σ reject / n_src`(EG1 우변) | 프레임 `gates.eg7_range` 는 `n_reject / (n_out + n_reject)` — dedup 이 있는 테이블에서는 두 정의가 갈린다(`corp_event` 절단본 0.176 vs 0.375). 프레임 미수정, `corp_event.threshold_EG7` seed 는 프레임 정의로 측정. 정본 정의는 미결(§8) | P21 |
 | FX-2-003 (S05) | `corp_event` 무상증자 1.2:1 사례 1 (doc:2단계 기록) | 절단본·seed 픽스처 파일에는 사례가 없어 `tests/test_equity_s05_event.py` 의 `stg_event_fric` 손 트리(SK하이닉스 0.2 배정 → ratio 1.2)로 검증하고, 서버 빌드 뒤 실사례를 `fixtures/corp_event.json` 에 등재한다 | 절단본 `stg_event_fric` 0행 |
 | EG8-P04 (S05) | `corp_event` 첫 빌드 skip(no_baseline) | 분모(기준가≠전일종가)가 `price_daily` 를 요구하므로 S05 에서는 술어를 붙이지 않고 S06 이후에 `corp_event` 재판정으로 붙인다 | DESIGN §4-2 |
@@ -2041,7 +2042,7 @@ S07 의 커널 3포트 어댑터는 제품 경로가 쓰지 않았고, 제품 �
 | `owner` 의 뜻 | (미정의) | **막힌 것을 푸는 책임자**. ready 행은 계산이 남았으므로 `factor_layer`. 절단본 분포 equity 16 · factor_layer 37 · unavailable 1 | `rules_s20.FactorSpec` |
 | R04(시장 베타) | 제안서 §1-6 "즉시" | **blocked(field_unavailable) · owner `unavailable`** — `index_daily.close_idx` 는 실재하지만 `benchmark.close` 는 FIELD_MAP §2 가 미지원으로 판정한 축이다(GAP-09: 지수가 security 축이 아니다). 데이터가 아니라 계약이 없다 | FIELD_MAP §2 |
 | G04(EPS 성장률) | 제안서 §1-3 "즉시" | **blocked(partial_support)** — `fin_std.eps_basic` 이 주식분할 미조정 원장 값이라(FIELD_MAP §3, S12 실측) 시계열 비율이 분할 구간에서 가짜 점프를 낸다. 제안서는 S12 실측 전 판정이었다 | FIELD_MAP §3 |
-| E05·E06 | 제안서 §1-7 "즉시" | **blocked(no_observations)** — `corp_event` 가 MVP 4유형만 적재해 `treasury_buy`·`rights`·`cb_issue` 행이 0 이다(DESIGN §4-2). 원천(`stg_event_tsstk_aq` 1,951 등)은 실재하므로 S05 후속으로 풀린다. **EG10 이 잡으라고 만든 바로 그 경우** | DESIGN §10 P39 |
+| E05·E06 | 제안서 §1-7 "즉시" | **ready**(e1.9.0 부터). 09-06 첫 판정은 **blocked(no_observations)** 였다 — `corp_event` 가 MVP 4유형만 적재해 `treasury_buy`·`rights`·`cb_issue` 행이 0 이었고, **EG10 이 잡으라고 만든 바로 그 경우**였다. e1.9.0(09-07)이 `treasury_buy`(← `stg_event_tsstk_aq`)·`cb_issue`(← `stg_event_cvbd_is`)를 실어 둘 다 열렸다. E05 금액은 주식 종류별이고(e1.20.0, #589) E06 은 `rights` 가 아직 없어 CB 만 덮는다 — 조건은 각 caveat 에 있다 | DESIGN §10 P39 · `rules_s20.py` E05·E06 |
 | V05·V07·Q07·Q08 | 제안서 §1-1·§1-2 "조건부(GAP-02)" | **ready** — GAP-02 는 "3계정이 실재하는가" 였고 S12·S19 실측이 **실재한다**로 답했다(`borrowings` 17.5% · `depreciation`·`interest_expense` 15.0%). 대신 커버 시작이 늦어 `first_usable_date` 가 2023-11-14 다 — 조건이 판정에서 **시작일**로 옮겨간 것이다 | DESIGN §10 P38 |
 
 **S21 축소 정정 — 워크벤치 어댑터 · contract `ADAPTERS` · MVP-B 백테스트 (2026-09-05, 절단본 실측 → `backend/src/strategy_workbench/adapters/outbound/equity_duckdb/`)**

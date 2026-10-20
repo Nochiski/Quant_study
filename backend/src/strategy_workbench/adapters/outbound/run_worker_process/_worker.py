@@ -1,8 +1,8 @@
 """worker 쪽 전송: boot 줄로 부팅하고 job 한 줄을 읽어 계산해 이벤트 줄을 쓴다(spec D3·D5~D7·D11).
 
 조립(어댑터·계산 만들기)은 composition root(`bootstrap/run_worker`)가 `boot` 로 넘긴다. 이 모듈은
-줄 주고받기, 진행 이벤트 상한, 부모 사망 감시, 엔진 관문, 코드 지문과 그 뒤 import 가드, 최대 RSS 만
-소유한다.
+줄 주고받기, 진행 이벤트 상한, 부모 사망 감시, 엔진 관문, 코드 지문과 그 뒤 import 가드만 소유한다.
+최대 RSS 읽기는 `_memory.py` 가 소유한다.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
 )
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult, RunStage
 
+from ._memory import peak_rss_bytes
 from ._protocol import (
     CommittedMessage,
     EngineReadyMessage,
@@ -485,39 +486,3 @@ def _package_locations(package: str) -> tuple[Path, ...]:
             f"package location not found for the code fingerprint — package={package}"
         )
     return tuple(Path(location) for location in spec.submodule_search_locations)
-
-
-def peak_rss_bytes() -> int | None:
-    """이 프로세스의 최대 RSS(바이트). 읽지 못하면 None 이다(spec D8 계수 재조정의 입력)."""
-    if sys.platform == "win32":
-        import ctypes
-        from ctypes import wintypes
-
-        class _Counters(ctypes.Structure):
-            _fields_ = [
-                ("cb", wintypes.DWORD),
-                ("PageFaultCount", wintypes.DWORD),
-                ("PeakWorkingSetSize", ctypes.c_size_t),
-                ("WorkingSetSize", ctypes.c_size_t),
-                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-                ("PagefileUsage", ctypes.c_size_t),
-                ("PeakPagefileUsage", ctypes.c_size_t),
-            ]
-
-        counters = _Counters()
-        counters.cb = ctypes.sizeof(counters)
-        current = ctypes.windll.kernel32.GetCurrentProcess
-        current.restype = wintypes.HANDLE
-        read = ctypes.windll.psapi.GetProcessMemoryInfo
-        read.argtypes = (wintypes.HANDLE, ctypes.POINTER(_Counters), wintypes.DWORD)
-        if not read(current(), ctypes.byref(counters), counters.cb):
-            return None
-        return int(counters.PeakWorkingSetSize)
-    import resource
-
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    # Linux 는 KiB, macOS 는 바이트다.
-    return int(peak) if sys.platform == "darwin" else int(peak) * 1024

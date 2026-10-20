@@ -3,14 +3,14 @@ plan_version: 1
 project: columnar-tape
 project_status: IN_REVIEW
 current_phase: T2,T3
-current_pr: T2-03,T3-03
-active_prs: [T2-03, T3-03]
-parallel_window: [T2-03, T3-03]
-last_updated: 2026-10-20T10:08:17+09:00
+current_pr: T2-03,T3-04
+active_prs: [T2-03, T3-04]
+parallel_window: [T2-03, T3-04]
+last_updated: 2026-10-20T11:09:17+09:00
 planned_prs: 26
-merged_prs: 7
-approved_prs: 7
-progress_percent: 27
+merged_prs: 8
+approved_prs: 8
+progress_percent: 31
 ---
 
 # tape 열 지향 계산 진행 계획
@@ -25,11 +25,11 @@ progress_percent: 27
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `T2,T3` |
-| Current/next PR | `T2-03,T3-03` |
-| Active PR | `T2-03, T3-03` |
-| Progress | `7 / 26 merged (27%)` |
-| Approved | `7 / 26` |
-| Aggregated at | `2026-10-20 10:08 KST` |
+| Current/next PR | `T2-03,T3-04` |
+| Active PR | `T2-03, T3-04` |
+| Progress | `8 / 26 merged (31%)` |
+| Approved | `8 / 26` |
+| Aggregated at | `2026-10-20 11:09 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수로 센다. frontmatter와 위 표, Phase 집계는
@@ -55,13 +55,13 @@ progress_percent: 27
 | T0 | Planning package and prerequisite defect | 2 | 2 | `MERGED` |
 | T1 | Parity harness | 1 | 1 | `MERGED` |
 | T2 | Columnar raw panel port | 3 | 2 | `IN_REVIEW` |
-| T3 | Columnar factor evaluator | 6 | 2 | `IN_REVIEW` |
+| T3 | Columnar factor evaluator | 6 | 3 | `IN_REVIEW` |
 | T4 | Pipeline switch | 3 | 0 | `WAITING` |
 | T5 | Columnar compiler | 4 | 0 | `WAITING` |
 | T6 | Consumer migration | 3 | 0 | `WAITING` |
 | T7 | Legacy path removal | 3 | 0 | `WAITING` |
 | T9 | Closeout review | 1 | 0 | `WAITING` |
-| **Total** |  | **26** | **7** | **27%** |
+| **Total** |  | **26** | **8** | **31%** |
 <!-- PLAN:PHASES:END -->
 
 ## T0 — 기획·선행 결함
@@ -91,8 +91,8 @@ progress_percent: 27
 |---|---|---|---|---|---|
 | [x] | `T3-01` | 열 평가기 골격 | T2-01 | `MERGED` | #577 · APPROVE(P3 3건 반영) · main 머지 426d9ba1(2026-10-20) |
 | [x] | `T3-02` | 시계열 끝점·min/max | T3-01 | `MERGED` | #579 · APPROVE(P3 2건 반영) · main 머지 7d435987(2026-10-20) |
-| [ ] | `T3-03` | 정확 평균 커널 | T3-02 | `IN_REVIEW` | - |
-| [ ] | `T3-04` | 정확 pstdev 커널 | T3-03 | `PLANNED` | - |
+| [x] | `T3-03` | 정확 평균 커널 | T3-02 | `MERGED` | #584 · 2차 확인 APPROVE(1차 P2-1 해소) · main 머지 e5e667d7(2026-10-20) |
+| [ ] | `T3-04` | 정확 pstdev 커널 | T3-03 | `IN_REVIEW` | - |
 | [ ] | `T3-05` | 남은 연산(cs·group·중앙값 채움) | T3-04 | `PLANNED` | - |
 | [ ] | `T3-06` | trace를 노드 캐시에서 | T3-05 | `PLANNED` | - |
 

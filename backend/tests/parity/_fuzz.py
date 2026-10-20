@@ -53,7 +53,10 @@ def _value(rng: np.random.Generator, distribution: str) -> float:
     if distribution == "integers":
         return float(np.round(rng.normal(0.0, 1e6)))
     if distribution == "extreme":
-        return float(rng.choice((1e300, -3e299, 5e-324, -1e-310, 7e-291, 0.0, -0.0, 1e144, 2e-126)))
+        # ±1.7e308 은 두 값의 합·중앙값 (a + b) / 2 가 넘치는 크기다(#598 리뷰 P3-2)
+        sizes = (1.7e308, -1.7e308, 1e300, -3e299, 5e-324, -1e-310, 7e-291, 0.0, -0.0, 1e144)
+        sizes += (2e-126,)
+        return float(rng.choice(sizes))
     pick = int(rng.integers(0, 4))
     return (
         float(rng.normal(0.0, 1.0)),

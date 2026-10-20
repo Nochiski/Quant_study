@@ -164,9 +164,10 @@ def window_mean(
             f"starts={span!r} rows={values.shape[0]} window={window} limit={limit}"
         )
     count = high - low
-    if wanted is not None and wanted.shape != (count,):
+    if wanted is not None and (wanted.dtype != np.bool_ or wanted.shape != (count,)):
         raise ValueError(
-            f"window mean wanted mask must match starts — wanted={wanted.shape} starts={count}"
+            "window mean wanted mask must be a bool array as long as starts — "
+            f"wanted_shape={wanted.shape} wanted_dtype={wanted.dtype} starts={count}"
         )
     means = np.zeros(count, np.float64)
     exact = np.zeros(count, bool)
@@ -197,9 +198,9 @@ def segment_mean(
 ) -> ExactMeans:
     """구간 g 마다 `statistics.mean(values[offsets[g] : offsets[g + 1]].tolist())` 와 같은 비트.
 
-    횡단면·그룹 평균(demean·neutralize·zscore 중심)이 쓸 형태다. 호출자는 각 구간의 원소를 객체
-    경로가 `statistics.mean` 에 넘기는 순서로 놓는다 — 정확 경로가 같은 목록을 받아야 한다.
-    빈 구간은 평균이 정의되지 않아(`statistics.mean` 은 예외) NaN 이고 정확 경로 표시는 거짓이다.
+    횡단면·그룹 평균(demean·neutralize·zscore 중심)이 쓸 형태다. `statistics.mean` 은 정확한
+    유리수 합을 한 번 반올림하므로 구간 안 원소 순서는 결과를 바꾸지 않는다. 빈 구간은 평균이
+    정의되지 않아(`statistics.mean` 은 예외) NaN 이고 정확 경로 표시는 거짓이다.
 
     Args:
         values: 1차원 float64 열.
@@ -280,13 +281,21 @@ def _two_product(left: _Floats, right: _Floats) -> tuple[_Floats, _Floats]:
     return product, error
 
 
-def _residual(
+def _residual_terms(
     total: _Floats, error: _Floats, candidate: _Floats, count: _Floats
-) -> tuple[_Floats, _Floats]:
-    """(W − candidate·count 의 근사 r, r 을 만든 세 덧셈의 반올림 오차 상한 E_res)."""
+) -> tuple[_Floats, _Floats, _Floats]:
+    """(W − candidate·count 의 근사 r, de, pe). (p, pe) = TwoProduct, (d, de) = TwoSum(s, −p)."""
     product, product_error = _two_product(candidate, count)
     difference, difference_error = _two_sum(total, -product)
     residual = difference + ((difference_error - product_error) + error)
+    return residual, difference_error, product_error
+
+
+def _residual(
+    total: _Floats, error: _Floats, candidate: _Floats, count: _Floats
+) -> tuple[_Floats, _Floats]:
+    """(잔차 r, r 을 만든 세 덧셈의 반올림 오차 상한 E_res)."""
+    residual, difference_error, product_error = _residual_terms(total, error, candidate, count)
     rounding = (3.0 * _UNIT_ROUNDOFF) * (
         np.abs(difference_error) + np.abs(product_error) + np.abs(error) + np.abs(residual)
     )
@@ -295,9 +304,8 @@ def _residual(
 
 def _corrected(total: _Floats, error: _Floats, candidate: _Floats, count: _Floats) -> _Floats:
     """한 번 고친 후보 fl(q0 + fl(R/n)). 오차 상한은 인증 단계(`_residual`)에서만 잰다."""
-    product, product_error = _two_product(candidate, count)
-    difference, difference_error = _two_sum(total, -product)
-    return candidate + (difference + ((difference_error - product_error) + error)) / count
+    residual, _, _ = _residual_terms(total, error, candidate, count)
+    return candidate + residual / count
 
 
 def _certify(

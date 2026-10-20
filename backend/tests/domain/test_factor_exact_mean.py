@@ -223,6 +223,14 @@ def test_checkpoint_runs_inside_long_kernels_and_can_cancel() -> None:
         ),
         (lambda: window_mean(np.zeros(3), 2, starts=slice(0, 3)), ValueError),
         (lambda: window_mean(np.zeros(3), 2, wanted=np.ones(3, bool)), ValueError),
+        (
+            lambda: window_mean(
+                np.zeros(3),
+                2,
+                wanted=np.ones(2, np.int8),  # pyright: ignore[reportArgumentType]  # reason: 잘못된 dtype 거절을 본다
+            ),
+            ValueError,
+        ),
         (lambda: segment_mean(np.zeros(3), np.array([0, 2], np.intp)), ValueError),
         (lambda: segment_mean(np.zeros(3), np.array([0, 2, 1, 3], np.intp)), ValueError),
     ],

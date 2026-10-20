@@ -229,7 +229,11 @@ class FactorNodeColumn:
 
 
 class FactorNodeCache:
-    """출력에서 닿는 노드의 열. 키 순서는 객체 평가기 `computed` 와 같은 완료 순서다."""
+    """출력에서 닿는 노드의 열. 키 순서는 객체 평가기 `computed` 와 같은 완료 순서다.
+
+    `value`·`is_masked` 는 trace 가 읽는 뷰(`_trace.TraceNodeCache`)다. 객체 평가기 캐시
+    (`_NodeEvaluator.cache`)와 같은 읽기를 낸다(T3-06).
+    """
 
     def __init__(self, columns: dict[str, FactorNodeColumn]) -> None:
         self._columns = columns
@@ -244,6 +248,10 @@ class FactorNodeCache:
         if not column.valid[row]:
             return None
         return bool(column.values[row]) if column.boolean else float(column.values[row])
+
+    def is_masked(self, node_id: str, row: int) -> bool:
+        """trace 용. 원장이 가린 칸 때문에 결측이 된 칸인가(`FactorNodeColumn.masked`)."""
+        return bool(self._columns[node_id].masked[row])
 
 
 def evaluate_panel_nodes(

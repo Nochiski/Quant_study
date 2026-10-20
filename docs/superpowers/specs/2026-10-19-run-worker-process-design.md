@@ -109,8 +109,11 @@ Python 루프라 실행 내내 GIL을 쥔다. 그래서 같은 프로세스의 H
 
 ### D3. IPC: stdin 작업·명령 줄, stdout 이벤트 줄, pickle 금지
 
-- **선택**: 줄 단위 JSON(JSON Lines) 프로토콜 v1. 인코딩·디코딩은 한 모듈이 소유하고, 버전이 다르면 양쪽이 거절한다.
-  - 부모 → worker(stdin): `job` 한 줄, 필요할 때 `proceed`(D11). 이후 stdin은 열어 둔다(D5 부모 사망 감지).
+- **선택**: 줄 단위 JSON(JSON Lines) 프로토콜(W1-02 v1, W2-01부터 v2). 인코딩·디코딩은 한 모듈이 소유하고, 버전이 다르면 양쪽이
+  거절한다.
+  - 부모 → worker(stdin): `boot` 한 줄(D10의 설정), `ready`를 받은 뒤 `job` 한 줄, 필요할 때 `proceed`(D11). 이후 stdin은
+    열어 둔다(D5 부모 사망 감지). 설정을 job보다 먼저 보내는 것은 예비 worker가 run이 정해지기 전에 `ready`까지 부팅하기 때문이다
+    (D7, 프로토콜 v2. v1은 설정을 job에 실었다).
   - worker → 부모(stdout): `ready`(부팅 완료, D6 판본 묶음 포함), `progress`(stage·fraction·message), `engine_ready`(D11,
     요청한 job에서만), `committed`(D4), `failed`(error_code·error) 중 하나씩. 종결 이벤트는 `committed`·`failed` 둘이다.
   - stderr는 로그다. 부모가 run_id를 붙여 자기 로거로 중계한다.
@@ -185,6 +188,13 @@ run마다 부모에 **감독 스레드** 하나가 있다(D12). 그 run의 종�
   새 예비를 띄운다. 예비가 아직 준비되지 않았으면 그 run의 감독 스레드가 새 worker를 직접 띄운다.
   - 예비 부팅 실패나 판본 불일치는 run이 없으므로 로그만 남기고 다시 띄운다. 연속 3회 실패하면 예비 띄우기를 멈추고, 이후 배정마다
     감독 스레드가 새 worker를 띄운다. 그 부팅이 실패하면 그 run은 `worker_exited`(부팅 실패), 판본 불일치면 `worker_mismatch`다.
+  - 구현에서 정한 것(W2-01):
+    - job을 기다리던 예비가 죽어도 같은 실패로 세고 다시 띄운다. 연속 횟수는 예비가 `ready`(판본 일치)에 닿으면 0으로 돌아간다.
+      멈춘 뒤에는 서버를 다시 시작할 때까지 띄우지 않는다.
+    - 예비가 아직 부팅 중일 때 든 run은 그 예비를 기다리지 않고 직접 띄우고, 예비는 다음 run 몫으로 남는다. 그래서 worker 프로세스는
+      도는 run 수 + 1을 넘지 않는다.
+    - 예비는 run이 정해지기 전에 부팅하므로 설정을 job보다 먼저 받는다(D3의 `boot` 줄). job을 기다리는 동안 stdin EOF는 부모
+      사망이라 결과 없이 끝난다(POSIX 경로, Windows는 Job Object). 서버 종료는 부팅 중이든 기다리든 예비를 끝낸다(D5).
 - **이유**: mock run은 1초 안에 끝나는데 부팅이 3~6초다. 예비가 없으면 e2e와 실험 trial이 run마다 그만큼 늘어난다. 실험 trial은
   슬롯 1개를 연달아 쓰므로 부팅이 직렬로 쌓인다. `browser-e2e` job은 이미 88개 테스트에 약 18분을 쓰고 30분 제한 아래 있다
   (`docs/planning/validation-lab/V5-06-capacity-factor-reports.md:68-99`). 유휴 worker 하나의 RSS는 118MB다.
@@ -230,8 +240,8 @@ run마다 부모에 **감독 스레드** 하나가 있다(D12). 그 run의 종�
 - 서비스(`BacktestRunService`)는 접수·대기열·슬롯·잇기·공유 취소·상태 전이·완료와 취소 선형화·부팅 복구를 계속 소유한다.
 - concrete 선택은 `bootstrap`만 한다(`backend-package-boundary.md`). 새 노드(`run_thread`, `run_worker_process`, `bootstrap/run_worker`)를
   더하는 PR이 같은 PR에서 그 규칙 문서에 노드를 적는다.
-- worker 쪽 composition root는 `bootstrap/run_worker`다. 부모가 해석한 설정(equity 어댑터 종류·루트, 산출물 루트, hold 여부)을 job으로
-  받는다. worker는 환경 변수를 다시 해석하지 않는다(설정 해석의 정본은 `bootstrap/_http.py`). equity 어댑터와 실행기는 `bootstrap/_container.py`의
+- worker 쪽 composition root는 `bootstrap/run_worker`다. 부모가 해석한 설정(equity 어댑터 종류·루트, 산출물 루트, hold 여부)을 `boot`
+  줄로 받는다(D3). worker는 환경 변수를 다시 해석하지 않는다(설정 해석의 정본은 `bootstrap/_http.py`). equity 어댑터와 실행기는 `bootstrap/_container.py`의
   생성 함수를 재사용해 만들고, 목록(`EQUITY_ADAPTERS`)을 복제하지 않는다. worker는 `BacktestRunService`를 만들지 않는다. 만들면 부팅 복구가
   부모의 도는 run을 닫는다(`_service.py:368`).
 

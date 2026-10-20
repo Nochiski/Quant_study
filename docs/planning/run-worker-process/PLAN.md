@@ -1,16 +1,16 @@
 ---
 plan_version: 1
 project: run-worker-process
-project_status: IN_PROGRESS
-current_phase: W1
-current_pr: W1-03
-active_prs: [W1-03]
+project_status: IN_REVIEW
+current_phase: W2
+current_pr: W2-01
+active_prs: [W2-01]
 parallel_window: []
-last_updated: 2026-10-20T06:46:24+09:00
+last_updated: 2026-10-20T10:50:20+09:00
 planned_prs: 10
-merged_prs: 3
-approved_prs: 3
-progress_percent: 30
+merged_prs: 4
+approved_prs: 4
+progress_percent: 40
 ---
 
 # run 별도 프로세스 실행 진행 계획
@@ -23,13 +23,13 @@ progress_percent: 30
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
-| Current phase | `W1` |
-| Current/next PR | `W1-03` |
-| Active PR | `W1-03` |
-| Progress | `3 / 10 merged (30%)` |
-| Approved | `3 / 10` |
-| Aggregated at | `2026-10-20 06:46 KST` |
+| Project status | `IN_REVIEW` |
+| Current phase | `W2` |
+| Current/next PR | `W2-01` |
+| Active PR | `W2-01` |
+| Progress | `4 / 10 merged (40%)` |
+| Approved | `4 / 10` |
+| Aggregated at | `2026-10-20 10:50 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수로 센다. frontmatter와 위 표, Phase 집계는
@@ -54,13 +54,13 @@ progress_percent: 30
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | W0 | Planning package and benchmark | 1 | 1 | `MERGED` |
-| W1 | Computation boundary and worker process | 3 | 2 | `IN_PROGRESS` |
-| W2 | Spare worker and memory guard | 2 | 0 | `WAITING` |
+| W1 | Computation boundary and worker process | 3 | 3 | `MERGED` |
+| W2 | Spare worker and memory guard | 2 | 0 | `IN_REVIEW` |
 | W3 | Default switch and SoT revision | 1 | 0 | `WAITING` |
 | W4 | Factor regression job | 1 | 0 | `WAITING` |
 | W5 | Interactive path decision gate | 1 | 0 | `WAITING` |
 | W9 | Closeout review | 1 | 0 | `WAITING` |
-| **Total** |  | **10** | **3** | **30%** |
+| **Total** |  | **10** | **4** | **40%** |
 <!-- PLAN:PHASES:END -->
 
 ## W0 — 기획
@@ -75,13 +75,13 @@ progress_percent: 30
 |---|---|---|---|---|---|
 | [x] | `W1-01` | 계산 경계 추출, `RunExecutionPort`, `run_thread` adapter(동작 불변) | W0-01 | `MERGED` | #572 · 2차 APPROVE(1차 P2 1건 해소) · main 머지 50a5c6ac(2026-10-20) |
 | [x] | `W1-02` | `bootstrap/run_worker`, IPC v1, `run_worker_process` adapter(opt-in), Windows backend job | W1-01 | `MERGED` | #575 · APPROVE(P3 6건 중 4건 W1-03, 2건 W2-02) · main 머지 5ed8c88a(2026-10-20) |
-| [ ] | `W1-03` | 취소=종료(감독 스레드 종결), worker 고장, 부모 사망(Job Object), 판본 묶음 대조, e2e hold 게이트, 실패 코드 2개 | W1-02 | `IN_PROGRESS` | - |
+| [x] | `W1-03` | 취소=종료(감독 스레드 종결), worker 고장, 부모 사망(Job Object), 판본 묶음 대조, e2e hold 게이트, 실패 코드 2개 | W1-02 | `MERGED` | #581 · 2차 APPROVE(1차 P3 6·2차 P3 1 반영, 기존 결함 DEFECT-581-01 수정) · main 머지 75167a1e(2026-10-20) |
 
 ## W2 — 지연과 메모리
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `W2-01` | 예비 worker 항상 1개, V-7 gate | W1-03 | `PLANNED` | - |
+| [ ] | `W2-01` | 예비 worker 항상 1개, V-7 gate | W1-03 | `IN_REVIEW` | - |
 | [ ] | `W2-02` | 메모리 가드(도는 run 남은 예약분 차감, 최대 RSS 기록) | W2-01 | `PLANNED` | - |
 
 ## W3 — 기본값
@@ -116,3 +116,4 @@ progress_percent: 30
 
 - 2026-10-19: 기획 패키지 초안. 측정 근거는 [BENCHMARK.md](./BENCHMARK.md).
 - 2026-10-20: #569 1차 리뷰 REQUEST_CHANGES(P2 7건·P3 15건) 반영 — D5 종결 순서, D6 판본 묶음, D7 예비 1개 상시, D8 남은 예약분 차감, D11 엔진 게이트, D12 잠금 규율, D13 port 계약, Windows job을 W1-02로.
+- 2026-10-20: W1-03(#581) main 머지. W2-01 — 프로토콜 v2(`boot` 줄), 예비 worker 늘 1개(구현 세부는 spec D7), 서버 종료 정리의 lifespan 이전(#581 리뷰 nit).

@@ -72,6 +72,12 @@ bootstrap ─> application + adapters
   재사용하며, 지정가 위반을 포함한 검증 실패 시 주문·revision·계좌를 바꾸지 않는다.
   이 slice의 조립은 호출자/테스트가 명시적으로 수행한다. 기존 bootstrap·HTTP에는
   연결하지 않는다. 상세 실행 계약은 `docs/planning/research-to-trading/S05-offline-execution.md`다.
+- S06 키움 모의 연결은 `adapters/outbound/kiwoom_mock`이 S05 `BrokerPort`를 구현한다. S05 포트·도메인·
+  원장·서비스는 바꾸지 않는다. 키움에 없는 의도 ID·revision은 이 노드의 전용 참조 원장이 소유하고, 누적
+  사실 전이 판정은 `domain/order_execution`의 `classify_event`를 그대로 쓴다. `kiwoom_mock → sqlite_store`는
+  위 공용 연결·DDL 규칙의 재사용이다. HTTP는 표준 라이브러리이며 주소는 모의 도메인 상수 하나다. 키 저장과
+  bootstrap·HTTP 연결은 이 노드의 범위가 아니다. 상세 계약은
+  `docs/planning/research-to-trading/S06-kiwoom-contract.md`다.
 - 완료 run의 계좌 보고서는 `domain/backtest`의 순수 projection·전용
   `facade/account_report.py`가 금액·상태·초기자본 기준 해석을 소유한다.
   `application/backtest_run`은 `self.result(run_id)`의 완료·해시·역직렬화 검증을 한 번 재사용한 뒤

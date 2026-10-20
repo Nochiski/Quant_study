@@ -22,9 +22,10 @@
 -- EG3_corp_event 가 건수만 기록한다:
 --   out_of_calendar  효력일이 trading_calendar [min, max] 밖(DART 결정공시·자본변동 공통)
 --   unlisted_class   상장 티커가 없는 주식 종류(RCPS·전환우선주 등 UNLISTED_KINDS, 또는 우선주
---                    계열인데 법인에 상장 우선주가 없음, 결정공시의 기타주식도 같은 규칙)
+--                    계열인데 법인에 상장 우선주가 없음, 결정공시의 기타주식도 같은 규칙. 자사주 취득의
+--                    기타주식분은 결정일에 상장돼 있던 우선주가 없을 때)
 --   class_unknown    종류 어휘 밖('-' 포함) — 어느 티커의 사건인지 정할 수 없다
---   class_ambiguous  금액을 나르는 기타주식 class-row 인데 법인의 상장 우선주 티커가 둘 이상 —
+--   class_ambiguous  금액을 나르는 기타주식 class-row 인데 결정일에 상장돼 있던 우선주 티커가 둘 이상 —
 --                    금액은 나눠 붙일 수 없어 어느 우선주의 금액인지 정할 수 없다(자사주 취득, #589)
 --   pre_listing      티커는 있으나 효력일이 그 티커의 security_span 첫 존재일 이전
 --   krx_par_only     KRX 액면가 변경인데 주식수가 사실상 불변(|ratio−1| ≤ krx_share_change_tol)
@@ -179,40 +180,59 @@ capital AS (
 --   common    보통주식분. 기타주식만 사는 공시(보통주 수량·금액이 0 또는 결측)는 보통주 사건이 아니라
 --             행을 내지 않는다. 종류별 수량·금액이 하나도 없는 공시는 보통주 행으로 남기고 금액만 결측이다.
 --   preferred 기타주식분 — 기타주식 = 상장 우선주 leg 라는 규칙은 결정공시 estk leg · 종류 대응표
---             '기타주식'(rules_s05.PREFERRED_KINDS)과 같다. 상장 우선주가 없으면 unlisted_class 다.
---             **금액은 나눠 붙일 수 없다** — 우선주 티커가 둘 이상인 법인은 어느 우선주의 금액인지
---             공시가 말하지 않으므로 cls 를 'ambiguous' 로 두어 class_ambiguous(범위 밖)로 보낸다.
---             (비율 사건은 1주당 배수라 모든 우선주 leg 에 같은 값이 맞지만 금액은 합이다.)
+--             '기타주식'(rules_s05.PREFERRED_KINDS)과 같다. **금액은 나눠 붙일 수 없다** — 비율 사건은
+--             1주당 배수라 모든 우선주 leg 에 같은 값이 맞지만 금액은 합이다. 그래서 기타주식분은
+--             **결정일에 상장돼 있던 우선주 leg 가 정확히 하나일 때만** 그 티커(`leg_ticker`)에 싣는다
+--             (#590 리뷰 P3-1 — 결정일 전에 폐지된 우선주는 그날의 매입 대상이 아니다). 0 → 'unlisted'
+--             (범위 밖 unlisted_class) · 2 이상 → 'ambiguous'(범위 밖 class_ambiguous, 공시가 어느
+--             우선주인지 말하지 않는다).
+--             「그날 상장」은 universe_daily 와 같은 security_span 구간 규칙(first_date ≤ 날짜 ≤ last_date)
+--             이고, 끝이 coverage_gap 인 구간(원천 끝까지 상장)은 열린 끝이다. 결정일이 없으면 시점을 못
+--             정하므로 날짜 조건 없이 세고, 뒤 판정이 effective_unresolved 로 격리한다.
+tsstk_estk AS (
+    SELECT t.*,
+           (SELECT {'n': count(DISTINCT l.ticker), 'ticker': min(l.ticker)}
+            FROM legs l
+            WHERE l.corp_code = t.corp_code AND l.cls = 'preferred'
+              AND (t.aq_dd IS NULL OR EXISTS (
+                   SELECT 1 FROM security_span s
+                   WHERE s.ticker = l.ticker AND t.aq_dd >= s.first_date
+                     AND (t.aq_dd <= s.last_date OR s.end_reason = 'coverage_gap')))) AS pref
+    FROM stg_event_tsstk_aq t
+    WHERE coalesce(t.aqpln_prc_estk, 0) > 0 OR coalesce(t.aqpln_stk_estk, 0) > 0
+),
 tsstk_aq AS (
     SELECT rcept_no, corp_code, 'event_tsstk_aq' AS source, 'treasury_buy' AS event_type,
            'common' AS cls, aq_dd AS basis_date,
            NULL::DOUBLE AS ratio, FALSE AS ratio_given, available_date, available_basis,
-           aqpln_prc_ostk AS amount_raw, (aqpln_prc_ostk IS NOT NULL) AS amount_given
+           aqpln_prc_ostk AS amount_raw, (aqpln_prc_ostk IS NOT NULL) AS amount_given,
+           NULL::VARCHAR AS leg_ticker
     FROM stg_event_tsstk_aq
     WHERE coalesce(aqpln_prc_ostk, 0) > 0 OR coalesce(aqpln_stk_ostk, 0) > 0
        OR NOT (coalesce(aqpln_prc_estk, 0) > 0 OR coalesce(aqpln_stk_estk, 0) > 0)
     UNION ALL
-    SELECT t.rcept_no, t.corp_code, 'event_tsstk_aq', 'treasury_buy',
-           CASE WHEN (SELECT count(*) FROM legs l
-                      WHERE l.corp_code = t.corp_code AND l.cls = 'preferred') > 1
-                THEN 'ambiguous' ELSE 'preferred' END,
-           t.aq_dd, NULL::DOUBLE, FALSE, t.available_date, t.available_basis,
-           t.aqpln_prc_estk, (t.aqpln_prc_estk IS NOT NULL)
-    FROM stg_event_tsstk_aq t
-    WHERE coalesce(t.aqpln_prc_estk, 0) > 0 OR coalesce(t.aqpln_stk_estk, 0) > 0
+    SELECT rcept_no, corp_code, 'event_tsstk_aq', 'treasury_buy',
+           CASE WHEN pref.n = 0 THEN 'unlisted' WHEN pref.n = 1 THEN 'preferred'
+                ELSE 'ambiguous' END,
+           aq_dd, NULL::DOUBLE, FALSE, available_date, available_basis,
+           aqpln_prc_estk, (aqpln_prc_estk IS NOT NULL),
+           CASE WHEN pref.n = 1 THEN pref.ticker END
+    FROM tsstk_estk
 ),
 cvbd_is AS (
     SELECT rcept_no, corp_code, 'event_cvbd_is' AS source, 'cb_issue' AS event_type,
            'common' AS cls, bddd AS basis_date,
            NULL::DOUBLE AS ratio, FALSE AS ratio_given, available_date, available_basis,
-           coalesce(bd_fta, 0) AS amount_raw, (bd_fta IS NOT NULL) AS amount_given
+           coalesce(bd_fta, 0) AS amount_raw, (bd_fta IS NOT NULL) AS amount_given,
+           NULL::VARCHAR AS leg_ticker
     FROM stg_event_cvbd_is
 ),
 dart AS (
-    SELECT *, NULL::DOUBLE AS amount_raw, FALSE AS amount_given FROM fric
-    UNION ALL SELECT *, NULL::DOUBLE, FALSE FROM pifric
-    UNION ALL SELECT *, NULL::DOUBLE, FALSE FROM cr
-    UNION ALL SELECT *, NULL::DOUBLE, FALSE FROM capital
+    SELECT *, NULL::DOUBLE AS amount_raw, FALSE AS amount_given, NULL::VARCHAR AS leg_ticker
+    FROM fric
+    UNION ALL SELECT *, NULL::DOUBLE, FALSE, NULL::VARCHAR FROM pifric
+    UNION ALL SELECT *, NULL::DOUBLE, FALSE, NULL::VARCHAR FROM cr
+    UNION ALL SELECT *, NULL::DOUBLE, FALSE, NULL::VARCHAR FROM capital
     UNION ALL SELECT * FROM tsstk_aq
     UNION ALL SELECT * FROM cvbd_is
 ),
@@ -220,7 +240,8 @@ dart_leg AS (
     -- announce 폴백: rcept_no 14자리 = 접수일 YYYYMMDD + 일련번호 6자리 → '%Y%m%d%f'(%f = 6자리)
     -- 로 한 번에 파싱해 날짜만 취한다(참조표 미스 → stage available_date NULL·basis unknown).
     -- unlisted·unknown·ambiguous class-row 는 legs 에 없으므로 ticker NULL 1행으로 남아 scope_out 으로 간다.
-    SELECT l.ticker, d.corp_code, d.source, d.event_type, d.cls, d.basis_date, d.ratio,
+    -- `leg_ticker` 가 정해진 class-row(자사주 기타주식분)는 legs 로 펴지 않고 그 티커 하나에 붙는다.
+    SELECT coalesce(d.leg_ticker, l.ticker) AS ticker, d.corp_code, d.source, d.event_type, d.cls, d.basis_date, d.ratio,
            d.ratio_given, CASE WHEN d.amount_given THEN d.amount_raw END AS amount_krw,
            d.rcept_no,
            coalesce(d.available_date,
@@ -232,7 +253,7 @@ dart_leg AS (
                 ELSE d.basis_date END                                       AS effective_date,
            'disclosure_body'                                                AS effective_basis
     FROM dart d
-    LEFT JOIN legs l ON l.corp_code = d.corp_code AND l.cls = d.cls
+    LEFT JOIN legs l ON d.leg_ticker IS NULL AND l.corp_code = d.corp_code AND l.cls = d.cls
 ),
 -- ── KRX 액면가 변경 (직전 거래일 대비) ───────────────────────────────────────
 listing AS (

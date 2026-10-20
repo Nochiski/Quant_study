@@ -375,8 +375,8 @@ eg3_corp_event.gate_name = "EG3_corp_event"     # type: ignore[attr-defined]
 # (`FACT_ONLY_TYPES`). `rights` 는 아직 싣지 않아 `event.capital_raise_amount` 는 `cb_issue` 행만 읽는다.
 # 선언은 행이 없을 때도 남긴다 — S19 가 커버율 0 을 재고 S20 EG10 이 blocked(no_observations)로
 # 드러내야 "필드가 없다" 와 "필드는 있는데 값이 없다" 가 구별된다(GATES §6 EG10 의 왜).
-# 자사주 취득 금액은 주식 종류별이다(#589) — 보통주식분은 보통주 티커에, 기타주식분은 법인의 상장
-# 우선주 티커가 하나일 때만 그 티커에 실린다(`sql/corp_event.sql` 의 `tsstk_aq` CTE).
+# 자사주 취득 금액은 주식 종류별이다(#589) — 보통주식분은 보통주 티커에, 기타주식분은 결정일에
+# 상장돼 있던 우선주 티커가 하나일 때만 그 티커에 실린다(`sql/corp_event.sql` 의 `tsstk_estk`).
 # `row_filter` 의 `event_type` 은 원장 사건 어휘다(원천 표 이름 `tsstk_aq` 가 아니다). 워크벤치
 # 어댑터의 같은 필터가 이 선언과 같은지는 backend 계약 테스트가 본다(#583).
 # 랙 1 세션: 원천이 전부 stage `lag_known=false` 이고 공시는 장중·장후 어느 쪽이든 접수된다.
@@ -388,9 +388,9 @@ FIELDS_CORP_EVENT: tuple[FieldProfile, ...] = (
         disclosure_basis="자기주식취득결정 공시 접수일(rcept_dt)",
         evidence="corp_event.amount_krw WHERE event_type='treasury_buy' ← stg_event_tsstk_aq "
                  "(e1.9.0 부터 적재). 금액은 주식 종류별 취득예정금액이다(e1.20.0, #589) — "
-                 "보통주 티커는 aqpln_prc_ostk, 우선주 티커는 aqpln_prc_estk 이고, 상장 우선주가 "
-                 "둘 이상인 법인의 기타주식분은 어느 우선주인지 몰라 싣지 않는다"
-                 "(class_ambiguous). 사업보고서 확정치 축은 event.treasury_acquired(S16)로 "
+                 "보통주 티커는 aqpln_prc_ostk, 우선주 티커는 aqpln_prc_estk 이다. 기타주식분은 "
+                 "결정일에 상장돼 있던 우선주가 하나일 때만 싣고, 없으면 unlisted_class, 둘 "
+                 "이상이면 어느 우선주인지 몰라 class_ambiguous 로 범위 밖이다. 사업보고서 확정치 축은 event.treasury_acquired(S16)로 "
                  "축·시점이 다르다.",
         coverage_axis="table_rows", row_filter="event_type = 'treasury_buy'"),
     FieldProfile(
@@ -451,7 +451,7 @@ CORP_EVENT = register(EquityTable(
                               "available_basis"),
         "corp_ticker": ("ticker", "isin8", "corp_code", "is_common"),
         "trading_calendar": ("date", "prev_td"),
-        "security_span": ("ticker", "first_date")},
+        "security_span": ("ticker", "first_date", "last_date", "end_reason")},
     available_basis=("derived", "default"),
     content_date_column="announce_date",
     reject_reasons=REJECT_REASONS,

@@ -151,10 +151,16 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                for t in tickers],
               {"ticker": "VARCHAR", "isin8": "VARCHAR", "corp_code": "VARCHAR",
                "is_common": "BOOLEAN"})
-        _view(con, "security_span",
-              [{"ticker": t, "first_date": min(r["date"] for r in listing if r["ticker"] == t)}
-               for t in tickers],
-              {"ticker": "VARCHAR", "first_date": "DATE"})
+        # 구간 끝이 캘린더 끝이면 원천 끝까지 상장(coverage_gap), 아니면 그날 폐지(delisted) —
+        # security_span.sql 의 end_reason 규칙과 같은 모양이다.
+        spans = []
+        for t in tickers:
+            days = [r["date"] for r in listing if r["ticker"] == t]
+            spans.append({"ticker": t, "first_date": min(days), "last_date": max(days),
+                          "end_reason": "coverage_gap" if max(days) == cal[-1] else "delisted"})
+        _view(con, "security_span", spans,
+              {"ticker": "VARCHAR", "first_date": "DATE", "last_date": "DATE",
+               "end_reason": "VARCHAR"})
         prev = [None, *cal[:-1]]
         _view(con, "trading_calendar", [{"date": d, "prev_td": p} for d, p in zip(cal, prev,
                                                                                  strict=True)],
@@ -711,7 +717,8 @@ def _krx_harness(tol: float) -> duckdb.DuckDBPyConnection:
                 "AS prev_td FROM (VALUES (DATE '2013-05-22'), (DATE '2013-05-23'), "
                 "(DATE '2013-05-24'), (DATE '2013-05-27')) t(date)")
     tickers = ", ".join(f"('{t}')" for t, *_ in KRX_HAND)
-    con.execute(f"CREATE TABLE security_span AS SELECT ticker, DATE '2013-05-22' AS first_date "
+    con.execute(f"CREATE TABLE security_span AS SELECT ticker, DATE '2013-05-22' AS first_date, "
+                f"DATE '2013-05-27' AS last_date, 'coverage_gap' AS end_reason "
                 f"FROM (VALUES {tickers}) t(ticker)")
     con.execute(f"CREATE TABLE corp_ticker AS SELECT ticker, 'KR7' || substr(ticker, 1, 5) AS "
                 f"isin8, '0' || ticker || '0' AS corp_code, TRUE AS is_common "
@@ -966,10 +973,15 @@ def test_금액이_없는_행은_격리하지_않고_금액만_결측이다() ->
 
 
 def _run_two_class_corp(cal: list[date], preferred: tuple[str, ...],
-                        tsstk: list[dict[str, object]]) -> dict[str, dict[str, object]]:
-    """보통주 A00001 과 상장 우선주 `preferred` 를 가진 법인 CX 위에서 자사주 공시만 돌린다."""
+                        tsstk: list[dict[str, object]],
+                        delisted: tuple[str, ...] = ()) -> dict[str, dict[str, object]]:
+    """보통주 A00001 과 상장 우선주 `preferred` 를 가진 법인 CX 위에서 자사주 공시만 돌린다.
+
+    `delisted` 의 우선주는 앞 10세션만 상장했다가 폐지된다(security_span 끝 = cal[9]).
+    """
     tickers = ("A00001", *preferred)
-    listing = [row for t in tickers for row in flat_listing(t, cal, 1_000_000)]
+    listing = [row for t in tickers
+               for row in flat_listing(t, cal[:10] if t in delisted else cal, 1_000_000)]
     corp_ticker: list[dict[str, object]] = [
         {"ticker": t, "isin8": f"KR7{t}", "corp_code": "CX", "is_common": t == "A00001"}
         for t in tickers]
@@ -981,7 +993,7 @@ def test_자사주_취득_금액은_주식_종류별로_그_종류의_티커에_
 
     #589.
 
-    보통주 티커에는 보통주식 금액만, 상장 우선주가 하나인 법인의 우선주 티커에는 기타주식 금액만
+    보통주 티커에는 보통주식 금액만, 결정일에 상장된 우선주가 하나인 법인의 그 티커에는 기타주식 금액만
     붙는다. 둘을 합쳐 보통주에 붙이면 보통주 시가총액으로 나눈 규모가 우선주 매입분만큼 부푼다.
     기타주식만 사는 공시는 보통주 사건이 아니다. 종류별 금액이 하나도 없으면 보통주 행의 금액만
     결측이다(「결측은 결측」).
@@ -1021,6 +1033,61 @@ def test_상장_우선주가_둘_이상이면_기타주식_금액은_어느_티�
     out = _run_two_class_corp(cal, ("A00005", "A00007"), tsstk)
     got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
     assert got == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000}
+
+
+_BOTH_CLASSES = {"rcept_no": "20210301000001", "corp_code": "CX",
+                 "aqpln_stk_ostk": 100_000.0, "aqpln_stk_estk": 30_000.0,
+                 "aqpln_prc_ostk": 5_000_000_000.0, "aqpln_prc_estk": 1_000_000_000.0}
+
+
+def test_결정일_전에_폐지된_우선주에는_기타주식_금액을_싣지_않는다() -> None:
+    """#590 리뷰 P3-1: 우선주 수는 결정일에 security_span 구간 안인 것만 센다.
+
+    유일한 우선주 A00005 가 cal[9] 에 폐지됐으면 cal[20] 결정의 기타주식분은 그날 상장 우선주가
+    없어 unlisted_class(범위 밖)다 — 폐지된 티커에 붙이지 않는다. 보통주식분은 그대로다.
+    """
+    cal = sessions(60)
+    tsstk = [{**_BOTH_CLASSES, "aq_dd": cal[20], "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk, delisted=("A00005",))
+    got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+    assert got == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000}
+
+
+def test_우선주_둘_중_결정일에_살아_있는_하나에만_기타주식_금액이_붙는다() -> None:
+    """A00007 은 cal[9] 에 폐지돼 cal[20] 결정일에 상장 우선주는 A00005 하나뿐이다 — ambiguous 가
+    아니라 A00005 에 귀속한다."""
+    cal = sessions(60)
+    tsstk = [{**_BOTH_CLASSES, "aq_dd": cal[20], "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005", "A00007"), tsstk, delisted=("A00007",))
+    got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+    assert got == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000,
+                   f"A00005:treasury_buy:{cal[20]}": 1_000_000_000}
+
+
+def test_보통주_수량만_있고_금액이_없으면_보통주_금액은_0이_아니라_결측이다() -> None:
+    """#590 리뷰 nit-1(a): 보통주 수량은 있는데 보통주 금액이 비고 기타주식 금액만 있는 공시.
+
+    보통주 행은 사건이 있으니 내되 금액은 결측이다 — 0 으로 채우면 「매입 0원」이라는 거짓 사실이
+    된다. 기타주식분은 우선주 티커에 그대로 실린다."""
+    cal = sessions(60)
+    tsstk = [{"rcept_no": "20210301000001", "corp_code": "CX", "aq_dd": cal[20],
+              "aqpln_stk_ostk": 10_000.0, "aqpln_stk_estk": 3_000.0,
+              "aqpln_prc_estk": 200_000_000.0, "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk)
+    got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+    assert got == {f"A00001:treasury_buy:{cal[20]}": None,
+                   f"A00005:treasury_buy:{cal[20]}": 200_000_000}
+
+
+def test_기타주식_수량만_있는_공시는_우선주_행으로_남고_금액만_결측이다() -> None:
+    """#590 리뷰 nit-1(b): 기타주식 수량만 있고 금액이 없는 공시도 우선주 사건이다. 보통주 사건이
+    아니므로 보통주 행은 없고, 우선주 행은 금액만 결측이다(어디에도 안 실리면 사건이 사라진다)."""
+    cal = sessions(60)
+    tsstk = [{"rcept_no": "20210301000001", "corp_code": "CX", "aq_dd": cal[20],
+              "aqpln_stk_estk": 5_000.0, "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk)
+    got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+    assert got == {f"A00005:treasury_buy:{cal[20]}": None}
 
 
 def test_절단본_자사주_취득은_종류별_금액이_각_티커에_붙는다(

@@ -164,9 +164,10 @@ RULES_VERSION = "e1.20.0"                # BuildRecord.rules_version 에 실린�
 #         레지스트리 가격 변화 팩터를 이 필드로 옮겨 FIELD_MAP §2 어휘가 됐다(문서 감사 결정 5).
 #         값·랙·커버는 그대로이고 `dataset_profile` 한 행의 `field_scope`·`evidence` 만 바뀐다.
 # e1.20.0: 2026-10-20 자사주 취득 금액을 주식 종류별 class-row 로 나눈다(#589). 보통주 티커는
-#         보통주식분(`aqpln_prc_ostk`)만, 상장 우선주가 하나인 법인의 우선주 티커는 기타주식분
-#         (`aqpln_prc_estk`)만 받고, 우선주가 둘 이상이면 기타주식분을 범위 밖 `class_ambiguous` 로
-#         둔다(기타주식만 산 공시는 보통주 행이 없다). `corp_event` 의 행·`amount_krw` 와
+#         보통주식분(`aqpln_prc_ostk`)만, 결정일에 상장돼 있던 우선주가 하나인 법인의 우선주
+#         티커는 기타주식분(`aqpln_prc_estk`)만 받는다. 그런 우선주가 없으면 `unlisted_class`,
+#         둘 이상이면 `class_ambiguous`(둘 다 범위 밖)이고, 상장 여부는 `security_span` 구간으로
+#         본다(#590 리뷰 P3-1). 기타주식만 산 공시는 보통주 행이 없다. `corp_event` 의 행·`amount_krw` 와
 #         `dataset_profile` 의 `event.buyback_amount` 커버가 바뀐다. 같은 판에서 S19·S20 문장의
 #         「E05 행 0」 서술을 지금 원장대로 고치고(#588) E05 에 레지스트리
 #         `event.buyback_announcement` 를 옮겨 단다(I03 은 사업보고서 확정치 축이라 그 팩터의

@@ -316,8 +316,9 @@ FACTORS: tuple[FactorSpec, ...] = (
        "FACTORS §7 E05 = 취득 결정 공시 이벤트 더미(발표일 초과수익). 재료는 `corp_event` 의 "
        "`treasury_buy` 행(e1.9.0 부터 적재, ← stg_event_tsstk_aq).",
        caveat="금액은 결정 공시의 **취득예정금액**이고 주식 종류별이다(e1.20.0) — 보통주 티커는 "
-              "보통주식분, 우선주 티커는 기타주식분만 받는다. 상장 우선주가 둘 이상인 법인의 "
-              "기타주식분은 어느 우선주인지 몰라 싣지 않는다(`class_ambiguous`). 실제 취득 "
+              "보통주식분, 우선주 티커는 기타주식분만 받는다. 기타주식분은 결정일에 상장돼 있던 "
+              "우선주가 하나일 때만 싣고, 둘 이상이면 어느 우선주인지 몰라 싣지 않는다"
+              "(`class_ambiguous`). 실제 취득 "
               "수량은 사업보고서 축(`event.treasury_acquired`, I03)이다.",
        registry="event.buyback_announcement"),
     _f("E06", "유상증자·CB 발행", ("event.capital_raise_amount",), "equity",

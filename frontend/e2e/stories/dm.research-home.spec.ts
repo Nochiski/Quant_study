@@ -65,7 +65,12 @@ test(
     await page.goto("/");
     await expect(page).toHaveURL(/\/$/u);
     await expect(page.getByRole("heading", { level: 1, name: "연구 홈" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "홈" })).toHaveAttribute("aria-current", "page");
+    // 이름 일부 일치면 이 테스트가 저장한 전략 링크(`US-DM-15 홈 …`)도 잡혀, 최근 작업 목록이
+    // 먼저 그려진 회차에 strict mode 로 실패한다. 내비게이션 링크만 정확히 고른다.
+    await expect(page.getByRole("link", { name: "홈", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
 
     // 계좌 칸: 미연결 배지와 문장뿐이고 숫자가 없다(RD-01-B).
     const account = page.getByRole("region", { name: /계좌 손익/u });

@@ -241,11 +241,21 @@ def test_zscore_exact_paths_and_constant_segments() -> None:
         ], items
 
 
-def test_scalar_api_wraps_the_segment_kernels() -> None:
-    """포트폴리오 컴파일러·신호 평가가 부르는 스칼라 API 결과가 옛 식과 같다(spec D5)."""
+@pytest.mark.parametrize("path", ["default", "definition", "kernel"])
+def test_scalar_api_matches_the_old_formulas_on_both_paths(
+    monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """포트폴리오 컴파일러·신호 평가가 부르는 스칼라 API 결과가 옛 식과 같다(spec D5).
+
+    원소 수 상한을 크게·0 으로 바꿔 정의 경로와 커널 경로를 같은 입력으로 각각 본다(#598 리뷰 P2-1).
+    """
+    if path != "default":
+        limit = 1 << 30 if path == "definition" else 0
+        monkeypatch.setattr(_statistics, "_RANK_DEFINITION_MAX", limit)
+        monkeypatch.setattr(_statistics, "_ZSCORE_DEFINITION_MAX", limit)
     rng = np.random.default_rng(5)
     for kind in _KINDS:
-        for size in (0, 1, 2, 3, 7, 40, 300):
+        for size in (0, 1, 2, 3, 7, 40, 256, 257, 300):
             items = _values(rng, kind, size).tolist()
             assert [_hex(value) for value in cross_sectional_rank(items)] == [
                 _hex(value) for value in _reference_rank(items)
@@ -259,14 +269,32 @@ def test_scalar_api_wraps_the_segment_kernels() -> None:
 
 
 @pytest.mark.parametrize(
-    "kernel",
-    [segment_rank, lambda values, offsets: segment_winsorize(values, offsets, 0.1, 0.9)],
+    "items",
+    [
+        [1.0, math.nan],
+        [math.nan, 3.0, 1.0, math.nan, 2.0],
+        [math.inf, math.nan, -math.inf, 0.0, -0.0],
+        [math.nan],
+    ],
 )
-def test_sorting_kernels_reject_nan(kernel: Kernel) -> None:
-    with pytest.raises(ValueError, match="cannot order NaN"):
-        kernel(np.array([1.0, math.nan]), np.array([0, 2]))
-    with pytest.raises(ValueError, match="cannot order NaN"):
-        cross_sectional_rank([1.0, math.nan])
+def test_sorting_kernels_resolve_nan_segments_by_the_definition(items: list[float]) -> None:
+    """NaN 이 든 구간의 순위·winsorize 는 정의(옛 식) 그대로이고 다른 구간은 영향을 받지 않는다."""
+    values = np.array([*items, 4.0, 1.0, 2.0])
+    offsets = np.array([0, len(items), len(items) + 3])
+    cases: list[tuple[Kernel, Reference]] = [
+        (segment_rank, _reference_rank),
+        (
+            lambda values, offsets: segment_winsorize(values, offsets, 0.1, 0.9),
+            lambda values: _reference_winsorize(values, 0.1, 0.9),
+        ),
+    ]
+    for kernel, reference in cases:
+        result = kernel(values, offsets)
+        expected = reference(items) + reference([4.0, 1.0, 2.0])
+        assert [_hex(value) for value in result] == [_hex(value) for value in expected]
+    assert [_hex(value) for value in cross_sectional_rank(items)] == [
+        _hex(value) for value in _reference_rank(items)
+    ]
 
 
 @pytest.mark.parametrize(

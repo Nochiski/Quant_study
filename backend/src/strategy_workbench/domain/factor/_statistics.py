@@ -8,6 +8,14 @@ from statistics import mean, median, pstdev
 import numpy as np
 from numpy.typing import NDArray
 
+# 스칼라 API 가 구간 커널 대신 정의(아래 `_rank_definition`, zscore 는 함수 본문)로 바로 계산하는
+# 원소 수 상한(#598 리뷰 P2-1). 구간 하나짜리 호출에서는 벡터 커널의 고정비(정렬·동점 묶기 약 50µs,
+# 정확 평균·pstdev 인증 준비 3~5ms)가 정의보다 비싸다. 실측(단일 구간, CPython 3.11): rank 는
+# n≈150~200 에서, zscore 는 연속 분포 n≈8천·작은 정수 n≈5만에서 커널이 앞선다. 그 아래는 정의를
+# 그대로 부르므로 결과·속도가 T3-05 전과 같다. 열 평가기는 패널 전체를 한 번에 넘겨 늘 커널을 쓴다.
+_RANK_DEFINITION_MAX = 256
+_ZSCORE_DEFINITION_MAX = 1 << 16
+
 
 def cross_sectional_rank(values: Sequence[float]) -> list[float]:
     """횡단면 백분위 순위를 0~1 로 돌려준다(입력 순서 그대로).
@@ -16,9 +24,11 @@ def cross_sectional_rank(values: Sequence[float]) -> list[float]:
     않도록 1 로 막아 유일한 값이 0.0 이 된다 — 횡단면에 비교 대상이 없으면 순위 정보도 없다.
 
     `CrossSectionalOperator.RANK`·`GroupOperator.RANK` 와 `signal.normalization: rank` 가 같은
-    정의를 쓴다(P2-04). 공식은 구간 커널 `segment_rank` 하나가 소유하고, 이 함수는 입력 전체를
-    구간 하나로 감싼다(columnar-tape spec D5). 값은 유한한 float 여야 한다(NaN 은 `ValueError`).
+    정의를 쓴다(P2-04). 공식은 이 모듈이 소유한다 — 정의 `_rank_definition` 과 그 벡터 재현
+    `segment_rank`(columnar-tape spec D5). 이 함수는 원소 수로 둘 중 빠른 쪽을 고르고 결과는 같다.
     """
+    if len(values) <= _RANK_DEFINITION_MAX:
+        return _rank_definition(values)
     array = np.asarray(values, dtype=np.float64)
     ranks = segment_rank(array, np.array([0, array.shape[0]], np.intp))
     return ranks.tolist()
@@ -31,14 +41,45 @@ def cross_sectional_zscore(values: Sequence[float]) -> list[float]:
     0.0 이다 — 0 으로 나누는 대신 "정보 없음"을 중립값으로 표현한다.
 
     `CrossSectionalOperator.ZSCORE` 와 `signal.normalization: zscore` 가 같은 정의를 쓴다(P2-04).
-    공식은 구간 커널 `segment_zscore` 하나가 소유하고, 이 함수는 입력 전체를 구간 하나로 감싼다
-    (columnar-tape spec D5).
+    공식은 이 모듈이 소유한다 — 정의(아래 `statistics.mean`·`pstdev` 와 IEEE 빼기·나누기 한
+    번씩)와 그 벡터 재현 `segment_zscore`(columnar-tape spec D5). 이 함수는 원소 수로 둘 중 빠른
+    쪽을 고르고 결과는 같다.
     """
     if not values:
         return []
-    array = np.asarray(values, dtype=np.float64)
-    scores = segment_zscore(array, np.array([0, array.shape[0]], np.intp))
-    return scores.tolist()
+    if len(values) > _ZSCORE_DEFINITION_MAX:
+        array = np.asarray(values, dtype=np.float64)
+        scores = segment_zscore(array, np.array([0, array.shape[0]], np.intp))
+        return scores.tolist()
+    center = mean(values)
+    deviation = pstdev(values)
+    if deviation == 0:
+        return [0.0] * len(values)
+    return [(value - center) / deviation for value in values]
+
+
+def _rank_definition(values: Sequence[float]) -> list[float]:
+    """백분위 순위의 정의. 키 (값, 입력 순서)로 정렬하고 같은 값(`==`) 묶음이 평균 순위를 나눈다."""
+    ordered = sorted(enumerate(values), key=lambda item: (item[1], item[0]))
+    ranked: dict[int, float] = {}
+    position = 0
+    while position < len(ordered):
+        end = position + 1
+        while end < len(ordered) and ordered[end][1] == ordered[position][1]:
+            end += 1
+        average_rank = (position + 1 + end) / 2
+        for index, _ in ordered[position:end]:
+            ranked[index] = average_rank
+        position = end
+    denominator = max(len(ranked) - 1, 1)
+    return [(ranked[index] - 1) / denominator for index in range(len(values))]
+
+
+def _winsorize_definition(values: list[float], lower: float, upper: float) -> list[float]:
+    """winsorize 의 정의. 정렬한 값의 `quantile` 두 개로 `min(max(x, lo), hi)` 다."""
+    ordered = sorted(values)
+    low, high = quantile(ordered, lower), quantile(ordered, upper)
+    return [min(max(value, low), high) for value in values]
 
 
 def quantile(ordered: list[float], probability: float) -> float:
@@ -968,8 +1009,9 @@ def _certify_deviation(sums: _Floats, count: _Floats) -> tuple[_Floats, _Bools, 
 #
 # 구간 g 는 `values[offsets[g] : offsets[g + 1]]` 이고, 구간 안 순서는 객체 경로 동료 목록의
 # 순서(관측 순서)다. 아래 커널은 그 목록을 받은 객체 경로 공식과 비트가 같다. 스칼라 API
-# `cross_sectional_rank`·`cross_sectional_zscore` 는 입력 전체를 구간 하나로 감싸 같은 커널을
-# 부른다.
+# `cross_sectional_rank`·`cross_sectional_zscore` 는 원소 수가 상한(`_RANK_DEFINITION_MAX`·
+# `_ZSCORE_DEFINITION_MAX`)을 넘을 때만 입력 전체를 구간 하나로 감싸 같은 커널을 부르고, 그 아래는
+# 정의로 계산한다.
 #
 # - 정렬: 객체 경로는 Python `sorted` 다(rank 는 키 (값, 입력 순서), winsorize·median 은 값만).
 #   둘 다 안정 정렬이라 같은 값(`==`, −0.0 과 0.0 포함)은 입력 순서를 지킨다. 여기서는 구간 번호를
@@ -977,13 +1019,13 @@ def _certify_deviation(sums: _Floats, count: _Floats) -> tuple[_Floats, _Bools, 
 #   +0.0 이 되어 두 0 이 같은 키라, 정렬 구현이 부호 비트를 보더라도 같은 값은 입력 순서로 남는다.
 #   값 자체는 원래 열에서 읽어 부호를 잃지 않는다.
 # - NaN 은 `<` 로 순서가 정해지지 않아 `sorted` 결과가 입력 배치에 따라 달라진다. 벡터로 재현할
-#   정의가 없으므로 NaN 이 든 구간의 중앙값은 그 구간을 `statistics.median` 에 동료 순서 그대로 넘겨
-#   정한다. 그래프 출력 채움(`_filled`)은 출력 노드의 유한값 검사보다 먼저 돌아(`_evaluation.py` 의
+#   수 없으므로 NaN 이 든 구간은 그 구간을 정의(`statistics.median`·`_rank_definition`·
+#   `_winsorize_definition`)에 동료 순서 그대로 넘겨 다시 정한다 — 어느 입력에서나 객체 경로와
+#   같다. 그래프 출력 채움(`_filled`)은 출력 노드의 유한값 검사보다 먼저 돌아(`_evaluation.py` 의
 #   출력 채움 뒤 `_require_finite_values`) 넘친 ±inf·NaN 이 중앙값까지 온다(#598 리뷰 P1-1).
-#   rank·winsorize 의 입력(횡단면·그룹 노드 입력)은 유한값 검사를 통과한 자식 값과 채움 값(0.0, 또는
-#   유한값의 중앙값 — 넘치면 ±inf 이고 NaN 은 아니다)뿐이고, 스칼라 API 호출자(컴파일러·신호 평가)는
-#   비유한값을 먼저 거른다. 그래서 두 커널은 NaN 을 `ValueError` 로 거절한다. ±inf 는 순서가 정해져
-#   그대로 다룬다.
+#   rank·winsorize 입력(횡단면·그룹 노드 입력)은 유한값 검사를 통과한 자식 값과 채움 값(0.0, 또는
+#   유한값의 중앙값 — 넘치면 ±inf 이고 NaN 은 아니다)뿐이라 평가기에서는 NaN 이 오지 않는다. ±inf 는
+#   순서가 정해져 벡터 경로 그대로 다룬다.
 # - 정렬은 구간을 모은 `_SORT_CHUNK` 원소 조각마다, 원소 연산은 `_KERNEL_CHUNK` 원소 조각마다 하고
 #   조각마다 checkpoint 를 부른다. 구간 하나가 정렬 조각보다 길면 그 구간의 정렬 한 번 안에서는
 #   부를 수 없다(정확 경로의 긴 칸과 같은 한계).
@@ -1002,7 +1044,6 @@ def segment_rank(
     번 나눠 정확하다). 그 뒤 1 을 빼고 분모로 한 번 나눈다 — 객체 경로와 같은 IEEE 연산 순서다.
     """
     bounds = _segment_bounds(values, offsets, "segment rank")
-    _require_ordered(values, "segment rank")
     ranks = np.empty(values.shape[0], np.float64)
     for low, high, local, _ in _segment_spans(bounds, checkpoint):
         part = values[low:high]
@@ -1019,6 +1060,9 @@ def segment_rank(
         average = ((run_start[run] - first) + 1 + (run_stop[run] - first)).astype(np.float64) / 2.0
         denominator = np.maximum(np.diff(local) - 1, 1).astype(np.float64)[segment]
         ranks[low + order] = (average - 1.0) / denominator
+    for group in _unordered_segments(values, bounds, checkpoint):
+        low, high = int(bounds[group]), int(bounds[group + 1])
+        ranks[low:high] = _rank_definition(values[low:high].tolist())
     return ranks
 
 
@@ -1078,7 +1122,6 @@ def segment_winsorize(
     분위는 검증기(`factor.graph.winsor_bounds`)처럼 [0, 1] 이어야 한다.
     """
     bounds = _segment_bounds(values, offsets, "segment winsorize")
-    _require_ordered(values, "segment winsorize")
     probabilities = (float(lower_probability), float(upper_probability))
     if not all(0.0 <= probability <= 1.0 for probability in probabilities):
         raise ValueError(
@@ -1095,6 +1138,9 @@ def segment_winsorize(
         )
         raised = np.where(lower > part, lower, part)
         clipped[low:high] = np.where(upper < raised, upper, raised)
+    for group in _unordered_segments(values, bounds, checkpoint):
+        low, high = int(bounds[group]), int(bounds[group + 1])
+        clipped[low:high] = _winsorize_definition(values[low:high].tolist(), *probabilities)
     return clipped
 
 
@@ -1127,23 +1173,21 @@ def segment_median(
         with np.errstate(all="ignore"):
             even = (lower + upper) / 2.0
         medians[first + present] = np.where(odd, upper, even)
-    # NaN 이 든 구간은 순서가 입력 배치에 달려 Python 정의 그대로 다시 정한다
-    missing = np.flatnonzero(np.isnan(values))
-    unordered = np.unique(np.searchsorted(bounds, missing, side="right") - 1)
-    for group in unordered.tolist():
-        checkpoint()
+    for group in _unordered_segments(values, bounds, checkpoint):
         medians[group] = median(values[bounds[group] : bounds[group + 1]].tolist())
     return medians
 
 
-def _require_ordered(values: _Floats, kernel: str) -> None:
-    """정렬 커널 입력에 NaN 이 없는지 본다(머리 주석)."""
+def _unordered_segments(
+    values: _Floats, bounds: NDArray[np.intp], checkpoint: Callable[[], None]
+) -> Iterator[int]:
+    """NaN 이 든 구간 번호(오름차순). 순서가 입력 배치에 달려 정의로 다시 정할 구간이다(머리 주석).
+
+    정의 한 번이 길 수 있어 구간마다 checkpoint 를 부른다."""
     missing = np.flatnonzero(np.isnan(values))
-    if missing.size:
-        raise ValueError(
-            f"{kernel} cannot order NaN — first_index={int(missing[0])} count={missing.size} "
-            f"rows={values.shape[0]}"
-        )
+    for group in np.unique(np.searchsorted(bounds, missing, side="right") - 1).tolist():
+        checkpoint()
+        yield int(group)
 
 
 def _segment_spans(

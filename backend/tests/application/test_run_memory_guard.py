@@ -27,6 +27,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.backtest_run._memory_guard import (
+    RunShape,
     estimated_sessions,
     gb_bytes,
     memory_verdict,
@@ -87,11 +88,43 @@ def test_estimated_sessions_are_the_weekdays_in_range_plus_the_warm_up(
     assert estimated_sessions(start, end, 272) == _weekdays(start, end) + 272
 
 
-def test_reserve_follows_the_spec_formula_at_the_two_measured_points() -> None:
-    # spec D8: 1년 약 520세션은 약 2.5GB, 5년 약 1,690세션은 약 6.9GB 를 잡는다.
-    assert run_reserve_bytes(520) == gb_bytes(1.25 * (0.44 + 0.0030 * 520))
-    assert round(run_reserve_bytes(520) / _GB, 2) == 2.5
-    assert round(run_reserve_bytes(1690) / _GB, 2) == 6.89
+# BENCHMARK 7절의 측정점: (추정 세션, 필드 수, 팩터 단계 수, worker 최대 RSS GB, 최대 commit GB).
+# 실데이터 `krx.common-stock`, 전략 모양 넷(bench·fields·nodes·multi) × 구간. 계수를 다시 맞추면
+# 새 측정점으로 이 표를 고친다.
+_MEASURED = (
+    (403, 2, 2, 1.435, 1.764),
+    (531, 2, 2, 1.932, 2.262),
+    (793, 2, 2, 2.963, 3.297),
+    (1054, 2, 2, 3.954, 4.269),
+    (403, 5, 2, 2.213, 2.556),
+    (531, 5, 2, 3.006, 3.343),
+    (403, 2, 10, 2.170, 2.500),
+    (531, 2, 10, 2.933, 3.265),
+    (403, 5, 10, 2.951, 3.286),
+    (531, 5, 10, 3.998, 4.338),
+)
+
+
+@pytest.mark.parametrize(("sessions", "fields", "steps", "rss_gb", "commit_gb"), _MEASURED)
+def test_the_reserve_covers_every_measured_run_with_margin(
+    sessions: int, fields: int, steps: int, rss_gb: float, commit_gb: float
+) -> None:
+    """spec D8·#599 리뷰 P2-1: 모든 측정점에서 예약치가 최대 RSS 의 1.15배, 최대 commit 이상이다."""
+    reserve = run_reserve_bytes(RunShape(sessions, fields, steps))
+
+    assert reserve >= 1.15 * gb_bytes(rss_gb)
+    assert reserve >= gb_bytes(commit_gb)
+
+
+def test_the_same_sessions_reserve_more_for_more_fields_and_factor_steps() -> None:
+    """#599 리뷰 P2-1: 세션 수만으로 정하면 팩터·필드가 많은 run 이 예약의 1.6배를 쓴다."""
+    simple = run_reserve_bytes(RunShape(sessions=531, fields=2, factor_steps=2))
+    more_fields = run_reserve_bytes(RunShape(sessions=531, fields=5, factor_steps=2))
+    more_steps = run_reserve_bytes(RunShape(sessions=531, fields=2, factor_steps=10))
+
+    assert simple < more_fields and simple < more_steps
+    # 1년 4팩터·5필드 실측 최대 RSS 4.00GB 를 덮는다(세션 수만 본 옛 식은 2.54GB 였다).
+    assert run_reserve_bytes(RunShape(531, 5, 10)) >= gb_bytes(4.0 * 1.15)
 
 
 def _memory(available: int, *, overhead: int = 0, **rss: int) -> RunMemory:
@@ -161,8 +194,11 @@ class _FakeTransport:
         listener.on_finished(RunFailed("backtest.run.internal", f"test finished run_id={run_id}"))
 
 
-def _spec() -> StrategySpec:
-    """20세션 모멘텀 하나 — 원시 관측이 시작일 앞의 워밍업을 읽어 예약치에 든다."""
+def _spec(factors: int = 1) -> StrategySpec:
+    """20세션 모멘텀 `factors` 개 — 원시 관측이 시작일 앞의 워밍업을 읽어 예약치에 든다.
+
+    팩터마다 실행 계획 단계가 둘이라, 같은 구간에서 팩터가 많을수록 예약치가 크다.
+    """
     template = StrategyDesignService(
         InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).template()
@@ -173,7 +209,13 @@ def _spec() -> StrategySpec:
         ),
         output_node_id="mom",
     )
-    return replace(template, factors=(replace(template.factors[0], graph=graph),))
+    base = template.factors[0]
+    return replace(
+        template,
+        factors=tuple(
+            replace(base, factor_id=f"momentum_{index}", graph=graph) for index in range(factors)
+        ),
+    )
 
 
 def _portfolio() -> PortfolioDesignService:
@@ -210,22 +252,30 @@ def _service(
     )
 
 
-def _request(*, end: date = _ENVIRONMENT.end) -> BacktestRunSpec:
+def _request(*, end: date = _ENVIRONMENT.end, factors: int = 1) -> BacktestRunSpec:
     # 끝 날짜를 달리해 같은 입력 잇기를 피한다.
     return BacktestRunSpec(
-        strategy=_spec(), core=ExecutionCore.PYTHON, environment=replace(_ENVIRONMENT, end=end)
+        strategy=_spec(factors),
+        core=ExecutionCore.PYTHON,
+        environment=replace(_ENVIRONMENT, end=end),
     )
 
 
 def _reserve(request: BacktestRunSpec) -> int:
-    """접수가 이 요청에 잡을 예약치 — 실행 설정 구간과 preflight 의 워밍업으로 어림한다."""
+    """접수가 이 요청에 잡을 예약치 — 실행 설정 구간과 preflight 의 워밍업·필드·단계로 어림한다."""
     environment = request.environment
     assert environment is not None and request.strategy is not None
-    history = _portfolio().preflight(
+    preflight = _portfolio().preflight(
         PortfolioPreviewRequest(request.strategy, environment=environment)
     )
     return run_reserve_bytes(
-        estimated_sessions(environment.start, environment.end, history.history_sessions)
+        RunShape(
+            sessions=estimated_sessions(
+                environment.start, environment.end, preflight.history_sessions
+            ),
+            fields=preflight.field_count,
+            factor_steps=preflight.factor_steps,
+        )
     )
 
 
@@ -340,7 +390,13 @@ def test_the_reserve_counts_the_factor_warm_up(tmp_path: Path) -> None:
     environment, strategy = request.environment, request.strategy
     assert environment is not None and strategy is not None
     preflight = _portfolio().preflight(PortfolioPreviewRequest(strategy, environment=environment))
-    without_warm_up = run_reserve_bytes(estimated_sessions(environment.start, environment.end, 0))
+    without_warm_up = run_reserve_bytes(
+        RunShape(
+            sessions=estimated_sessions(environment.start, environment.end, 0),
+            fields=preflight.field_count,
+            factor_steps=preflight.factor_steps,
+        )
+    )
     assert preflight.history_sessions > 0
     transport = _FakeTransport()
     runs = _service(tmp_path, transport)
@@ -353,12 +409,29 @@ def test_the_reserve_counts_the_factor_warm_up(tmp_path: Path) -> None:
     assert transport.started_ids() == ["run-1"]
 
 
+def test_two_heavy_runs_do_not_start_together_where_two_light_runs_do(tmp_path: Path) -> None:
+    """#599 리뷰 P2-1: 같은 구간·같은 가용 메모리에서 팩터 단계가 많은 run 둘은 함께 뜨지 않는다."""
+    light, heavy = _request(), _request(factors=4)
+    assert _reserve(heavy) > _reserve(light)
+    available = 2 * _reserve(light)
+    started: dict[str, list[str]] = {}
+    for name, request in (("light", light), ("heavy", heavy)):
+        transport = _FakeTransport()
+        runs = _service(tmp_path / name, transport)
+        transport.sample = _memory(available)
+        runs.start(request)
+        runs.start(replace(request, initial_cash=1.0e9))
+        started[name] = transport.started_ids()
+
+    assert started == {"light": ["run-1", "run-2"], "heavy": ["run-1"]}
+
+
 @pytest.mark.parametrize(("short_bytes", "started"), [(0, 2), (1, 1)])
 def test_a_fixed_reserve_replaces_the_estimate(
     tmp_path: Path, short_bytes: int, started: int
 ) -> None:
-    # 추정식이면 mock run 도 0.5GB 를 넘게 잡아 둘째 run 이 늘 기다린다.
-    assert _reserve(_request()) > gb_bytes(0.5)
+    # 추정식이면 mock run 도 고정값(0.1GB)의 두 배를 넘게 잡아 둘째 run 이 늘 기다린다.
+    assert _reserve(_request()) > 2 * gb_bytes(0.1)
     transport = _FakeTransport()
     runs = _service(tmp_path, transport, memory_reserve_gb=0.1)
     transport.sample = _memory(2 * gb_bytes(0.1) - short_bytes)

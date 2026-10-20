@@ -263,9 +263,11 @@ class PortfolioPreflight:
     """데이터를 읽지 않는 사전 검사(`preflight`)의 답."""
 
     engine: EngineCompatibility
-    # 원시 관측 질의가 시작일 앞에서 읽을 워밍업 세션 수. run 메모리 예약치의 입력이다(run-worker
-    # spec D8).
+    # 아래 셋은 run 메모리 예약치의 입력이다(run-worker spec D8). 원시 관측 질의가 시작일 앞에서
+    # 읽을 워밍업 세션 수, 그 질의가 읽을 원천 필드 수, 팩터 실행 계획의 단계(노드) 수 합.
     history_sessions: int
+    field_count: int
+    factor_steps: int
 
 
 @dataclass(frozen=True)
@@ -324,7 +326,12 @@ class PortfolioDesignService:
             request.environment,
             requested_parameters=request.parameter_values,
         )
-        return PortfolioPreflight(prepared.engine, prepared.history_sessions)
+        return PortfolioPreflight(
+            engine=prepared.engine,
+            history_sessions=prepared.history_sessions,
+            field_count=len(_required_field_ids(request.spec, prepared.plans)),
+            factor_steps=sum(len(plan.steps) for plan in prepared.plans.values()),
+        )
 
     def run_pipeline(
         self,

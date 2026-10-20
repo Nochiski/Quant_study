@@ -1,20 +1,22 @@
 """run 메모리 예약치 대 실측 최대 RSS, 메모리 가드 전후 실험 처리량(run-worker W2-02, spec D8).
 
 프로세스 방식 앱을 임시 경로로 조립해 실데이터 run 하나를 끝까지 돌리고, 부모 로그에서 그 run 의
-예약치·세션 수 어림(배정 때)과 worker 가 보고한 최대 RSS·읽은 입력의 크기(완료 때)를 모은다.
-`--experiment-start`·`--experiment-end` 를 주면 같은 전략의 롤링 실험(학습 1년·검증 1년)을 가드
-기본값과 가드를 사실상 끈 설정(예약치 0.001GB)으로 한 번씩 돌려 끝날 때까지의 시간을 잰다. 실험
-trial 은 실험 몫 슬롯 하나를 차례로 쓰므로 두 시간이 같아야 한다.
+예약치·모양(세션 수 어림·필드 수·팩터 단계 수, 배정 때)과 worker 가 보고한 최대 RSS·읽은 입력의
+크기(완료 때)를 모은다. psutil 이 있으면 도는 동안 이 프로세스의 자식들을 훑어 worker 의 최대
+private commit(Windows `peak_pagefile`)도 잰다. `--experiment-start`·`--experiment-end` 를 주면
+같은 전략의 롤링 실험(학습 1년·검증 1년)을 가드 기본값과 가드를 사실상 끈 설정(예약치 0.001GB)으로
+한 번씩 돌려 끝날 때까지의 시간을 잰다. 실험 trial 은 실험 몫 슬롯 하나를 차례로 쓰므로 두 시간이
+같아야 한다.
 
-run 은 한 번에 하나만 돈다. 시작 전 가용 메모리가 예약치보다 작으면 돌리지 않는다(페이징 방지).
-측정 절차와 결과의 정본은 `docs/planning/run-worker-process/BENCHMARK.md` 다. 구간 시작은 홀드아웃
-규칙에 따라 2020-01-02 이후만 받는다(`.claude/rules/holdout-window.md`).
+run 은 한 번에 하나만 돈다. 시작 전 가용 메모리가 `--min-available-gb` 보다 작으면 돌리지
+않는다(페이징 방지). 측정 절차와 결과의 정본은 `docs/planning/run-worker-process/BENCHMARK.md` 다.
+구간 시작은 홀드아웃 규칙에 따라 2020-01-02 이후만 받는다(`.claude/rules/holdout-window.md`).
 
 사용법:
-    uv run --no-sync python scripts/bench_run_memory.py \
+    uv run --no-sync --with psutil python scripts/bench_run_memory.py \
         ../docs/planning/run-worker-process/bench-strategy.yaml \
         --start 2025-01-02 --end 2025-12-30 --equity-root ~/quant-ledger/data/equity \
-        --experiment-start 2023-01-02 --experiment-end 2024-12-30
+        --min-available-gb 4 --experiment-start 2023-01-02 --experiment-end 2024-12-30
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ import json
 import logging
 import shutil
 import tempfile
+import threading
 import time
 from datetime import date
 from pathlib import Path
@@ -34,12 +37,13 @@ from fastapi.testclient import TestClient
 from strategy_workbench.adapters.outbound.run_worker_process._memory import (
     available_memory_bytes,
 )
-from strategy_workbench.application.backtest_run._memory_guard import (
-    estimated_sessions,
-    run_reserve_bytes,
-)
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.backtest.facade.environment import RESEARCH_START
+
+try:
+    import psutil
+except ImportError:  # 선택 의존성이다. 없으면 최대 commit 만 빠진다
+    psutil = None
 
 TERMINAL = ("completed", "failed", "cancelled")
 _GB = 2**30
@@ -54,7 +58,7 @@ class _Records(logging.Handler):
 
     def __init__(self) -> None:
         super().__init__(logging.INFO)
-        self.dispatched: dict[str, tuple[int, int]] = {}
+        self.dispatched: dict[str, tuple[object, ...]] = {}
         self.committed: dict[str, tuple[object, ...]] = {}
         self.waited: list[str] = []
 
@@ -64,11 +68,44 @@ class _Records(logging.Handler):
         args: tuple[object, ...] = record.args
         message = str(record.msg)
         if message.startswith("backtest run dispatched"):
-            self.dispatched[str(args[0])] = (int(str(args[1])), int(str(args[2])))
+            self.dispatched[str(args[0])] = args[1:]
         elif message.startswith("run worker committed"):
             self.committed[str(args[0])] = args[1:]
         elif message.startswith("backtest run waits for memory"):
             self.waited.append(str(args[0]))
+
+
+class _CommitSampler:
+    """이 프로세스의 자식들을 훑어 가장 큰 최대 working set·최대 private commit 을 남긴다."""
+
+    def __init__(self) -> None:
+        self.peak_wset = 0
+        self.peak_commit = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def __enter__(self) -> _CommitSampler:
+        if psutil is not None:
+            self._thread.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join()
+
+    def _run(self) -> None:
+        if psutil is None:
+            return
+        me = psutil.Process()
+        while not self._stop.wait(_POLL_S):
+            for child in me.children(recursive=True):
+                try:
+                    info = child.memory_info()
+                except psutil.Error:
+                    continue
+                self.peak_wset = max(self.peak_wset, int(getattr(info, "peak_wset", 0)))
+                self.peak_commit = max(self.peak_commit, int(getattr(info, "peak_pagefile", 0)))
 
 
 def _app(tmp: Path, args: argparse.Namespace, reserve_gb: float | None) -> Any:
@@ -93,17 +130,18 @@ def _wait(condition: Any, what: str) -> Any:
     raise SystemExit(f"{what} — {_TIMEOUT_S}s 안에 끝나지 않았다")
 
 
-def _require_memory(start: str, end: str, history: int) -> None:
-    """예약치만큼 가용 메모리가 없으면 멈춘다. 측정이 PC 를 페이징으로 몰지 않게 한다."""
-    reserve = run_reserve_bytes(
-        estimated_sessions(date.fromisoformat(start), date.fromisoformat(end), history)
-    )
+def _require_memory(minimum_gb: float) -> None:
+    """가용 메모리가 `minimum_gb` 보다 작으면 멈춘다. 측정이 PC 를 페이징으로 몰지 않게 한다."""
     available = available_memory_bytes() or 0
-    if available < reserve:
+    if available < minimum_gb * _GB:
         raise SystemExit(
-            f"가용 메모리가 예약치보다 작다 — available_gb={available / _GB:.2f} "
-            f"reserve_gb={reserve / _GB:.2f} start={start} end={end}"
+            f"가용 메모리가 모자라 재지 않는다 — available_gb={available / _GB:.2f} "
+            f"minimum_gb={minimum_gb}"
         )
+
+
+def _gb(value: object) -> float | None:
+    return None if not isinstance(value, int) or not value else round(value / _GB, 3)
 
 
 def _single_run(
@@ -115,31 +153,43 @@ def _single_run(
         "core": "rust",
     }
     started = time.perf_counter()
-    response = client.post("/api/v1/backtests", json=body)
-    if response.status_code != 202:
-        raise SystemExit(f"run 접수 거절 — status={response.status_code} body={response.text}")
-    run_id = response.json()["run"]["run_id"]
+    with _CommitSampler() as sampler:
+        response = client.post("/api/v1/backtests", json=body)
+        if response.status_code != 202:
+            raise SystemExit(f"run 접수 거절 — status={response.status_code} body={response.text}")
+        run_id = response.json()["run"]["run_id"]
 
-    def finished() -> dict | None:
-        state = client.get(f"/api/v1/backtests/{run_id}").json()
-        state = state.get("run", state)
-        return state if state["status"] in TERMINAL else None
+        def finished() -> dict | None:
+            state = client.get(f"/api/v1/backtests/{run_id}").json()
+            state = state.get("run", state)
+            return state if state["status"] in TERMINAL else None
 
-    state = _wait(finished, f"run {run_id}")
+        state = _wait(finished, f"run {run_id}")
     elapsed = time.perf_counter() - started
-    reserve, sessions = records.dispatched[run_id]
-    max_rss, read_sessions, fields, factors, rows = _wait(
+    reserve, sessions, fields, steps = records.dispatched[run_id]
+    max_rss, read_sessions, read_fields, factors, rows = _wait(
         lambda: records.committed.get(run_id), f"run {run_id} 의 worker 보고"
     )
+    commit = sampler.peak_commit or None
     return {
         "status": state["status"],
         "elapsed_s": round(elapsed, 1),
         "estimated_sessions": sessions,
-        "reserve_gb": round(reserve / _GB, 3),
-        "max_rss_gb": None if max_rss is None else round(max_rss / _GB, 3),
-        "reserve_over_max_rss": None if not max_rss else round(reserve / max_rss, 3),
-        "read_sessions": read_sessions,
         "fields": fields,
+        "factor_steps": steps,
+        "reserve_gb": _gb(reserve),
+        "max_rss_gb": _gb(max_rss),
+        "peak_commit_gb": _gb(commit),
+        "reserve_over_max_rss": (
+            round(reserve / max_rss, 3)
+            if isinstance(reserve, int) and isinstance(max_rss, int) and max_rss
+            else None
+        ),
+        "reserve_over_peak_commit": (
+            round(reserve / commit, 3) if isinstance(reserve, int) and commit else None
+        ),
+        "read_sessions": read_sessions,
+        "read_fields": read_fields,
         "factors": factors,
         "observation_rows": rows,
     }
@@ -207,7 +257,7 @@ def main() -> None:
     parser.add_argument("--experiment-start")
     parser.add_argument("--experiment-end")
     parser.add_argument(
-        "--warm-up-history", type=int, default=272, help="가용 메모리 확인용 워밍업 어림"
+        "--min-available-gb", type=float, default=4.0, help="시작 전에 있어야 하는 가용 메모리"
     )
     args = parser.parse_args()
     for value in (args.start, args.experiment_start):
@@ -221,7 +271,7 @@ def main() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="bench-run-memory-"))
     report: dict[str, Any] = {}
     try:
-        _require_memory(args.start, args.end, args.warm_up_history)
+        _require_memory(args.min_available_gb)
         with TestClient(_app(tmp / "single", args, None)) as client:
             compiled = client.post(
                 "/api/v1/strategy-documents/compile",
@@ -241,7 +291,7 @@ def main() -> None:
             report["experiment"] = []
             for name, reserve_gb in (("guard", None), ("guard_off", _GUARD_OFF_GB)):
                 # 실험 run 은 1년 학습·검증이다. 한 번에 하나만 돈다.
-                _require_memory(args.start, args.end, args.warm_up_history)
+                _require_memory(args.min_available_gb)
                 records.waited.clear()
                 result = _experiment(tmp / name, args, reserve_gb, records)
                 report["experiment"].append({"mode": name, **result})

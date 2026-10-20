@@ -101,7 +101,13 @@ from ._factor_regression import (
     factor_regression_spec,
     strategy_period_returns,
 )
-from ._memory_guard import estimated_sessions, gb_bytes, memory_verdict, run_reserve_bytes
+from ._memory_guard import (
+    RunShape,
+    estimated_sessions,
+    gb_bytes,
+    memory_verdict,
+    run_reserve_bytes,
+)
 from ._scheduler import RunLaneControls, RunQueue, experiment_slots
 from ._validation_report import RunValidationReport
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
@@ -172,8 +178,9 @@ class RunAdmission:
     lineage_id: str | None
     strategy_source: StrategySource | None
     lineage_strategy_id: str | None
-    # 원시 관측이 시작일 앞에서 읽을 워밍업 세션 수(메모리 예약치의 입력, run-worker spec D8).
-    history_sessions: int
+    # 메모리 예약치의 입력(세션 수 어림·필드 수·팩터 단계 수, run-worker spec D8). 데이터를 읽지
+    # 않고 preflight 로 정한다.
+    memory_shape: RunShape
 
     @property
     def spec(self) -> BacktestRunSpec:
@@ -244,9 +251,9 @@ class _RunRecord:
     experiment_slot: bool = False
     # 전송이 돌려준 손잡이(띄운 뒤에만 있다). 취소를 전송에 알린다.
     handle: RunHandle | None = None
-    # 메모리 가드가 이 run 몫으로 잡는 바이트와 그 근거인 세션 수 어림(spec D8, 접수 때 정한다).
+    # 메모리 가드가 이 run 몫으로 잡는 바이트와 그 근거(spec D8, 접수 때 정한다).
     reserve_bytes: int = 0
-    estimated_sessions: int = 0
+    memory_shape: RunShape | None = None
 
 
 class _RunListener:
@@ -437,13 +444,11 @@ class BacktestRunService:
                 owners={owner},
             )
             # 예약치는 접수 때 데이터를 읽지 않고 정한다(spec D8). 고정값 설정이 있으면 그 값이다.
-            record.estimated_sessions = estimated_sessions(
-                spec.environment.start, spec.environment.end, admission.history_sessions
-            )
+            record.memory_shape = admission.memory_shape
             record.reserve_bytes = (
                 self._fixed_reserve_bytes
                 if self._fixed_reserve_bytes is not None
-                else run_reserve_bytes(record.estimated_sessions)
+                else run_reserve_bytes(admission.memory_shape)
             )
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
             # 저장이 실패하면 접수하지 않는다 — 기록 없는 run 이 돌면 재시작 뒤 흔적이 없다.
@@ -530,7 +535,13 @@ class BacktestRunService:
             lineage_id,
             request.strategy_source,
             request.lineage_strategy_id,
-            preflight.history_sessions,
+            RunShape(
+                sessions=estimated_sessions(
+                    environment.start, environment.end, preflight.history_sessions
+                ),
+                fields=preflight.field_count,
+                factor_steps=preflight.factor_steps,
+            ),
         )
 
     def preview_trial(self, request: BacktestRunSpec) -> TrialPreview:
@@ -1154,11 +1165,15 @@ class BacktestRunService:
                 record.experiment_slot = None not in record.owners
                 self._running += 1
                 self._running_experiments += record.experiment_slot
+                shape = record.memory_shape
                 logger.info(
-                    "backtest run dispatched — run_id=%s reserve_bytes=%s estimated_sessions=%s",
+                    "backtest run dispatched — run_id=%s reserve_bytes=%s estimated_sessions=%s "
+                    "fields=%s factor_steps=%s",
                     record.state.run_id,
                     record.reserve_bytes,
-                    record.estimated_sessions,
+                    None if shape is None else shape.sessions,
+                    None if shape is None else shape.fields,
+                    None if shape is None else shape.factor_steps,
                 )
         self._run_execution.set_memory_hold(held)
 

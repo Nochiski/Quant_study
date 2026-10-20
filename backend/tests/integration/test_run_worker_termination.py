@@ -198,6 +198,32 @@ def test_a_run_held_for_memory_starts_when_the_running_worker_ends(tmp_path: Pat
     assert wait_for_terminal_run(service, second, timeout_s=TIMEOUT_S).status is RunStatus.CANCELLED
 
 
+def test_unreadable_available_memory_runs_one_backtest_at_a_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """spec D8·#599 리뷰 P3-2: 가용 메모리를 읽지 못하면 0 으로 보아 run 을 하나씩만 띄운다.
+
+    예약치는 기본 추정식 그대로다. 크게 보는 쪽으로 바꾸면(예: 2⁶²) 둘째 run 이 함께 뜬다.
+    """
+    monkeypatch.setattr(_execution, "available_memory_bytes", lambda: None)
+    marker = tmp_path / "marker"
+    service, _ = _service(tmp_path, hook_command("tape", marker))
+    first = service.start(_request()).run.run_id
+    wait_for_marker(marker)
+    marker.unlink()
+    with caplog.at_level("WARNING", logger=_execution.__name__):
+        second = service.start(replace(_request(), initial_cash=99_999_999.0)).run.run_id
+
+    held = service.state(second)
+    assert (held.status, held.message) == (RunStatus.QUEUED, "Waiting for free memory")
+    assert "available memory could not be read" in caplog.text
+    service.cancel(first)
+    assert wait_for_terminal_run(service, first, timeout_s=TIMEOUT_S).status is RunStatus.CANCELLED
+    wait_for_marker(marker)
+    service.cancel(second)
+    assert wait_for_terminal_run(service, second, timeout_s=TIMEOUT_S).status is RunStatus.CANCELLED
+
+
 def test_a_killed_worker_fails_the_run_and_its_renamed_result_is_removed(tmp_path: Path) -> None:
     """worker 강제 종료는 `worker_exited` 이고, 이미 rename 된 결과 디렉터리도 지운다(D5 2·3)."""
     marker = tmp_path / "marker"

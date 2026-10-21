@@ -1,8 +1,6 @@
 """주간 리밸런싱 주문의 가격·수량·체결 품질(S07). 호가와 금액만 다루는 순수 계산이다.
 
 - 지정가는 매수면 매도 호가, 매도면 매수 호가의 `level`번째 값이다(2026-10-21 승인: 2호가).
-- 호가 간격(틱)은 호가표 안에서 이웃한 가격 차이의 최솟값으로 잰다. 빈 가격대가 있으면 틱을
-  크게 잡아 간격을 작게 세므로, 이 판정은 너그러운 쪽이다.
 - 체결 차이는 신호 기준가 대비 bp이고 불리한 쪽이 양수다. 미체결 기회비용은 못 산(판) 수량에
   기준가에서 장 마감가까지의 움직임을 곱한 값이고, 놓친 이익이 양수다.
 """
@@ -30,15 +28,14 @@ class ExecutionPolicy:
     """비용 상한은 주문 금액의 bp(올림)다. 모의 비용은 매수 0.35%, 매도 0.35% + 거래세 0.2%다."""
 
     limit_level: int = 2
-    max_spread_ticks: int = 5
     buy_fee_budget_bp: int = 40
     sell_fee_budget_bp: int = 70
-    max_orders_per_day: int = 30
+    # 주문안 하나에 낼 주문(다시 낸 주문 포함) 상한. 10종목 × 오전 추적 16회에 여유를 둔 값이다.
+    max_orders_per_day: int = 200
 
     def __post_init__(self) -> None:
         for name in (
             "limit_level",
-            "max_spread_ticks",
             "buy_fee_budget_bp",
             "sell_fee_budget_bp",
             "max_orders_per_day",
@@ -59,21 +56,6 @@ def limit_price(side: str, quote: Quote, level: int) -> int | None:
     if not book:
         return None
     return book[min(level, len(book)) - 1]
-
-
-def spread_ticks(quote: Quote) -> int | None:
-    """매도 1호가와 매수 1호가 사이가 몇 틱인가. 호가가 한쪽이라도 없으면 None이다."""
-    if not quote.asks or not quote.bids:
-        return None
-    steps = [
-        high - low for low, high in zip(quote.asks, quote.asks[1:], strict=False) if high > low
-    ]
-    steps += [
-        high - low for high, low in zip(quote.bids, quote.bids[1:], strict=False) if high > low
-    ]
-    if not steps:
-        return None
-    return (quote.asks[0] - quote.bids[0]) // min(steps)
 
 
 def affordable_shares(cash_krw: int, limit_price_krw: int, fee_rate_bp: int) -> int:

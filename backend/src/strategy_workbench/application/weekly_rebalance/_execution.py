@@ -1,11 +1,15 @@
 """주간 리밸런싱 실행기(S07). 남긴 주문안을 키움 모의계좌에 낸다.
 
+주문은 실행일 오전에 모두 낸다. 미루지 않고 시장가로 호가를 긁지도 않는다(2026-10-21 사용자 결정).
+
 - 주문안이 있어야 하고, 첫 4주는 승인이 있어야 한다. 신호일 뒤 며칠 안에만 낸다.
-- 매도를 먼저 내고 체결을 기다린 뒤, 그때 현금으로 살 수 있는 만큼 매수한다.
-- 한 종목에는 주문을 하나만 둔다. 의도 ID는 `<주문안>-<종목>-<방향>`(다시 낸 주문은 `-r`)이라 다시
-  돌려도 같은 주문을 두 번 보내지 않는다.
-- 호가가 없거나 1호가 사이가 넓으면 그 종목은 미루고, 14:00 재주문 단계에서 다시 본다.
-- 재주문 단계는 남은 잔량을 취소하고, 취소가 확정된 것을 본 뒤 지금 호가로 한 번 더 낸다.
+- 여는 단계(09:05): 매도를 먼저 내고 체결을 잠깐 기다린 뒤, 그때 현금으로 살 수 있는 만큼 매수한다.
+- 추적 단계(09:15~11:30, 10분마다): 살아 있는 잔량을 취소하고, 취소가 확정되면 남은 목표를 그때
+  호가로 다시 낸다. 마지막 추적에서 낸 주문은 장 마감까지 걸어 둔다.
+- 가격은 매수 매도 2호가, 매도 매수 2호가 지정가다. 호가 사이가 넓어도 미루지 않는다. 호가가 아예
+  없는(거래정지 등) 종목만 그 회차를 건너뛰고 기록한다.
+- 한 종목·방향에는 주문을 하나만 둔다. 의도 ID는 `<주문안>-<종목>-<방향>`, 다시 낸 주문은
+  `-c<회차>`이고, 살아 있는 주문을 목표에서 빼고 내므로 다시 돌려도 같은 수량을 두 번 내지 않는다.
 - 장 마감 기록은 신호 기준가 대비 체결 차이와 미체결 기회비용, 그날 총자산을 남긴다.
 """
 
@@ -44,13 +48,12 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
     limit_price,
     missed_krw,
     shortfall_bp,
-    spread_ticks,
 )
 
 
 class Phase(StrEnum):
     OPEN = "open"
-    REQUOTE = "requote"
+    CHASE = "chase"
 
 
 class ExecuteStatus(StrEnum):
@@ -101,7 +104,7 @@ class Waits:
     retry_seconds: float = 15.0
     retry_attempts: int = 8
     poll_seconds: float = 20.0
-    sell_wait_seconds: float = 600.0
+    sell_wait_seconds: float = 120.0
     cancel_polls: int = 12
 
 
@@ -157,7 +160,7 @@ class WeeklyExecutionService:
                 self._event(plan_id, phase, "halted", detail=state.detail)
                 return ExecuteResult(ExecuteStatus.HALTED, detail=state.detail)
             lines: list[OrderLine] = []
-            if phase is Phase.REQUOTE:
+            if phase is Phase.CHASE:
                 lines += self._cancel_open(record, state, send=send)
                 state = self._gateway.state()
             lines += self._place(record, phase, state, send=send)
@@ -172,12 +175,10 @@ class WeeklyExecutionService:
         lines: list[OrderLine] = []
         prefix = f"{record.plan_id}-"
         for order in state.orders:
-            # 재주문 단계가 낸 주문(`-r`)은 다시 취소하지 않는다. 다시 돌려도 한 번만 다시 낸다.
-            if (
-                not order.intent_id.startswith(prefix)
-                or order.intent_id.endswith("-r")
-                or order.open_quantity <= 0
-            ):
+            if not order.intent_id.startswith(prefix) or order.open_quantity <= 0:
+                continue
+            if order.state in ("unknown", "ready"):
+                # 결과를 모르는 주문은 S05가 취소하지 않는다. 남겨 두면 다시 내는 것도 막는다.
                 continue
             line = OrderLine(
                 order.symbol,
@@ -191,10 +192,11 @@ class WeeklyExecutionService:
                 lines.append(line)
                 continue
             outcome = self._gateway.cancel(order.intent_id)
-            confirmed = self._await_terminal(order.intent_id)
+            # 접수된 취소는 S05가 조회로 확정한 것이다. 결과를 모를 때만 조회로 기다린다.
+            confirmed = outcome.status is SubmitStatus.SENT or self._await_terminal(order.intent_id)
             self._event(
                 record.plan_id,
-                Phase.REQUOTE,
+                Phase.CHASE,
                 "cancel",
                 symbol=order.symbol,
                 intent_id=order.intent_id,
@@ -228,9 +230,8 @@ class WeeklyExecutionService:
     def _place(
         self, record: PlanRecord, phase: Phase, state: GatewayState, *, send: bool
     ) -> list[OrderLine]:
-        suffix = "" if phase is Phase.OPEN else "-r"
         existing = {order.intent_id for order in state.orders}
-        # 다시 낼 주문이 남은 종목만 낸다. 앞 단계 주문이 아직 살아 있으면 건드리지 않는다.
+        # 다시 낼 주문이 남은 종목만 낸다. 취소가 확정되지 않은 주문이 살아 있으면 건드리지 않는다.
         blocked = {
             (order.symbol, order.side)
             for order in state.orders
@@ -248,7 +249,7 @@ class WeeklyExecutionService:
             quantity = min(quantity, state.holdings.get(symbol, 0))
             lines.append(
                 self._order(
-                    record, phase, symbol, "sell", quantity, suffix, existing, blocked, budget, send
+                    record, phase, symbol, "sell", quantity, existing, blocked, budget, send
                 )
             )
         if send and any(line.outcome == SubmitStatus.SENT.value for line in lines):
@@ -272,7 +273,6 @@ class WeeklyExecutionService:
                 symbol,
                 "buy",
                 quantity,
-                suffix,
                 existing,
                 blocked,
                 budget,
@@ -292,7 +292,6 @@ class WeeklyExecutionService:
         symbol: str,
         side: str,
         quantity: int,
-        suffix: str,
         existing: set[str],
         blocked: set[tuple[str, str]],
         budget: list[int],
@@ -300,7 +299,9 @@ class WeeklyExecutionService:
         *,
         available: int | None = None,
     ) -> OrderLine:
-        intent_id = f"{record.plan_id}-{symbol}-{side}{suffix}"
+        base = f"{record.plan_id}-{symbol}-{side}"
+        sent_before = sum(item == base or item.startswith(f"{base}-c") for item in existing)
+        intent_id = base if sent_before == 0 else f"{base}-c{sent_before}"
         reference = next(
             (line.reference_price_krw or 0 for line in record.plan.lines if line.symbol == symbol),
             0,
@@ -321,10 +322,8 @@ class WeeklyExecutionService:
             )
             return OrderLine(symbol, side, quantity, limit, intent_id, outcome, detail)
 
-        if intent_id in existing:
-            return OrderLine(symbol, side, quantity, 0, intent_id, SubmitStatus.EXISTS.value)
         if (symbol, side) in blocked:
-            return skipped("waiting", "앞 단계 주문이 아직 살아 있다")
+            return skipped("waiting", "앞 주문의 취소가 아직 확정되지 않았다")
         if quantity <= 0:
             return skipped("skipped", "팔 보유 수량이 없다")
         if budget[0] <= 0:
@@ -332,13 +331,10 @@ class WeeklyExecutionService:
         try:
             quote = self._market.quote(symbol)
         except MarketError as error:
-            return skipped("deferred", f"호가를 읽지 못했다 — {error}")
-        spread = spread_ticks(quote)
+            return skipped("no_quote", f"호가를 읽지 못했다 — {error}")
         limit = limit_price(side, quote, self._policy.limit_level)
-        if spread is None or limit is None:
-            return skipped("deferred", "호가가 없다(거래정지·VI 가능)")
-        if spread > self._policy.max_spread_ticks:
-            return skipped("deferred", f"1호가 사이 {spread}틱 > {self._policy.max_spread_ticks}틱")
+        if limit is None:
+            return skipped("no_quote", "호가가 없다(거래정지·VI 가능) — 다음 회차에 다시 본다")
         if available is not None:
             quantity = min(quantity, affordable_shares(available, limit, self._sizing.fee_rate_bp))
             if quantity <= 0:

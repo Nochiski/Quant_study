@@ -11,7 +11,6 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
     limit_price,
     missed_krw,
     shortfall_bp,
-    spread_ticks,
 )
 
 BOOK = Quote("000001", asks=(10_010, 10_020, 10_030), bids=(10_000, 9_990, 9_980))
@@ -22,13 +21,6 @@ def test_limit_price_takes_the_level_on_the_opposite_side() -> None:
     assert limit_price("sell", BOOK, 2) == 9_990
     assert limit_price("buy", Quote("x", (10_010,), ()), 2) == 10_010  # 2호가가 없으면 1호가
     assert limit_price("sell", Quote("x", (10_010,), ()), 2) is None
-
-
-def test_spread_is_counted_in_ticks_from_the_book() -> None:
-    assert spread_ticks(BOOK) == 1
-    assert spread_ticks(Quote("x", (10_060, 10_070), (10_000, 9_990))) == 6
-    assert spread_ticks(Quote("x", (10_010,), (10_000,))) is None  # 틱을 잴 이웃이 없다
-    assert spread_ticks(Quote("x", (), (10_000, 9_990))) is None
 
 
 def test_affordable_shares_include_the_fee() -> None:

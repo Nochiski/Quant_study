@@ -248,7 +248,7 @@ def test_rerunning_open_does_not_send_twice() -> None:
     count = len(r.gateway.submitted)
     again = r.service.execute(PLAN, Phase.OPEN, send=True)
     assert again.status is ExecuteStatus.OK and len(r.gateway.submitted) == count
-    assert {line.outcome for line in again.lines} <= {"exists"}
+    assert again.lines == ()  # 살아 있는 주문을 목표에서 빼므로 더 낼 것이 없다
 
 
 def test_unsettled_presend_read_is_retried_with_the_same_intent() -> None:
@@ -258,13 +258,17 @@ def test_unsettled_presend_read_is_retried_with_the_same_intent() -> None:
     assert [o.intent_id for o in r.gateway.submitted].count(f"{PLAN}-00000A-buy") == 1
 
 
-def test_wide_spread_or_missing_book_defers_the_symbol() -> None:
+def test_wide_spread_is_not_deferred_and_only_a_missing_book_is_skipped() -> None:
     r = rig()
     r.market.quotes["00000A"] = Quote("00000A", (10_070, 10_080), (10_000, 9_990))  # 7틱
     r.market.quotes["00000B"] = Quote("00000B", (), ())
     result = r.service.execute(PLAN, Phase.OPEN, send=True)
-    outcomes = {line.symbol: line.outcome for line in result.lines}
-    assert outcomes == {"00000E": "sent", "00000A": "deferred", "00000B": "deferred"}
+    outcomes = {line.symbol: (line.outcome, line.limit_price_krw) for line in result.lines}
+    assert outcomes == {
+        "00000E": ("sent", 9_990),
+        "00000A": ("sent", 10_080),  # 넓어도 그때 2호가로 낸다
+        "00000B": ("no_quote", 0),
+    }
 
 
 def test_refusals_before_any_order() -> None:
@@ -293,23 +297,41 @@ def test_order_budget_caps_the_run() -> None:
     assert [line.outcome for line in result.lines][-1] == "limit"
 
 
-def test_requote_cancels_the_remainder_then_sends_it_once_more() -> None:
+def test_chase_rounds_cancel_the_remainder_and_resend_at_the_current_book() -> None:
     r = rig()
     r.service.execute(PLAN, Phase.OPEN, send=True)
     r.gateway.fill(f"{PLAN}-00000A-buy", 50, 10_020)  # A 50주만 체결, B는 체결 없음
     r.market.quotes["00000A"] = Quote("00000A", (10_100, 10_110), (10_090, 10_080))
-    result = r.service.execute(PLAN, Phase.REQUOTE, send=True)
+    first = r.service.execute(PLAN, Phase.CHASE, send=True)
     assert r.gateway.cancelled == [f"{PLAN}-00000A-buy", f"{PLAN}-00000B-buy"]
     assert _sent(r)[-2:] == [
-        (f"{PLAN}-00000A-buy-r", "buy", 80, 10_110),
-        (f"{PLAN}-00000B-buy-r", "buy", 130, 10_020),
+        (f"{PLAN}-00000A-buy-c1", "buy", 80, 10_110),
+        (f"{PLAN}-00000B-buy-c1", "buy", 130, 10_020),
     ]
-    assert [line.outcome for line in result.lines][:2] == ["cancelled", "cancelled"]
-    again = r.service.execute(PLAN, Phase.REQUOTE, send=True)
-    assert len(r.gateway.submitted) == 5 and {line.outcome for line in again.lines} <= {
-        "exists",
-        "waiting",
-    }
+    assert [line.outcome for line in first.lines][:2] == ["cancelled", "cancelled"]
+    # 다음 회차: B는 다 찼고 A는 그대로다. A만 다시 쫓는다
+    r.gateway.fill(f"{PLAN}-00000B-buy-c1", 130, 10_020)
+    r.market.quotes["00000A"] = Quote("00000A", (10_150, 10_160), (10_140, 10_130))
+    r.service.execute(PLAN, Phase.CHASE, send=True)
+    assert r.gateway.cancelled[-1] == f"{PLAN}-00000A-buy-c1"
+    assert _sent(r)[-1] == (f"{PLAN}-00000A-buy-c2", "buy", 80, 10_160)
+    # 다 차면 더 내지 않는다
+    r.gateway.fill(f"{PLAN}-00000A-buy-c2", 80, 10_160)
+    count = len(r.gateway.submitted)
+    assert r.service.execute(PLAN, Phase.CHASE, send=True).lines == ()
+    assert len(r.gateway.submitted) == count
+
+
+def test_chase_leaves_unknown_orders_alone() -> None:
+    r = rig()
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    r.gateway.orders[f"{PLAN}-00000A-buy"] = replace(
+        r.gateway.orders[f"{PLAN}-00000A-buy"], state="unknown"
+    )
+    count = len(r.gateway.submitted)
+    r.service.execute(PLAN, Phase.CHASE, send=True)
+    assert f"{PLAN}-00000A-buy" not in r.gateway.cancelled
+    assert all(o.symbol != "00000A" for o in r.gateway.submitted[count:])
 
 
 def test_close_records_shortfall_missed_cost_and_raw_evidence() -> None:

@@ -5,7 +5,6 @@ from strategy_workbench.domain.rebalance._execution import (
     limit_price,
     missed_krw,
     shortfall_bp,
-    spread_ticks,
 )
 from strategy_workbench.domain.rebalance._model import (
     RebalanceAction,
@@ -27,5 +26,4 @@ __all__ = [
     "missed_krw",
     "plan_rebalance",
     "shortfall_bp",
-    "spread_ticks",
 ]

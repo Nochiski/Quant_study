@@ -3,7 +3,7 @@
     prepare  --workdir <폴더> --model-root <모델 DB> --signal-date YYYY-MM-DD
     show     --workdir <폴더> --plan weekly-YYYY-MM-DD
     approve  --workdir <폴더> --plan weekly-YYYY-MM-DD --approver <이름> [--note <메모>]
-    execute  --workdir <폴더> --plan weekly-YYYY-MM-DD --phase open|requote [--send]
+    execute  --workdir <폴더> --plan weekly-YYYY-MM-DD --phase open|chase [--send]
              [--without-approval]
     close    --workdir <폴더> [--plan weekly-YYYY-MM-DD]
     report   --workdir <폴더>

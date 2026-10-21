@@ -65,7 +65,17 @@
 
 ## 배포
 
-- 10-22(목) 낮, 10-21 아침 · 장 마감 판 확인과 보강 스위치 켜기 뒤. `deploy.sh --apply --allow-branch fix/excel-fin-basis`
-  (15:40~16:30 · 21:00~21:30 피함, 배포 전 한 줄 보고). config 변경 없음.
-- 첫 확인: 그날 15:55 장 마감 엑셀 — Earnings 회색 칸 · Score 비고 '연결/별도 다름' · LG에너지솔루션 영업이익.
+- **10-21(수) 13:10 완료** — 원안 10-22 를 당김(사용자 '왜 내일 배포해? 오늘 하면 안되나?' → '배포해도됨', 배터리
+  관리는 사용자 몫 — `caffeinate -i` 로 진행). `deploy.sh --apply --allow-branch fix/excel-fin-basis`, 서버 rev
+  9a1e76e6. 테스트 3,864 통과 · 16 건너뜀(18분 36초), 내용 바뀐 파일 1개(`src/deliver/excel_daily.py`) · config 0 —
+  보강 스위치는 꺼진 그대로.
+  - 첫 시도는 테스트 수집에서 거부(rc 2 · 서버 변경 없음): 새 작업 트리에서 `uv run --project backend` 가 만든
+    venv 에 `equity` · `llm` extra 가 없어 duckdb 를 못 읽었다. `uv sync --project backend --extra equity --extra llm`
+    뒤 재실행.
+  - 배포 직후 서버 코드(`~/quant-ledger/src`)로 10-20 장 마감 판 발송 없는 재생성 → 검토 때 재생성본과 Score ·
+    Earnings 차이 0. Events · Market · ETF 차이는 그 시트들이 만들 때의 원천 최신을 읽어서(10-20 자료가 그 뒤 들어옴),
+    Meta 는 생성 시각 · rev 칸뿐.
+- 첫 확인: 10-21 15:55 장 마감 엑셀(체인 rc 0 · 발송 ok · 모집단 605) — Earnings 회색 YoY 67칸 · 23종목, Score 비고
+  '연결/별도 다름' 23, 5행 메모 '회색 YoY: 연결/별도 다름', LG에너지솔루션 2025 영업이익 13,461 · 2026E YoY −26.0%,
+  Meta 배포 rev 9a1e76e6.
 - 되돌리기: 직전 rev c04e54ab 로 `deploy.sh` 재배포(데이터 · 규칙 판 변경 없음).

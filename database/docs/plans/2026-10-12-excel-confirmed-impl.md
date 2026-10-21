@@ -109,6 +109,8 @@
 
 공통: `scripts/deploy.sh`(낮 · 전원 연결 · 15:40–16:30 · 21:00–21:30 피함), 배포 브랜치는 그때의 track/cutover(서버 rev 포함)를 병합해 만든 뒤 `--apply --allow-branch <이름>`, 되돌리기는 `--allow-rollback` 으로 직전 rev.
 
+배포 기록: ① 10-19 11:09 완료(`deploy/excel-1` 2afd3f4e) · ② 10-20 10:23 완료(`deploy/excel-2` c04e54ab — 첫 장 마감 엑셀 10-20 15:55 정상 발송, 보강 스위치는 꺼진 채) · 뒤이은 N-54(Earnings 영업이익 · 연결/별도 회색) 10-21 13:10 완료(`fix/excel-fin-basis` 9a1e76e6 — `plans/2026-10-20-excel-fin-basis.md` 배포 절).
+
 **① 10-19(월) 낮 — E1 + E3 + E4(엑셀만)**(N-51 — 원안 10-20)
 - 배포 대상 = **78c557d6**(E2 병합 직전 — E1 · E3 · E4 와 그 검토 수정 전부) + 그때의 track/cutover 병합 → `deploy/excel-1`.
 - 사전 확인(10-15~10-19, 발송 없이 서버 임시 폴더): 장 마감 판(model_db)으로 새 엑셀 생성 — 새 시트 6개가 원천 최신 날짜로 나오는지, 시간 · 메모리.

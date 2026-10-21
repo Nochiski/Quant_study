@@ -151,6 +151,20 @@ class UrllibTransport:
             ) from error
 
 
+def system_trust_transport() -> UrllibTransport:
+    """OS 신뢰 저장소로 TLS를 확인하는 전송.
+
+    `truststore`가 설치돼 있으면 그것을 쓰고, 없으면 파이썬 기본값으로 둔다(Linux·Windows
+    기본값은 OS 저장소를 읽는다). python.org macOS 빌드는 기본 인증서 목록이 비어 있어
+    `truststore`가 필요하다.
+    """
+    try:
+        import truststore
+    except ImportError:
+        return UrllibTransport()
+    return UrllibTransport(ssl_context=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT))
+
+
 def _headers(message: Message | None) -> dict[str, str]:
     return {} if message is None else {key.lower(): value for key, value in message.items()}
 

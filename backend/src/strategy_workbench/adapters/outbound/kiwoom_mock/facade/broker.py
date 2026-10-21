@@ -9,6 +9,7 @@ from strategy_workbench.adapters.outbound.kiwoom_mock._http import (
     KiwoomNoResponseError,
     KiwoomTransport,
     UrllibTransport,
+    system_trust_transport,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "KiwoomNoResponseError",
     "KiwoomTransport",
     "UrllibTransport",
+    "system_trust_transport",
 ]

@@ -22,6 +22,7 @@
         --symbol 005930 --quantity 1 --max-orders 3 --send
     uv run python scripts/kiwoom_mock_probe.py --out <폴더> cancel --intent buy-1 --send
     uv run python scripts/kiwoom_mock_probe.py --out <폴더> recover
+    uv run python scripts/kiwoom_mock_probe.py --out <폴더> resume   # 대사가 맞을 때만 정지를 푼다
 
 같은 TR을 1초 안에 두 번 부르면 키움이 1700으로 거절하므로, 명령 사이에 1.5초를 쉰다.
 """
@@ -149,11 +150,11 @@ def dump(probe: Probe, tag: str) -> Path:
             },
             "acnt_ord_cntr_prps_dtl",
         ),
-        "ka10076": client.rows(
-            "ka10076",
+        "ka10170": client.rows(
+            "ka10170",
             ACCOUNT_PATH,
-            {"stk_cd": "", "qry_tp": "0", "sell_tp": "0", "ord_no": "", "stex_tp": "0"},
-            "cntr",
+            {"base_dt": "", "ottks_tp": "2", "ch_crd_tp": "0"},
+            "tdy_trde_diary",
         ),
         "kt00018": client.rows(
             "kt00018",
@@ -169,7 +170,7 @@ def dump(probe: Probe, tag: str) -> Path:
     }
     path = probe.out / f"raw-{datetime.now(KST).strftime('%H%M%S')}-{tag}.json"
     _private_write(path, json.dumps(raw, ensure_ascii=False, indent=1))
-    print(f"[원본] {path.name} — 주문행 {len(raw['kt00007'])} 체결행 {len(raw['ka10076'])}")
+    print(f"[원본] {path.name} — 주문행 {len(raw['kt00007'])} 매매일지 종목 {len(raw['ka10170'])}")
     return path
 
 
@@ -195,7 +196,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="키움 모의 실측 도구 (S06 ③)")
     parser.add_argument("--out", type=Path, required=True, help="원장·조회 원본 폴더(저장소 밖)")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("status", "init", "recover"):
+    for name in ("status", "init", "recover", "resume"):
         commands.add_parser(name)
     quote = commands.add_parser("quote")
     quote.add_argument("--symbol", required=True)
@@ -246,8 +247,10 @@ def run(
             print(result.status, result.detail)
             dump(probe, "init")
             return 0 if result.status == "ok" else 1
-        elif args.command == "recover":
-            result = probe.service.recover()
+        elif args.command in ("recover", "resume"):
+            result = (
+                probe.service.recover() if args.command == "recover" else probe.service.resume()
+            )
             print(result.status, result.detail, result.reconciliation)
             show(probe)
             return 0 if result.status == "ok" else 1

@@ -94,3 +94,19 @@ def test_missing_keys_stop_before_calling_kiwoom(
     with pytest.raises(SystemExit):
         _run(probe, fake, clock, "--out", str(tmp_path / "out"), "status")
     assert fake.calls == []
+
+
+@pytest.mark.usefixtures("saved_keys")
+def test_resume_lifts_the_halt_only_when_reconciled(probe: ModuleType, tmp_path: Path) -> None:
+    clock = Clock()
+    fake = FakeKiwoom(clock)
+    out = str(tmp_path / "out")
+    assert _run(probe, fake, clock, "--out", out, "init") == 0
+    fake.cash -= 1  # 장부에 없는 현금 변화
+    assert _run(probe, fake, clock, "--out", out, "recover") == 1
+    assert _run(probe, fake, clock, "--out", out, "resume") == 1
+    fake.cash += 1
+    assert _run(probe, fake, clock, "--out", out, "resume") == 0
+    send = ("--price", "70000", *ORDER, "--send")
+    assert _run(probe, fake, clock, "--out", out, "buy", "--intent", "b1", *send) == 0
+    assert fake.api_ids().count("kt10000") == 1

@@ -1,6 +1,7 @@
 from strategy_workbench.adapters.inbound.weekly_rebalance_cli._cli import (
     CliFactories,
     ExecutionFactory,
+    FillRecorder,
     ServiceFactory,
     export_csv,
     render,
@@ -13,6 +14,7 @@ from strategy_workbench.adapters.inbound.weekly_rebalance_cli._cli import (
 __all__ = [
     "CliFactories",
     "ExecutionFactory",
+    "FillRecorder",
     "ServiceFactory",
     "export_csv",
     "render",

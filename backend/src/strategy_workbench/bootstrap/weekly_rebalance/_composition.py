@@ -12,10 +12,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from datetime import time as clock_time
 from pathlib import Path
 
 from strategy_workbench.adapters.inbound.weekly_rebalance_cli.facade.command import (
@@ -32,16 +34,15 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import (
     system_trust_transport,
 )
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.market import KiwoomMarket
+from strategy_workbench.adapters.outbound.kiwoom_mock.facade.stream import (
+    mock_connect,
+    record_fills,
+)
 from strategy_workbench.adapters.outbound.rebalance_files.facade.plans import (
     JsonExecutionLog,
     JsonPlanStore,
 )
 from strategy_workbench.adapters.outbound.scope_signal.facade.source import ScopeSignalSource
-from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
-    LocalFileBrokerCredentialStore,
-    LocalFileProviderSecretStore,
-    default_secrets_path,
-)
 from strategy_workbench.application.offline_execution.facade.execution import (
     BrokerError,
     ExecutionStatus,
@@ -53,7 +54,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     WeeklyExecutionService,
     WeeklyRebalanceService,
 )
-from strategy_workbench.bootstrap.facade.http import runtime_assistant_settings
+from strategy_workbench.bootstrap.weekly_rebalance._credentials import load_credentials
 from strategy_workbench.bootstrap.weekly_rebalance._gateway import OfflineOrderGateway
 
 KST = timezone(timedelta(hours=9))
@@ -103,15 +104,7 @@ class KiwoomAccountSource:
 
 
 def saved_credentials() -> KiwoomCredentials:
-    configured = runtime_assistant_settings().secrets_path
-    store = LocalFileProviderSecretStore(
-        configured if configured is not None else default_secrets_path(),
-        forbidden_roots=(REPOSITORY_ROOT,),
-    )
-    saved = LocalFileBrokerCredentialStore(store).load()
-    if saved is None:
-        raise AccountUnavailableError("saved kiwoom mock keys not found — save them in settings")
-    return KiwoomCredentials(saved.app_key, saved.secret_key, saved.account_number)
+    return load_credentials(REPOSITORY_ROOT)
 
 
 def outside_repository(workdir: Path) -> Path:
@@ -161,7 +154,35 @@ def open_weekly_execution(
         gateway.close()
 
 
+def record_today_fills(workdir: Path, until: clock_time) -> int:
+    """오늘 `until`(KST)까지 실시간 체결 알림을 `records/fills-<날짜>.jsonl`에 덧붙인다.
+
+    주문하지 않는다.
+    """
+    root = outside_repository(workdir)
+    (root / "ledger").mkdir(parents=True, exist_ok=True, mode=0o700)
+    transport = system_trust_transport()
+    broker = KiwoomMockBroker(
+        saved_credentials(), root / "ledger" / "kiwoom-reference.sqlite", transport=transport
+    )
+    today = datetime.now(KST)
+    try:
+        return asyncio.run(
+            record_fills(
+                broker.client.session_token,
+                mock_connect(transport.ssl_context),
+                root / "records" / f"fills-{today.date().isoformat()}.jsonl",
+                datetime.combine(today.date(), until, KST),
+                lambda: datetime.now(KST),
+            )
+        )
+    finally:
+        broker.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     # 앞 명령이 같은 TR을 막 불렀으면 1초 한도(1700)에 걸린다. 프로세스 사이 간격을 둔다.
     time.sleep(START_PAUSE_SECONDS)
-    return run_cli(CliFactories(build_weekly_rebalance, open_weekly_execution), argv)
+    return run_cli(
+        CliFactories(build_weekly_rebalance, open_weekly_execution, record_today_fills), argv
+    )

@@ -1,0 +1,77 @@
+"""키움 모의 키를 어디서 읽을지 정한다(S07).
+
+- 기본(맥): 설정 화면이 저장한 사용자 설정 폴더의 `secrets.json`.
+- 서버: `STRATEGY_WORKBENCH_KIWOOM_ENV_FILE`이 있으면 그 `.env`에서
+  `PAPER_TRADING_KIWOOM_{APP_KEY,SECRET_KEY,ACCOUNT}_<쌍>` 세 이름만 읽는다(쌍 번호는
+  `STRATEGY_WORKBENCH_KIWOOM_KEY_PAIR`, 기본 2). 다른 이름은 읽지 않는다. 그 파일에 실전 키가
+  함께 있어도 이 코드의 주소는 모의 서버 하나라 실전 키는 키움이 8030으로 거절한다
+  (2026-10-21 사용자 결정).
+값은 어떤 메시지에도 싣지 않는다.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+
+from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import KiwoomCredentials
+from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
+    LocalFileBrokerCredentialStore,
+    LocalFileProviderSecretStore,
+    default_secrets_path,
+)
+from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
+    AccountUnavailableError,
+)
+from strategy_workbench.bootstrap.facade.http import runtime_assistant_settings
+
+ENV_FILE_ENV = "STRATEGY_WORKBENCH_KIWOOM_ENV_FILE"
+KEY_PAIR_ENV = "STRATEGY_WORKBENCH_KIWOOM_KEY_PAIR"
+DEFAULT_KEY_PAIR = "2"
+_NAME_PREFIX = "PAPER_TRADING_KIWOOM_"
+
+
+def load_credentials(repository_root: Path) -> KiwoomCredentials:
+    env_file = os.environ.get(ENV_FILE_ENV)
+    if env_file:
+        return env_file_credentials(
+            Path(env_file).expanduser(), os.environ.get(KEY_PAIR_ENV, DEFAULT_KEY_PAIR)
+        )
+    configured = runtime_assistant_settings().secrets_path
+    store = LocalFileProviderSecretStore(
+        configured if configured is not None else default_secrets_path(),
+        forbidden_roots=(repository_root,),
+    )
+    saved = LocalFileBrokerCredentialStore(store).load()
+    if saved is None:
+        raise AccountUnavailableError("saved kiwoom mock keys not found — save them in settings")
+    return KiwoomCredentials(saved.app_key, saved.secret_key, saved.account_number)
+
+
+def env_file_credentials(path: Path, pair: str) -> KiwoomCredentials:
+    if not re.fullmatch(r"\d{1,2}", pair):
+        raise AccountUnavailableError(f"invalid key pair number — pair={pair!r}")
+    wanted = {
+        f"{_NAME_PREFIX}APP_KEY_{pair}": "app_key",
+        f"{_NAME_PREFIX}SECRET_KEY_{pair}": "secret_key",
+        f"{_NAME_PREFIX}ACCOUNT_{pair}": "account_number",
+    }
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise AccountUnavailableError(
+            f"cannot read the kiwoom env file — file={path.name} error={type(error).__name__}"
+        ) from error
+    values: dict[str, str] = {}
+    for line in lines:
+        name, separator, value = line.strip().removeprefix("export ").partition("=")
+        if separator and name.strip() in wanted:
+            values[wanted[name.strip()]] = value.strip().strip("\"'")
+    missing = sorted(name for name, field in wanted.items() if not values.get(field))
+    if missing:
+        raise AccountUnavailableError(f"kiwoom mock keys missing in env file — names={missing}")
+    try:
+        return KiwoomCredentials(**values)
+    except ValueError as error:
+        raise AccountUnavailableError(f"invalid kiwoom mock keys in env file — {error}") from error

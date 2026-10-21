@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import time
 from pathlib import Path
 
 import pytest
@@ -49,7 +50,7 @@ def test_cli_prepares_shows_and_approves_once(
             policy=RebalancePolicy(slots=3, keep_rank=5),
         )
 
-    factories = CliFactories(factory, _no_execution)
+    factories = CliFactories(factory, _no_execution, _no_recorder)
     common = ["--workdir", str(tmp_path)]
     prepare = ["prepare", *common, "--model-root", str(tmp_path), "--signal-date", "2026-10-23"]
     assert run_cli(factories, prepare) == 0
@@ -64,6 +65,10 @@ def test_cli_prepares_shows_and_approves_once(
     assert run_cli(factories, ["show", *common, *plan]) == 0
     assert "승인: 동민" in capsys.readouterr().out
     assert run_cli(factories, ["show", *common, "--plan", "weekly-2026-10-30"]) == 1
+
+
+def _no_recorder(workdir: Path, until: time) -> int:
+    raise AssertionError("this command must not open the fill recorder")
 
 
 @contextmanager
@@ -86,7 +91,13 @@ def test_cli_executes_closes_reports_and_exports(
     def planning(workdir: Path, model_root: Path | None) -> WeeklyRebalanceService:
         raise AssertionError("execution commands must not open the planner")
 
-    factories = CliFactories(planning, execution)
+    recorded: list[time] = []
+
+    def recorder(workdir: Path, until: time) -> int:
+        recorded.append(until)
+        return 7
+
+    factories = CliFactories(planning, execution, recorder)
     common = ["--workdir", str(tmp_path)]
     assert run_cli(factories, ["execute", *common, "--plan", PLAN, "--phase", "open"]) == 0
     assert "보내지 않음" in capsys.readouterr().out and r.gateway.submitted == []
@@ -117,6 +128,9 @@ def test_cli_executes_closes_reports_and_exports(
     with (exports / "events.csv").open(encoding="utf-8-sig") as handle:
         kinds = [row["kind"] for row in csv.DictReader(handle)]
     assert kinds[0] == "initialized" and kinds.count("submit") == 3
+    capsys.readouterr()
+    assert run_cli(factories, ["record-fills", *common, "--until", "15:35"]) == 0
+    assert recorded == [time(15, 35)] and "received=7" in capsys.readouterr().out
 
 
 def _source(tmp_path: Path, fake: FakeKiwoom) -> KiwoomAccountSource:

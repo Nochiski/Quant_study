@@ -7,14 +7,21 @@
     <작업 폴더>/ledger/execution.sqlite        S05 실행 원장(실행기가 만든다)
     <작업 폴더>/ledger/kiwoom-reference.sqlite 키움 모의 참조 원장
     <작업 폴더>/plans/                         주문안·승인
+    <작업 폴더>/records/                       실행 사건·하루 기록
 """
 
 from __future__ import annotations
 
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from strategy_workbench.adapters.inbound.weekly_rebalance_cli.facade.command import run_cli
+from strategy_workbench.adapters.inbound.weekly_rebalance_cli.facade.command import (
+    CliFactories,
+    run_cli,
+)
 from strategy_workbench.adapters.outbound.execution_sqlite.facade.ledger import (
     ExecutionSqliteLedger,
 )
@@ -24,7 +31,11 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import (
     KiwoomTransport,
     system_trust_transport,
 )
-from strategy_workbench.adapters.outbound.rebalance_files.facade.plans import JsonPlanStore
+from strategy_workbench.adapters.outbound.kiwoom_mock.facade.market import KiwoomMarket
+from strategy_workbench.adapters.outbound.rebalance_files.facade.plans import (
+    JsonExecutionLog,
+    JsonPlanStore,
+)
 from strategy_workbench.adapters.outbound.scope_signal.facade.source import ScopeSignalSource
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
     LocalFileBrokerCredentialStore,
@@ -39,12 +50,15 @@ from strategy_workbench.application.offline_execution.facade.execution import (
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountState,
     AccountUnavailableError,
+    WeeklyExecutionService,
     WeeklyRebalanceService,
 )
 from strategy_workbench.bootstrap.facade.http import runtime_assistant_settings
+from strategy_workbench.bootstrap.weekly_rebalance._gateway import OfflineOrderGateway
 
 KST = timezone(timedelta(hours=9))
 REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
+START_PAUSE_SECONDS = 1.5
 
 
 class KiwoomAccountSource:
@@ -119,5 +133,35 @@ def build_weekly_rebalance(workdir: Path, model_root: Path | None) -> WeeklyReba
     )
 
 
+@contextmanager
+def open_weekly_execution(
+    workdir: Path, send: bool, require_approval: bool
+) -> Iterator[WeeklyExecutionService]:
+    """실행기. `send`가 거짓이면 어댑터도 보내지 않는 기본값(`transmit=False`)으로 연다."""
+    root = outside_repository(workdir)
+    (root / "ledger").mkdir(parents=True, exist_ok=True, mode=0o700)
+    broker = KiwoomMockBroker(
+        saved_credentials(),
+        root / "ledger" / "kiwoom-reference.sqlite",
+        transport=system_trust_transport(),
+        transmit=send,
+    )
+    gateway = OfflineOrderGateway(root / "ledger", broker)
+    try:
+        yield WeeklyExecutionService(
+            JsonPlanStore(root),
+            gateway,
+            KiwoomMarket(broker),
+            JsonExecutionLog(root),
+            now=lambda: datetime.now(KST),
+            sleep=time.sleep,
+            require_approval=require_approval,
+        )
+    finally:
+        gateway.close()
+
+
 def main(argv: list[str] | None = None) -> int:
-    return run_cli(build_weekly_rebalance, argv)
+    # 앞 명령이 같은 TR을 막 불렀으면 1초 한도(1700)에 걸린다. 프로세스 사이 간격을 둔다.
+    time.sleep(START_PAUSE_SECONDS)
+    return run_cli(CliFactories(build_weekly_rebalance, open_weekly_execution), argv)

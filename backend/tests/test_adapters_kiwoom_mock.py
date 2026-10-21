@@ -97,6 +97,9 @@ class FakeKiwoom:
         self.past: dict[str, list[dict[str, str]]] = {}
         self.journal: dict[str, dict[str, int]] = {}
         self.journal_lag: list[tuple[str, str, int, int, int]] = []
+        self.quotes: dict[str, tuple[tuple[int, ...], tuple[int, ...]]] = {}
+        self.rate_limited: set[str] = set()  # 다음 한 번만 호출 한도(1700)로 답할 TR
+        self.last_prices: dict[str, int] = {}
         self.calls: list[Call] = []
         self.after: dict[str, list[Callable[[], None]]] = {}  # 한 번만 돈다
         self.every: dict[str, list[Callable[[], None]]] = {}  # 호출마다 돈다
@@ -110,7 +113,10 @@ class FakeKiwoom:
     ) -> KiwoomHttpResponse:
         api_id = headers["api-id"]
         self.calls.append(Call(api_id, dict(body), dict(headers), self.clock.mono))
-        if api_id != "au10001" and headers.get("authorization") != f"Bearer {self.token}":
+        if api_id in self.rate_limited:
+            self.rate_limited.discard(api_id)
+            response = self._error("1700", "허용된 API 요청 개수를 초과하였습니다")
+        elif api_id != "au10001" and headers.get("authorization") != f"Bearer {self.token}":
             response = self._error("8005", "Token이 유효하지 않습니다")
         else:
             response = getattr(self, f"_{api_id}")(dict(body), dict(headers))
@@ -161,6 +167,22 @@ class FakeKiwoom:
             for code, totals in sorted(self.journal.items())
         ]
         return self._page(rows, "tdy_trde_diary", headers)
+
+    def _ka10004(self, body: dict[str, object], _: dict[str, str]) -> KiwoomHttpResponse:
+        asks, bids = self.quotes.get(str(body["stk_cd"]), ((), ()))
+        levels = ["fpr", *(f"{index}th_pre" for index in range(2, 11))]
+        values: dict[str, object] = {}
+        for index, level in enumerate(levels):
+            # 실측처럼 매도 호가는 부호가 붙어 올 수 있다
+            values[f"sel_{level}_bid"] = f"-{asks[index]}" if index < len(asks) else "0"
+            values[f"buy_{level}_bid"] = str(bids[index]) if index < len(bids) else "0"
+        return self._ok(values)
+
+    def _ka10001(self, body: dict[str, object], _: dict[str, str]) -> KiwoomHttpResponse:
+        code = str(body["stk_cd"])
+        return self._ok(
+            {"stk_cd": code, "stk_nm": "삼성전자", "cur_prc": f"+{self.last_prices[code]}"}
+        )
 
     def _kt00018(self, _: dict[str, object], headers: dict[str, str]) -> KiwoomHttpResponse:
         rows = [

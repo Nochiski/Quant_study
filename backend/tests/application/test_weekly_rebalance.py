@@ -85,6 +85,9 @@ class Plans:
     def approval(self, plan_id: str) -> Approval | None:
         return self.approvals.get(plan_id)
 
+    def plan_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self.records))
+
 
 def service(
     signals: Signals | None = None, account: Account | None = None, plans: Plans | None = None

@@ -133,44 +133,12 @@ def _private_write(path: Path, text: str) -> None:
 
 def dump(probe: Probe, tag: str) -> Path:
     """조회 원본을 남긴다. 계좌번호 필드가 있는 TR은 부르지 않는다."""
-    client = probe.broker._client  # pyright: ignore[reportPrivateUsage]  # reason: 측정 도구가 같은 토큰으로 원본 TR을 읽는다
-    raw = {
-        "taken_at": datetime.now(KST).isoformat(timespec="seconds"),
-        "kt00007": client.rows(
-            "kt00007",
-            ACCOUNT_PATH,
-            {
-                "ord_dt": "",
-                "qry_tp": "1",
-                "stk_bond_tp": "0",
-                "sell_tp": "0",
-                "stk_cd": "",
-                "fr_ord_no": "",
-                "dmst_stex_tp": "%",
-            },
-            "acnt_ord_cntr_prps_dtl",
-        ),
-        "ka10170": client.rows(
-            "ka10170",
-            ACCOUNT_PATH,
-            {"base_dt": "", "ottks_tp": "2", "ch_crd_tp": "0"},
-            "tdy_trde_diary",
-        ),
-        "kt00018": client.rows(
-            "kt00018",
-            ACCOUNT_PATH,
-            {"qry_tp": "1", "dmst_stex_tp": "KRX"},
-            "acnt_evlt_remn_indv_tot",
-        ),
-        "kt00001": {
-            key: value
-            for key, value in client.call("kt00001", ACCOUNT_PATH, {"qry_tp": "3"}).body.items()
-            if key not in ("return_code", "return_msg")
-        },
-    }
+    raw = probe.broker.raw_reads()
     path = probe.out / f"raw-{datetime.now(KST).strftime('%H%M%S')}-{tag}.json"
     _private_write(path, json.dumps(raw, ensure_ascii=False, indent=1))
-    print(f"[원본] {path.name} — 주문행 {len(raw['kt00007'])} 매매일지 종목 {len(raw['ka10170'])}")
+    orders, journal = raw["kt00007"], raw["ka10170"]
+    counts = [len(rows) if isinstance(rows, list) else 0 for rows in (orders, journal)]
+    print(f"[원본] {path.name} — 주문행 {counts[0]} 매매일지 종목 {counts[1]}")
     return path
 
 

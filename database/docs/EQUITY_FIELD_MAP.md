@@ -155,6 +155,12 @@
 | `dividend_event` | **corp** | LATEST | 종류(`stock_knd`) 축을 접는다 — 값 있는 행 우선 → 최신 `bsns_year`·`reprt_code` → `stock_knd` 사전순(한글 정렬상 '보통주' 가 '우선주' 앞) | `event.dividend_per_share` |
 | `corp_event`(`event_type='treasury_buy'`) | ticker | LATEST | 같은 공시일의 여러 건은 `sum(amount_krw)`. 행은 주식 종류별이라 그 티커 종류분 금액만 더한다(e1.20.0, #589) | `event.buyback_amount` |
 | `holder_daily`(`src='elestock'`) | **corp** | LATEST | 같은 접수일의 보고자는 `sum(qty_change_shr)`(전부 NULL 이면 NULL) | `event.insider_net_buy` |
+| stage `stg_consensus_matrix`(참조, #608) | ticker | GRID(`fetched_date`) | (계정 121500·122710, lookback current·1w·1m·3m) 마다 원천 하나 — 수집 달 이후로 끝나는 `target_period` 중 가장 가까운 기 | `wise.consensus_op`·`_1w_ago`·`_1m_ago`·`_3m_ago`, `wise.consensus_ni`·… |
+| stage `stg_consensus_annual`(참조, #608) | ticker | GRID(`fetched_date`) | 수집 연도 12월 기의 추정(`period_kind='E'`) — 그날 수집분에 없으면 옛 값을 잇지 않는다 | `wise.fy0_op_estimate`·`wise.fy0_ni_estimate` |
+| stage `stg_fin_wise`(참조, #608) | ticker | LATEST | `ep='cF4002'` 의 계정 382100·382500·431800, 추정(E)이 아닌 마지막 12월 열 | `wise.per`·`wise.pbr`·`wise.dividend_yield` |
+| stage `stg_flow_daily_kiwoom`(참조, #608) | ticker | GRID | 없음(grain (ticker, date)) | `kiwoom.private_fund_net_buy` |
+
+stage 참조 원천(#608)은 equity 로 승격하지 않은 stage 표를 equity 루트 옆 `stage/` 에서 읽기만 한다. stage 이력은 WISE 3표가 2026-09-01 부터다. 랙은 원천 선언(1 세션)이 정본이고, 표가 없으면 그 원천만 `stage_table_missing` 으로 빠진다(받기: `ledger_sync --layer stage pull --tables stg_consensus_matrix stg_consensus_annual stg_fin_wise stg_flow_daily_kiwoom`).
 
 - **GRID** 는 랙 n 을 "정확히 n 세션 전 행" 으로 읽고 그 세션에 원천 행이 없으면 셀을 내지 않는다 — 재상장 구간 첫날이 직전 구간 값을 물지 않는다(합성 금지). **LATEST** 는 컷오프(as_of 에서 n 세션 전 거래일) 이하의 마지막 관측이고 `available_date` 는 **그 관측의 공개일**이라 as_of 보다 몇 달 앞일 수 있다(계약은 `available_date ≤ as_of` 만 요구한다). 관측이 하나도 없으면 셀이 없고, 값이 NULL 이면 셀은 나가되 `CellKind.MISSING` 이다(`load_panel` 과 같은 규칙).
 - **corp 축 3원천은 `corp_ticker` 로 전개하고 한 법인의 종류주 티커 전부가 같은 값을 받는다.** 재무·임원지분은 법인 사실이라 옳지만 **배당은 종류마다 다르다** — 우선주 티커가 보통주 DPS 를 받는 것이 `event.dividend_per_share` 부분 판정의 근거 ②이고, 종류별 DPS 가 필요하면 소비자가 `dividend_event` 를 직접 읽어야 한다. `corp_ticker` 는 시점축 없는 현재 스냅샷이라 폐지·티커 재사용 구간의 대응은 DESIGN §4-5 6 의 한계를 그대로 물려받는다.

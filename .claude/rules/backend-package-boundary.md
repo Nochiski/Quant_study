@@ -179,7 +179,9 @@ bootstrap ─> application + adapters
   이 금지는 adapter를 통째로 갈아 끼우는 것에 대한 것이다. `equity_duckdb`가 원장
   `dataset_profile`에 행이 없는 필드를 선언표 상수로 읽는 랙 폴백은 허용하되, 그 상수는 원장
   선언과 같아야 하고(`tests/contract/test_equity_fallback_lag.py`) 부팅 경고
-  `profile_lag_fallback`으로 드러낸다.
+  `profile_lag_fallback`으로 드러낸다. stage 참조 원천(#608)은 원장 대장 밖이라 선언 랙이 정본이고
+  이 폴백·경고 대상이 아니다. 그 표는 `STRATEGY_WORKBENCH_EQUITY_ROOT` 옆 `stage/`에서 읽으며 설정을
+  따로 두지 않는다.
 - mock의 raw PIT port(`load_raw_observations`)는 fixture 달력 안에서는 `load_panel`과 같은
   Observation 행·PIT cut-off를 읽고, 달력 밖에서는 절대 영업일 index 기반 synthetic 시계열을
   만든다. 두 경우 모두 (security, date)만의 함수이며 query window에 의존하지 않는다. 실패는

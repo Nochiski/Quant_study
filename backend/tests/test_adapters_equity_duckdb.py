@@ -453,8 +453,9 @@ def test_list_fields_serves_every_declared_field_whose_source_is_built(
     assert profiles["financial.book_equity"].coverage.starts_on == WB_SESSIONS[0]
     assert profiles["event.buyback_amount"].coverage.starts_on == date(2023, 12, 27)
     # 설명은 선언표 문장 그대로 소비자에게 간다 — 판정 접두를 붙이지 않는다(#373).
+    # stage 참조 필드(#608)는 이 루트에 stage 표가 없어 빠진다 — `test_adapters_equity_duckdb_stage`
     assert {f: p.description for f, p in profiles.items()} == {
-        spec.field_id: spec.description for spec in FIELD_SPECS
+        spec.field_id: spec.description for spec in FIELD_SPECS if spec.field_id in ALL_FIELDS
     }
 
 

@@ -73,6 +73,18 @@ ADJ_MACRO = "v_adj_close"
 # 원장이 접지 못한 사건(#369) — 필드 원천이 아니라 백테스트 사건 피드가 읽는다
 UNFOLDED_MACRO = "v_unfolded_event"
 
+# stage 참조 원천이 읽는 표(#608) — equity 로 승격하지 않고 stage 루트에서 읽는다
+STAGE_MATRIX_TABLE = "stg_consensus_matrix"
+STAGE_ANNUAL_TABLE = "stg_consensus_annual"
+STAGE_FIN_WISE_TABLE = "stg_fin_wise"
+STAGE_FLOW_KIWOOM_TABLE = "stg_flow_daily_kiwoom"
+STAGE_TABLES = (
+    STAGE_MATRIX_TABLE,
+    STAGE_ANNUAL_TABLE,
+    STAGE_FIN_WISE_TABLE,
+    STAGE_FLOW_KIWOOM_TABLE,
+)
+
 REQUIRED_TABLES = (CALENDAR_TABLE, SPAN_TABLE, UNIVERSE_TABLE, POLICY_TABLE, PRICE_TABLE)
 
 
@@ -90,6 +102,13 @@ class Reduce(Enum):
     NONE = "none"  # GRID — 격자 행이 이미 (축, 세션) 유일
     PICK = "pick"  # (축, available_date) 당 정렬 첫 행
     SUM = "sum"  # (축, available_date) 당 값 합 — 전부 NULL 이면 NULL
+
+
+class SourceLayer(Enum):
+    """원천 표가 놓인 원장 층. 워크벤치의 정본 층은 equity 이고 stage 는 참조로만 읽는다(#608)."""
+
+    EQUITY = "equity"
+    STAGE = "stage"
 
 
 @dataclass(frozen=True)
@@ -125,6 +144,12 @@ class SourceSpec:
     `omitted_is_zero` 는 그 원천의 `src_omitted`(원천이 행을 뺀 칸)가 원장 규약상 "그날 0" 이라는
     선언이다. 참이면 어댑터가 그 칸을 값 0 의 SOURCE_OMITTED_ZERO 로 내고, 거짓이면 MISSING 으로
     접는다(#371). 어느 원천이 참인가의 정본은 FIELD_MAP §1 「결측 어휘」다.
+
+    `layer` 가 STAGE 인 원천은 equity 로 승격하지 않은 stage 표를 읽기 전용 참조로 읽는다(#608).
+    표는 equity 루트 옆 stage 루트(`_source.STAGE_DIR`)의 MANIFEST current_build 만 열고, 원장
+    `dataset_profile` 에 행이 없으므로 랙은 이 선언(`lag_sessions`)이 정본이다(폴백이 아니다).
+    `date_expr` 는 격자 날짜 열이 `date` 가 아닌 stage 표의 날짜 식이다(WISE 는 `fetched_date`) —
+    어댑터가 관계식을 감싸 그 값을 `date` 로 붙인다.
     """
 
     name: str
@@ -147,6 +172,8 @@ class SourceSpec:
     required_columns: tuple[str, ...] = ()
     masked_expr: str | None = None
     omitted_is_zero: bool = False
+    layer: SourceLayer = SourceLayer.EQUITY
+    date_expr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -221,6 +248,81 @@ _CREDIT_LAG_BASIS = (
     "(stage lag_known=false, 실입수 observed − date = +3일) → dataset_profile(S19) 선언과 같은 "
     "3 세션(EQUITY_FIELD_MAP DEFECT-E01 정정)"
 )
+
+_WISE_STAGE_LAG_BASIS = (
+    "stage available_date = fetched_date(measured, 수집일) — 06:00 수집은 10-19 부터이고 그 전 "
+    "수집 시각은 일정하지 않아 그날 장중에 쓸 수 있었는지 모른다 → equity 컨센서스와 같은 1 세션"
+)
+_KIWOOM_STAGE_LAG_BASIS = (
+    "stage available_date = date(basis default, lag_known=false) — 공표 시각을 모른다 → equity "
+    "수급과 같은 1 세션"
+)
+# WISE 컨센서스 매트릭스(c1050001 T4)의 계정 코드와 비교 시점(lookback)
+_MATRIX_ACCOUNTS = {"op": "121500", "ni": "122710"}
+_MATRIX_LOOKBACKS = ("current", "1w", "1m", "3m")
+
+
+def _matrix_source(metric: str, lookback: str) -> SourceSpec:
+    """WISE 매트릭스의 (계정, 비교 시점) 하나를 읽는 stage 격자 원천.
+
+    수집일마다 그 수집 달 이후로 끝나는 결산기 가운데 가장 가까운 기(FY1)를 고른다. 1주·1개월·
+    3개월 전 값은 우리가 이력을 늦춰 만든 값이 아니라 WISE 가 그 수집일에 준 비교값이다.
+    """
+    return SourceSpec(
+        name=f"wise_matrix_{metric}_{lookback}",
+        dataset_id=STAGE_MATRIX_TABLE,
+        relation=STAGE_MATRIX_TABLE,
+        is_macro=False,
+        mode=SourceMode.GRID,
+        axis=SourceAxis.TICKER,
+        key_column="ticker",
+        available_expr="available_date",
+        content_expr="coalesce(base_date, fetched_date)",
+        reduce=Reduce.NONE,
+        row_filter=(
+            f"acc_cd = '{_MATRIX_ACCOUNTS[metric]}' AND lookback = '{lookback}' "
+            "AND target_period >= strftime(fetched_date, '%Y%m')"
+        ),
+        pick_order="target_period",
+        lag_sessions=1,
+        lag_basis=_WISE_STAGE_LAG_BASIS,
+        requires=(STAGE_MATRIX_TABLE,),
+        frequency=FieldFrequency.DAILY,
+        layer=SourceLayer.STAGE,
+        date_expr="fetched_date",
+    )
+
+
+# WISE cF4002 연간 비율(PER·PBR·현금배당수익률)의 계정 코드
+_WISE_RATIO_ACCOUNTS = {"per": "382100", "pbr": "382500", "dividend_yield": "431800"}
+
+
+def _wise_ratio_source(name: str) -> SourceSpec:
+    """WISE 재무비율 표(cF4002)의 계정 하나를 읽는 stage 최신값 원천.
+
+    표는 같은 원문이 이어지면 판을 접어 `fetched_date` 가 그 원문을 처음 본 날이다 — 컷오프 이하
+    최신 판의 값이 그날까지 이어진다.
+    """
+    return SourceSpec(
+        name=f"wise_ratio_{name}",
+        dataset_id=STAGE_FIN_WISE_TABLE,
+        relation=STAGE_FIN_WISE_TABLE,
+        is_macro=False,
+        mode=SourceMode.LATEST,
+        axis=SourceAxis.TICKER,
+        key_column="ticker",
+        available_expr="available_date",
+        content_expr="fetched_date",
+        reduce=Reduce.PICK,
+        row_filter=f"ep = 'cF4002' AND accode = '{_WISE_RATIO_ACCOUNTS[name]}'",
+        pick_order="seq",
+        lag_sessions=1,
+        lag_basis=_WISE_STAGE_LAG_BASIS,
+        requires=(STAGE_FIN_WISE_TABLE,),
+        frequency=FieldFrequency.ANNUAL,
+        layer=SourceLayer.STAGE,
+    )
+
 
 SOURCE_SPECS: tuple[SourceSpec, ...] = (
     SourceSpec(
@@ -491,6 +593,54 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         requires=(HOLDER_TABLE, CORP_TICKER_TABLE),
         frequency=FieldFrequency.EVENT,
     ),
+    # ── stage 참조 원천 (#608) — equity 로 승격하지 않은 stage 표를 읽기만 한다 ─────
+    *(
+        _matrix_source(metric, lookback)
+        for metric in _MATRIX_ACCOUNTS
+        for lookback in _MATRIX_LOOKBACKS
+    ),
+    SourceSpec(
+        name="wise_annual_fy0",
+        dataset_id=STAGE_ANNUAL_TABLE,
+        relation=STAGE_ANNUAL_TABLE,
+        is_macro=False,
+        # 그날 수집분에 당해 12월기 추정이 있는지가 곧 추정치 보유 여부라 격자로 읽는다 — 최신값으로
+        # 읽으면 추정이 사라진 종목도 옛 수집분 값이 이어진다.
+        mode=SourceMode.GRID,
+        axis=SourceAxis.TICKER,
+        key_column="ticker",
+        available_expr="available_date",
+        content_expr="fetched_date",
+        reduce=Reduce.NONE,
+        row_filter="period_kind = 'E' AND period = strftime(fetched_date, '%Y') || '12'",
+        pick_order="period_label",
+        lag_sessions=1,
+        lag_basis=_WISE_STAGE_LAG_BASIS,
+        requires=(STAGE_ANNUAL_TABLE,),
+        frequency=FieldFrequency.DAILY,
+        layer=SourceLayer.STAGE,
+        date_expr="fetched_date",
+    ),
+    *(_wise_ratio_source(name) for name in _WISE_RATIO_ACCOUNTS),
+    SourceSpec(
+        name="kiwoom_flow",
+        dataset_id=STAGE_FLOW_KIWOOM_TABLE,
+        relation=STAGE_FLOW_KIWOOM_TABLE,
+        is_macro=False,
+        mode=SourceMode.GRID,
+        axis=SourceAxis.TICKER,
+        key_column="ticker",
+        available_expr="available_date",
+        content_expr="date",
+        reduce=Reduce.NONE,
+        row_filter=None,
+        pick_order=None,  # grain (ticker, date)
+        lag_sessions=1,
+        lag_basis=_KIWOOM_STAGE_LAG_BASIS,
+        requires=(STAGE_FLOW_KIWOOM_TABLE,),
+        frequency=FieldFrequency.DAILY,
+        layer=SourceLayer.STAGE,
+    ),
 )
 
 # ── 필드 ──────────────────────────────────────────────────────────────────────
@@ -513,6 +663,50 @@ _FIN_DISCLOSURE = "DART 정기보고서 접수일(rcept_no 의 rcept_dt) — 정
 # 격자 3테이블(S08~S10) 필드의 빈 셀 문장. 결측 어휘가 셀 종류로 옮겨지는 규칙은
 # `SourceSpec.omitted_is_zero` 와 FIELD_MAP §1 「결측 어휘」가 정본이다.
 _BLANK_NOT_ZERO = "값이 없는 날은 0 이 아니라 빈 값입니다."
+
+# stage 참조 필드(#608)의 공통 문장·식
+_STAGE_SINCE = "stage 원장을 참조로 읽어 2026-09-01 부터만 값이 있습니다."
+_WISE_DISCLOSURE = "WISE 수집일(측정) — 그날 수집분은 다음 세션부터 쓴다"
+_MATRIX_METRIC_NAMES = {"op": "영업이익", "ni": "순이익"}
+_MATRIX_LOOKBACK_NAMES = {"1w": "1주 전", "1m": "1개월 전", "3m": "3개월 전"}
+# cF4002 는 연간 열 6개(과거 5기 + 추정 1기)를 넓게 싣는다 — 추정(E)이 아닌 마지막 12월 열의 값
+_LATEST_ACTUAL_DECEMBER = (
+    "CASE "
+    + " ".join(
+        f"WHEN period_label_{i} LIKE '____/12%' AND period_label_{i} NOT LIKE '%(E)%' THEN val_{i}"
+        for i in range(6, 0, -1)
+    )
+    + " END"
+)
+
+
+def _matrix_field(metric: str, lookback: str) -> FieldSpec:
+    name = _MATRIX_METRIC_NAMES[metric]
+    if lookback == "current":
+        field_id, when, extra = f"wise.consensus_{metric}", "", ""
+    else:
+        when = _MATRIX_LOOKBACK_NAMES[lookback]
+        field_id = f"wise.consensus_{metric}_{lookback}_ago"
+        extra = f"WISE 가 그날 함께 준 {when} 시점 값이고 우리 이력을 늦춰 만든 값이 아닙니다. "
+    return FieldSpec(
+        field_id=field_id,
+        source=f"wise_matrix_{metric}_{lookback}",
+        expr="value",
+        label=f"WISE 컨센서스 {name}{f'({when})' if when else ''}(가장 가까운 결산기, 억원)",
+        unit="억원",
+        value_type=FieldValueType.AMOUNT,
+        description=(
+            f"그날 수집 달 이후로 끝나는 가장 가까운 결산기의 {name} 컨센서스(억원)입니다. "
+            + extra
+            + _STAGE_SINCE
+        ),
+        disclosure_basis=_WISE_DISCLOSURE,
+        evidence=(
+            f"stage stg_consensus_matrix (acc_cd='{_MATRIX_ACCOUNTS[metric]}', "
+            f"lookback='{lookback}', target_period = 수집 달 이후 가장 가까운 기, c1050001 T4)"
+        ),
+    )
+
 
 FIELD_SPECS: tuple[FieldSpec, ...] = (
     # ── price_daily (FIELD_MAP §2 price.*) ──────────────────────────────────
@@ -1046,6 +1240,89 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         disclosure_basis="DART 소유보고 접수일(rcept_dt)",
         evidence="holder_daily.qty_change_shr (src='elestock'), 법인→티커는 corp_ticker",
     ),
+    # ── stage 참조 필드 (#608) ─────────────────────────────────────────────────
+    *(
+        _matrix_field(metric, lookback)
+        for metric in _MATRIX_ACCOUNTS
+        for lookback in _MATRIX_LOOKBACKS
+    ),
+    *(
+        FieldSpec(
+            field_id=f"wise.fy0_{metric}_estimate",
+            source="wise_annual_fy0",
+            expr=metric,
+            label=f"WISE 올해 12월 결산 {_MATRIX_METRIC_NAMES[metric]} 추정(그날 수집분, 억원)",
+            unit="억원",
+            value_type=FieldValueType.AMOUNT,
+            description=(
+                f"그날 WISE 수집분에 실린 올해 12월 결산 {_MATRIX_METRIC_NAMES[metric]} 추정"
+                "(억원)입니다. 그날 추정이 없으면 빈 값이라 추정치를 지금 갖고 있는지 가를 때 "
+                "씁니다. " + _STAGE_SINCE
+            ),
+            disclosure_basis=_WISE_DISCLOSURE,
+            evidence=(
+                f"stage stg_consensus_annual.{metric} (period_kind='E', period = 수집 연도 12월, "
+                "c1050001)"
+            ),
+        )
+        for metric in _MATRIX_ACCOUNTS
+    ),
+    FieldSpec(
+        field_id="wise.per",
+        source="wise_ratio_per",
+        expr=_LATEST_ACTUAL_DECEMBER,
+        label="WISE PER(최근 12월 결산 실적, 배)",
+        unit="배",
+        value_type=FieldValueType.RATIO,
+        description=(
+            "WISE 가 주는 최근 12월 결산 실적 기준 PER(배)입니다. 결산기 말 주가 기준이라 그해 "
+            "안에서는 거의 바뀌지 않습니다. " + _STAGE_SINCE
+        ),
+        disclosure_basis=_WISE_DISCLOSURE,
+        evidence="stage stg_fin_wise (ep='cF4002', accode='382100'), 추정(E)이 아닌 마지막 12월 열",
+    ),
+    FieldSpec(
+        field_id="wise.pbr",
+        source="wise_ratio_pbr",
+        expr=_LATEST_ACTUAL_DECEMBER,
+        label="WISE PBR(최근 12월 결산 실적, 배)",
+        unit="배",
+        value_type=FieldValueType.RATIO,
+        description=(
+            "WISE 가 주는 최근 12월 결산 실적 기준 PBR(배)입니다. 결산기 말 주가 기준이라 그해 "
+            "안에서는 거의 바뀌지 않습니다. " + _STAGE_SINCE
+        ),
+        disclosure_basis=_WISE_DISCLOSURE,
+        evidence="stage stg_fin_wise (ep='cF4002', accode='382500'), 추정(E)이 아닌 마지막 12월 열",
+    ),
+    FieldSpec(
+        field_id="wise.dividend_yield",
+        source="wise_ratio_dividend_yield",
+        expr=_LATEST_ACTUAL_DECEMBER,
+        label="WISE 현금배당수익률(최근 12월 결산 실적, %)",
+        unit="pct",
+        value_type=FieldValueType.RATIO,
+        description=(
+            "WISE 가 주는 최근 12월 결산 실적 기준 현금배당수익률(%)입니다. 결산기 말 주가 "
+            "기준입니다. " + _STAGE_SINCE
+        ),
+        disclosure_basis=_WISE_DISCLOSURE,
+        evidence="stage stg_fin_wise (ep='cF4002', accode='431800'), 추정(E)이 아닌 마지막 12월 열",
+    ),
+    FieldSpec(
+        field_id="kiwoom.private_fund_net_buy",
+        source="kiwoom_flow",
+        expr="samo_fund_krw",
+        label="사모펀드 순매수(대금, 키움)",
+        unit="KRW",
+        value_type=FieldValueType.AMOUNT,
+        description=(
+            "키움이 주는 사모펀드 순매수 대금(원)입니다. 수급 원장이 아니라 stage 원장을 참조로 "
+            "읽습니다. " + _BLANK_NOT_ZERO
+        ),
+        disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
+        evidence="stage stg_flow_daily_kiwoom.samo_fund_krw (ka10060)",
+    ),
 )
 
 # 아래 필드의 사용자 대면 사유 문장 — compile 진단과 질의 거절이 싣는다(#316). 원장
@@ -1133,6 +1410,24 @@ def _reject_unread_declarations(
     unread = [spec.name for spec in source_specs if spec.omitted_is_zero and spec.kind_expr is None]
     if unread:
         raise ValueError(f"omitted_is_zero needs a kind_expr — sources={unread}")
+    # stage 참조 원천(#608)은 카탈로그가 없는 층이라 매크로를 읽을 수 없고, 날짜 식은 격자
+    # 질의만 읽는다(LATEST 는 공개일 식으로 고른다).
+    unread = [
+        spec.name
+        for spec in source_specs
+        if spec.layer is SourceLayer.STAGE
+        and (spec.is_macro or any(name.startswith("v_") for name in spec.requires))
+    ]
+    if unread:
+        raise ValueError(f"stage sources cannot read catalog macros — sources={unread}")
+    unread = [
+        spec.name
+        for spec in source_specs
+        if spec.date_expr is not None
+        and (spec.mode is not SourceMode.GRID or spec.layer is not SourceLayer.STAGE)
+    ]
+    if unread:
+        raise ValueError(f"date_expr needs a stage GRID source — sources={unread}")
 
 
 _reject_unread_declarations(SOURCE_SPECS, FIELD_SPECS)

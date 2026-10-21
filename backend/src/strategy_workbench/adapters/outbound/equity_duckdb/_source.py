@@ -33,6 +33,12 @@ CATALOG_REBUILD = (
 # 원장 표를 받는 조치 — 표가 없어 원천을 빼거나 백테스트를 멈춘 사유(`table_missing`)가 이 문구로
 # 조치를 알린다(#316).
 LEDGER_SYNC = "원장을 받은 뒤(`ledger_sync`) 서버를 다시 띄워야 한다"
+# stage 참조 원천(#608)의 표는 equity 루트 옆 이 폴더에서 읽는다(ledger_sync 의 `--layer stage` 가
+# 받는 자리와 같다). 표가 없어 원천을 뺀 사유(`stage_table_missing`)가 아래 조치를 알린다.
+STAGE_DIR = "stage"
+STAGE_SYNC = (
+    "stage 표를 받은 뒤(`ledger_sync --layer stage pull --tables …`) 서버를 다시 띄워야 한다"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +98,23 @@ def table_builds(equity_root: Path) -> dict[str, str]:
         current = _manifest(equity_root, name).get("current_build")
         if isinstance(current, str) and current:
             builds[name] = current
+    return builds
+
+
+def stage_builds(equity_root: Path, tables: tuple[str, ...]) -> dict[str, str]:
+    """equity 루트 옆 stage 루트에서 `tables` 가운데 커밋된 표 → current_build(#608).
+
+    stage 는 참조로만 읽으므로 원천이 요구하는 표만 본다 — 다른 stage 표의 MANIFEST 가 깨져도
+    부팅을 막지 않는다. stage 루트나 표가 없으면 그 원천만 빠진다(어댑터가 사유를 단다).
+    """
+    root = equity_root.parent / STAGE_DIR
+    builds: dict[str, str] = {}
+    for table in tables:
+        if not (root / table / MANIFEST_NAME).exists():
+            continue
+        current = _manifest(root, table).get("current_build")
+        if isinstance(current, str) and current:
+            builds[table] = current
     return builds
 
 

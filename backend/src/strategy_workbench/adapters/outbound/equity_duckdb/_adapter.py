@@ -125,12 +125,15 @@ from strategy_workbench.domain.factor.facade.expression import (
 from ._source import (
     CATALOG_REBUILD,
     LEDGER_SYNC,
+    STAGE_DIR,
+    STAGE_SYNC,
     CatalogState,
     EquityDuckdbSetupError,
     TableBuild,
     read_catalog,
     resolve_table,
     snapshot_id,
+    stage_builds,
     table_builds,
     unreadable_catalog,
 )
@@ -150,12 +153,14 @@ from ._specs import (
     SOURCE_BY_NAME,
     SOURCE_SPECS,
     SPAN_TABLE,
+    STAGE_TABLES,
     UNFOLDED_MACRO,
     UNIVERSE_TABLE,
     UNSUPPORTED_FIELDS,
     FieldSpec,
     Reduce,
     SourceAxis,
+    SourceLayer,
     SourceMode,
     SourceSpec,
 )
@@ -611,6 +616,13 @@ class EquityDuckdbAdapter:
         self._tables: dict[str, TableBuild] = {
             table: resolve_table(self._root, table) for table in builds
         }
+        # stage 참조 원천(#608)의 표 — 원장 판(`ledger_snapshot_id`)에는 넣지 않는다. 그 판은
+        # 카탈로그 meta·EG-C 와 대조하는 equity 판이고, stage 판은 필드 계약 판 쪽에 싣는다.
+        self._stage_builds = stage_builds(self._root, STAGE_TABLES)
+        self._tables |= {
+            table: resolve_table(self._root.parent / STAGE_DIR, table)
+            for table in self._stage_builds
+        }
         self._catalog: CatalogState = self._checked_catalog(
             read_catalog(self._root, ledger_snapshot_id)
         )
@@ -648,6 +660,8 @@ class EquityDuckdbAdapter:
             "grid_lag_scope": "security_span",
             "event_types": EVENT_TYPE_MAP,
             "ratio_directed_event_types": RATIO_DIRECTED_EVENT_TYPES,
+            # stage 참조 표의 판(#608) — 같은 equity 판이라도 stage 판이 바뀌면 값이 달라진다
+            "stage_builds": dict(sorted(self._stage_builds.items())),
         }
 
     def _connect(self, sources: Iterable[SourceSpec]) -> duckdb.DuckDBPyConnection:
@@ -748,7 +762,13 @@ class EquityDuckdbAdapter:
         폴백 상수는 원장 선언과 같게 맞췄지만, 원장 선언이 바뀌면 이 루트에서만 조용히 어긋난다.
         근거 문자열의 `fallback` 표시만으로는 아무도 보지 않으므로 운영 로그에 남긴다.
         """
-        fallback = sorted(field_id for field_id in self._fields if not self._profile.get(field_id))
+        # stage 참조 필드(#608)는 대장에 행이 없는 것이 정상이다 — 선언 랙이 정본이라 폴백이 아니다
+        fallback = sorted(
+            field_id
+            for field_id, spec in self._fields.items()
+            if not self._profile.get(field_id)
+            and SOURCE_BY_NAME[spec.source].layer is SourceLayer.EQUITY
+        )
         if not fallback:
             return
         rest = len(fallback) - 10
@@ -765,13 +785,16 @@ class EquityDuckdbAdapter:
         """field_id 의 (랙, 근거). 대장에 있으면 대장, 없으면 필드·원천 상수 폴백.
 
         폴백 상수는 원장 선언과 같은 값이다(이슈 #246). 한 원천 안에서 랙이 갈리는 필드는
-        `FieldSpec.lag_sessions` 가 원천 값을 덮는다.
+        `FieldSpec.lag_sessions` 가 원천 값을 덮는다. stage 참조 필드(#608)는 대장 밖이라 선언 랙이
+        정본이다.
         """
+        spec = self._fields[field_id]
+        source = SOURCE_BY_NAME[spec.source]
+        if source.layer is SourceLayer.STAGE:
+            return source.lag_sessions, source.lag_basis
         entry = self._profile.get(field_id)
         if entry is not None:
             return entry
-        spec = self._fields[field_id]
-        source = SOURCE_BY_NAME[spec.source]
         if spec.lag_sessions is not None:
             basis = spec.lag_basis or source.lag_basis
             return spec.lag_sessions, f"{basis} (fallback: no {PROFILE_TABLE} row)"
@@ -801,6 +824,14 @@ class EquityDuckdbAdapter:
         """원천을 읽을 수 없으면 왜인지 — 미빌드 테이블 · 쓸 수 없는 카탈로그 · 없는 매크로."""
         macros = {name for name in spec.requires if name.startswith("v_")}
         tables = [name for name in spec.requires if name not in macros]
+        if spec.layer is SourceLayer.STAGE:
+            absent = [table for table in tables if table not in self._stage_builds]
+            return (
+                f"stage 참조 표가 없어 이 원천의 필드를 뺀다 — {STAGE_SYNC} "
+                f"(stage_table_missing) — missing={absent}"
+                if absent
+                else None
+            )
         absent = [table for table in tables if table not in self._builds]
         if absent:
             return (
@@ -1035,8 +1066,11 @@ class EquityDuckdbAdapter:
     def _starts_on(
         self, con: duckdb.DuckDBPyConnection, source: SourceSpec, relation: str, where: str
     ) -> date:
-        """`LATEST` 원천의 첫 공개일(캘린더 안으로 자른다). `GRID` 는 캘린더 시작이다."""
-        if source.mode is SourceMode.GRID:
+        """`LATEST` 원천의 첫 공개일(캘린더 안으로 자른다). equity `GRID` 는 캘린더 시작이다.
+
+        stage 참조 격자(#608)는 수집을 늦게 시작해 첫 공개일을 잰다.
+        """
+        if source.mode is SourceMode.GRID and source.layer is SourceLayer.EQUITY:
             return self._sessions[0]
         row = con.execute(f"SELECT min({source.available_expr}) FROM {relation} {where}").fetchone()
         first = row[0] if row is not None else None
@@ -1775,10 +1809,17 @@ class EquityDuckdbAdapter:
         return {name: tuple(items) for name, items in grouped.items()}
 
     def _relation(self, source: SourceSpec, as_of: date) -> str:
-        """원천을 읽는 duckdb 관계식 — 테이블이면 parquet, 매크로면 as_of 를 넘긴 호출."""
-        if not source.is_macro:
-            return self._source(source.relation)
-        return f"{source.relation}(as_of := {_lit(as_of)})"
+        """원천을 읽는 duckdb 관계식 — 테이블이면 parquet, 매크로면 as_of 를 넘긴 호출.
+
+        격자 날짜 열이 `date` 가 아닌 stage 표(#608)는 그 날짜 식을 `date` 로 붙여 감싼다 — 격자
+        질의(`_grid_sql`)와 커버율이 같은 열 이름을 읽는다.
+        """
+        if source.is_macro:
+            return f"{source.relation}(as_of := {_lit(as_of)})"
+        relation = self._source(source.relation)
+        if source.date_expr is None:
+            return relation
+        return f"(SELECT *, {source.date_expr} AS date FROM {relation})"
 
     def _panel(
         self,

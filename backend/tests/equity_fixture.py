@@ -1191,3 +1191,134 @@ def build_workbench_root(
     if catalog:
         write_catalog(root)
     return root
+
+
+# ── stage 참조 원천(#608) ────────────────────────────────────────────────────────
+# equity 루트 옆 `stage/` 에 어댑터가 참조로 읽는 stage 표 넷을 만든다. 열은 원천 선언이 읽는 것만
+# 둔다(실물 stage 표의 일부). 세션이 해를 넘겨(2023-12 → 2024-01) 결산기 고르기 경계가 드러난다.
+WB_STAGE_MATRIX_FETCHES = (date(2023, 12, 28), date(2024, 1, 3), date(2024, 1, 4), date(2024, 1, 6))
+WB_STAGE_MATRIX_BASE = {"121500": 1000.0, "122710": 500.0}
+WB_STAGE_TARGET_OFFSET = {"202312": 0.0, "202412": 100.0}
+WB_STAGE_LOOKBACK_OFFSET = {"current": 0.0, "1w": -1.0, "1m": -2.0, "3m": -3.0, "1y": -4.0}
+
+
+def wb_stage_matrix_value(acc_cd: str, target: str, lookback: str, fetched: date) -> float:
+    """손 픽스처 매트릭스 값 — 계정·결산기·비교 시점·수집 차수에서 정해진다."""
+    return (
+        WB_STAGE_MATRIX_BASE[acc_cd]
+        + WB_STAGE_TARGET_OFFSET[target]
+        + WB_STAGE_LOOKBACK_OFFSET[lookback]
+        + 10.0 * WB_STAGE_MATRIX_FETCHES.index(fetched)
+    )
+
+
+# (수집일, 결산기, 구분, 영업이익, 순이익) — 01-04 수집분에는 2024/12 추정이 없다(추정 소멸)
+WB_STAGE_ANNUAL_ROWS: list[tuple[date, str, str, float, float]] = [
+    (date(2023, 12, 28), "202212", "A", 800.0, 300.0),
+    (date(2023, 12, 28), "202312", "E", 900.0, 400.0),
+    (date(2023, 12, 28), "202412", "E", 950.0, 450.0),
+    (date(2024, 1, 3), "202412", "E", 960.0, 460.0),
+    (date(2024, 1, 3), "202512", "E", 990.0, 490.0),
+    (date(2024, 1, 4), "202512", "E", 995.0, 495.0),
+]
+# cF4002 판 두 개 — (수집일, 계정, 마지막 실적 12월 값). 추정(E) 열에는 다른 값을 둔다.
+WB_STAGE_RATIO_ROWS: list[tuple[date, str, float]] = [
+    (date(2023, 12, 27), "382100", 10.0),
+    (date(2023, 12, 27), "382500", 1.5),
+    (date(2023, 12, 27), "431800", 2.0),
+    (date(2024, 1, 4), "382100", 11.0),
+    (date(2024, 1, 4), "382500", 1.6),
+    (date(2024, 1, 4), "431800", 2.1),
+]
+WB_STAGE_ESTIMATE_COLUMN = -99.0
+# 키움 사모펀드 순매수(원) — 005930 은 01-03 행이 없다
+WB_STAGE_KIWOOM_ROWS: list[tuple[str, date, float]] = [
+    *(
+        ("005930", session, 1_000_000.0 * (index + 1))
+        for index, session in enumerate(WB_SESSIONS)
+        if session != date(2024, 1, 3)
+    ),
+    ("000660", date(2024, 1, 4), -5_000_000.0),
+]
+
+
+def build_stage_root(equity_root: Path) -> Path:
+    """`equity_root` 옆 `stage/` 에 stage 참조 표 넷을 만든다(`_source.STAGE_DIR`)."""
+    stage = equity_root.parent / "stage"
+    matrix = [
+        (fetched, target, acc_cd, lookback)
+        for fetched in WB_STAGE_MATRIX_FETCHES
+        for target in WB_STAGE_TARGET_OFFSET
+        for acc_cd in WB_STAGE_MATRIX_BASE
+        for lookback in WB_STAGE_LOOKBACK_OFFSET
+    ]
+    write_equity_table(
+        stage,
+        "stg_consensus_matrix",
+        pa.table(
+            {
+                "ticker": ["005930"] * len(matrix),
+                "fetched_date": pa.array([row[0] for row in matrix], pa.date32()),
+                "target_period": [row[1] for row in matrix],
+                "acc_cd": [row[2] for row in matrix],
+                "lookback": [row[3] for row in matrix],
+                "base_date": pa.array([row[0] for row in matrix], pa.date32()),
+                "value": [wb_stage_matrix_value(r[2], r[1], r[3], r[0]) for r in matrix],
+                "available_date": pa.array([row[0] for row in matrix], pa.date32()),
+            }
+        ),
+    )
+    annual = WB_STAGE_ANNUAL_ROWS
+    write_equity_table(
+        stage,
+        "stg_consensus_annual",
+        pa.table(
+            {
+                "ticker": ["005930"] * len(annual),
+                "fetched_date": pa.array([row[0] for row in annual], pa.date32()),
+                "period_label": [f"{r[1][:4]}.{r[1][4:]}({r[2]})" for r in annual],
+                "period": [row[1] for row in annual],
+                "period_kind": [row[2] for row in annual],
+                "op": [row[3] for row in annual],
+                "ni": [row[4] for row in annual],
+                "available_date": pa.array([row[0] for row in annual], pa.date32()),
+            }
+        ),
+    )
+    ratios = WB_STAGE_RATIO_ROWS
+    labels = [f"{year}/12(IFRS연결)" for year in range(2018, 2023)] + ["2023/12(E)(IFRS연결)"]
+    write_equity_table(
+        stage,
+        "stg_fin_wise",
+        pa.table(
+            {
+                "ticker": ["005930"] * len(ratios),
+                "fetched_date": pa.array([row[0] for row in ratios], pa.date32()),
+                "ep": ["cF4002"] * len(ratios),
+                "seq": list(range(len(ratios))),
+                "accode": [row[1] for row in ratios],
+                **{
+                    f"period_label_{i + 1}": [label] * len(ratios) for i, label in enumerate(labels)
+                },
+                **{f"val_{i}": [0.0] * len(ratios) for i in range(1, 5)},
+                "val_5": [row[2] for row in ratios],
+                "val_6": [WB_STAGE_ESTIMATE_COLUMN] * len(ratios),
+                "available_date": pa.array([row[0] for row in ratios], pa.date32()),
+            }
+        ),
+    )
+    kiwoom = WB_STAGE_KIWOOM_ROWS
+    write_equity_table(
+        stage,
+        "stg_flow_daily_kiwoom",
+        pa.table(
+            {
+                "ticker": [row[0] for row in kiwoom],
+                "date": pa.array([row[1] for row in kiwoom], pa.date32()),
+                "samo_fund_krw": [row[2] for row in kiwoom],
+                "available_date": pa.array([row[1] for row in kiwoom], pa.date32()),
+            }
+        ),
+        year_column="date",
+    )
+    return stage

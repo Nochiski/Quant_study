@@ -17,7 +17,11 @@ from typing import Any
 
 import pytest
 
-from strategy_workbench.adapters.outbound.equity_duckdb._specs import FIELD_BY_ID
+from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
+    FIELD_BY_ID,
+    SOURCE_BY_NAME,
+    SourceLayer,
+)
 from strategy_workbench.domain.equity.facade.research_data import ResearchPanelQuery
 from tests.equity_fixture import (
     WB_PROFILE_ROWS,
@@ -30,6 +34,13 @@ pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync -
 
 from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (  # noqa: E402
     EquityDuckdbAdapter,
+)
+
+# 폴백이 있는 필드 — stage 참조 원천(#608)은 원장 대장 밖이라 선언 랙이 정본이고 폴백이 아니다
+LEDGER_FIELD_IDS = frozenset(
+    field_id
+    for field_id, spec in FIELD_BY_ID.items()
+    if SOURCE_BY_NAME[spec.source].layer is SourceLayer.EQUITY
 )
 
 
@@ -45,7 +56,7 @@ def _ledger_lags() -> dict[str, int]:
 def test_폴백_랙이_원장_선언과_같다(tmp_path: Path) -> None:
     root = build_workbench_root(tmp_path / "equity", profile=False)
     served = {item.field_id: item for item in EquityDuckdbAdapter(root).list_fields()}
-    assert set(served) == set(FIELD_BY_ID), "손 픽스처가 선언표의 필드를 다 내지 않는다"
+    assert set(served) == LEDGER_FIELD_IDS, "손 픽스처가 선언표의 equity 필드를 다 내지 않는다"
     assert all("fallback" in item.available_date_basis for item in served.values())
     ledger = _ledger_lags()
 
@@ -123,7 +134,7 @@ def test_root_without_dataset_profile_warns_once_at_boot(
     assert len(warned) == 1, warned
     message = warned[0]
     assert "dataset_profile" in message and "폴백" in message
-    assert f"fields={len(FIELD_BY_ID)} " in message
+    assert f"fields={len(LEDGER_FIELD_IDS)} " in message
     assert "table_present=False" in message
     assert str(root) in message
 

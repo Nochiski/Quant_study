@@ -26,6 +26,8 @@ from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     SOURCE_BY_NAME,
     UNSUPPORTED_FIELDS,
     FieldSpec,
+    SourceLayer,
+    SourceMode,
     SourceSpec,
 )
 from strategy_workbench.adapters.outbound.equity_mock._fixture import (
@@ -56,6 +58,15 @@ EXPECTED_SHARED = frozenset(
         "flow.foreign_net_buy",
         "credit.margin_balance",
     }
+)
+
+
+# 원장 `dataset_profile` 선언과 대조하는 필드. stage 참조 원천(#608)은 원장 선언이 없어 이 파일
+# 끝의 stage 대조가 따로 본다.
+LEDGER_FIELD_IDS = sorted(
+    field_id
+    for field_id, spec in FIELD_BY_ID.items()
+    if SOURCE_BY_NAME[spec.source].layer is SourceLayer.EQUITY
 )
 
 
@@ -119,7 +130,7 @@ def test_원장_field_map_필드는_선언표나_미지원표_정확히_한쪽�
     ledger = {
         profile.field_id for profile in _ledger_profiles().values() if profile.scope == "field_map"
     }
-    declared, unsupported = set(FIELD_BY_ID), set(UNSUPPORTED_FIELDS)
+    declared, unsupported = set(LEDGER_FIELD_IDS), set(UNSUPPORTED_FIELDS)
 
     assert sorted(ledger - declared - unsupported) == []
     assert sorted(declared & unsupported) == []
@@ -261,7 +272,7 @@ _LEDGER_FREQUENCIES = {"session": "daily", "monthly": "monthly", "event": "event
 _CONTEXT_FREQUENCIES = {("fin_std", "report"): "quarterly", ("dividend_event", "report"): "annual"}
 
 
-@pytest.mark.parametrize("field_id", sorted(FIELD_BY_ID))
+@pytest.mark.parametrize("field_id", LEDGER_FIELD_IDS)
 def test_지원_필드의_단위가_원장_척도와_같다(field_id: str) -> None:
     _, ledger = _ledger_fields()[field_id]
     expected = _LEDGER_UNITS.get(ledger.unit, _CONTEXT_UNITS.get((field_id, ledger.unit)))
@@ -272,7 +283,7 @@ def test_지원_필드의_단위가_원장_척도와_같다(field_id: str) -> No
     )
 
 
-@pytest.mark.parametrize("field_id", sorted(FIELD_BY_ID))
+@pytest.mark.parametrize("field_id", LEDGER_FIELD_IDS)
 def test_지원_필드의_빈도가_원장_원천의_주기와_같다(field_id: str) -> None:
     table, ledger = _ledger_fields()[field_id]
     expected = _LEDGER_FREQUENCIES.get(
@@ -434,7 +445,7 @@ def test_corp_event_를_거르는_유형은_원장이_싣는_사건_유형이다
     )
 
 
-@pytest.mark.parametrize("field_id", sorted(FIELD_BY_ID))
+@pytest.mark.parametrize("field_id", LEDGER_FIELD_IDS)
 def test_duckdb_선언표의_값_타입이_원장_선언과_같다(field_id: str) -> None:
     """`FIELD_SPECS` 는 원장 스키마를 옮긴 표다. 값 타입이 원장 `dataset_profile` 과 같아야 한다."""
     ledger = _ledger_profiles().get(field_id)
@@ -469,3 +480,76 @@ def test_필드_프로파일과_선언표는_같은_팩터_값타입_변환을_�
             assert metadata.unit == spec.unit
             assert metadata.value_type is expected
             assert metadata.adjusted_field_id == "price.adj_close"
+
+
+# ── stage 참조 원천 (#608) ─────────────────────────────────────────────────────
+# stage 참조 원천은 원장 `dataset_profile` 선언이 없다. 대신 stage 빌드가 표를 만드는 선언
+# (`database/src/stage` 의 `rules_*.TABLES`)과 대조한다 — 없는 열을 읽으면 부팅 때 원천이 통째로
+# 실패하고, stage 가 그날 쓸 수 있다고 보지 않는 값을 랙 0 으로 읽으면 공개 전 값이다.
+STAGE_SOURCE_NAMES = sorted(
+    name for name, spec in SOURCE_BY_NAME.items() if spec.layer is SourceLayer.STAGE
+)
+# stage 빌드가 모든 표에 붙이는 공개일 열(선언 열 밖)
+_STAGE_BUILD_COLUMNS = frozenset({"available_date"})
+_SQL_WORDS = frozenset(
+    "and or not like in is null case when then else end asc desc nulls first last true false "
+    "coalesce strftime".split()
+)
+_STRING_LITERAL = re.compile(r"'[^']*'")
+_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_]*")
+
+
+def _identifiers(expression: str) -> set[str]:
+    """SQL 조각이 읽는 열 이름 — 문자열 리터럴·키워드·함수 이름을 뺀다."""
+    bare = _STRING_LITERAL.sub("", expression.lower())
+    return {token for token in _IDENTIFIER.findall(bare) if token not in _SQL_WORDS}
+
+
+def _stage_rules() -> dict[str, Any]:
+    from tests.equity_fixture import import_ledger_module
+
+    tables: dict[str, Any] = {}
+    for name in ("stage.rules_wise", "stage.rules_kiwoom"):
+        module: Any = import_ledger_module(name)
+        tables |= {rule.name: rule for rule in module.TABLES}
+    return tables
+
+
+def test_stage_참조_원천이_비어_있지_않다() -> None:
+    assert STAGE_SOURCE_NAMES, "stage 참조 원천이 없다 — 아래 대조가 공허하다"
+
+
+@pytest.mark.parametrize("name", STAGE_SOURCE_NAMES)
+def test_stage_원천은_stage_선언의_표와_열만_읽는다(name: str) -> None:
+    spec = SOURCE_BY_NAME[name]
+    rule = _stage_rules().get(spec.relation)
+    assert rule is not None, f"stage 선언에 없는 표 — source={name} relation={spec.relation}"
+    columns = (
+        {column.name for column in rule.columns}
+        | {extra.name for extra in rule.extras}
+        | _STAGE_BUILD_COLUMNS
+    )
+    expressions = (
+        spec.key_column,
+        spec.available_expr,
+        spec.content_expr,
+        spec.row_filter or "",
+        spec.pick_order or "",
+        # 격자 질의만 날짜 열을 읽는다(`date_expr` 가 없으면 표의 `date` 열)
+        spec.date_expr or ("date" if spec.mode is SourceMode.GRID else ""),
+        *(field.expr for field in FIELD_BY_ID.values() if field.source == name),
+    )
+    unknown = sorted(set().union(*(_identifiers(text) for text in expressions)) - columns)
+    assert unknown == [], f"stage 선언에 없는 열을 읽는다 — source={name} unknown={unknown}"
+
+
+@pytest.mark.parametrize("name", STAGE_SOURCE_NAMES)
+def test_stage_원천의_랙은_stage_공개_규칙보다_짧지_않다(name: str) -> None:
+    """stage 가 공개 시각을 모르는 표(`lag_known=False`)는 그날 값을 쓸 수 없다 — 1 세션 이상."""
+    spec = SOURCE_BY_NAME[name]
+    rule = _stage_rules()[spec.relation]
+    floor = 0 if rule.lag_known else 1
+    assert spec.lag_sessions >= floor, (
+        f"stage 원천 랙이 stage 공개 규칙보다 짧다 — source={name} lag={spec.lag_sessions} "
+        f"floor={floor} lag_known={rule.lag_known}"
+    )

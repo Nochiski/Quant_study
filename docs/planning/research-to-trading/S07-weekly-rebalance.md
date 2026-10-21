@@ -8,7 +8,7 @@
 
 | 항목 | 결정 |
 |---|---|
-| 신호 | scope_v1.0 장 마감 빌드 순위(모델 DB `model/scope@1.0`) |
+| 신호 | scope_v2.0 장 마감 빌드 순위(모델 DB `model/scope@2.0`). 메인 모델(10-11 N-47, 엑셀 주 모델)과 같다. 10-21 첫 매수만 scope_v1.0 10-20 순위로 했고 10-23 주문안부터 2.0(10-21 사용자 결정) |
 | 종목 수·비중 | 상위 10종목 동일비중. 총자산의 2%는 현금 |
 | 교체 | 상위 10에 들면 산다. 보유 종목은 30위 밖으로 밀릴 때만 판다 |
 | 시점 | 주의 마지막 거래일 장 마감 신호 → 다음 거래일 정규장. 시간외·NXT 없음 |
@@ -43,9 +43,9 @@
 
 1. `model/latest_evening.json`의 `status`가 `ok`, `basis`가 `evening`, `date`가 신호일이어야 한다.
    아니면 `not_ready`.
-2. 그 빌드의 `specs["scope@1.0"].gates`가 모두 `pass`·`warn`·`skip`이고 `excluded_specs`에 없어야 한다.
+2. 그 빌드의 `specs["scope@2.0"].gates`가 모두 `pass`·`warn`·`skip`이고 `excluded_specs`에 없어야 한다.
    아니면 `gate_failed`.
-3. `model/scope@1.0/MANIFEST.json`의 `current_build`가 같은 빌드여야 한다. `scores.parquet`의
+3. `model/scope@2.0/MANIFEST.json`의 `current_build`가 같은 빌드여야 한다. `scores.parquet`의
    `score_date`가 신호일 하나이고 종목·순위가 겹치지 않아야 한다. 아니면 `unreadable`.
 4. 기준가격은 그 빌드가 점수를 계산한 가격 판(`fi_build_id`의 `factor_inputs/fi_prices`)의 신호일
    종가다. 신호일 거래량 0 종목은 매매가 막힌 것으로 본다.

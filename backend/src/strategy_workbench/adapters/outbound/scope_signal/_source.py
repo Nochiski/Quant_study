@@ -28,7 +28,8 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     SignalSnapshot,
 )
 
-DEFAULT_MODEL_ID = "scope@1.0"
+# 메인 모델 scope_v2.0(2026-10-11 사용자 결정 N-47, 엑셀 주 모델과 같다). scope@1.0은 비교용이다.
+DEFAULT_MODEL_ID = "scope@2.0"
 # 게이트 기록 상태. warn은 통과에 경고 표시가 붙은 것이고 skip은 그 게이트가 판정하지 않은 것이다.
 _ACCEPTED_GATES = frozenset({"pass", "warn", "skip"})
 
@@ -208,8 +209,9 @@ def _universe_notes(
 ) -> tuple[dict[str, str] | None, dict[str, str] | None]:
     """점수를 계산한 판의 `fi_universe`에서 종목 이름과, 순위가 없는 종목이 빠진 이유를 읽는다.
 
-    엔진 유니버스는 그날 가격 행 · eligible · 추정치 유예 0 · 시총 하한이다. eligible 이고 신선하며
-    가격이 있는데 순위가 없으면 남은 규칙은 시총 하한이다. 읽지 못하면 이름·이유 없이 진행한다.
+    엔진 유니버스는 그날 가격 행 · eligible · 추정치 유예(1.0은 0, 2.0은 5거래일) · 시총 하한이다.
+    eligible 이고 신선하며 가격이 있는데 순위가 없으면 남은 규칙은 시총 하한이다. 읽지 못하면
+    이름·이유 없이 진행한다.
     """
     files = sorted(folder.glob("*.parquet"))
     columns = ["ticker", "name", "market_cap", "eligible", "exclude_reason", "coverage_state"]

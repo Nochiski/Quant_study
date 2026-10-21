@@ -38,7 +38,7 @@ def model_db(
     scores: list[tuple[str, int, str]] | None = None,
 ) -> Path:
     model = root / "model"
-    (model / "scope@1.0" / f"v={BUILD}").mkdir(parents=True)
+    (model / "scope@2.0" / f"v={BUILD}").mkdir(parents=True)
     pointer = {
         "status": "ok",
         "basis": "evening",
@@ -46,11 +46,11 @@ def model_db(
         "build_id": BUILD,
         "fi_build_id": PRICES,
         "excluded_specs": {},
-        "specs": {"scope@1.0": {"gates": {"MG0": {"status": "pass"}, "MG5": {"status": "skip"}}}},
+        "specs": {"scope@2.0": {"gates": {"MG0": {"status": "pass"}, "MG5": {"status": "skip"}}}},
     }
     pointer.update(latest or {})
     (model / "latest_evening.json").write_text(json.dumps(pointer))
-    (model / "scope@1.0" / "MANIFEST.json").write_text(
+    (model / "scope@2.0" / "MANIFEST.json").write_text(
         json.dumps({"current_build": manifest_build})
     )
     rows = scores or [("000001", 1, "2026-10-23"), ("000002", 2, "2026-10-23")]
@@ -62,7 +62,7 @@ def model_db(
                 "score_date": [row[2] for row in rows],
             }
         ),
-        model / "scope@1.0" / f"v={BUILD}" / "scores.parquet",
+        model / "scope@2.0" / f"v={BUILD}" / "scores.parquet",
     )
     prices = root / "factor_inputs" / "fi_prices" / f"v={PRICES}"
     prices.mkdir(parents=True)
@@ -90,7 +90,7 @@ def test_signal_reads_the_current_build_ranks_and_closes(tmp_path: Path) -> None
     assert dict(snapshot.ranks) == {"000001": 1, "000002": 2}
     assert dict(snapshot.closes_krw) == {"000001": 10_000, "000002": 20_000, "000003": 30_000}
     assert snapshot.untraded == frozenset({"000002"})
-    scores = root / "model" / "scope@1.0" / f"v={BUILD}" / "scores.parquet"
+    scores = root / "model" / "scope@2.0" / f"v={BUILD}" / "scores.parquet"
     assert snapshot.scores_sha256 == hashlib.sha256(scores.read_bytes()).hexdigest()
 
 
@@ -100,10 +100,10 @@ def test_signal_reads_the_current_build_ranks_and_closes(tmp_path: Path) -> None
         ({"latest": {"date": "2026-10-22"}}, SignalReadStatus.NOT_READY),
         ({"latest": {"status": "failed"}}, SignalReadStatus.NOT_READY),
         (
-            {"latest": {"specs": {"scope@1.0": {"gates": {"MG1": {"status": "fail"}}}}}},
+            {"latest": {"specs": {"scope@2.0": {"gates": {"MG1": {"status": "fail"}}}}}},
             SignalReadStatus.GATE_FAILED,
         ),
-        ({"latest": {"excluded_specs": {"scope@1.0": "gate"}}}, SignalReadStatus.GATE_FAILED),
+        ({"latest": {"excluded_specs": {"scope@2.0": "gate"}}}, SignalReadStatus.GATE_FAILED),
         ({"manifest_build": "e_older"}, SignalReadStatus.UNREADABLE),
         ({"scores": [("000001", 1, "2026-10-22")]}, SignalReadStatus.UNREADABLE),
         (
@@ -169,7 +169,7 @@ def _record() -> PlanRecord:
     return PlanRecord(
         "weekly-2026-10-23",
         datetime(2026, 10, 23, 16, 10, tzinfo=KST),
-        SignalRecord("scope@1.0", BUILD, "2026-10-23", "ab" * 32, PRICES, (("000001", 1),)),
+        SignalRecord("scope@2.0", BUILD, "2026-10-23", "ab" * 32, PRICES, (("000001", 1),)),
         AccountState(1_000_000, {"000003": 10}, None, "실행 원장 없음"),
         plan,
     )
@@ -201,7 +201,7 @@ def test_plan_store_rejects_path_like_ids(tmp_path: Path) -> None:
 
 def test_signal_carries_the_previous_build_ranks_for_the_gap_check(tmp_path: Path) -> None:
     root = model_db(tmp_path)
-    model = root / "model" / "scope@1.0"
+    model = root / "model" / "scope@2.0"
     (model / "v=e_prev").mkdir()
     pq.write_table(
         pa.table(

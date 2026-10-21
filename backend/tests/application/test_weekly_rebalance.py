@@ -115,6 +115,19 @@ def test_prepare_records_the_signal_and_plan_once() -> None:
     assert signals.calls == 1  # 남긴 주문안이 있으면 신호를 다시 읽지 않는다
 
 
+def test_plan_keeps_names_of_its_lines_and_why_holdings_left_the_signal() -> None:
+    names = {"000001": "가", "000002": "나", "000003": "다", "000004": "라", "000009": "보유"}
+    signal = snapshot(names=names, exclusion_reasons={"000009": "시총 하한 미만(시총 800억)"})
+    account = Account(AccountState(2_000_000, {"000009": 100}, None))
+    record = service(Signals(SignalRead(SignalReadStatus.OK, signal)), account).prepare(DAY).record
+    assert record is not None
+    assert dict(record.signal.names) == {
+        code: names[code] for code in ("000001", "000002", "000003", "000009")
+    }
+    [held] = [line for line in record.plan.lines if line.symbol == "000009"]
+    assert held.review and held.reason.startswith("신호에서 빠짐 — 시총 하한 미만(시총 800억)")
+
+
 def test_untraded_names_are_blocked() -> None:
     signals = Signals(SignalRead(SignalReadStatus.OK, snapshot(untraded=frozenset({"000001"}))))
     record = service(signals).prepare(DAY).record

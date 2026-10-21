@@ -123,6 +123,7 @@ class WeeklyRebalanceService:
                 cash_krw=account.cash_krw,
                 blocked=dict.fromkeys(signal.untraded, UNTRADED_REASON),
                 previous_ranks=signal.previous_ranks,
+                missing_reasons=signal.exclusion_reasons,
             )
         except ValueError as error:
             return PrepareResult(
@@ -141,6 +142,11 @@ class WeeklyRebalanceService:
                 tuple(sorted(signal.ranks.items(), key=lambda item: item[1])),
                 signal.previous_build_id,
                 anomalies,
+                tuple(
+                    (line.symbol, signal.names[line.symbol])
+                    for line in plan.lines
+                    if signal.names is not None and line.symbol in signal.names
+                ),
             ),
             account,
             plan,

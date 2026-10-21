@@ -5,13 +5,16 @@ from __future__ import annotations
 import csv
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import time
+from dataclasses import dataclass, field
+from datetime import date, time
 from pathlib import Path
 
 import pytest
 
 from strategy_workbench.adapters.inbound.weekly_rebalance_cli.facade.command import (
     CliFactories,
+    ServiceFactory,
+    render_telegram,
     run_cli,
 )
 from strategy_workbench.adapters.outbound.execution_sqlite.facade.ledger import (
@@ -20,6 +23,11 @@ from strategy_workbench.adapters.outbound.execution_sqlite.facade.ledger import 
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import KiwoomCredentials
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountState,
+    NoticeError,
+    PlanRecord,
+    SignalRead,
+    SignalReadStatus,
+    SignalRecord,
     WeeklyExecutionService,
     WeeklyRebalanceService,
 )
@@ -28,9 +36,9 @@ from strategy_workbench.bootstrap.weekly_rebalance.facade.command import (
     build_weekly_rebalance,
 )
 from strategy_workbench.domain.order_execution.facade.orders import Account as BrokerAccount
-from strategy_workbench.domain.rebalance.facade.rebalance import RebalancePolicy
+from strategy_workbench.domain.rebalance.facade.rebalance import RebalancePolicy, plan_rebalance
 from tests.application.test_weekly_execution import PLAN, rig
-from tests.application.test_weekly_rebalance import NOW, Account, Plans, Signals
+from tests.application.test_weekly_rebalance import NOW, Account, Plans, Signals, snapshot
 from tests.test_adapters_kiwoom_mock import ACCOUNT, APP_KEY, SECRET, SYMBOL, Clock, FakeKiwoom
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -50,7 +58,7 @@ def test_cli_prepares_shows_and_approves_once(
             policy=RebalancePolicy(slots=3, keep_rank=5),
         )
 
-    factories = CliFactories(factory, _no_execution, _no_recorder)
+    factories = CliFactories(factory, _no_execution, _no_recorder, _no_notifier)
     common = ["--workdir", str(tmp_path)]
     prepare = ["prepare", *common, "--model-root", str(tmp_path), "--signal-date", "2026-10-23"]
     assert run_cli(factories, prepare) == 0
@@ -69,6 +77,10 @@ def test_cli_prepares_shows_and_approves_once(
     shown = capsys.readouterr().out
     assert "승인: 동민" in shown and "이번 주 매매에서 뺀 종목: 000002" in shown
     assert run_cli(factories, ["show", *common, "--plan", "weekly-2026-10-30"]) == 1
+
+
+def _no_notifier() -> Notices:
+    raise AssertionError("this command must not send a notice")
 
 
 def _no_recorder(workdir: Path, until: time) -> int:
@@ -101,7 +113,7 @@ def test_cli_executes_closes_reports_and_exports(
         recorded.append(until)
         return 7
 
-    factories = CliFactories(planning, execution, recorder)
+    factories = CliFactories(planning, execution, recorder, _no_notifier)
     common = ["--workdir", str(tmp_path)]
     assert run_cli(factories, ["execute", *common, "--plan", PLAN, "--phase", "open"]) == 0
     assert "보내지 않음" in capsys.readouterr().out and r.gateway.submitted == []
@@ -165,3 +177,135 @@ def test_account_source_reconciles_an_existing_ledger(tmp_path: Path) -> None:
 def test_workdir_inside_the_repository_is_refused() -> None:
     with pytest.raises(SystemExit):
         build_weekly_rebalance(REPOSITORY_ROOT / "backend" / ".weekly", None)
+
+
+@dataclass
+class Notices:
+    sent: list[str] = field(default_factory=list)
+    error: str | None = None
+
+    def send(self, html: str) -> None:
+        if self.error is not None:
+            raise NoticeError(self.error)
+        self.sent.append(html)
+
+
+def test_telegram_plan_follows_the_confirmed_template() -> None:
+    names = {"000001": "알멕", "000002": "대원미디어", "000003": "HMM"}
+    names |= {"000004": "에이블씨엔씨", "000005": "한솔<홀딩스>"}
+    plan = plan_rebalance(
+        RebalancePolicy(slots=3, keep_rank=5),
+        ranks={"000003": 1, "000004": 2, "000005": 3, "000002": 7},
+        holdings={"000001": 166, "000002": 100, "000003": 300},
+        prices=dict.fromkeys(names, 10_000),
+        cash_krw=4_340_000,
+        blocked={},
+        previous_ranks={"000001": 4},
+        missing_reasons={"000001": "WISE 추정치 공백"},
+    )
+    record = PlanRecord(
+        "weekly-2026-10-23",
+        NOW,
+        SignalRecord(
+            "scope@1.0", "e_b", "2026-10-23", "ab" * 32, "e_p", (), names=tuple(names.items())
+        ),
+        AccountState(4_340_000, {}, None),
+        plan,
+    )
+    assert render_telegram(record, date(2026, 10, 26)) == (
+        "<b>S07 주문지</b> · 10/26(월) 실행\n"
+        "<i>scope_v1.0 · 10/23(금) 장 마감 신호</i>\n\n"
+        "<b>▼ 매도 2</b>\n"
+        "<blockquote><b>알멕</b> 000001 · 166주 · 166만\n"
+        "⚠️ 신호에서 빠짐 · WISE 추정치 공백 (직전 빌드 4위)\n\n"
+        "<b>대원미디어</b> 000002 · 100주 · 100만\n"
+        "순위 7위</blockquote>\n\n"
+        "<b>▲ 매수 2</b>\n"
+        "<blockquote><b>에이블씨엔씨</b> 000004 · 325주 · 325만\n"
+        "<b>한솔&lt;홀딩스&gt;</b> 000005 · 325주 · 325만</blockquote>\n\n"
+        "<b>유지 1</b>\n<blockquote>HMM</blockquote>\n\n"
+        "총자산 1,000만 · 종목당 327만\n"
+        "<b>⚠️ 확인 1건</b> — 알멕을 이번 주 매매에서 뺄지 승인 때 알려 주세요."
+    )
+
+
+def _planner(signals: Signals, account: Account, plans: Plans) -> ServiceFactory:
+    def factory(workdir: Path, model_root: Path | None) -> WeeklyRebalanceService:
+        return WeeklyRebalanceService(
+            signals, account, plans, now=lambda: NOW, policy=RebalancePolicy(slots=3, keep_rank=5)
+        )
+
+    return factory
+
+
+def test_prepare_notify_sends_the_plan_or_why_it_was_not_made(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    notices = Notices()
+    common = ["--workdir", str(tmp_path), "--model-root", str(tmp_path)]
+    prepare = ["prepare", *common, "--signal-date", "2026-10-23"]
+    notify = ["--notify", "--execute-on", "2026-10-26"]
+
+    plans = Plans()
+    sent = CliFactories(
+        _planner(Signals(), Account(), plans), _no_execution, _no_recorder, lambda: notices
+    )
+    assert run_cli(sent, [*prepare, *notify]) == 0
+    assert notices.sent[-1].startswith("<b>S07 주문지</b> · 10/26(월) 실행")
+    assert "<b>▲ 매수 3</b>" in notices.sent[-1]
+    with pytest.raises(SystemExit):
+        run_cli(sent, [*prepare, "--notify"])  # 실행일 없이는 보내지 않는다
+
+    suspect = Signals(
+        SignalRead(
+            SignalReadStatus.OK,
+            snapshot(previous_build_id="e_prev", previous_ranks={"000007": 1, "000008": 2}),
+        )
+    )
+    held = CliFactories(
+        _planner(suspect, Account(), Plans()), _no_execution, _no_recorder, lambda: notices
+    )
+    assert run_cli(held, [*prepare, *notify]) == 1
+    assert notices.sent[-1].startswith("<b>S07 주문지 보류</b> · 10/23(금) 장 마감 신호")
+    assert "상위 30위 중 2종목이 사라짐" in notices.sent[-1]
+
+    broken = Account(error="kiwoom account unavailable — file=/home/someone/x")
+    failed = CliFactories(
+        _planner(Signals(), broken, Plans()), _no_execution, _no_recorder, lambda: notices
+    )
+    assert run_cli(failed, [*prepare, *notify]) == 1
+    assert "키움 모의 계좌를 읽지 못함 (account_unavailable)" in notices.sent[-1]
+    assert "/home" not in notices.sent[-1]  # 원문 진단은 서버 기록에만
+
+    down = Notices(error="telegram unreachable — error=URLError")
+    unsent = CliFactories(
+        _planner(Signals(), Account(), Plans()), _no_execution, _no_recorder, lambda: down
+    )
+    capsys.readouterr()
+    assert run_cli(unsent, [*prepare, *notify]) == 1  # 주문안은 남고 알림 실패는 드러낸다
+    assert "[notice_failed] telegram unreachable" in capsys.readouterr().out
+
+
+def test_notify_plan_prints_without_sending(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    notices = Notices()
+    plans = Plans()
+    factories = CliFactories(
+        _planner(Signals(), Account(), plans), _no_execution, _no_recorder, lambda: notices
+    )
+    common = ["--workdir", str(tmp_path)]
+    assert (
+        run_cli(
+            factories,
+            ["prepare", *common, "--model-root", str(tmp_path), "--signal-date", "2026-10-23"],
+        )
+        == 0
+    )
+    capsys.readouterr()
+    show = ["notify-plan", *common, "--plan", "weekly-2026-10-23", "--execute-on", "2026-10-26"]
+    assert run_cli(factories, [*show, "--print"]) == 0
+    assert "<b>S07 주문지</b>" in capsys.readouterr().out and notices.sent == []
+    assert run_cli(factories, show) == 0 and len(notices.sent) == 1
+    missing = ["notify-plan", *common, "--plan", "weekly-2026-10-30", "--execute-on", "2026-11-02"]
+    assert run_cli(factories, missing) == 1

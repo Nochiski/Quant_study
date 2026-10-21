@@ -121,6 +121,38 @@ def test_signal_refuses_stale_failed_or_inconsistent_builds(
     assert read.snapshot is None
 
 
+def test_signal_reads_names_and_why_unranked_names_left(tmp_path: Path) -> None:
+    root = model_db(tmp_path)
+    universe = root / "factor_inputs" / "fi_universe" / f"v={PRICES}"
+    universe.mkdir(parents=True)
+    rows = [
+        ("000001", "순위 있음", 5_000.0, True, None, "fresh"),
+        ("000003", "시총 작음", 812.4, True, None, "fresh"),
+        ("000004", "추정치 끊김", 3_000.0, False, "estimates_lapsed", "lapsed"),
+        ("000005", "유예 중", 3_000.0, True, None, "grace"),
+        ("000006", "가격 없음", 3_000.0, True, None, "fresh"),
+        ("000007", "새 사유", 3_000.0, False, "new_rule", "fresh"),
+    ]
+    columns = ["ticker", "name", "market_cap", "eligible", "exclude_reason", "coverage_state"]
+    pq.write_table(
+        pa.table({name: [row[i] for row in rows] for i, name in enumerate(columns)}),
+        universe / "part0.parquet",
+    )
+    snapshot = ScopeSignalSource(root).read(DAY).snapshot
+    assert snapshot is not None and snapshot.names is not None
+    assert snapshot.names["000004"] == "추정치 끊김"
+    assert dict(snapshot.exclusion_reasons or {}) == {
+        "000003": "시총 하한 미만(시총 812억)",
+        "000004": "WISE 추정치 공백",
+        "000005": "WISE 추정치 공백(유예 중)",
+        "000006": "가격 없음(거래정지 등)",
+        "000007": "유니버스 제외(new_rule)",
+    }
+    # 유니버스 판이 없으면 이름·이유 없이 진행한다
+    bare = ScopeSignalSource(model_db(tmp_path / "bare")).read(DAY).snapshot
+    assert bare is not None and bare.names is None and bare.exclusion_reasons is None
+
+
 def test_missing_model_db_is_unreadable(tmp_path: Path) -> None:
     assert ScopeSignalSource(tmp_path).read(DAY).status is SignalReadStatus.UNREADABLE
 
@@ -199,7 +231,10 @@ def test_plan_store_keeps_review_flags_anomalies_and_no_trade(tmp_path: Path) ->
         previous_ranks={"000009": 2},
     )
     signal = replace(
-        base.signal, previous_build_id="e_prev", anomalies=("상위 30위 중 2종목이 사라짐",)
+        base.signal,
+        previous_build_id="e_prev",
+        anomalies=("상위 30위 중 2종목이 사라짐",),
+        names=(("000001", "가"), ("000009", "보유")),
     )
     record = replace(base, signal=signal, plan=plan)
     store = JsonPlanStore(tmp_path)

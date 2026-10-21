@@ -99,6 +99,9 @@ class ScopeSignalSource:
             self._root / "factor_inputs" / "fi_prices" / f"v={prices_build_id}", signal_date
         )
         previous_id, previous_ranks = _previous(model_dir, manifest, build_id, signal_date)
+        names, reasons = _universe_notes(
+            self._root / "factor_inputs" / "fi_universe" / f"v={prices_build_id}", ranks, closes
+        )
         return SignalRead(
             SignalReadStatus.OK,
             SignalSnapshot(
@@ -112,6 +115,8 @@ class ScopeSignalSource:
                 prices_build_id,
                 previous_id,
                 previous_ranks,
+                names,
+                reasons,
             ),
         )
 
@@ -185,6 +190,58 @@ def _previous(
     return previous, dict(
         zip(table.column("stock_code").to_pylist(), table.column("rank").to_pylist(), strict=True)
     )
+
+
+# 유니버스 제외 사유 → 사람이 읽는 이유(factor_inputs `EXCLUDE_REASONS`)
+_EXCLUDE_TEXT = {
+    "estimates_lapsed": "WISE 추정치 공백",
+    "estimates_none": "추정치 없음",
+    "no_price": "가격 없음(거래정지 등)",
+    "corp_action_pending": "기업행위 처리 대기",
+    "sec_type": "대상 종목 유형 아님",
+    "market": "대상 시장 아님",
+}
+
+
+def _universe_notes(
+    folder: Path, ranks: dict[str, int], closes: dict[str, int]
+) -> tuple[dict[str, str] | None, dict[str, str] | None]:
+    """점수를 계산한 판의 `fi_universe`에서 종목 이름과, 순위가 없는 종목이 빠진 이유를 읽는다.
+
+    엔진 유니버스는 그날 가격 행 · eligible · 추정치 유예 0 · 시총 하한이다. eligible 이고 신선하며
+    가격이 있는데 순위가 없으면 남은 규칙은 시총 하한이다. 읽지 못하면 이름·이유 없이 진행한다.
+    """
+    files = sorted(folder.glob("*.parquet"))
+    columns = ["ticker", "name", "market_cap", "eligible", "exclude_reason", "coverage_state"]
+    try:
+        table = pa.concat_tables([pq.read_table(file, columns=columns) for file in files])
+    except (OSError, ValueError, KeyError, pa.ArrowInvalid):
+        return None, None
+    names: dict[str, str] = {}
+    reasons: dict[str, str] = {}
+    for row in table.to_pylist():
+        ticker = row["ticker"]
+        if not isinstance(ticker, str):
+            continue
+        if isinstance(row["name"], str):
+            names[ticker] = row["name"]
+        if ticker in ranks:
+            continue
+        reason = row["exclude_reason"]
+        if not row["eligible"]:
+            reasons[ticker] = _EXCLUDE_TEXT.get(str(reason), f"유니버스 제외({reason})")
+        elif row["coverage_state"] == "grace":
+            reasons[ticker] = "WISE 추정치 공백(유예 중)"
+        elif ticker not in closes:
+            reasons[ticker] = "가격 없음(거래정지 등)"
+        else:
+            cap = row["market_cap"]
+            reasons[ticker] = (
+                f"시총 하한 미만(시총 {cap:,.0f}억)"
+                if isinstance(cap, int | float)
+                else "시총 하한 미만"
+            )
+    return names, reasons
 
 
 def _closes(folder: Path, signal_date: date) -> tuple[dict[str, int], frozenset[str]]:

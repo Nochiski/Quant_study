@@ -35,6 +35,10 @@ class SignalSnapshot:
     prices_build_id: str
     previous_build_id: str | None = None
     previous_ranks: Mapping[str, int] | None = None
+    # 종목 이름, 그리고 유니버스에 있었지만 순위가 없는 종목이 빠진 이유(사람이 읽는 문장).
+    # 못 읽으면 None이다.
+    names: Mapping[str, str] | None = None
+    exclusion_reasons: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True)

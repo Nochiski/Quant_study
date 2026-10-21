@@ -10,6 +10,10 @@
     report   --workdir <폴더>
     export   --workdir <폴더>   # <작업 폴더>/exports 에 분석·복기용 CSV 4개
     record-fills --workdir <폴더> --until HH:MM   # 장중 실시간 체결 알림 기록(한 곳에서만)
+    notify-plan --workdir <폴더> --plan weekly-YYYY-MM-DD --execute-on YYYY-MM-DD [--print]
+
+`prepare --notify --execute-on <실행일>`은 만든 주문지를 텔레그램으로 보낸다. 만들지 못했으면
+보류·실패 알림을 보낸다(주문지 흐름의 알림만 보내고 로그성 알림은 보내지 않는다).
 
 `execute`는 `--send`가 있어야 주문을 보낸다. 없으면 무엇을 보낼지만 보인다. 승인한 주문안만
 보낸다(매주 승인). 주문안은 신호 날짜마다 한 번만 쓰인다.
@@ -19,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import os
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
@@ -34,19 +39,23 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     ExecuteResult,
     ExecuteStatus,
     ExecutionEvent,
+    NoticeError,
+    NoticeSender,
     Phase,
     PlanRecord,
     PrepareStatus,
     WeeklyExecutionService,
     WeeklyRebalanceService,
 )
-from strategy_workbench.domain.rebalance.facade.rebalance import RebalanceAction
+from strategy_workbench.domain.rebalance.facade.rebalance import RebalanceAction, RebalanceLine
 
 ServiceFactory = Callable[[Path, Path | None], WeeklyRebalanceService]
 # (작업 폴더, 보내는가, 승인이 필요한가) → 실행기. 끝나면 원장·연결을 닫는다.
 ExecutionFactory = Callable[[Path, bool, bool], AbstractContextManager[WeeklyExecutionService]]
 # (작업 폴더, 끝낼 시각) → 받은 체결·접수 알림 건수
 FillRecorder = Callable[[Path, time], int]
+# 주문지 알림을 보낼 곳. 보낼 때만 만든다(설정이 없으면 `NoticeError`).
+NoticeFactory = Callable[[], NoticeSender]
 
 
 @dataclass(frozen=True)
@@ -54,6 +63,7 @@ class CliFactories:
     planning: ServiceFactory
     execution: ExecutionFactory
     recorder: FillRecorder
+    notifier: NoticeFactory
 
 
 _ACTION_LABELS = {
@@ -77,6 +87,10 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="직전 빌드와 견준 데이터 누락 의심을 사람이 확인했을 때만",
     )
+    prepare.add_argument(
+        "--notify", action="store_true", help="주문지(또는 보류·실패)를 텔레그램으로 보낸다"
+    )
+    prepare.add_argument("--execute-on", type=date.fromisoformat, help="주문지에 적을 실행일")
     show = commands.add_parser("show", help="남긴 주문안과 승인 여부를 보인다")
     show.add_argument("--plan", required=True)
     approve = commands.add_parser("approve", help="주문안을 승인한다(한 번만)")
@@ -95,7 +109,11 @@ def _parser() -> argparse.ArgumentParser:
     export = commands.add_parser("export", help="분석·복기용 CSV를 <작업 폴더>/exports에 쓴다")
     fills = commands.add_parser("record-fills", help="장중 실시간 체결 알림을 기록한다")
     fills.add_argument("--until", type=time.fromisoformat, required=True, help="끝낼 시각 HH:MM")
-    for command in (prepare, show, approve, execute, close, report, export, fills):
+    notify = commands.add_parser("notify-plan", help="남긴 주문지를 텔레그램으로 보낸다")
+    notify.add_argument("--plan", required=True)
+    notify.add_argument("--execute-on", type=date.fromisoformat, required=True)
+    notify.add_argument("--print", action="store_true", help="보내지 않고 보낼 글만 보인다")
+    for command in (prepare, show, approve, execute, close, report, export, fills, notify):
         command.add_argument(
             "--workdir", type=Path, required=True, help="원장·주문안 폴더(저장소 밖)"
         )
@@ -103,7 +121,10 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.command == "prepare" and args.notify and args.execute_on is None:
+        parser.error("--notify에는 --execute-on이 필요합니다")
     if args.command == "record-fills":
         received = factories.recorder(args.workdir, args.until)
         print(f"[ok] received={received}")
@@ -119,7 +140,26 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
         if result.record is not None:
             print(render(result.record, planning.plan(result.record.plan_id)[1]))
         print(f"[{result.status.value}] {result.detail}".rstrip())
-        return 0 if result.status in (PrepareStatus.OK, PrepareStatus.EXISTS) else 1
+        made = result.status in (PrepareStatus.OK, PrepareStatus.EXISTS)
+        if args.notify:
+            text = (
+                render_telegram(result.record, args.execute_on)
+                if made and result.record is not None
+                else render_telegram_notice(result.status, args.signal_date, result.detail)
+            )
+            if not _send(factories, text):
+                return 1
+        return 0 if made else 1
+    if args.command == "notify-plan":
+        record, _ = planning.plan(args.plan)
+        if record is None:
+            print(f"[not_found] 주문안이 없습니다 — plan={args.plan}")
+            return 1
+        text = render_telegram(record, args.execute_on)
+        if args.print:
+            print(text)
+            return 0
+        return 0 if _send(factories, text) else 1
     if args.command == "show":
         record, approval = planning.plan(args.plan)
         if record is None:
@@ -130,6 +170,16 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
     result = planning.approve(args.plan, args.approver, args.note, tuple(args.no_trade))
     print(f"[{result.status.value}] plan={args.plan} {result.detail}".rstrip())
     return 0 if result.status is ApproveStatus.OK else 1
+
+
+def _send(factories: CliFactories, text: str) -> bool:
+    try:
+        factories.notifier().send(text)
+    except NoticeError as error:
+        print(f"[notice_failed] {error}")
+        return False
+    print("[notice] 텔레그램으로 보냄")
+    return True
 
 
 def _run_execution(service: WeeklyExecutionService, args: argparse.Namespace) -> int:
@@ -383,3 +433,119 @@ def render(record: PlanRecord, approval: Approval | None) -> str:
 
 def _reconciled(value: bool | None) -> str:
     return "원장 없음" if value is None else ("일치" if value else "불일치")
+
+
+_WEEKDAYS = "월화수목금토일"
+_NOTICE_REASONS = {
+    PrepareStatus.SIGNAL_UNAVAILABLE: "장 마감 신호를 읽지 못함",
+    PrepareStatus.ACCOUNT_UNAVAILABLE: "키움 모의 계좌를 읽지 못함",
+    PrepareStatus.NOT_RECONCILED: "실행 원장과 키움 계좌가 맞지 않음",
+    PrepareStatus.INVALID_INPUT: "주문안 계산 입력이 맞지 않음",
+}
+
+
+def render_telegram(record: PlanRecord, execute_on: date) -> str:
+    """텔레그램 주문지(HTML, 2026-10-21 사용자 확정 양식). 굵게·인용 상자만 쓴다."""
+    plan, signal = record.plan, record.signal
+    names = dict(signal.names)
+    sells: list[str] = []
+    buys: list[str] = []
+    skips: list[str] = []
+    holds: list[str] = []
+    for line in plan.lines:
+        name = _html(names.get(line.symbol, line.symbol))
+        head = f"<b>{name}</b> {line.symbol}"
+        if line.action is RebalanceAction.HOLD:
+            holds.append(name)
+            continue
+        if line.action is RebalanceAction.SKIP:
+            skips.append(f"{head}\n{_html(line.reason)}")
+            continue
+        amount = abs(line.delta_shares) * (line.reference_price_krw or 0)
+        item = f"{head} · {abs(line.delta_shares):,}주 · {_won(amount)}"
+        note = _telegram_note(line, plan.policy.keep_rank, plan.policy.slots)
+        (sells if line.delta_shares < 0 else buys).append(f"{item}\n{note}" if note else item)
+    parts = [
+        f"<b>S07 주문지</b> · {_day(execute_on)} 실행\n"
+        f"<i>{_html(signal.model_id.replace('@', '_v'))} · "
+        f"{_day(date.fromisoformat(signal.signal_date))} 장 마감 신호</i>"
+    ]
+    parts += _section(f"▼ 매도 {len(sells)}", sells)
+    parts += _section(f"▲ 매수 {len(buys)}", buys)
+    parts += _section(f"건너뜀 {len(skips)}", skips)
+    if holds:
+        parts.append(f"<b>유지 {len(holds)}</b>\n<blockquote>{' · '.join(holds)}</blockquote>")
+    if not sells and not buys:
+        parts.append("이번 주 매매 없음")
+    footer = [f"총자산 {_won(plan.equity_krw)} · 종목당 {_won(plan.target_value_krw)}"]
+    if signal.anomalies:
+        footer.append("<i>데이터 누락 의심을 확인하고 만든 주문지</i>")
+    reviews = [names.get(line.symbol, line.symbol) for line in plan.lines if line.review]
+    if reviews:
+        footer.append(
+            f"<b>⚠️ 확인 {len(reviews)}건</b> — {_html(', '.join(reviews))}"
+            f"{_object_particle(reviews[-1])} 이번 주 매매에서 뺄지 승인 때 알려 주세요."
+        )
+    parts.append("\n".join(footer))
+    return "\n\n".join(parts)
+
+
+def render_telegram_notice(status: PrepareStatus, signal_date: date, detail: str) -> str:
+    """주문지를 만들지 않았을 때의 알림. 원문 진단은 서버 기록에만 둔다(경로가 담길 수 있다)."""
+    when = f"{_day(signal_date)} 장 마감 신호"
+    if status is PrepareStatus.SIGNAL_SUSPECT:
+        return (
+            f"<b>S07 주문지 보류</b> · {when}\n"
+            f"<blockquote>데이터 누락 의심 — {_html(detail)}</blockquote>\n"
+            "확인 뒤 다시 만듭니다."
+        )
+    reason = _NOTICE_REASONS.get(status, status.value)
+    return (
+        f"<b>S07 주문지 못 만듦</b> · {when}\n"
+        f"<blockquote>{reason} ({status.value})</blockquote>\n"
+        "자세한 내용은 서버 기록에 있습니다."
+    )
+
+
+def _telegram_note(line: RebalanceLine, keep_rank: int, slots: int) -> str:
+    if line.review:
+        return "⚠️ " + _html(line.reason.replace(" — ", " · ", 1))
+    if line.action is RebalanceAction.RESIZE:
+        return "비중 조정"
+    if line.action is RebalanceAction.SELL and line.rank is not None and line.rank > keep_rank:
+        return f"순위 {line.rank}위"
+    if line.action is RebalanceAction.BUY and (line.rank or 0) <= slots:
+        return ""
+    return _html(line.reason)
+
+
+def _section(title: str, items: list[str]) -> list[str]:
+    if not items:
+        return []
+    joiner = "\n\n" if any("\n" in item for item in items) else "\n"
+    return [f"<b>{title}</b>\n<blockquote>{joiner.join(items)}</blockquote>"]
+
+
+def _won(amount_krw: int) -> str:
+    """만 원 단위로 반올림해 `1억 96만`·`963만`처럼 쓴다."""
+    man = (amount_krw + 5_000) // 10_000
+    eok, rest = divmod(man, 10_000)
+    if not eok:
+        return f"{rest:,}만"
+    return f"{eok:,}억 {rest:,}만" if rest else f"{eok:,}억"
+
+
+def _day(day: date) -> str:
+    return f"{day.month}/{day.day}({_WEEKDAYS[day.weekday()]})"
+
+
+def _object_particle(word: str) -> str:
+    """마지막 글자에 받침이 있으면 `을`, 없으면 `를`. 한글이 아니면 `을(를)`."""
+    last = word[-1:]
+    if not "가" <= last <= "힣":
+        return "을(를)"
+    return "을" if (ord(last) - ord("가")) % 28 else "를"
+
+
+def _html(text: str) -> str:
+    return html.escape(text, quote=False)

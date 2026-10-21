@@ -29,6 +29,8 @@ class SignalRecord:
     previous_build_id: str | None = None
     # 직전 빌드와 견준 데이터 누락 의심 사유. 사람이 확인하고 받아들였을 때만 주문안이 남는다.
     anomalies: tuple[str, ...] = ()
+    # 주문안 줄에 나온 종목의 이름(종목코드, 이름)
+    names: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

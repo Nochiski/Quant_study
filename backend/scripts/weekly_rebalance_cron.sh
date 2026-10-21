@@ -8,13 +8,15 @@
 #   S07_LEDGER_HOME       quant-ledger 폴더 — 휴장 판정은 그 daily.calendar 한 곳을 읽는다
 #   S07_REQUIRE_APPROVAL  1이면 승인한 주문안만 보낸다(매주 승인, 10-21 사용자 결정), 0이면 승인 없이 보낸다
 #   STRATEGY_WORKBENCH_KIWOOM_ENV_FILE · STRATEGY_WORKBENCH_KIWOOM_KEY_PAIR  키를 읽을 .env와 쌍 번호
+#   STRATEGY_WORKBENCH_TELEGRAM_ENV_FILE · _TOKEN_VAR · _CHAT_ID  주문지를 보낼 봇 토큰(.env의 이름)과 채팅
 #
 # 단계(모두 KST, 휴장일에는 아무것도 하지 않는다):
 #   fills    08:55  장중 실시간 체결 알림 기록(15:35까지)
 #   open     09:05  직전 거래일 주문안이 있으면 전 종목을 낸다(매도 먼저)
 #   chase    09:15~11:30 10분마다  잔량을 취소하고 그때 2호가로 다시 낸다(11:30 주문은 장 마감까지)
 #   close    15:40  장 마감 대사·하루 기록·키움 원본
-#   prepare  15:45  그 주 마지막 거래일이면 장 마감 빌드가 끝난 것을 확인한 뒤 주문안을 만든다
+#   prepare  15:45  그 주 마지막 거래일이면 장 마감 빌드가 끝난 것을 확인한 뒤 주문안을 만들고
+#                   텔레그램으로 주문지를 보낸다(만들지 못했으면 보류·실패 알림)
 # 휴장 판정을 할 수 없으면(연도 파일 부재 등) 휴장으로 위장하지 않고 실패한다.
 set -euo pipefail
 
@@ -28,7 +30,7 @@ TODAY="$(TZ=Asia/Seoul date +%F)"
 
 log() { echo "[$(TZ=Asia/Seoul date '+%F %T')] [$PHASE] $*"; }
 
-calendar() {  # calendar trading|week_end|prev → stdout
+calendar() {  # calendar trading|week_end|prev|next → stdout
   (cd "$S07_LEDGER_HOME" && PYTHONPATH=src .venv/bin/python - "$1" "$TODAY" <<'PY'
 import datetime as dt
 import sys
@@ -56,6 +58,8 @@ elif question == "week_end":
     print("yes" if last else "no")
 elif question == "prev":
     print(cal.prev_trading_day(today).isoformat())
+elif question == "next":
+    print(next_trading_day(today).isoformat())
 else:
     raise SystemExit(f"unknown question {question}")
 PY
@@ -99,15 +103,18 @@ case "$PHASE" in
       exit 0
     fi
     LATEST="$S07_MODEL_DB/model/latest_evening.json"
-    # 장 마감 빌드가 끝난 것을 확인하고 잇는다. 날이 바뀌기 전까지 1분마다 본다.
+    # 장 마감 빌드가 끝난 것을 확인하고 잇는다. 23시까지 1분마다 보고, 그때도 없으면 prepare가
+    # 신호를 읽지 못한 것으로 끝나며 실패 알림을 보낸다.
     until python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("status")=="ok" and d.get("date")==sys.argv[2] else 1)' "$LATEST" "$TODAY"; do
       if [ "$(TZ=Asia/Seoul date +%H)" -ge 23 ]; then
-        log "오늘 장 마감 빌드가 끝나지 않음 — 주문안을 만들지 못함"
-        exit 1
+        log "오늘 장 마감 빌드가 끝나지 않음"
+        break
       fi
       sleep 60
     done
-    wr prepare --workdir "$S07_WORKDIR" --model-root "$S07_MODEL_DB" --signal-date "$TODAY"
+    NEXT="$(calendar next)"
+    wr prepare --workdir "$S07_WORKDIR" --model-root "$S07_MODEL_DB" --signal-date "$TODAY" \
+      --notify --execute-on "$NEXT"
     ;;
   *)
     log "알 수 없는 단계"

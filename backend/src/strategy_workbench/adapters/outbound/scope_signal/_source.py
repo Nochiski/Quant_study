@@ -87,7 +87,8 @@ class ScopeSignalSource:
                 f"failed={failed or 'no gates'}",
             )
         model_dir = self._root / "model" / self._model_id
-        current = _text(_json(model_dir / "MANIFEST.json"), "current_build")
+        manifest = _json(model_dir / "MANIFEST.json")
+        current = _text(manifest, "current_build")
         if current != build_id:
             raise _Unreadable(
                 f"model manifest points elsewhere — {identity} latest={build_id} manifest={current}"
@@ -97,6 +98,7 @@ class ScopeSignalSource:
         closes, untraded = _closes(
             self._root / "factor_inputs" / "fi_prices" / f"v={prices_build_id}", signal_date
         )
+        previous_id, previous_ranks = _previous(model_dir, manifest, build_id, signal_date)
         return SignalRead(
             SignalReadStatus.OK,
             SignalSnapshot(
@@ -108,6 +110,8 @@ class ScopeSignalSource:
                 untraded,
                 hashlib.sha256(scores_path.read_bytes()).hexdigest(),
                 prices_build_id,
+                previous_id,
+                previous_ranks,
             ),
         )
 
@@ -151,6 +155,36 @@ def _ranks(path: Path, signal_date: date) -> dict[str, int]:
     if len(set(ranks.values())) != len(ranks):
         raise _Unreadable(f"ranks are not unique — build={path.parent.name} n={len(ranks)}")
     return ranks
+
+
+def _previous(
+    model_dir: Path, manifest: dict[str, object], build_id: str, signal_date: date
+) -> tuple[str | None, dict[str, int] | None]:
+    """MANIFEST 빌드 목록에서 현재 빌드 바로 앞 판의 순위. 없거나 읽지 못하면 점검을 건너뛴다."""
+    builds = manifest.get("builds")
+    ids = (
+        [b.get("build_id") for b in builds if isinstance(b, dict)]
+        if isinstance(builds, list)
+        else []
+    )
+    if build_id not in ids or ids.index(build_id) == 0:
+        return None, None
+    previous = ids[ids.index(build_id) - 1]
+    if not isinstance(previous, str):
+        return None, None
+    try:
+        table = pq.read_table(
+            model_dir / f"v={previous}" / "scores.parquet",
+            columns=["stock_code", "rank", "score_date"],
+        )
+    except (OSError, ValueError, KeyError):
+        return previous, None
+    dates = set(table.column("score_date").to_pylist())
+    if len(dates) != 1 or not str(next(iter(dates))) < signal_date.isoformat():
+        return previous, None
+    return previous, dict(
+        zip(table.column("stock_code").to_pylist(), table.column("rank").to_pylist(), strict=True)
+    )
 
 
 def _closes(folder: Path, signal_date: date) -> tuple[dict[str, int], frozenset[str]]:

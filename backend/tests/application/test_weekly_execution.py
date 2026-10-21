@@ -352,3 +352,16 @@ def test_close_records_shortfall_missed_cost_and_raw_evidence() -> None:
     assert record.equity_krw == r.gateway.cash + 50 * 10_100 + 100 * 10_050
     assert r.log.raws[MONDAY.date()]["kt00007"]
     assert r.service.days() == (record,)
+
+
+def test_no_trade_symbols_from_the_approval_are_neither_bought_nor_sold() -> None:
+    r = rig(approved=False)
+    r.plans.save_approval(PLAN, Approval(MONDAY, "동민", no_trade=("00000A", "00000E")))
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    assert {o.symbol for o in r.gateway.submitted} == {"00000B"}
+    assert any(e.kind == "no_trade" for e in r.log.events_)
+    r.service.execute(PLAN, Phase.CHASE, send=True)
+    assert {o.symbol for o in r.gateway.submitted} == {"00000B"}
+    r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
+    record = r.service.close().record
+    assert record is not None and {o.symbol for o in record.orders} == {"00000B"}

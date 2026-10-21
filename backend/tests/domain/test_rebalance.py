@@ -9,6 +9,7 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
     RebalancePlan,
     RebalancePolicy,
     plan_rebalance,
+    signal_anomalies,
 )
 
 POLICY = RebalancePolicy(slots=3, keep_rank=5)
@@ -166,3 +167,30 @@ def test_invalid_inputs_are_rejected(
 def test_policy_rejects_a_buffer_tighter_than_the_slots() -> None:
     with pytest.raises(ValueError):
         RebalancePolicy(slots=10, keep_rank=5)
+
+
+def test_held_name_missing_from_the_signal_is_sold_but_flagged_for_review() -> None:
+    plan = plan_rebalance(
+        POLICY,
+        ranks={"000001": 1},
+        holdings={"000009": 10},
+        prices={"000001": 10_000, "000009": 10_000},
+        cash_krw=0,
+        blocked={},
+        previous_ranks={"000009": 25},
+    )
+    [line] = [line for line in plan.lines if line.symbol == "000009"]
+    assert (line.action, line.target_shares, line.review) == (RebalanceAction.SELL, 0, True)
+    assert "직전 빌드 25위" in line.reason
+    assert not any(other.review for other in plan.lines if other.symbol != "000009")
+
+
+def test_signal_anomalies_flag_bulk_disappearance_from_the_top() -> None:
+    previous = {f"{index:06d}": index for index in range(1, 101)}
+    one_gone = {code: rank for code, rank in previous.items() if code != "000003"}
+    assert signal_anomalies(one_gone, previous) == ()
+    two_gone = {code: rank for code, rank in one_gone.items() if code != "000012"}
+    [reason] = signal_anomalies(two_gone, previous)
+    assert "2종목" in reason and "000003" in reason and "000012" in reason
+    shrunk = {code: rank for code, rank in previous.items() if rank <= 30 or rank > 34}
+    assert "100 → 96" in signal_anomalies(shrunk, previous)[0]  # 4% 감소, 상위 30은 그대로

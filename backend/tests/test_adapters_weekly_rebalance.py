@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import stat
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -164,3 +165,46 @@ def test_plan_store_round_trips_and_never_overwrites(tmp_path: Path) -> None:
 def test_plan_store_rejects_path_like_ids(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         JsonPlanStore(tmp_path).load("../escape")
+
+
+def test_signal_carries_the_previous_build_ranks_for_the_gap_check(tmp_path: Path) -> None:
+    root = model_db(tmp_path)
+    model = root / "model" / "scope@1.0"
+    (model / "v=e_prev").mkdir()
+    pq.write_table(
+        pa.table(
+            {"stock_code": ["000001", "000009"], "rank": [2, 1], "score_date": ["2026-10-22"] * 2}
+        ),
+        model / "v=e_prev" / "scores.parquet",
+    )
+    builds = [{"build_id": "e_prev"}, {"build_id": BUILD}]
+    (model / "MANIFEST.json").write_text(json.dumps({"current_build": BUILD, "builds": builds}))
+    snapshot = ScopeSignalSource(root).read(DAY).snapshot
+    assert snapshot is not None and snapshot.previous_build_id == "e_prev"
+    assert dict(snapshot.previous_ranks or {}) == {"000001": 2, "000009": 1}
+    # 직전 빌드가 없으면 점검을 건너뛴다
+    fresh = ScopeSignalSource(model_db(tmp_path / "fresh")).read(DAY).snapshot
+    assert fresh is not None and fresh.previous_ranks is None
+
+
+def test_plan_store_keeps_review_flags_anomalies_and_no_trade(tmp_path: Path) -> None:
+    base = _record()
+    plan = plan_rebalance(
+        RebalancePolicy(slots=2, keep_rank=3),
+        ranks={"000001": 1},
+        holdings={"000009": 5},
+        prices={"000001": 10_000, "000009": 10_000},
+        cash_krw=0,
+        blocked={},
+        previous_ranks={"000009": 2},
+    )
+    signal = replace(
+        base.signal, previous_build_id="e_prev", anomalies=("상위 30위 중 2종목이 사라짐",)
+    )
+    record = replace(base, signal=signal, plan=plan)
+    store = JsonPlanStore(tmp_path)
+    store.save(record)
+    assert store.load(record.plan_id) == record
+    approval = Approval(datetime(2026, 10, 23, 17, 0, tzinfo=KST), "동민", "", ("000009",))
+    store.save_approval(record.plan_id, approval)
+    assert store.approval(record.plan_id) == approval

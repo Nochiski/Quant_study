@@ -54,6 +54,7 @@ class JsonPlanStore:
                 "approved_at": approval.approved_at.isoformat(),
                 "approver": approval.approver,
                 "note": approval.note,
+                "no_trade": list(approval.no_trade),
             },
         )
 
@@ -66,6 +67,7 @@ class JsonPlanStore:
             datetime.fromisoformat(str(value["approved_at"])),
             str(value["approver"]),
             str(value.get("note", "")),
+            _strings(value.get("no_trade")),
         )
 
     def plan_ids(self) -> tuple[str, ...]:
@@ -123,6 +125,8 @@ def _encode_plan(record: PlanRecord) -> dict[str, object]:
             "scores_sha256": signal.scores_sha256,
             "prices_build_id": signal.prices_build_id,
             "ranks": [[symbol, rank] for symbol, rank in signal.ranks],
+            "previous_build_id": signal.previous_build_id,
+            "anomalies": list(signal.anomalies),
         },
         "account": {
             "cash_krw": account.cash_krw,
@@ -150,6 +154,7 @@ def _encode_plan(record: PlanRecord) -> dict[str, object]:
                     "target_shares": line.target_shares,
                     "reference_price_krw": line.reference_price_krw,
                     "reason": line.reason,
+                    "review": line.review,
                 }
                 for line in plan.lines
             ],
@@ -171,6 +176,8 @@ def _decode_plan(value: dict[str, object]) -> PlanRecord:
             str(signal["scores_sha256"]),
             str(signal["prices_build_id"]),
             tuple((str(pair[0]), _int(pair[1], "rank")) for pair in _list(signal, "ranks")),
+            None if signal.get("previous_build_id") is None else str(signal["previous_build_id"]),
+            _strings(signal.get("anomalies")),
         ),
         AccountState(
             _int(account["cash_krw"], "cash_krw"),
@@ -203,7 +210,12 @@ def _line(value: object) -> RebalanceLine:
         _int(value["target_shares"], "target_shares"),
         None if price is None else _int(price, "reference_price_krw"),
         str(value["reason"]),
+        bool(value.get("review", False)),
     )
+
+
+def _strings(value: object) -> tuple[str, ...]:
+    return tuple(str(item) for item in value) if isinstance(value, list) else ()
 
 
 def _int(value: object, field: str) -> int:

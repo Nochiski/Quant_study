@@ -26,6 +26,9 @@ class SignalRecord:
     scores_sha256: str
     prices_build_id: str
     ranks: tuple[tuple[str, int], ...]
+    previous_build_id: str | None = None
+    # 직전 빌드와 견준 데이터 누락 의심 사유. 사람이 확인하고 받아들였을 때만 주문안이 남는다.
+    anomalies: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -39,9 +42,12 @@ class PlanRecord:
 
 @dataclass(frozen=True)
 class Approval:
+    """`no_trade`는 승인하며 이번 주 매매에서 뺀 종목이다(사는 것도 파는 것도 하지 않는다)."""
+
     approved_at: datetime
     approver: str
     note: str = ""
+    no_trade: tuple[str, ...] = ()
 
 
 class PlanStore(Protocol):

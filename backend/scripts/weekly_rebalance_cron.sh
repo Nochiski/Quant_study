@@ -6,7 +6,7 @@
 #   S07_WORKDIR           원장·주문안·기록 폴더
 #   S07_MODEL_DB          모델 DB 폴더(quant-ledger data/model_db)
 #   S07_LEDGER_HOME       quant-ledger 폴더 — 휴장 판정은 그 daily.calendar 한 곳을 읽는다
-#   S07_REQUIRE_APPROVAL  1이면 승인한 주문안만 보낸다(첫 4주), 0이면 승인 없이 보낸다
+#   S07_REQUIRE_APPROVAL  1이면 승인한 주문안만 보낸다(매주 승인, 10-21 사용자 결정), 0이면 승인 없이 보낸다
 #   STRATEGY_WORKBENCH_KIWOOM_ENV_FILE · STRATEGY_WORKBENCH_KIWOOM_KEY_PAIR  키를 읽을 .env와 쌍 번호
 #
 # 단계(모두 KST, 휴장일에는 아무것도 하지 않는다):

@@ -12,6 +12,7 @@ from strategy_workbench.domain.rebalance._model import (
     RebalancePlan,
     RebalancePolicy,
     plan_rebalance,
+    signal_anomalies,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "missed_krw",
     "plan_rebalance",
     "shortfall_bp",
+    "signal_anomalies",
 ]

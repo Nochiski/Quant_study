@@ -1,8 +1,9 @@
 """주간 리밸런싱(S07) 명령줄. 입력 해석과 사람이 읽을 출력만 맡는다.
 
-    prepare  --workdir <폴더> --model-root <모델 DB> --signal-date YYYY-MM-DD
+    prepare  --workdir <폴더> --model-root <모델 DB> --signal-date YYYY-MM-DD [--accept-anomalies]
     show     --workdir <폴더> --plan weekly-YYYY-MM-DD
     approve  --workdir <폴더> --plan weekly-YYYY-MM-DD --approver <이름> [--note <메모>]
+             [--no-trade <종목> ...]   # 이번 주 매매에서 뺄 종목
     execute  --workdir <폴더> --plan weekly-YYYY-MM-DD --phase open|chase [--send]
              [--without-approval]
     close    --workdir <폴더> [--plan weekly-YYYY-MM-DD]
@@ -10,8 +11,8 @@
     export   --workdir <폴더>   # <작업 폴더>/exports 에 분석·복기용 CSV 4개
     record-fills --workdir <폴더> --until HH:MM   # 장중 실시간 체결 알림 기록(한 곳에서만)
 
-`execute`는 `--send`가 있어야 주문을 보낸다. 없으면 무엇을 보낼지만 보인다. 첫 4주는 승인한
-주문안만 보낸다(`--without-approval`은 그 뒤에 쓴다). 주문안은 신호 날짜마다 한 번만 쓰인다.
+`execute`는 `--send`가 있어야 주문을 보낸다. 없으면 무엇을 보낼지만 보인다. 승인한 주문안만
+보낸다(매주 승인). 주문안은 신호 날짜마다 한 번만 쓰인다.
 """
 
 from __future__ import annotations
@@ -71,12 +72,18 @@ def _parser() -> argparse.ArgumentParser:
     prepare = commands.add_parser("prepare", help="장 마감 신호로 주문안을 만들어 남긴다")
     prepare.add_argument("--model-root", type=Path, required=True, help="모델 DB 폴더(model_db)")
     prepare.add_argument("--signal-date", type=date.fromisoformat, required=True)
+    prepare.add_argument(
+        "--accept-anomalies",
+        action="store_true",
+        help="직전 빌드와 견준 데이터 누락 의심을 사람이 확인했을 때만",
+    )
     show = commands.add_parser("show", help="남긴 주문안과 승인 여부를 보인다")
     show.add_argument("--plan", required=True)
     approve = commands.add_parser("approve", help="주문안을 승인한다(한 번만)")
     approve.add_argument("--plan", required=True)
     approve.add_argument("--approver", required=True)
     approve.add_argument("--note", default="")
+    approve.add_argument("--no-trade", action="append", default=[], help="이번 주 매매에서 뺄 종목")
     execute = commands.add_parser("execute", help="주문안을 낸다(--send가 있어야 보낸다)")
     execute.add_argument("--plan", required=True)
     execute.add_argument("--phase", choices=[phase.value for phase in Phase], required=True)
@@ -108,7 +115,7 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             return _run_execution(service, args)
     planning = factories.planning(args.workdir, getattr(args, "model_root", None))
     if args.command == "prepare":
-        result = planning.prepare(args.signal_date)
+        result = planning.prepare(args.signal_date, accept_anomalies=args.accept_anomalies)
         if result.record is not None:
             print(render(result.record, planning.plan(result.record.plan_id)[1]))
         print(f"[{result.status.value}] {result.detail}".rstrip())
@@ -120,8 +127,8 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             return 1
         print(render(record, approval))
         return 0
-    result = planning.approve(args.plan, args.approver, args.note)
-    print(f"[{result.status.value}] plan={args.plan}")
+    result = planning.approve(args.plan, args.approver, args.note, tuple(args.no_trade))
+    print(f"[{result.status.value}] plan={args.plan} {result.detail}".rstrip())
     return 0 if result.status is ApproveStatus.OK else 1
 
 
@@ -334,6 +341,7 @@ def render(record: PlanRecord, approval: Approval | None) -> str:
         f"점수 지문 {signal.scores_sha256[:12]}",
         f"계좌 현금 {plan.cash_krw:,}원 · 총자산 {plan.equity_krw:,}원 · 종목당 목표 "
         f"{plan.target_value_krw:,}원 · 원장 대사 {_reconciled(record.account.reconciled)}",
+        *(f"⚠ 데이터 누락 의심을 확인하고 만든 주문안: {reason}" for reason in signal.anomalies),
         "",
         f"{'구분':<4} {'종목':<6} {'순위':>4} {'현재':>7} {'목표':>7} {'증감':>7} "
         f"{'기준가':>9} {'증감 금액':>13}  사유",
@@ -349,7 +357,7 @@ def render(record: PlanRecord, approval: Approval | None) -> str:
             f"{_ACTION_LABELS[line.action]:<4} {line.symbol:<6} "
             f"{'-' if line.rank is None else line.rank:>4} {line.current_shares:>7,} "
             f"{line.target_shares:>7,} {line.delta_shares:>+7,} {price:>9,} {amount:>+13,}  "
-            f"{line.reason}"
+            f"{'⚠확인 ' if line.review else ''}{line.reason}"
         )
     lines += [
         "",
@@ -362,6 +370,14 @@ def render(record: PlanRecord, approval: Approval | None) -> str:
             f"{approval.note}".rstrip()
         ),
     ]
+    if approval is not None and approval.no_trade:
+        lines.append(f"이번 주 매매에서 뺀 종목: {', '.join(approval.no_trade)}")
+    reviews = [line.symbol for line in plan.lines if line.review]
+    if reviews and approval is None:
+        lines.append(
+            f"⚠ 확인 필요 {len(reviews)}종목 {reviews} — 신호에서 빠졌다. 데이터 누락이면 "
+            "승인할 때 --no-trade 로 이번 주 매매에서 뺀다"
+        )
     return "\n".join(lines)
 
 

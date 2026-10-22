@@ -199,3 +199,23 @@ WICS 섹터 구성의 **주간 스냅샷**이다(토요일 03:00 KST, dt=금요�
 - `available_date = snapshot_date`, basis `convention`(공표 시각 미실측). 토요일 수집이므로 실사용 랙은 1캘린더일 이상 — 권장 랙 1세션.
 - `dataset_profile` 등재는 보류(`rules_s19.SOURCE_TABLES` 고정 목록, B-1 과 같은 사정). 선언은 `rules_s25.FIELDS` 에 있다.
 
+## 7. `wise.*` · `flow.private_fund_net_buy` — S26 WISE 3표 (2026-10-22, 플랜 `2026-10-22-equity-wise-fields`)
+
+WISE 컨센서스 매트릭스·연간 실적/추정·재무비율을 equity 표로 둔다(사용자 10-22, #608). **백필 없음 — 2026-09-01 수집분부터**다.
+랙은 전부 1 세션이다 — stage `available_date = fetched_date`(measured)를 그대로 나르고, 수집 시각이 stage 에 없어
+06:00 수집(10-20~)분도 하루 보수적으로 쓴다(플랜 D1).
+
+| 필드 | 표 · 행 필터 | 뜻 | 단위 |
+|---|---|---|---|
+| `wise.consensus_op`·`_1w_ago`·`_1m_ago`·`_3m_ago` | `consensus_matrix` acc_cd 121500 × lookback, `fy_rank = 1` | FY1(수집 달 이후 가장 가까운 결산기) 영업이익 컨센서스와 WISE 가 그날 함께 준 비교 시점 값 | 억원 |
+| `wise.consensus_ni`·`_1w_ago`·`_1m_ago`·`_3m_ago` | 같은 표 acc_cd 122710 | 같은 뜻의 순이익 | 억원 |
+| `wise.fy0_op_estimate`·`wise.fy0_ni_estimate` | `consensus_annual` `period_kind='E'` ∧ period = 수집 연도 12월 | 그날 수집분의 당해 12월기 추정 — 없으면 행이 없다(추정치 보유 여부) | 억원 |
+| `wise.per`·`wise.pbr`·`wise.dividend_yield` | `fin_ratio_wise` accode 382100·382500·431800, `NOT is_estimate` ∧ 12월기 | 최근 12월 결산 실적 비율(결산기 말 주가 기준) — 그 가운데 가장 늦은 결산기 | 배·배·% |
+| `flow.private_fund_net_buy` | `flow_daily.samo_fund_krw` | 사모펀드 순매수(키움 ∪ KIS, 다른 순매수와 같은 합집합) | KRW |
+
+- 1주·1개월·3개월 전 값은 우리 이력을 늦춰 만든 값이 아니라 WISE 가 그 수집일에 함께 준 비교값이다.
+- 매트릭스·연간 추정은 (종목, 수집일) 격자로 읽는다 — 그날 수집분에 없으면 결측이고 옛 수집분 값을 잇지 않는다.
+- 재무비율은 stage 가 같은 원문을 접어 `fetched_date` 가 그 원문을 처음 본 날이라 최신값으로 읽고 다음 판까지 값이
+  이어진다. WISE 가 종목을 더 보여 주지 않으면 옛 값이 남는다 — 이월 한도는 소비 규칙이다(플랜 D2).
+- `fy_rank` 는 compat(`mappings.py`)·fi 엔진(`v3_zscore._consensus_pair`)이 각자 쓰던 "수집 달 이후 가장 가까운 기" 규칙이다.
+  두 소비자의 읽기 전환은 TECH_DEBT B-23 의 나머지다.

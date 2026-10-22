@@ -901,6 +901,7 @@ WHERE g.${VALUE_COL} = 0
 | 25 | `opinion_daily` | 5 | ● | ●(§3-⑳) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-007) | ●(a) | ●(P01,P03) | ● | skip(no_baseline) | ●(P06) | — |
 | 26a | `coverage_daily`(S24, 09-11) | 7 | ● | ●(EG3_coverage_daily: 격자·커버 재계산·PIT 불변식) | — | — | ●(FX-24) | — | skip(no_multi_version) | ● | — | ●(기록형 `n_wise_status_mismatch`) | — |
 | 26b | `sector_snapshot`(S25, 09-20) | 1 | ● | ●(EG3_sector_snapshot: L2 유일·L1↔L2 정합·L1 어휘·L2 접두·폭·부호) | — | — | ●(FX-25) | — | skip(no_multi_version) | ● | — | — | — · 매크로 `v_sector(as_of)`(스냅샷일 ≤ as_of 최신 행 + `days_since_snapshot`)는 `ASOF_VIEWS` 밖 |
+| 26c | `consensus_matrix`·`consensus_annual`·`fin_ratio_wise`(S26, 10-22) | 1 | ● | ●(EG3_consensus_matrix: lookback 어휘·대응·fy_rank·폭 / EG3_consensus_annual: period_kind 어휘·period 폭·폭 / EG3_fin_ratio_wise: 폭, 결산기 못 읽은 칸은 기록형) | — | — | ●(FX-26-001…003) | — | skip(no_multi_version) | ● | — | — | — |
 | 26 | `opinion_broker_daily` | 5 | ● | ●(§3-㉑) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-008) | ●(a) | skip(no_multi_version) | ● | — | ●(P06) | — |
 | 27 | `dataset_profile` | 6 | ● | skip(declaration_table) | skip(dimension_table) → `EG2_dataset_profile`(P04,P06,P07,P08 + 어휘·범위) | ●(P01) | ●(FX-6-001…009,016…018) | ●(a) | skip(no_multi_version) | ● | — | ●(P06 기록형, 시총 분위) | ●⑥⑧ |
 | 28 | `factor_readiness` | 6 | ● | skip(declaration_table) | skip(dimension_table) | ●(P01) | ●(FX-6-010,011,013,015,019) | ●(a) | skip(no_multi_version) | ● | — | — | — · 판정은 **EG10**(§6) |

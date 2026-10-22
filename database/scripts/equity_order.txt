@@ -1,4 +1,4 @@
-# equity 29표 빌드·재판정 순서 (위상 정렬 — 선행 equity 표가 먼저 온다).
+# equity 33표 빌드·재판정 순서 (위상 정렬 — 선행 equity 표가 먼저 온다).
 # 정본은 이 파일 하나다. `equity_rebuild_all.sh`(빌드)·`equity_gate_all.sh`(재판정)가 함께 읽는다.
 # 두 곳에 나눠 적었더니 coverage_daily(S24, 2026-09-10 신설)가 재판정 쪽에만 빠져
 # "28표 전부 통과" 를 29표로 오독하게 만들었다(DEFECT-C09, 09-19 감사).
@@ -30,6 +30,9 @@ dividend_event
 consensus_daily
 opinion_daily
 opinion_broker_daily
+consensus_matrix
+consensus_annual
+fin_ratio_wise
 coverage_daily
 dataset_profile
 factor_readiness

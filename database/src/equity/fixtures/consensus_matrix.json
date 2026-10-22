@@ -1,0 +1,86 @@
+[
+ {
+  "id": "FX-26-001a",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "target_period": "202612",
+   "acc_cd": "121500",
+   "lookback_idx": "1"
+  },
+  "column": "value",
+  "expect": "3933479.000000",
+  "source": "stage:stg_consensus_matrix(005930, 2026-09-02) — 서버 판과 stage 절단본이 같은 원문(10-22 대조) acc_cd=121500 VAL1",
+  "note": "영업이익 FY1 현재(억원)"
+ },
+ {
+  "id": "FX-26-001b",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "target_period": "202612",
+   "acc_cd": "121500",
+   "lookback_idx": "4"
+  },
+  "column": "value",
+  "expect": "3644258.000000",
+  "source": "같은 기 VAL4",
+  "note": "영업이익 3개월 전"
+ },
+ {
+  "id": "FX-26-001c",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "target_period": "202612",
+   "acc_cd": "122710",
+   "lookback_idx": "3"
+  },
+  "column": "value",
+  "expect": "3211049.000000",
+  "source": "acc_cd=122710 VAL3",
+  "note": "순이익 1개월 전"
+ },
+ {
+  "id": "FX-26-001d",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "target_period": "202612",
+   "acc_cd": "121500",
+   "lookback_idx": "1"
+  },
+  "column": "fy_rank",
+  "expect": "1",
+  "source": "수집 달 202609 이후 첫 결산기 202612",
+  "note": "FY1"
+ },
+ {
+  "id": "FX-26-001e",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "target_period": "202712",
+   "acc_cd": "121500",
+   "lookback_idx": "1"
+  },
+  "column": "fy_rank",
+  "expect": "2",
+  "source": "다음 결산기",
+  "note": "FY2"
+ },
+ {
+  "id": "FX-26-001f",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "target_period": "202612",
+   "acc_cd": "121500",
+   "lookback_idx": "1"
+  },
+  "column": "base_date",
+  "expect": "2026-09-01",
+  "source": "같은 행 DT",
+  "note": "WISE 기준일 라벨 = 전 거래일"
+ }
+]

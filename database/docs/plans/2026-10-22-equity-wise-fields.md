@@ -6,8 +6,8 @@
 | T2 사모 순매수 필드 선언(`flow.private_fund_net_buy`) | 10-22 | 10-22 | — | T1 과 함께 | — | dataset_profile 행 |
 | T3 S19 등재(`SOURCE_TABLES` 26 → 29) | 10-22 | 10-22 | — | T1 과 함께 | — | dataset_profile 커버율 |
 | T4 서버 임시 폴더 빌드(운영 체인 밖) | 10-22 | 10-22 | 10-22 16:28~16:31 — 3표 rc 0(8초·1초·11초, RSS 최대 3.2GB, 게이트 전부 통과) · dataset_profile 98행 rc 0(1분 33초) | — | — | — |
-| T5 워크벤치 어댑터(main, #609 선언을 equity 표로) | 10-22 | — | — | PR | — | — |
-| T6 scope_v1.0 근사 YAML 재대조 | 10-22 | — | — | — | — | 상위 10 겹침 ≥ 8 |
+| T5 워크벤치 어댑터(main, #609 선언을 equity 표로) | 10-22 | 10-23 | 어댑터·계약 테스트 620 통과 | PR | — | — |
+| T6 scope_v1.0 근사 YAML 재대조 | 10-22 | 10-23 | 31거래일 상위 10 평균 8.94·최저 8·ρ 0.993 — stage 참조판과 일별로 같다 | — | — | — |
 
 ## 배경
 
@@ -84,3 +84,11 @@ YAML 에서 이름이 바뀌는 것은 사모 하나다(`kiwoom.private_fund_net
 
 1. stage WISE 표에 수집 시각(`fetched_at`)을 실으면 D1 대안(행마다 처음 쓸 세션)으로 06:00 수집분을 하루 당길 수 있다.
 2. fi·compat 를 equity 표로 옮기는 B-23 나머지.
+
+## 기록
+
+- 10-23 T6: 로컬 원장 복제(10-21 판) + 서버 임시 빌드 4표(S26 3표·dataset_profile)로 카탈로그를 다시 짓고(임시 루트라
+  EG5c 는 `--rebase-asof`), 워크벤치 어댑터(feat/workbench-wise-fields)로 근사 YAML(노드 595, 사모 필드만
+  `flow.private_fund_net_buy` 로 이름 교체)을 돌렸다. 2026-09-01~10-19 scope 31거래일 상위 10 겹침이 stage 참조판(#609)과
+  날마다 같다 — 사모 원천이 stage 키움 단독에서 flow_daily 합집합으로 바뀐 영향은 이 구간에 없다.
+

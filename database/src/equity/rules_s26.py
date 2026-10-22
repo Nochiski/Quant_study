@@ -233,7 +233,7 @@ FIELDS_ANNUAL: tuple[FieldProfile, ...] = tuple(_annual_field(metric) for metric
 FIELDS_RATIO: tuple[FieldProfile, ...] = (
     _ratio_field("per", "WISE PER(최근 12월 결산 실적)", "배"),
     _ratio_field("pbr", "WISE PBR(최근 12월 결산 실적)", "배"),
-    _ratio_field("dividend_yield", "WISE 현금배당수익률(최근 12월 결산 실적)", "%"),
+    _ratio_field("dividend_yield", "WISE 현금배당수익률(최근 12월 결산 실적)", "pct"),
 )
 
 

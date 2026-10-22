@@ -22,6 +22,7 @@ from pathlib import Path
 
 from strategy_workbench.adapters.inbound.weekly_rebalance_cli.facade.command import (
     CliFactories,
+    FillRecording,
     run_cli,
 )
 from strategy_workbench.adapters.outbound.execution_sqlite.facade.ledger import (
@@ -184,7 +185,7 @@ def open_ledger_repair(workdir: Path) -> Iterator[LedgerRepairService]:
         broker.close()
 
 
-def record_today_fills(workdir: Path, until: clock_time) -> int:
+def record_today_fills(workdir: Path, until: clock_time) -> FillRecording:
     """오늘 `until`(KST)까지 실시간 체결 알림을 `records/fills-<날짜>.jsonl`에 덧붙인다.
 
     주문하지 않는다.
@@ -197,7 +198,7 @@ def record_today_fills(workdir: Path, until: clock_time) -> int:
     )
     today = datetime.now(KST)
     try:
-        return asyncio.run(
+        result = asyncio.run(
             record_fills(
                 broker.client.session_token,
                 mock_connect(transport.ssl_context),
@@ -206,6 +207,7 @@ def record_today_fills(workdir: Path, until: clock_time) -> int:
                 lambda: datetime.now(KST),
             )
         )
+        return FillRecording(result.received, result.refused)
     finally:
         broker.close()
 

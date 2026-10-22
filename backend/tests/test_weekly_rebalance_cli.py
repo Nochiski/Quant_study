@@ -13,6 +13,7 @@ import pytest
 
 from strategy_workbench.adapters.inbound.weekly_rebalance_cli.facade.command import (
     CliFactories,
+    FillRecording,
     ServiceFactory,
     render,
     render_telegram,
@@ -86,7 +87,7 @@ def _no_notifier() -> Notices:
     raise AssertionError("this command must not send a notice")
 
 
-def _no_recorder(workdir: Path, until: time) -> int:
+def _no_recorder(workdir: Path, until: time) -> FillRecording:
     raise AssertionError("this command must not open the fill recorder")
 
 
@@ -112,9 +113,9 @@ def test_cli_executes_closes_reports_and_exports(
 
     recorded: list[time] = []
 
-    def recorder(workdir: Path, until: time) -> int:
+    def recorder(workdir: Path, until: time) -> FillRecording:
         recorded.append(until)
-        return 7
+        return FillRecording(7) if len(recorded) == 1 else FillRecording(0, "return_code=1 거절")
 
     factories = CliFactories(planning, execution, recorder, _no_notifier)
     common = ["--workdir", str(tmp_path)]
@@ -150,12 +151,40 @@ def test_cli_executes_closes_reports_and_exports(
     capsys.readouterr()
     assert run_cli(factories, ["record-fills", *common, "--until", "15:35"]) == 0
     assert recorded == [time(15, 35)] and "received=7" in capsys.readouterr().out
+    # 리뷰 #605 P3: 로그인 거절은 [ok] 가 아니라 실패로 끝난다
+    assert run_cli(factories, ["record-fills", *common, "--until", "15:35"]) == 1
+    assert "[login_refused] received=0 return_code=1 거절" in capsys.readouterr().out
 
 
 def _source(tmp_path: Path, fake: FakeKiwoom) -> KiwoomAccountSource:
     return KiwoomAccountSource(
         tmp_path, KiwoomCredentials(APP_KEY, SECRET, ACCOUNT), transport=fake
     )
+
+
+def test_a_quoted_home_workdir_is_expanded_before_exporting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 리뷰 #604 P3: 따옴표로 감싼 '~' 를 받으면 계좌 CSV 가 현재 폴더 아래 '~/…' 에 쓰였다
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    r = rig()
+    seen: list[Path] = []
+
+    @contextmanager
+    def execution(workdir: Path, send: bool, approval: bool) -> Iterator[WeeklyExecutionService]:
+        seen.append(workdir)
+        yield r.service
+
+    factories = CliFactories(_unused_planner, execution, _no_recorder, _no_notifier)
+    assert run_cli(factories, ["export", "--workdir", "~/s07"]) == 0
+    assert seen == [tmp_path / "s07"]
+    assert (tmp_path / "s07" / "exports" / "days.csv").exists()
+    assert not (tmp_path / "~").exists()
+
+
+def _unused_planner(workdir: Path, model_root: Path | None) -> WeeklyRebalanceService:
+    raise AssertionError("execution commands must not open the planner")
 
 
 def test_account_source_reads_kiwoom_without_a_ledger(tmp_path: Path) -> None:
@@ -349,7 +378,7 @@ def test_prepare_notify_sends_the_plan_or_why_it_was_not_made(
     )
     assert run_cli(held, [*prepare, *notify]) == 1
     assert notices.sent[-1].startswith("<b>S07 주문지 보류</b> · 10/23(금) 장 마감 신호")
-    assert "상위 30위 중 2종목이 사라짐" in notices.sent[-1]
+    assert "상위 5위 중 2종목이 사라짐" in notices.sent[-1]
 
     broken = Account(error="kiwoom account unavailable — file=/home/someone/x")
     failed = CliFactories(

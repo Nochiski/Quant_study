@@ -26,6 +26,7 @@ class ExecutionEvent:
     bids: tuple[int, ...] = ()
     status: str = ""
     detail: str = ""
+    preview: bool = False  # 보내지 않는 미리보기 실행에서 남긴 사건(2026-10-22 리뷰 #604)
 
 
 @dataclass(frozen=True)

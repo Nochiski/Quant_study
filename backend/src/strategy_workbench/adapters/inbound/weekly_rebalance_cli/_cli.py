@@ -63,8 +63,16 @@ from strategy_workbench.domain.rebalance.facade.rebalance import RebalanceAction
 ServiceFactory = Callable[[Path, Path | None], WeeklyRebalanceService]
 # (작업 폴더, 보내는가, 승인이 필요한가) → 실행기. 끝나면 원장·연결을 닫는다.
 ExecutionFactory = Callable[[Path, bool, bool], AbstractContextManager[WeeklyExecutionService]]
-# (작업 폴더, 끝낼 시각) → 받은 체결·접수 알림 건수
-FillRecorder = Callable[[Path, time], int]
+@dataclass(frozen=True)
+class FillRecording:
+    """받은 체결·접수 알림 건수. `refused`가 있으면 로그인이 거절돼 그날 기록을 멈췄다."""
+
+    received: int
+    refused: str | None = None
+
+
+# (작업 폴더, 끝낼 시각) → 받은 알림 건수와 로그인 거절 사유
+FillRecorder = Callable[[Path, time], FillRecording]
 # 주문지 알림을 보낼 곳. 보낼 때만 만든다(설정이 없으면 `NoticeError`).
 NoticeFactory = Callable[[], NoticeSender]
 # 작업 폴더 → 원장 고치기. 끝나면 원장·연결을 닫는다.
@@ -150,11 +158,16 @@ def _parser() -> argparse.ArgumentParser:
 def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    # 따옴표로 감싼 '~' 도 같은 폴더로 푼다. 조립(저장소 밖 검사)과 내보내기가 같은 경로를 쓴다.
+    args.workdir = args.workdir.expanduser()
     if args.command == "prepare" and args.notify and args.execute_on is None:
         parser.error("--notify에는 --execute-on이 필요합니다")
     if args.command == "record-fills":
-        received = factories.recorder(args.workdir, args.until)
-        print(f"[ok] received={received}")
+        recording = factories.recorder(args.workdir, args.until)
+        if recording.refused is not None:
+            print(f"[login_refused] received={recording.received} {recording.refused}".rstrip())
+            return 1
+        print(f"[ok] received={recording.received}")
         return 0
     if args.command.startswith("ledger-"):
         if factories.repair is None:
@@ -365,6 +378,7 @@ def export_csv(
                 "bids",
                 "status",
                 "detail",
+                "preview",
             ],
             [
                 [
@@ -382,6 +396,7 @@ def export_csv(
                     " ".join(map(str, e.bids)),
                     e.status,
                     e.detail,
+                    e.preview,
                 ]
                 for e in events
             ],

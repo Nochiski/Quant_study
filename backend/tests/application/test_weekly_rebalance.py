@@ -171,7 +171,7 @@ def test_approval_is_recorded_once() -> None:
 
 
 def test_suspected_data_gap_holds_the_plan_until_a_person_accepts_it() -> None:
-    previous = {"000001": 1, "000002": 2, "000003": 3, "000004": 4, "000007": 5, "000008": 6}
+    previous = {"000001": 1, "000002": 2, "000007": 3, "000008": 4, "000003": 5, "000004": 6}
     suspect = snapshot(previous_build_id="e_prev", previous_ranks=previous)  # 000007·000008 사라짐
     plans = Plans()
     held = service(Signals(SignalRead(SignalReadStatus.OK, suspect)), plans=plans).prepare(DAY)
@@ -182,6 +182,16 @@ def test_suspected_data_gap_holds_the_plan_until_a_person_accepts_it() -> None:
     )
     assert accepted.status is PrepareStatus.OK and accepted.record is not None
     assert accepted.record.signal.anomalies and accepted.record.signal.previous_build_id == "e_prev"
+
+
+def test_the_gap_check_looks_at_the_buffer_of_the_policy() -> None:
+    # 리뷰 #603 P3: 점검 범위가 완충 순위와 따로 30위로 고정돼 있었다. 이 주문안의 완충은 5위다
+    others = {f"1{index:05d}": 10 + index for index in range(100)}  # 종목 수 감소는 2% 밑
+    ranks = {"000001": 1, "000002": 2, "000003": 3, "000004": 4, **others}
+    previous = {**ranks, "000007": 6, "000008": 7}  # 완충(5위) 밖 두 종목이 사라졌다
+    outside = snapshot(ranks=ranks, previous_build_id="e_prev", previous_ranks=previous)
+    result = service(Signals(SignalRead(SignalReadStatus.OK, outside))).prepare(DAY)
+    assert result.status is PrepareStatus.OK
 
 
 def test_held_name_without_a_signal_day_price_is_held_on_its_earlier_close() -> None:

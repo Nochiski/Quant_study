@@ -105,7 +105,7 @@ class WeeklyRebalanceService:
         anomalies = (
             ()
             if signal.previous_ranks is None
-            else signal_anomalies(signal.ranks, signal.previous_ranks)
+            else signal_anomalies(signal.ranks, signal.previous_ranks, top=self._policy.keep_rank)
         )
         if anomalies and not accept_anomalies:
             return PrepareResult(

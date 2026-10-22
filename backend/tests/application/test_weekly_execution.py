@@ -246,6 +246,17 @@ def test_open_initializes_the_ledger_sells_first_and_buys_with_freed_cash() -> N
     assert [e.kind for e in r.log.events_][0] == "initialized"
 
 
+def test_events_from_a_preview_are_marked_as_preview() -> None:
+    # 리뷰 #604 P3: 미리보기도 사건을 남기는데 표시가 없어 복기 기록에 실행하지 않은 일이 섞였다
+    r = rig()
+    r.market.quotes["00000B"] = Quote("00000B", (), ())  # 호가가 없어 건너뜀 사건이 남는다
+    r.service.execute(PLAN, Phase.OPEN, send=False)
+    assert r.log.events_ and all(event.preview for event in r.log.events_)
+    count = len(r.log.events_)
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    assert not any(event.preview for event in r.log.events_[count:])
+
+
 def test_rerunning_open_does_not_send_twice() -> None:
     r = rig()
     r.service.execute(PLAN, Phase.OPEN, send=True)
@@ -291,6 +302,14 @@ def test_refusals_before_any_order() -> None:
     assert halted.gateway.submitted == []
     assert rig().service.execute("weekly-2026-10-30", Phase.OPEN, send=True).status is (
         ExecuteStatus.NOT_FOUND
+    )
+
+
+def test_a_plan_can_run_after_a_long_holiday() -> None:
+    # 리뷰 #605 P3: 연휴로 다음 거래일이 신호일 8일 뒤면 주문지의 실행일에 open 이 stale 로 끝났다
+    after_holiday = datetime(2026, 10, 31, 9, 10, tzinfo=KST)  # 신호일(10-23) 8일 뒤
+    assert rig(now=after_holiday).service.execute(PLAN, Phase.OPEN, send=True).status is (
+        ExecuteStatus.OK
     )
 
 

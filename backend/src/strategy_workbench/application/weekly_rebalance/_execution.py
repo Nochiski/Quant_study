@@ -125,7 +125,10 @@ class WeeklyExecutionService:
         sleep: Callable[[float], None],
         policy: ExecutionPolicy | None = None,
         require_approval: bool = True,
-        max_stale_days: int = 5,
+        # 신호일 뒤 며칠까지 낼 수 있나(달력 일수). 예약 스크립트는 직전 거래일 주문안만 내므로
+        # 이 값은 옛 주문안을 손으로 내는 실수를 막는 상한이다. 설·추석 연휴(다음 거래일이
+        # 8일 뒤)를 넘긴다.
+        max_stale_days: int = 9,
         waits: Waits | None = None,
     ) -> None:
         self._plans = plans
@@ -138,10 +141,18 @@ class WeeklyExecutionService:
         self._require_approval = require_approval
         self._max_stale_days = max_stale_days
         self._waits = waits or Waits()
+        self._previewing = False
 
     # --- 주문 ---------------------------------------------------------------------------------
 
     def execute(self, plan_id: str, phase: Phase, *, send: bool) -> ExecuteResult:
+        self._previewing = not send
+        try:
+            return self._execute(plan_id, phase, send=send)
+        finally:
+            self._previewing = False
+
+    def _execute(self, plan_id: str, phase: Phase, *, send: bool) -> ExecuteResult:
         record = self._plans.load(plan_id)
         if record is None:
             return ExecuteResult(ExecuteStatus.NOT_FOUND, detail=f"no plan — plan_id={plan_id}")
@@ -531,6 +542,7 @@ class WeeklyExecutionService:
                 bids,
                 status,
                 detail,
+                self._previewing,
             )
         )
 

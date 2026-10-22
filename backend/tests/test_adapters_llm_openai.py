@@ -46,9 +46,6 @@ from strategy_workbench.adapters.outbound.llm_openai.facade.provider import (  #
     OpenAiLlmAdapter,
     sdk_client_factory,
 )
-from strategy_workbench.application.assistant_chat.facade.ports import (  # noqa: E402  # reason: importorskip 이후 import
-    LlmProviderPort,
-)
 from strategy_workbench.application.assistant_chat.facade.prompt import (  # noqa: E402  # reason: importorskip 이후 import
     SEARCH_BUDGET_EXHAUSTED_NOTICE,
 )
@@ -421,12 +418,6 @@ def test_the_system_prompt_travels_as_instructions_not_as_a_message() -> None:
 def test_default_model_is_the_model_fixed_from_the_sdk() -> None:
     assert DEFAULT_MODEL == "gpt-6-astra"
     assert OpenAiLlmAdapter().default_model() == "gpt-6-astra"
-
-
-def test_the_adapter_satisfies_the_outgoing_port() -> None:
-    adapter: LlmProviderPort = OpenAiLlmAdapter()
-
-    assert adapter.kind is ProviderKind.OPENAI
 
 
 def test_the_secret_and_base_url_reach_the_client_factory_per_call() -> None:

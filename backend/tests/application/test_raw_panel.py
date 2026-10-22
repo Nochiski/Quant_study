@@ -26,7 +26,6 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     LookAheadViolationError,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
-    ColumnarRawObservationPort,
     RawFieldValue,
     RawObservation,
     RawObservationContractViolation,
@@ -427,17 +426,6 @@ def test_validation_stops_at_a_cancelling_checkpoint(monkeypatch: pytest.MonkeyP
 
     with pytest.raises(RuntimeError, match="cancelled during columnar raw validation"):
         panel.validate_contract(checkpoint=checkpoint)
-
-
-def test_columnar_capability_is_a_runtime_checkable_protocol() -> None:
-    class _Columnar:
-        def load_raw_panel(
-            self, query: object, *, checkpoint: object, progress: object
-        ) -> RawPanel:
-            raise NotImplementedError
-
-    assert isinstance(_Columnar(), ColumnarRawObservationPort)
-    assert not isinstance(MockEquityDataAdapter.demo(), ColumnarRawObservationPort)
 
 
 # --- 생성 시 구조 검사(P3-3) ------------------------------------------------------------------

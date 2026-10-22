@@ -104,7 +104,8 @@ class BrokerConnectionService:
         else:
             check = self._probe.verify(credentials)
             outcome, detail = check.outcome, check.detail
-        # 화면에는 정해 둔 문장만 보낸다. 원인(detail)은 운영 로그에만 남긴다(비밀값은 probe 가 지운다).
+        # 화면에는 정해 둔 문장만 보낸다. 원인(detail)은 운영 로그에만 남긴다
+        # (비밀값은 probe 가 지운다).
         logger.log(
             logging.INFO if outcome is ConnectionOutcome.CONNECTED else logging.WARNING,
             "kiwoom mock connection check — outcome=%s account_tail=%s detail=%s",

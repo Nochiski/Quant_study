@@ -11,6 +11,14 @@
     export   --workdir <폴더>   # <작업 폴더>/exports 에 분석·복기용 CSV 4개
     record-fills --workdir <폴더> --until HH:MM   # 장중 실시간 체결 알림 기록(한 곳에서만)
     notify-plan --workdir <폴더> --plan weekly-YYYY-MM-DD --execute-on YYYY-MM-DD [--print]
+    ledger-status --workdir <폴더>   # 정지 래치·실행 정지·응답을 잃은 주문과 후보 주문번호
+    ledger-bind --workdir <폴더> --intent <의도> --order-no <주문번호> --operator <이름> [--note]
+    ledger-reject --workdir <폴더> --intent <의도> --operator <이름> [--note]
+    ledger-clear-latch --workdir <폴더> --operator <이름> [--note]
+    ledger-resume --workdir <폴더> --operator <이름> [--note]   # 다시 대사하고 일치하면 정지를 푼다
+
+원장 고치기(ledger-*)는 원장 파일을 손으로 고치지 않게 하는 명령이다(2026-10-22 리뷰 #593).
+고친 일은 실행 사건 기록에 남고, 고친 뒤 다시 대사해 일치하면 신규 주문 정지가 풀린다.
 
 `prepare --notify --execute-on <실행일>`은 만든 주문지를 텔레그램으로 보낸다. 만들지 못했으면
 보류·실패 알림을 보낸다(주문지 흐름의 알림만 보내고 로그성 알림은 보내지 않는다).
@@ -39,11 +47,14 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     ExecuteResult,
     ExecuteStatus,
     ExecutionEvent,
+    LedgerRepairService,
     NoticeError,
     NoticeSender,
     Phase,
     PlanRecord,
     PrepareStatus,
+    RepairError,
+    RepairStatus,
     WeeklyExecutionService,
     WeeklyRebalanceService,
 )
@@ -56,6 +67,8 @@ ExecutionFactory = Callable[[Path, bool, bool], AbstractContextManager[WeeklyExe
 FillRecorder = Callable[[Path, time], int]
 # 주문지 알림을 보낼 곳. 보낼 때만 만든다(설정이 없으면 `NoticeError`).
 NoticeFactory = Callable[[], NoticeSender]
+# 작업 폴더 → 원장 고치기. 끝나면 원장·연결을 닫는다.
+RepairFactory = Callable[[Path], AbstractContextManager[LedgerRepairService]]
 
 
 @dataclass(frozen=True)
@@ -64,6 +77,7 @@ class CliFactories:
     execution: ExecutionFactory
     recorder: FillRecorder
     notifier: NoticeFactory
+    repair: RepairFactory | None = None
 
 
 _ACTION_LABELS = {
@@ -113,7 +127,20 @@ def _parser() -> argparse.ArgumentParser:
     notify.add_argument("--plan", required=True)
     notify.add_argument("--execute-on", type=date.fromisoformat, required=True)
     notify.add_argument("--print", action="store_true", help="보내지 않고 보낼 글만 보인다")
-    for command in (prepare, show, approve, execute, close, report, export, fills, notify):
+    status = commands.add_parser("ledger-status", help="래치·정지·응답을 잃은 주문을 보인다")
+    bind = commands.add_parser("ledger-bind", help="응답을 잃은 주문을 키움 주문번호에 묶는다")
+    bind.add_argument("--intent", required=True)
+    bind.add_argument("--order-no", required=True)
+    reject = commands.add_parser("ledger-reject", help="키움에 없는 주문을 거부로 확정한다")
+    reject.add_argument("--intent", required=True)
+    clear = commands.add_parser("ledger-clear-latch", help="정지 래치를 풀고 다시 대사한다")
+    resume = commands.add_parser("ledger-resume", help="다시 대사하고 일치하면 정지를 푼다")
+    for command in (bind, reject, clear, resume):
+        command.add_argument("--operator", required=True, help="고친 사람(실행 기록에 남는다)")
+        command.add_argument("--note", default="")
+    planning = (prepare, show, approve, notify)
+    running = (execute, close, report, export, fills)
+    for command in (*planning, *running, status, bind, reject, clear, resume):
         command.add_argument(
             "--workdir", type=Path, required=True, help="원장·주문안 폴더(저장소 밖)"
         )
@@ -129,6 +156,12 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
         received = factories.recorder(args.workdir, args.until)
         print(f"[ok] received={received}")
         return 0
+    if args.command.startswith("ledger-"):
+        if factories.repair is None:
+            print("[unavailable] 원장 고치기를 이 명령줄에 연결하지 않았다")
+            return 1
+        with factories.repair(args.workdir) as repairs:
+            return _run_repair(repairs, args)
     if args.command in ("execute", "close", "report", "export"):
         send = bool(getattr(args, "send", False))
         require_approval = not getattr(args, "without_approval", False)
@@ -172,6 +205,39 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
     if result.dropped_buys:
         print(f"함께 뺀 새 매수(자리를 그대로 차지): {', '.join(result.dropped_buys)}")
     return 0 if result.status is ApproveStatus.OK else 1
+
+
+def _run_repair(repairs: LedgerRepairService, args: argparse.Namespace) -> int:
+    if args.command == "ledger-status":
+        try:
+            state = repairs.state()
+        except RepairError as error:
+            print(f"[unavailable] {error}")
+            return 1
+        halted = {None: "원장 없음", True: "정지", False: "정상"}[state.halted]
+        print(f"정지 래치: {state.latch or '없음'}")
+        print(f"실행 원장 신규 주문: {halted}")
+        if not state.unresolved:
+            print("응답을 잃은 주문: 없음")
+        for order in state.unresolved:
+            candidates = ", ".join(order.candidates) or "없음(키움에 같은 내용 주문 없음)"
+            print(
+                f"응답을 잃은 주문 {order.intent_id} — {order.symbol} {order.side} "
+                f"{order.quantity:,}주 {order.limit_price_krw:,}원 · {order.order_date} "
+                f"{order.sent_at} · {order.status} {order.note}".rstrip()
+            )
+            print(f"  후보 주문번호: {candidates}")
+        return 0
+    if args.command == "ledger-bind":
+        result = repairs.bind(args.intent, args.order_no, args.operator, args.note)
+    elif args.command == "ledger-reject":
+        result = repairs.reject(args.intent, args.operator, args.note)
+    elif args.command == "ledger-clear-latch":
+        result = repairs.clear_latch(args.operator, args.note)
+    else:
+        result = repairs.resume(args.operator, args.note)
+    print(f"[{result.status.value}] {result.detail}")
+    return 0 if result.status is RepairStatus.OK else 1
 
 
 def _send(factories: CliFactories, text: str) -> bool:

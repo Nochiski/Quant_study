@@ -24,6 +24,7 @@ from strategy_workbench.adapters.outbound.execution_sqlite.facade.ledger import 
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import KiwoomCredentials
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountState,
+    LedgerRepairService,
     NoticeError,
     PlanRecord,
     SignalRead,
@@ -38,7 +39,8 @@ from strategy_workbench.bootstrap.weekly_rebalance.facade.command import (
 )
 from strategy_workbench.domain.order_execution.facade.orders import Account as BrokerAccount
 from strategy_workbench.domain.rebalance.facade.rebalance import RebalancePolicy, plan_rebalance
-from tests.application.test_weekly_execution import PLAN, rig
+from tests.application.test_ledger_repair import Repair
+from tests.application.test_weekly_execution import PLAN, Log, rig
 from tests.application.test_weekly_rebalance import NOW, Account, Plans, Signals, snapshot
 from tests.test_adapters_kiwoom_mock import ACCOUNT, APP_KEY, SECRET, SYMBOL, Clock, FakeKiwoom
 
@@ -278,6 +280,35 @@ def test_approve_prints_the_new_buys_dropped_with_a_kept_sale(
     printed = capsys.readouterr().out
     assert "[ok] plan=weekly-2026-10-23" in printed
     assert "함께 뺀 새 매수(자리를 그대로 차지): 000003" in printed
+
+
+def test_ledger_commands_show_and_repair_with_an_operator(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repair = Repair(latch="snapshot — amended order")
+    log = Log()
+
+    @contextmanager
+    def repairs(workdir: Path) -> Iterator[LedgerRepairService]:
+        yield LedgerRepairService(repair, log, now=lambda: NOW)
+
+    planner = _planner(Signals(), Account(), Plans())
+    factories = CliFactories(planner, _no_execution, _no_recorder, _no_notifier, repairs)
+    common = ["--workdir", str(tmp_path)]
+    assert run_cli(factories, ["ledger-status", *common]) == 0
+    shown = capsys.readouterr().out
+    assert "정지 래치: snapshot — amended order" in shown and "실행 원장 신규 주문: 정지" in shown
+    assert "후보 주문번호: 0000007" in shown
+    bind = ["ledger-bind", *common, "--intent", "weekly-2026-10-23-005930-buy"]
+    with pytest.raises(SystemExit):  # 고친 사람(--operator)은 반드시 받는다
+        run_cli(factories, [*bind, "--order-no", "0000007"])
+    capsys.readouterr()
+    assert run_cli(factories, [*bind, "--order-no", "0000007", "--operator", "동민"]) == 0
+    assert "[ok]" in capsys.readouterr().out
+    assert run_cli(factories, ["ledger-clear-latch", *common, "--operator", "동민"]) == 0
+    assert [event.kind for event in log.events_] == ["ledger_bind", "ledger_clear_latch"]
+    no_repair = CliFactories(planner, _no_execution, _no_recorder, _no_notifier)
+    assert run_cli(no_repair, ["ledger-status", *common]) == 1
 
 
 def _planner(signals: Signals, account: Account, plans: Plans) -> ServiceFactory:

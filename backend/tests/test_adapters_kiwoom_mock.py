@@ -488,7 +488,8 @@ def test_symbol_outside_krx_code_format_is_refused(tmp_path: Path) -> None:
 def test_a_second_order_on_a_symbol_with_an_unfinished_order_is_refused_before_sending(
     tmp_path: Path,
 ) -> None:
-    # 리뷰 #596 P2: 같은 종목 미종결 주문 옆에 둘째 주문이 체결되면 금액을 나눌 수 없어 계좌가 정지됐다
+    # 리뷰 #596 P2: 같은 종목 미종결 주문 옆에 둘째 주문이 체결되면 금액을 나눌 수 없어
+    # 계좌가 정지됐다
     r = started(tmp_path)
     assert r.service.submit(buy()).status == ExecutionStatus.OK
     r.fake.fill("0000001", 2, 70_000, commission=21)
@@ -611,6 +612,19 @@ def test_lost_request_without_candidate_halts_and_ignores_hts_orders(tmp_path: P
     assert report.status == ExecutionStatus.BLOCKED
     assert fact_of(r.ledger).state == OrderState.UNKNOWN
     assert r.fake.api_ids().count("kt10000") == 1
+
+
+def test_a_lost_request_is_not_bound_to_a_same_content_order_placed_much_later(
+    tmp_path: Path,
+) -> None:
+    # 리뷰 #593 P3: 시각 조건이 하한뿐이라 한참 뒤에 낸 같은 내용의 주문(다른 프로그램)도 묶였다
+    r = started(tmp_path)
+    r.fake.order_mode = "drop"
+    assert r.service.submit(buy()).status == ExecutionStatus.UNKNOWN
+    r.clock.now_value += timedelta(minutes=5)
+    r.fake.add_row(SYMBOL, "현금매수", 5, 70_000, channel="모의투자")
+    assert r.service.recover().status == ExecutionStatus.BLOCKED
+    assert fact_of(r.ledger).state == OrderState.UNKNOWN
 
 
 def test_kiwoom_error_answer_without_candidate_becomes_rejected(tmp_path: Path) -> None:

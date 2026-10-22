@@ -164,12 +164,8 @@ def day_trades(rows: list[DayTrade]) -> dict[str, DayTrade]:
     return totals
 
 
-def is_candidate(row: OrderRow, intent: Intent, sent_at: datetime, margin: timedelta) -> bool:
-    """응답을 잃은 의도의 재식별 후보. 이미 다른 의도에 묶인 번호는 호출자가 뺀다."""
-    earliest = sent_at - margin
-    earliest_text = (
-        "00:00:00" if earliest.date() < sent_at.date() else earliest.strftime("%H:%M:%S")
-    )
+def same_order(row: OrderRow, intent: Intent) -> bool:
+    """의도와 내용(종목·방향·수량·지정가)이 같은 신규 주문 행. 정정·취소 행은 아니다."""
     return (
         row.original == NO_ORIGINAL
         and row.channel in _ORDER_CHANNELS
@@ -178,8 +174,19 @@ def is_candidate(row: OrderRow, intent: Intent, sent_at: datetime, margin: timed
         and row.quantity == intent.quantity
         and row.price_krw == intent.limit_price_krw
         and row.trade_type in _LIMIT_TYPES
-        and row.time >= earliest_text
     )
+
+
+def is_candidate(row: OrderRow, intent: Intent, sent_at: datetime, margin: timedelta) -> bool:
+    """응답을 잃은 의도의 자동 재식별 후보. 주문 시각이 전송 시각 ± 여유 안이어야 한다. 뒤쪽
+    경계가 없으면 한참 뒤에 낸 같은 내용의 수동 주문도 묶였다(2026-10-22 리뷰 #593). 이미 다른
+    의도에 묶인 번호는 호출자가 뺀다."""
+    earliest, latest = sent_at - margin, sent_at + margin
+    earliest_text = (
+        "00:00:00" if earliest.date() < sent_at.date() else earliest.strftime("%H:%M:%S")
+    )
+    latest_text = "23:59:59" if latest.date() > sent_at.date() else latest.strftime("%H:%M:%S")
+    return same_order(row, intent) and earliest_text <= row.time <= latest_text
 
 
 @dataclass(frozen=True)

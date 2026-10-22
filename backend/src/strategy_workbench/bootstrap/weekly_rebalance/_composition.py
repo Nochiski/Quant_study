@@ -51,6 +51,7 @@ from strategy_workbench.application.offline_execution.facade.execution import (
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountState,
     AccountUnavailableError,
+    LedgerRepairService,
     WeeklyExecutionService,
     WeeklyRebalanceService,
 )
@@ -59,6 +60,7 @@ from strategy_workbench.bootstrap.weekly_rebalance._credentials import (
     telegram_notice,
 )
 from strategy_workbench.bootstrap.weekly_rebalance._gateway import OfflineOrderGateway
+from strategy_workbench.bootstrap.weekly_rebalance._repair import KiwoomLedgerRepair
 
 KST = timezone(timedelta(hours=9))
 REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
@@ -157,6 +159,31 @@ def open_weekly_execution(
         gateway.close()
 
 
+@contextmanager
+def open_ledger_repair(workdir: Path) -> Iterator[LedgerRepairService]:
+    """원장 고치기(리뷰 #593). 주문을 보내지 않는 브로커로 연다. 고친 일은 실행 사건 기록에
+    남는다."""
+    root = outside_repository(workdir)
+    (root / "ledger").mkdir(parents=True, exist_ok=True, mode=0o700)
+    broker = KiwoomMockBroker(
+        saved_credentials(),
+        root / "ledger" / "kiwoom-reference.sqlite",
+        transport=system_trust_transport(),
+    )
+    ledger_path = root / "ledger" / "execution.sqlite"
+    ledger = ExecutionSqliteLedger(ledger_path) if ledger_path.exists() else None
+    try:
+        yield LedgerRepairService(
+            KiwoomLedgerRepair(broker, ledger),
+            JsonExecutionLog(root),
+            now=lambda: datetime.now(KST),
+        )
+    finally:
+        if ledger is not None:
+            ledger.close()
+        broker.close()
+
+
 def record_today_fills(workdir: Path, until: clock_time) -> int:
     """오늘 `until`(KST)까지 실시간 체결 알림을 `records/fills-<날짜>.jsonl`에 덧붙인다.
 
@@ -188,7 +215,11 @@ def main(argv: list[str] | None = None) -> int:
     time.sleep(START_PAUSE_SECONDS)
     return run_cli(
         CliFactories(
-            build_weekly_rebalance, open_weekly_execution, record_today_fills, telegram_notice
+            build_weekly_rebalance,
+            open_weekly_execution,
+            record_today_fills,
+            telegram_notice,
+            open_ledger_repair,
         ),
         argv,
     )

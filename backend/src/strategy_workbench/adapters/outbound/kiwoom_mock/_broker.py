@@ -51,6 +51,7 @@ from strategy_workbench.adapters.outbound.kiwoom_mock._rows import (
     number,
     observe,
     order_number,
+    same_order,
     split_day_amounts,
     symbol,
     text,
@@ -267,6 +268,63 @@ class KiwoomMockBroker:
             f"state={None if fact is None else fact.state}"
         )
 
+    # --- 사람이 푸는 일(2026-10-22 리뷰 #593) --------------------------------------------------
+
+    def unresolved(self) -> tuple[UnresolvedReference, ...]:
+        """응답을 잃어 주문번호에 묶이지 않은 의도와, 그 주문일 키움 주문 중 내용이 같은 번호.
+
+        사람이 고를 후보라 자동 재식별의 시각 창은 보지 않는다. 다른 의도에 묶인 번호는 뺀다.
+        래치가 걸려 있어도 읽는다(주문은 내지 않는다).
+        """
+        records = [record for record in self._reference.orders() if _unresolved(record)]
+        if not records:
+            return ()
+        self._session()
+        bound = {(r.order_date, r.ord_no) for r in self._reference.orders() if r.ord_no is not None}
+        today = self._kst().strftime("%Y%m%d")
+        rows: dict[str, list[OrderRow]] = {}
+        found: list[UnresolvedReference] = []
+        for record in records:
+            if record.order_date not in rows:
+                query = "" if record.order_date == today else record.order_date
+                rows[record.order_date] = [OrderRow.parse(row) for row in self._order_rows(query)]
+            candidates = tuple(
+                row.ord_no
+                for row in rows[record.order_date]
+                if (record.order_date, row.ord_no) not in bound and same_order(row, record.intent)
+            )
+            found.append(UnresolvedReference(record, candidates))
+        return tuple(found)
+
+    def bind_unresolved(self, intent_id: str, ord_no: str) -> None:
+        """사람이 고른 주문번호에 묶는다. 그 번호가 지금 후보일 때만 묶는다."""
+        target = self._unresolved_one(intent_id)
+        if ord_no not in target.candidates:
+            raise BrokerError(
+                f"order number is not a candidate — intent_id={intent_id} ord_no={ord_no} "
+                f"candidates={list(target.candidates)}"
+            )
+        self._reference.bind(intent_id, ord_no, None)
+        logger.warning("kiwoom order bound by hand — intent_id=%s ord_no=%s", intent_id, ord_no)
+
+    def reject_unresolved(self, intent_id: str) -> None:
+        """그 주문일 키움에 내용이 같은 주문이 하나도 없을 때만 거부(보내지 않음)로 확정한다."""
+        target = self._unresolved_one(intent_id)
+        if target.candidates:
+            raise BrokerError(
+                f"kiwoom has orders with the same content — not rejected intent_id={intent_id} "
+                f"candidates={list(target.candidates)}"
+            )
+        fact = OrderFact(target.record.intent, OrderState.REJECTED, revision=1)
+        self._reference.observe(intent_id, fact, finalized=True)
+        logger.warning("kiwoom order rejected by hand — intent_id=%s", intent_id)
+
+    def _unresolved_one(self, intent_id: str) -> UnresolvedReference:
+        found = next((item for item in self.unresolved() if item.intent_id == intent_id), None)
+        if found is None:
+            raise BrokerError(f"no unresolved order with this intent — intent_id={intent_id}")
+        return found
+
     # --- 내부 --------------------------------------------------------------------------------
 
     def _kst(self) -> datetime:
@@ -276,6 +334,10 @@ class KiwoomMockBroker:
         latched = self._reference.latch()
         if latched is not None:
             raise KiwoomBlockedError(KiwoomBlock.LATCHED, latched)
+        self._session()
+
+    def _session(self) -> None:
+        """연결(토큰·계좌 대조)과 참조 원장의 계좌만 확인한다. 래치는 보지 않는다."""
         self._client.ensure_session()
         if not self._reference.bind_account(self._account_sha256):
             raise KiwoomBlockedError(
@@ -566,3 +628,23 @@ def _holdings(rows: list[dict[str, object]]) -> tuple[tuple[str, int], ...]:
             code = symbol(text(row, "stk_cd"))
             totals[code] = totals.get(code, 0) + quantity
     return tuple(sorted(totals.items()))
+
+
+@dataclass(frozen=True)
+class UnresolvedReference:
+    """응답을 잃어 주문번호에 묶이지 않은 의도 하나와, 사람이 고를 수 있는 키움 주문번호."""
+
+    record: ReferenceOrder
+    candidates: tuple[str, ...]
+
+    @property
+    def intent_id(self) -> str:
+        return self.record.intent.intent_id
+
+
+def _unresolved(record: ReferenceOrder) -> bool:
+    return record.fact is None and record.status in (
+        ReferenceStatus.PENDING,
+        ReferenceStatus.ANSWERED,
+    )
+

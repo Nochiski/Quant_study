@@ -11,6 +11,7 @@ from typing import Protocol
 
 __all__ = [
     "BrokerConnectionProbe",
+    "BrokerCredentialsUnreadableError",
     "BrokerCredentialStore",
     "BrokerCredentials",
     "ConnectionCheck",
@@ -27,9 +28,13 @@ class BrokerCredentials:
     account_number: str = field(repr=False)
 
 
+class BrokerCredentialsUnreadableError(Exception):
+    """저장된 항목이 있으나 읽을 수 없다(깨진 모양). 문장에 값은 싣지 않는다."""
+
+
 class BrokerCredentialStore(Protocol):
     def load(self) -> BrokerCredentials | None:
-        """저장된 것이 없으면 None."""
+        """저장된 것이 없으면 None. 있으나 읽을 수 없으면 `BrokerCredentialsUnreadableError`."""
         ...
 
     def save(self, credentials: BrokerCredentials) -> None: ...
@@ -48,6 +53,7 @@ class ConnectionOutcome(StrEnum):
     ACCOUNT_MISMATCH = "account_mismatch"
     NO_RESPONSE = "no_response"
     REFUSED = "refused"
+    UNREADABLE = "unreadable"  # 저장된 키 항목이 깨졌다(다시 저장하면 고쳐진다)
 
 
 @dataclass(frozen=True)

@@ -2332,7 +2332,8 @@
           "auth_failed",
           "account_mismatch",
           "no_response",
-          "refused"
+          "refused",
+          "unreadable"
         ],
         "title": "ConnectionOutcome",
         "type": "string"
@@ -6293,6 +6294,12 @@
           },
           "saved": {
             "title": "Saved",
+            "type": "boolean"
+          },
+          "unreadable": {
+            "default": false,
+            "description": "저장된 항목이 깨져 읽지 못했다. 다시 저장하거나 지우면 고쳐진다.",
+            "title": "Unreadable",
             "type": "boolean"
           }
         },

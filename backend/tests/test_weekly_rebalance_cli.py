@@ -13,7 +13,9 @@ import pytest
 
 from strategy_workbench.adapters.inbound.weekly_rebalance_cli.facade.command import (
     CliFactories,
+    FillRecording,
     ServiceFactory,
+    render,
     render_telegram,
     run_cli,
 )
@@ -23,6 +25,7 @@ from strategy_workbench.adapters.outbound.execution_sqlite.facade.ledger import 
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import KiwoomCredentials
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountState,
+    LedgerRepairService,
     NoticeError,
     PlanRecord,
     SignalRead,
@@ -37,7 +40,8 @@ from strategy_workbench.bootstrap.weekly_rebalance.facade.command import (
 )
 from strategy_workbench.domain.order_execution.facade.orders import Account as BrokerAccount
 from strategy_workbench.domain.rebalance.facade.rebalance import RebalancePolicy, plan_rebalance
-from tests.application.test_weekly_execution import PLAN, rig
+from tests.application.test_ledger_repair import Repair
+from tests.application.test_weekly_execution import PLAN, Log, rig
 from tests.application.test_weekly_rebalance import NOW, Account, Plans, Signals, snapshot
 from tests.test_adapters_kiwoom_mock import ACCOUNT, APP_KEY, SECRET, SYMBOL, Clock, FakeKiwoom
 
@@ -83,7 +87,7 @@ def _no_notifier() -> Notices:
     raise AssertionError("this command must not send a notice")
 
 
-def _no_recorder(workdir: Path, until: time) -> int:
+def _no_recorder(workdir: Path, until: time) -> FillRecording:
     raise AssertionError("this command must not open the fill recorder")
 
 
@@ -109,9 +113,9 @@ def test_cli_executes_closes_reports_and_exports(
 
     recorded: list[time] = []
 
-    def recorder(workdir: Path, until: time) -> int:
+    def recorder(workdir: Path, until: time) -> FillRecording:
         recorded.append(until)
-        return 7
+        return FillRecording(7) if len(recorded) == 1 else FillRecording(0, "return_code=1 거절")
 
     factories = CliFactories(planning, execution, recorder, _no_notifier)
     common = ["--workdir", str(tmp_path)]
@@ -147,12 +151,40 @@ def test_cli_executes_closes_reports_and_exports(
     capsys.readouterr()
     assert run_cli(factories, ["record-fills", *common, "--until", "15:35"]) == 0
     assert recorded == [time(15, 35)] and "received=7" in capsys.readouterr().out
+    # 리뷰 #605 P3: 로그인 거절은 [ok] 가 아니라 실패로 끝난다
+    assert run_cli(factories, ["record-fills", *common, "--until", "15:35"]) == 1
+    assert "[login_refused] received=0 return_code=1 거절" in capsys.readouterr().out
 
 
 def _source(tmp_path: Path, fake: FakeKiwoom) -> KiwoomAccountSource:
     return KiwoomAccountSource(
         tmp_path, KiwoomCredentials(APP_KEY, SECRET, ACCOUNT), transport=fake
     )
+
+
+def test_a_quoted_home_workdir_is_expanded_before_exporting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 리뷰 #604 P3: 따옴표로 감싼 '~' 를 받으면 계좌 CSV 가 현재 폴더 아래 '~/…' 에 쓰였다
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    r = rig()
+    seen: list[Path] = []
+
+    @contextmanager
+    def execution(workdir: Path, send: bool, approval: bool) -> Iterator[WeeklyExecutionService]:
+        seen.append(workdir)
+        yield r.service
+
+    factories = CliFactories(_unused_planner, execution, _no_recorder, _no_notifier)
+    assert run_cli(factories, ["export", "--workdir", "~/s07"]) == 0
+    assert seen == [tmp_path / "s07"]
+    assert (tmp_path / "s07" / "exports" / "days.csv").exists()
+    assert not (tmp_path / "~").exists()
+
+
+def _unused_planner(workdir: Path, model_root: Path | None) -> WeeklyRebalanceService:
+    raise AssertionError("execution commands must not open the planner")
 
 
 def test_account_source_reads_kiwoom_without_a_ledger(tmp_path: Path) -> None:
@@ -229,6 +261,131 @@ def test_telegram_plan_follows_the_confirmed_template() -> None:
     )
 
 
+def test_telegram_marks_a_held_name_without_a_signal_day_price() -> None:
+    # 리뷰 #603: 신호일 가격이 없어 직전 종가로 평가하고 그대로 둔 보유 종목은 따로 알린다
+    names = {"000001": "알멕", "000003": "HMM"}
+    plan = plan_rebalance(
+        RebalancePolicy(slots=3, keep_rank=5),
+        ranks={"000003": 1},
+        holdings={"000001": 100, "000003": 100},
+        prices=dict.fromkeys(names, 10_000),
+        cash_krw=1_000_000,
+        blocked={"000001": "신호일 종가 없음(거래정지 등) — 2026-10-21 종가로 평가"},
+        stale_prices={"000001"},
+    )
+    record = PlanRecord(
+        "weekly-2026-10-23",
+        NOW,
+        SignalRecord(
+            "scope@2.0", "e_b", "2026-10-23", "ab" * 32, "e_p", (), names=tuple(names.items())
+        ),
+        AccountState(1_000_000, {}, None),
+        plan,
+    )
+    text = render_telegram(record, date(2026, 10, 26))
+    assert "<b>유지 2</b>\n<blockquote>⚠️알멕 · HMM</blockquote>" in text
+    assert text.endswith(
+        "<b>⚠️ 가격 없음 1건</b> — 알멕은 신호일 종가가 없어(거래정지 등) 이번 주 매매 없이 둡니다."
+    )
+    assert "이번 주 매매에서 뺄지" not in text
+    shown = render(record, None)
+    assert "가격 없음 1종목 ['000001']" in shown and "확인 필요" not in shown
+
+
+def test_telegram_says_when_the_gap_check_was_skipped() -> None:
+    # 리뷰 #606 P3: 빌드 점검을 건너뛴 판도 주문지에서 '점검 통과'처럼 보였다
+    names = {"000003": "HMM"}
+    plan = plan_rebalance(
+        RebalancePolicy(slots=3, keep_rank=5),
+        ranks={"000003": 1},
+        holdings={},
+        prices={"000003": 10_000},
+        cash_krw=1_000_000,
+        blocked={},
+    )
+    signal = SignalRecord(
+        "scope@2.0",
+        "e_b",
+        "2026-10-23",
+        "ab" * 32,
+        "e_p",
+        (),
+        "e_prev",
+        names=tuple(names.items()),
+        gap_check_skipped="직전 빌드 e_prev 순위를 쓸 수 없음(읽기 실패 또는 같은 날 재빌드)",
+    )
+    record = PlanRecord("weekly-2026-10-23", NOW, signal, AccountState(1_000_000, {}, None), plan)
+    text = render_telegram(record, date(2026, 10, 26))
+    assert "<i>직전 빌드 점검 건너뜀 — 직전 빌드 e_prev 순위를 쓸 수 없음" in text
+    assert "빌드 점검 건너뜀 — 직전 빌드 e_prev" in render(record, None)
+
+
+def test_approve_prints_the_new_buys_dropped_with_a_kept_sale(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plans = Plans()
+    held = Account(AccountState(2_000_000, {"000009": 100}, None))
+    factories = CliFactories(
+        _planner(Signals(), held, plans), _no_execution, _no_recorder, _no_notifier
+    )
+    common = ["--workdir", str(tmp_path)]
+    prepare = ["prepare", *common, "--model-root", str(tmp_path), "--signal-date", "2026-10-23"]
+    assert run_cli(factories, prepare) == 0
+    capsys.readouterr()
+    approve = ["approve", *common, "--plan", "weekly-2026-10-23", "--approver", "동민"]
+    assert run_cli(factories, [*approve, "--no-trade", "000009"]) == 0
+    printed = capsys.readouterr().out
+    assert "[ok] plan=weekly-2026-10-23" in printed
+    assert "함께 뺀 새 매수(자리를 그대로 차지): 000003" in printed
+
+
+def test_ledger_commands_show_and_repair_with_an_operator(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repair = Repair(latch="snapshot — amended order")
+    log = Log()
+
+    @contextmanager
+    def repairs(workdir: Path) -> Iterator[LedgerRepairService]:
+        yield LedgerRepairService(repair, log, now=lambda: NOW)
+
+    planner = _planner(Signals(), Account(), Plans())
+    factories = CliFactories(planner, _no_execution, _no_recorder, _no_notifier, repairs)
+    common = ["--workdir", str(tmp_path)]
+    assert run_cli(factories, ["ledger-status", *common]) == 0
+    shown = capsys.readouterr().out
+    assert "정지 래치: snapshot — amended order" in shown and "실행 원장 신규 주문: 정지" in shown
+    assert "후보 주문번호: 0000007" in shown
+    bind = ["ledger-bind", *common, "--intent", "weekly-2026-10-23-005930-buy"]
+    with pytest.raises(SystemExit):  # 고친 사람(--operator)은 반드시 받는다
+        run_cli(factories, [*bind, "--order-no", "0000007"])
+    capsys.readouterr()
+    assert run_cli(factories, [*bind, "--order-no", "0000007", "--operator", "동민"]) == 0
+    assert "[ok]" in capsys.readouterr().out
+    assert run_cli(factories, ["ledger-clear-latch", *common, "--operator", "동민"]) == 0
+    assert [event.kind for event in log.events_] == ["ledger_bind", "ledger_clear_latch"]
+    no_repair = CliFactories(planner, _no_execution, _no_recorder, _no_notifier)
+    assert run_cli(no_repair, ["ledger-status", *common]) == 1
+
+
+def test_signal_status_tells_the_schedule_whether_to_keep_waiting(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # 리뷰 #605 P3: 빌드 준비 판정이 셸과 신호 어댑터에 갈라져 있었다. 셸은 이 명령만 묻는다
+    folders = ["--workdir", str(tmp_path), "--model-root", str(tmp_path)]
+    common = [*folders, "--signal-date", "2026-10-23"]
+    cases = [
+        (SignalRead(SignalReadStatus.OK, snapshot()), 0),
+        (SignalRead(SignalReadStatus.NOT_READY, detail="other date"), 3),
+        (SignalRead(SignalReadStatus.GATE_FAILED, detail="MG1 fail"), 1),
+    ]
+    for read, code in cases:
+        planner = _planner(Signals(read), Account(), Plans())
+        factories = CliFactories(planner, _no_execution, _no_recorder, _no_notifier)
+        assert run_cli(factories, ["signal-status", *common]) == code
+        assert f"[{read.status.value}]" in capsys.readouterr().out
+
+
 def _planner(signals: Signals, account: Account, plans: Plans) -> ServiceFactory:
     def factory(workdir: Path, model_root: Path | None) -> WeeklyRebalanceService:
         return WeeklyRebalanceService(
@@ -267,7 +424,7 @@ def test_prepare_notify_sends_the_plan_or_why_it_was_not_made(
     )
     assert run_cli(held, [*prepare, *notify]) == 1
     assert notices.sent[-1].startswith("<b>S07 주문지 보류</b> · 10/23(금) 장 마감 신호")
-    assert "상위 30위 중 2종목이 사라짐" in notices.sent[-1]
+    assert "상위 5위 중 2종목이 사라짐" in notices.sent[-1]
 
     broken = Account(error="kiwoom account unavailable — file=/home/someone/x")
     failed = CliFactories(

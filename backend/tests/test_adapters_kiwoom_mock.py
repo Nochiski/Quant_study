@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import sqlite3
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -104,6 +106,7 @@ class FakeKiwoom:
         self.after: dict[str, list[Callable[[], None]]] = {}  # 한 번만 돈다
         self.every: dict[str, list[Callable[[], None]]] = {}  # 호출마다 돈다
         self.echo_secret_in_errors = False
+        self.unreachable = False  # 연결 자체가 실패한다(인증서·DNS 등)
         self._next_ord_no = 1
         self._values: dict[str, int] = {}
 
@@ -113,6 +116,8 @@ class FakeKiwoom:
     ) -> KiwoomHttpResponse:
         api_id = headers["api-id"]
         self.calls.append(Call(api_id, dict(body), dict(headers), self.clock.mono))
+        if self.unreachable:
+            raise KiwoomNoResponseError(f"no response from kiwoom mock — path={path} unreachable")
         if api_id in self.rate_limited:
             self.rate_limited.discard(api_id)
             response = self._error("1700", "허용된 API 요청 개수를 초과하였습니다")
@@ -424,6 +429,20 @@ def test_connection_errors_block_before_any_order(
     assert set(r.fake.api_ids()) == {"au10001"}
 
 
+def test_a_transport_failure_is_logged_with_the_call(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # 리뷰 #594 P2: 호출 로그가 전송 뒤에만 있어 연결 자체가 실패하면 한 줄도 남지 않았다
+    caplog.set_level(logging.INFO)
+    r = rig(tmp_path)
+    r.fake.unreachable = True
+    with pytest.raises(KiwoomNoResponseError):
+        r.broker.snapshot()
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "kiwoom mock call — api_id=au10001 path=/oauth2/token" in logged
+    assert "kiwoom mock call failed — api_id=au10001" in logged and "unreachable" in logged
+
+
 def test_account_mismatch_blocks_before_reading_orders(tmp_path: Path) -> None:
     r = rig(tmp_path)
     r.fake.account = "5099999999"
@@ -443,6 +462,46 @@ def test_reference_ledger_is_bound_to_one_account(tmp_path: Path) -> None:
     assert raised.value.reason == KiwoomBlock.ACCOUNT_MISMATCH
 
 
+def test_the_ledger_keeps_only_the_account_tail_and_upgrades_the_old_hash(tmp_path: Path) -> None:
+    # 리뷰 #593 P3: 10자리 계좌번호의 salt 없는 SHA-256 은 바로 복원된다. 끝 4자리만 남긴다
+    r = started(tmp_path)
+    r.broker.close()
+    path = tmp_path / "kiwoom.sqlite"
+    with sqlite3.connect(path) as connection:
+        meta = dict(connection.execute("SELECT key, value FROM kiwoom_meta").fetchall())
+        assert meta["account_tail"] == ACCOUNT[-4:] and "account_sha256" not in meta
+        # 예전 판 원장처럼 전체 해시만 남긴다
+        connection.execute("DELETE FROM kiwoom_meta WHERE key = 'account_tail'")
+        legacy = hashlib.sha256(ACCOUNT.encode()).hexdigest()
+        connection.execute("INSERT INTO kiwoom_meta VALUES ('account_sha256', ?)", (legacy,))
+    other = FakeKiwoom(r.clock, account="5099999999")
+    stranger = make_broker(tmp_path, r.clock, other, transmit=True, account="5099999999")
+    with pytest.raises(KiwoomBlockedError):
+        stranger.snapshot()  # 해시가 다른 계좌는 그대로 막는다
+    stranger.close()
+    mine = make_broker(tmp_path, r.clock, r.fake, transmit=True)
+    mine.snapshot()
+    mine.close()
+    with sqlite3.connect(path) as connection:
+        meta = dict(connection.execute("SELECT key, value FROM kiwoom_meta").fetchall())
+    assert meta["account_tail"] == ACCOUNT[-4:] and "account_sha256" not in meta
+
+
+def test_a_broker_for_another_account_writes_nothing_to_the_ledger(tmp_path: Path) -> None:
+    # 리뷰 #593 P2: 계좌 A 원장에 계좌 B 브로커가 거부 기록을 남겨 A 의 대사가 영구히 멈췄다
+    r = started(tmp_path)
+    r.broker.close()
+    other = FakeKiwoom(r.clock, account="5099999999")
+    for transmit in (True, False):
+        broker = make_broker(tmp_path, r.clock, other, transmit=transmit, account="5099999999")
+        with pytest.raises(KiwoomBlockedError) as raised:
+            broker.submit(buy())
+        assert raised.value.reason == KiwoomBlock.ACCOUNT_MISMATCH
+        broker.close()
+    mine = make_broker(tmp_path, r.clock, r.fake, transmit=True)
+    assert mine.snapshot().orders == ()
+
+
 def test_symbol_outside_krx_code_format_is_refused(tmp_path: Path) -> None:
     r = started(tmp_path)
     result = r.service.submit(Intent("odd", "SAMSUNG", "buy", 1, 70_000))
@@ -451,6 +510,24 @@ def test_symbol_outside_krx_code_format_is_refused(tmp_path: Path) -> None:
 
 
 # --- 정상 주문 수명 -------------------------------------------------------------------------
+
+
+def test_a_second_order_on_a_symbol_with_an_unfinished_order_is_refused_before_sending(
+    tmp_path: Path,
+) -> None:
+    # 리뷰 #596 P2: 같은 종목 미종결 주문 옆에 둘째 주문이 체결되면 금액을 나눌 수 없어
+    # 계좌가 정지됐다
+    r = started(tmp_path)
+    assert r.service.submit(buy()).status == ExecutionStatus.OK
+    r.fake.fill("0000001", 2, 70_000, commission=21)
+    second = r.service.submit(buy("signal-2", quantity=3))
+    assert second.order is not None and second.order.state == OrderState.REJECTED
+    assert r.fake.api_ids().count("kt10000") == 1
+    # 앞 주문이 끝나면(취소 확정) 같은 종목에 다시 낼 수 있다
+    assert r.service.cancel("signal-1").status == ExecutionStatus.OK
+    third = r.service.submit(buy("signal-3", quantity=3))
+    assert third.order is not None and third.order.state == OrderState.OPEN
+    assert r.fake.api_ids().count("kt10000") == 2
 
 
 def test_order_lifecycle_partial_fill_then_cancel(tmp_path: Path) -> None:
@@ -564,6 +641,19 @@ def test_lost_request_without_candidate_halts_and_ignores_hts_orders(tmp_path: P
     assert r.fake.api_ids().count("kt10000") == 1
 
 
+def test_a_lost_request_is_not_bound_to_a_same_content_order_placed_much_later(
+    tmp_path: Path,
+) -> None:
+    # 리뷰 #593 P3: 시각 조건이 하한뿐이라 한참 뒤에 낸 같은 내용의 주문(다른 프로그램)도 묶였다
+    r = started(tmp_path)
+    r.fake.order_mode = "drop"
+    assert r.service.submit(buy()).status == ExecutionStatus.UNKNOWN
+    r.clock.now_value += timedelta(minutes=5)
+    r.fake.add_row(SYMBOL, "현금매수", 5, 70_000, channel="모의투자")
+    assert r.service.recover().status == ExecutionStatus.BLOCKED
+    assert fact_of(r.ledger).state == OrderState.UNKNOWN
+
+
 def test_kiwoom_error_answer_without_candidate_becomes_rejected(tmp_path: Path) -> None:
     r = started(tmp_path)
     r.fake.order_mode = "error"
@@ -627,8 +717,8 @@ def test_snapshot_gives_up_when_orders_keep_changing(tmp_path: Path) -> None:
 
 def test_paging_reads_every_page(tmp_path: Path) -> None:
     r = started(tmp_path)
-    for index in range(3):
-        r.service.submit(buy(f"signal-{index}", price=70_000 + index * 100))
+    for index, symbol in enumerate(("005930", "000660", "035420")):
+        r.service.submit(Intent(f"signal-{index}", symbol, "buy", 5, 70_000 + index * 100, 1_000))
     r.fake.page_size = 1
     snapshot = r.broker.snapshot()
     assert len(snapshot.orders) == 3
@@ -742,9 +832,13 @@ def test_requote_after_cancel_takes_the_rest_of_the_symbol_total(tmp_path: Path)
     )
 
 
-def test_two_open_orders_with_fills_on_one_symbol_latch(tmp_path: Path) -> None:
+def test_two_open_orders_with_fills_on_one_symbol_latch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 전송 전 거부(#596 리뷰)를 우회해 둘이 나간 경우에도 금액을 지어내지 않고 멈추는 방어선
     r = started(tmp_path)
     r.service.submit(buy("a", quantity=2))
+    monkeypatch.setattr(r.broker, "_refusal", lambda intent, order_date: None)
     r.service.submit(buy("b", quantity=2, price=70_100))
     r.fake.fill("0000001", 1, 70_000, commission=240)
     r.fake.fill("0000002", 1, 70_100, commission=240)

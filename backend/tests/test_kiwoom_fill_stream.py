@@ -12,6 +12,7 @@ from pathlib import Path
 
 import websockets
 
+from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import KiwoomNoResponseError
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.stream import (
     StreamConnection,
     record_fills,
@@ -83,7 +84,7 @@ def test_recorder_logs_fills_masks_the_account_echoes_ping_and_reconnects(
             sleep=no_wait,
         )
     )
-    assert received == 3
+    assert (received.received, received.refused) == (3, None)
     assert json.loads(first.sent[0]) == {"trnm": "LOGIN", "token": "fake-token-0123"}
     assert json.loads(first.sent[1])["data"] == [{"item": [""], "type": ["00"]}]
     assert first.sent[2] == '{"trnm": "PING"}' and first.closed and second.closed
@@ -113,4 +114,34 @@ def test_recorder_stops_when_login_is_refused(tmp_path: Path) -> None:
     received = asyncio.run(
         record_fills(lambda: "t", connect, out, START + timedelta(hours=6), clock.now)
     )
-    assert received == 0 and len(refused.sent) == 1 and refused.closed
+    # 리뷰 #605 P3: 로그인 거절도 [ok] 로 끝났다. 거절 사유를 돌려줘 실패로 드러낸다
+    assert (received.received, received.refused) == (0, "return_code=1 ")
+    assert len(refused.sent) == 1 and refused.closed
+
+
+def test_a_token_failure_is_retried_instead_of_ending_the_day(tmp_path: Path) -> None:
+    # 리뷰 #605 P3: 토큰 발급 오류(BrokerError)를 잡지 않아 첫 순간의 일시 오류로 그날 기록이 끝났다
+    clock = Clock()
+    login = json.dumps({"trnm": "LOGIN", "return_code": 0})
+    connection = FakeConnection(clock, deque([login, _fill(2)]))
+    attempts: list[int] = []
+
+    def token() -> str:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise KiwoomNoResponseError("no response from kiwoom mock — path=/oauth2/token")
+        return "fake-token"
+
+    async def connect() -> StreamConnection:
+        return connection
+
+    async def no_wait(_: float) -> None:
+        clock.now_value += timedelta(seconds=5)
+
+    out = tmp_path / "fills.jsonl"
+    result = asyncio.run(
+        record_fills(token, connect, out, START + timedelta(minutes=3), clock.now, sleep=no_wait)
+    )
+    assert result.received == 1 and len(attempts) == 2
+    kinds = [json.loads(line)["kind"] for line in out.read_text().splitlines()]
+    assert kinds[0] == "token_failed" and "REAL" in kinds

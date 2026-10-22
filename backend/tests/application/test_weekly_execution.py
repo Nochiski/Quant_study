@@ -93,6 +93,11 @@ class Gateway:
             return SubmitOutcome(SubmitStatus.RETRY, "orders kept changing")
         if request.intent_id in self.orders:
             return SubmitOutcome(SubmitStatus.EXISTS)
+        state = self.state()
+        cost = request.quantity * request.limit_price_krw + request.fee_budget_krw
+        if request.side == "buy" and cost > state.cash_krw - state.reserved_cash_krw:
+            # S05 처럼 대금 + 비용 상한이 쓸 수 있는 현금을 넘으면 보내지 않는다
+            return SubmitOutcome(SubmitStatus.BLOCKED, "insufficient cash")
         self.submitted.append(request)
         view = OrderView(
             request.intent_id,
@@ -201,7 +206,6 @@ def rig(
         now=lambda: now,
         sleep=lambda _: None,
         policy=policy,
-        sizing=RebalancePolicy(slots=3, keep_rank=5),
         waits=Waits(0, 8, 0, 0, 3),
     )
     return Rig(plans, gateway, market, log, service)
@@ -240,6 +244,17 @@ def test_open_initializes_the_ledger_sells_first_and_buys_with_freed_cash() -> N
     assert r.gateway.submitted[1].fee_budget_krw == 5_211
     assert r.gateway.submitted[0].fee_budget_krw == 6_993  # 매도는 거래세까지 0.7%
     assert [e.kind for e in r.log.events_][0] == "initialized"
+
+
+def test_events_from_a_preview_are_marked_as_preview() -> None:
+    # 리뷰 #604 P3: 미리보기도 사건을 남기는데 표시가 없어 복기 기록에 실행하지 않은 일이 섞였다
+    r = rig()
+    r.market.quotes["00000B"] = Quote("00000B", (), ())  # 호가가 없어 건너뜀 사건이 남는다
+    r.service.execute(PLAN, Phase.OPEN, send=False)
+    assert r.log.events_ and all(event.preview for event in r.log.events_)
+    count = len(r.log.events_)
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    assert not any(event.preview for event in r.log.events_[count:])
 
 
 def test_rerunning_open_does_not_send_twice() -> None:
@@ -287,6 +302,14 @@ def test_refusals_before_any_order() -> None:
     assert halted.gateway.submitted == []
     assert rig().service.execute("weekly-2026-10-30", Phase.OPEN, send=True).status is (
         ExecuteStatus.NOT_FOUND
+    )
+
+
+def test_a_plan_can_run_after_a_long_holiday() -> None:
+    # 리뷰 #605 P3: 연휴로 다음 거래일이 신호일 8일 뒤면 주문지의 실행일에 open 이 stale 로 끝났다
+    after_holiday = datetime(2026, 10, 31, 9, 10, tzinfo=KST)  # 신호일(10-23) 8일 뒤
+    assert rig(now=after_holiday).service.execute(PLAN, Phase.OPEN, send=True).status is (
+        ExecuteStatus.OK
     )
 
 
@@ -354,14 +377,62 @@ def test_close_records_shortfall_missed_cost_and_raw_evidence() -> None:
     assert r.service.days() == (record,)
 
 
+def test_close_on_a_later_day_does_not_record_the_weeks_fills_again() -> None:
+    # 리뷰 #604: 화~금 장 마감 기록이 월요일 누적 체결과 주문 줄을 날마다 다시 적어 합계가 부풀었다
+    r = rig()
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    r.gateway.fill(f"{PLAN}-00000A-buy", 50, 10_020)
+    r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
+    monday = r.service.close().record
+    assert monday is not None and monday.orders and monday.traded_krw == 999_000 + 501_000
+    tuesday = WeeklyExecutionService(
+        r.plans,
+        r.gateway,
+        r.market,
+        r.log,
+        now=lambda: MONDAY + timedelta(days=1, hours=6),
+        sleep=lambda _: None,
+        waits=Waits(0, 8, 0, 0, 3),
+    )
+    record = tuesday.close().record
+    assert record is not None and (record.traded_krw, record.orders) == (0, ())
+    assert record.equity_krw == monday.equity_krw  # 보유·현금은 그날 값 그대로 남긴다
+    assert [day.traded_krw for day in r.log.days()] == [1_500_000, 0]
+
+
 def test_no_trade_symbols_from_the_approval_are_neither_bought_nor_sold() -> None:
     r = rig(approved=False)
-    r.plans.save_approval(PLAN, Approval(MONDAY, "동민", no_trade=("00000A", "00000E")))
+    r.plans.save_approval(PLAN, Approval(MONDAY, "동민", no_trade=("00000A",)))
     r.service.execute(PLAN, Phase.OPEN, send=True)
-    assert {o.symbol for o in r.gateway.submitted} == {"00000B"}
+    assert {o.symbol for o in r.gateway.submitted} == {"00000E", "00000B"}
     assert any(e.kind == "no_trade" for e in r.log.events_)
     r.service.execute(PLAN, Phase.CHASE, send=True)
-    assert {o.symbol for o in r.gateway.submitted} == {"00000B"}
+    assert {o.symbol for o in r.gateway.submitted} == {"00000E", "00000B"}
     r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
     record = r.service.close().record
-    assert record is not None and {o.symbol for o in record.orders} == {"00000B"}
+    assert record is not None and {o.symbol for o in record.orders} == {"00000E", "00000B"}
+
+
+def test_keeping_a_name_planned_for_sale_also_drops_the_lowest_new_buy() -> None:
+    # 리뷰 #606: 파는 E 를 빼면 E 가 자리를 그대로 차지한다. 대체 매수 중 순위가 낮은 B 를 함께 뺀다
+    r = rig(approved=False)
+    r.plans.save_approval(PLAN, Approval(MONDAY, "동민", no_trade=("00000E",)))
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    r.service.execute(PLAN, Phase.CHASE, send=True)
+    assert {o.symbol for o in r.gateway.submitted} == {"00000A"}
+    assert r.gateway.holdings["00000E"] == 100
+    no_trade = next(e.detail for e in r.log.events_ if e.kind == "no_trade")
+    assert "함께 뺀 새 매수 ['00000B']" in no_trade
+    r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
+    record = r.service.close().record
+    assert record is not None and {o.symbol for o in record.orders} == {"00000A"}
+
+
+def test_cash_limited_buy_is_sized_with_the_fee_budget_the_ledger_checks() -> None:
+    # 리뷰 #603: 수량은 35bp 로 정하고 S05 는 40bp 로 현금을 검사해 주문 전체가 막혔다
+    r = rig()
+    r.gateway.cash = 992_811  # 매도 999,000원 · A 130주(1,307,811원) 뒤 B 에 684,000원이 남는다
+    result = r.service.execute(PLAN, Phase.OPEN, send=True)
+    b = next(line for line in result.lines if line.symbol == "00000B")
+    # 684,000 ÷ (10,020 × 1.0040) = 67.99 → 67주. 35bp 로는 68주(684,086원)라 현금을 넘었다
+    assert (b.outcome, b.quantity) == ("sent", 67)

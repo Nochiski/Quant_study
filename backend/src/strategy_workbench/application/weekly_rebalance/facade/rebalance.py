@@ -8,7 +8,13 @@ from strategy_workbench.application.weekly_rebalance._execution import (
     Waits,
     WeeklyExecutionService,
 )
+from strategy_workbench.application.weekly_rebalance._repair import (
+    LedgerRepairService,
+    RepairResult,
+    RepairStatus,
+)
 from strategy_workbench.application.weekly_rebalance._service import (
+    EARLIER_CLOSE_REASON,
     UNTRADED_REASON,
     ApproveResult,
     ApproveStatus,
@@ -53,7 +59,15 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.records impo
     ExecutionEvent,
     ExecutionLog,
 )
+from strategy_workbench.application.weekly_rebalance.ports.outgoing.repair import (
+    LedgerRepairState,
+    OrderLedgerRepair,
+    RepairError,
+    ResumeOutcome,
+    UnresolvedOrder,
+)
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal import (
+    EarlierClose,
     SignalRead,
     SignalReadStatus,
     SignalSnapshot,
@@ -61,6 +75,7 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal impor
 )
 
 __all__ = [
+    "EARLIER_CLOSE_REASON",
     "UNTRADED_REASON",
     "AccountSource",
     "AccountState",
@@ -72,17 +87,21 @@ __all__ = [
     "CloseStatus",
     "DayOrder",
     "DayRecord",
+    "EarlierClose",
     "ExecuteResult",
     "ExecuteStatus",
     "ExecutionEvent",
     "ExecutionLog",
     "GatewayError",
     "GatewayState",
+    "LedgerRepairService",
+    "LedgerRepairState",
     "MarketError",
     "MarketSource",
     "NoticeError",
     "NoticeSender",
     "OrderGateway",
+    "OrderLedgerRepair",
     "OrderLine",
     "OrderRequest",
     "OrderView",
@@ -93,6 +112,10 @@ __all__ = [
     "PrepareResult",
     "PrepareStatus",
     "PriceInfo",
+    "RepairError",
+    "RepairResult",
+    "RepairStatus",
+    "ResumeOutcome",
     "SignalRead",
     "SignalReadStatus",
     "SignalRecord",
@@ -100,6 +123,7 @@ __all__ = [
     "SignalSource",
     "SubmitOutcome",
     "SubmitStatus",
+    "UnresolvedOrder",
     "Waits",
     "WeeklyExecutionService",
     "WeeklyRebalanceService",

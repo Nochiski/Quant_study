@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from dataclasses import asdict, dataclass
@@ -43,6 +44,9 @@ _OBJECTS = (
         "WHERE ord_no IS NOT NULL",
     ),
 )
+
+
+ACCOUNT_TAIL_DIGITS = 4
 
 
 class KiwoomReferenceError(BrokerError):
@@ -92,18 +96,28 @@ class KiwoomReference:
     def close(self) -> None:
         self._database.close()
 
-    def bind_account(self, account_sha256: str) -> bool:
-        """처음이면 계좌 지문을 저장한다. 다른 계좌의 원장이면 거짓이다."""
+    def bind_account(self, account_number: str) -> bool:
+        """처음이면 계좌번호 끝 4자리를 저장한다. 다른 계좌의 원장이면 거짓이다.
+
+        예전 판은 계좌번호 전체의 SHA-256 을 남겼다. 10자리 숫자라 바로 복원되므로(2026-10-22 리뷰
+        #593) 같은 계좌로 열면 끝 4자리로 바꿔 적고 해시는 지운다. 계좌번호 전체는 저장하지 않는다.
+        """
+        tail = account_number[-ACCOUNT_TAIL_DIGITS:]
         with self._database.transaction(write=True) as connection:
-            row = connection.execute(
-                "SELECT value FROM kiwoom_meta WHERE key = 'account_sha256'"
-            ).fetchone()
-            if row is None:
+            stored = dict(
                 connection.execute(
-                    "INSERT INTO kiwoom_meta VALUES ('account_sha256', ?)", (account_sha256,)
-                )
-                return True
-            return row[0] == account_sha256
+                    "SELECT key, value FROM kiwoom_meta "
+                    "WHERE key IN ('account_tail', 'account_sha256')"
+                ).fetchall()
+            )
+            if "account_tail" in stored:
+                return stored["account_tail"] == tail
+            if "account_sha256" in stored:
+                if stored["account_sha256"] != hashlib.sha256(account_number.encode()).hexdigest():
+                    return False
+                connection.execute("DELETE FROM kiwoom_meta WHERE key = 'account_sha256'")
+            connection.execute("INSERT INTO kiwoom_meta VALUES ('account_tail', ?)", (tail,))
+            return True
 
     def latch(self) -> str | None:
         with self._database.transaction(write=False) as connection:

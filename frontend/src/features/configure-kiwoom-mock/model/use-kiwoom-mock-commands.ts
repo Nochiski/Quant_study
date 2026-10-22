@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   BrokerConnectionRequestError,
@@ -64,22 +64,39 @@ export type VerifyOutcome = {
   message: string;
 };
 
-/** 연결 확인. 키를 싣지 않지만 결과를 카드에 남기려고 저장과 같은 모양으로 둔다. */
+/**
+ * 연결 확인. 키를 싣지 않지만 결과를 카드에 남기려고 저장과 같은 모양으로 둔다.
+ *
+ * `reset`(새 키 저장·삭제) 뒤에 도착한 옛 확인 응답은 버린다 — 확인하지 않은 새 키에 "연결됐습니다"가
+ * 남지 않게 한다(2026-10-22 리뷰 #595). 세대 번호는 콜백에서만 읽고 쓴다.
+ */
 export const useVerifyKiwoomMockConnection = () => {
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<VerifyOutcome | null>(null);
+  const generation = useRef(0);
 
   const verify = async (): Promise<void> => {
+    const started = generation.current;
     setPending(true);
     try {
       const check = await brokerConnectionApi.verify();
-      setResult({ outcome: check.outcome, message: check.message });
+      if (generation.current === started)
+        setResult({ outcome: check.outcome, message: check.message });
     } catch {
-      setResult({ outcome: null, message: t("settings.kiwoom.verify.failed") });
+      if (generation.current === started)
+        setResult({
+          outcome: null,
+          message: t("settings.kiwoom.verify.failed"),
+        });
     } finally {
       setPending(false);
     }
   };
 
-  return { pending, result, verify, reset: () => setResult(null) };
+  const reset = () => {
+    generation.current += 1;
+    setResult(null);
+  };
+
+  return { pending, result, verify, reset };
 };

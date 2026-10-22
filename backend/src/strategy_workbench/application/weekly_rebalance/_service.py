@@ -22,14 +22,19 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.plans import
     PlanStore,
     SignalRecord,
 )
-from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal import SignalSource
+from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal import (
+    SignalRead,
+    SignalSource,
+)
 from strategy_workbench.domain.rebalance.facade.rebalance import (
     RebalancePolicy,
     plan_rebalance,
     signal_anomalies,
+    week_targets,
 )
 
 UNTRADED_REASON = "신호일 거래량 0(거래정지 가능)"
+EARLIER_CLOSE_REASON = "신호일 종가 없음(거래정지 등) — {day} 종가로 평가"
 
 
 class PrepareStatus(StrEnum):
@@ -58,9 +63,12 @@ class ApproveStatus(StrEnum):
 
 @dataclass(frozen=True)
 class ApproveResult:
+    """`dropped_buys`는 뺀 보유 종목이 자리를 차지해 이번 주 함께 하지 않는 새 매수다."""
+
     status: ApproveStatus
     approval: Approval | None = None
     detail: str = ""
+    dropped_buys: tuple[str, ...] = ()
 
 
 def plan_id_for(signal_date: date) -> str:
@@ -100,7 +108,7 @@ class WeeklyRebalanceService:
         anomalies = (
             ()
             if signal.previous_ranks is None
-            else signal_anomalies(signal.ranks, signal.previous_ranks)
+            else signal_anomalies(signal.ranks, signal.previous_ranks, top=self._policy.keep_rank)
         )
         if anomalies and not accept_anomalies:
             return PrepareResult(
@@ -114,22 +122,42 @@ class WeeklyRebalanceService:
             return PrepareResult(PrepareStatus.ACCOUNT_UNAVAILABLE, detail=str(error))
         if account.reconciled is False:
             return PrepareResult(PrepareStatus.NOT_RECONCILED, detail=account.detail)
+        prices = dict(signal.closes_krw)
+        blocked = dict.fromkeys(signal.untraded, UNTRADED_REASON)
+        # 신호일 가격 행이 없는 보유 종목은 그 전 마지막 종가로 평가하고 매매하지 않는다(확인 표시).
+        earlier = {
+            symbol: close
+            for symbol, close in (signal.earlier_closes or {}).items()
+            if symbol in account.holdings and symbol not in prices
+        }
+        for symbol, close in earlier.items():
+            prices[symbol] = close.close_krw
+            blocked[symbol] = EARLIER_CLOSE_REASON.format(day=close.day.isoformat())
         try:
             plan = plan_rebalance(
                 self._policy,
                 ranks=signal.ranks,
                 holdings=account.holdings,
-                prices=signal.closes_krw,
+                prices=prices,
                 cash_krw=account.cash_krw,
-                blocked=dict.fromkeys(signal.untraded, UNTRADED_REASON),
+                blocked=blocked,
                 previous_ranks=signal.previous_ranks,
                 missing_reasons=signal.exclusion_reasons,
+                stale_prices=frozenset(earlier),
             )
         except ValueError as error:
             return PrepareResult(
                 PrepareStatus.INVALID_INPUT,
                 detail=f"{error} — plan_id={plan_id} build_id={signal.build_id}",
             )
+        skipped = (
+            None
+            if signal.previous_ranks is not None
+            else "직전 빌드 없음"
+            if signal.previous_build_id is None
+            else f"직전 빌드 {signal.previous_build_id} 순위를 쓸 수 없음"
+            "(읽기 실패 또는 같은 날 재빌드)"
+        )
         record = PlanRecord(
             plan_id,
             self._now(),
@@ -147,6 +175,7 @@ class WeeklyRebalanceService:
                     for line in plan.lines
                     if signal.names is not None and line.symbol in signal.names
                 ),
+                skipped,
             ),
             account,
             plan,
@@ -181,7 +210,12 @@ class WeeklyRebalanceService:
             self._plans.save_approval(plan_id, approval)
         except PlanExistsError:
             return ApproveResult(ApproveStatus.ALREADY_APPROVED, self._plans.approval(plan_id))
-        return ApproveResult(ApproveStatus.OK, approval)
+        dropped = week_targets(record.plan, approval.no_trade).dropped_buys
+        return ApproveResult(ApproveStatus.OK, approval, dropped_buys=dropped)
+
+    def signal_status(self, signal_date: date) -> SignalRead:
+        """예약 실행이 장 마감 빌드를 기다릴 때 묻는다. 준비 판정은 신호 어댑터 한 곳이 한다."""
+        return self._signals.read(signal_date)
 
     def plan(self, plan_id: str) -> tuple[PlanRecord | None, Approval | None]:
         return self._plans.load(plan_id), self._plans.approval(plan_id)

@@ -11,6 +11,16 @@
     export   --workdir <폴더>   # <작업 폴더>/exports 에 분석·복기용 CSV 4개
     record-fills --workdir <폴더> --until HH:MM   # 장중 실시간 체결 알림 기록(한 곳에서만)
     notify-plan --workdir <폴더> --plan weekly-YYYY-MM-DD --execute-on YYYY-MM-DD [--print]
+    signal-status --workdir <폴더> --model-root <모델 DB> --signal-date YYYY-MM-DD
+             # 장 마감 빌드가 준비됐나. 0 = 준비, 3 = 아직(기다린다), 1 = 다른 이유로 못 쓴다
+    ledger-status --workdir <폴더>   # 정지 래치·실행 정지·응답을 잃은 주문과 후보 주문번호
+    ledger-bind --workdir <폴더> --intent <의도> --order-no <주문번호> --operator <이름> [--note]
+    ledger-reject --workdir <폴더> --intent <의도> --operator <이름> [--note]
+    ledger-clear-latch --workdir <폴더> --operator <이름> [--note]
+    ledger-resume --workdir <폴더> --operator <이름> [--note]   # 다시 대사하고 일치하면 정지를 푼다
+
+원장 고치기(ledger-*)는 원장 파일을 손으로 고치지 않게 하는 명령이다(2026-10-22 리뷰 #593).
+고친 일은 실행 사건 기록에 남고, 고친 뒤 다시 대사해 일치하면 신규 주문 정지가 풀린다.
 
 `prepare --notify --execute-on <실행일>`은 만든 주문지를 텔레그램으로 보낸다. 만들지 못했으면
 보류·실패 알림을 보낸다(주문지 흐름의 알림만 보내고 로그성 알림은 보내지 않는다).
@@ -39,23 +49,45 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     ExecuteResult,
     ExecuteStatus,
     ExecutionEvent,
+    LedgerRepairService,
     NoticeError,
     NoticeSender,
     Phase,
     PlanRecord,
     PrepareStatus,
+    RepairError,
+    RepairStatus,
+    SignalReadStatus,
     WeeklyExecutionService,
     WeeklyRebalanceService,
 )
-from strategy_workbench.domain.rebalance.facade.rebalance import RebalanceAction, RebalanceLine
+from strategy_workbench.domain.rebalance.facade.rebalance import (
+    LineCause,
+    RebalanceAction,
+    RebalanceLine,
+)
 
 ServiceFactory = Callable[[Path, Path | None], WeeklyRebalanceService]
 # (작업 폴더, 보내는가, 승인이 필요한가) → 실행기. 끝나면 원장·연결을 닫는다.
 ExecutionFactory = Callable[[Path, bool, bool], AbstractContextManager[WeeklyExecutionService]]
-# (작업 폴더, 끝낼 시각) → 받은 체결·접수 알림 건수
-FillRecorder = Callable[[Path, time], int]
+
+
+@dataclass(frozen=True)
+class FillRecording:
+    """받은 체결·접수 알림 건수. `refused`가 있으면 로그인이 거절돼 그날 기록을 멈췄다."""
+
+    received: int
+    refused: str | None = None
+
+
+# (작업 폴더, 끝낼 시각) → 받은 알림 건수와 로그인 거절 사유
+FillRecorder = Callable[[Path, time], FillRecording]
 # 주문지 알림을 보낼 곳. 보낼 때만 만든다(설정이 없으면 `NoticeError`).
 NoticeFactory = Callable[[], NoticeSender]
+# 작업 폴더 → 원장 고치기. 끝나면 원장·연결을 닫는다.
+RepairFactory = Callable[[Path], AbstractContextManager[LedgerRepairService]]
+# `signal-status`가 "아직 빌드가 없다(기다린다)"를 알리는 종료 코드. 예약 스크립트가 읽는다.
+SIGNAL_NOT_READY_EXIT = 3
 
 
 @dataclass(frozen=True)
@@ -64,6 +96,7 @@ class CliFactories:
     execution: ExecutionFactory
     recorder: FillRecorder
     notifier: NoticeFactory
+    repair: RepairFactory | None = None
 
 
 _ACTION_LABELS = {
@@ -91,6 +124,9 @@ def _parser() -> argparse.ArgumentParser:
         "--notify", action="store_true", help="주문지(또는 보류·실패)를 텔레그램으로 보낸다"
     )
     prepare.add_argument("--execute-on", type=date.fromisoformat, help="주문지에 적을 실행일")
+    signal = commands.add_parser("signal-status", help="그 날짜 장 마감 빌드가 준비됐나 본다")
+    signal.add_argument("--model-root", type=Path, required=True)
+    signal.add_argument("--signal-date", type=date.fromisoformat, required=True)
     show = commands.add_parser("show", help="남긴 주문안과 승인 여부를 보인다")
     show.add_argument("--plan", required=True)
     approve = commands.add_parser("approve", help="주문안을 승인한다(한 번만)")
@@ -113,7 +149,20 @@ def _parser() -> argparse.ArgumentParser:
     notify.add_argument("--plan", required=True)
     notify.add_argument("--execute-on", type=date.fromisoformat, required=True)
     notify.add_argument("--print", action="store_true", help="보내지 않고 보낼 글만 보인다")
-    for command in (prepare, show, approve, execute, close, report, export, fills, notify):
+    status = commands.add_parser("ledger-status", help="래치·정지·응답을 잃은 주문을 보인다")
+    bind = commands.add_parser("ledger-bind", help="응답을 잃은 주문을 키움 주문번호에 묶는다")
+    bind.add_argument("--intent", required=True)
+    bind.add_argument("--order-no", required=True)
+    reject = commands.add_parser("ledger-reject", help="키움에 없는 주문을 거부로 확정한다")
+    reject.add_argument("--intent", required=True)
+    clear = commands.add_parser("ledger-clear-latch", help="정지 래치를 풀고 다시 대사한다")
+    resume = commands.add_parser("ledger-resume", help="다시 대사하고 일치하면 정지를 푼다")
+    for command in (bind, reject, clear, resume):
+        command.add_argument("--operator", required=True, help="고친 사람(실행 기록에 남는다)")
+        command.add_argument("--note", default="")
+    planning = (prepare, signal, show, approve, notify)
+    running = (execute, close, report, export, fills)
+    for command in (*planning, *running, status, bind, reject, clear, resume):
         command.add_argument(
             "--workdir", type=Path, required=True, help="원장·주문안 폴더(저장소 밖)"
         )
@@ -123,12 +172,23 @@ def _parser() -> argparse.ArgumentParser:
 def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    # 따옴표로 감싼 '~' 도 같은 폴더로 푼다. 조립(저장소 밖 검사)과 내보내기가 같은 경로를 쓴다.
+    args.workdir = args.workdir.expanduser()
     if args.command == "prepare" and args.notify and args.execute_on is None:
         parser.error("--notify에는 --execute-on이 필요합니다")
     if args.command == "record-fills":
-        received = factories.recorder(args.workdir, args.until)
-        print(f"[ok] received={received}")
+        recording = factories.recorder(args.workdir, args.until)
+        if recording.refused is not None:
+            print(f"[login_refused] received={recording.received} {recording.refused}".rstrip())
+            return 1
+        print(f"[ok] received={recording.received}")
         return 0
+    if args.command.startswith("ledger-"):
+        if factories.repair is None:
+            print("[unavailable] 원장 고치기를 이 명령줄에 연결하지 않았다")
+            return 1
+        with factories.repair(args.workdir) as repairs:
+            return _run_repair(repairs, args)
     if args.command in ("execute", "close", "report", "export"):
         send = bool(getattr(args, "send", False))
         require_approval = not getattr(args, "without_approval", False)
@@ -150,6 +210,12 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             if not _send(factories, text):
                 return 1
         return 0 if made else 1
+    if args.command == "signal-status":
+        read = planning.signal_status(args.signal_date)
+        print(f"[{read.status.value}] {read.detail}".rstrip())
+        if read.ok:
+            return 0
+        return SIGNAL_NOT_READY_EXIT if read.status is SignalReadStatus.NOT_READY else 1
     if args.command == "notify-plan":
         record, _ = planning.plan(args.plan)
         if record is None:
@@ -169,7 +235,42 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
         return 0
     result = planning.approve(args.plan, args.approver, args.note, tuple(args.no_trade))
     print(f"[{result.status.value}] plan={args.plan} {result.detail}".rstrip())
+    if result.dropped_buys:
+        print(f"함께 뺀 새 매수(자리를 그대로 차지): {', '.join(result.dropped_buys)}")
     return 0 if result.status is ApproveStatus.OK else 1
+
+
+def _run_repair(repairs: LedgerRepairService, args: argparse.Namespace) -> int:
+    if args.command == "ledger-status":
+        try:
+            state = repairs.state()
+        except RepairError as error:
+            print(f"[unavailable] {error}")
+            return 1
+        halted = {None: "원장 없음", True: "정지", False: "정상"}[state.halted]
+        print(f"정지 래치: {state.latch or '없음'}")
+        print(f"실행 원장 신규 주문: {halted}")
+        if not state.unresolved:
+            print("응답을 잃은 주문: 없음")
+        for order in state.unresolved:
+            candidates = ", ".join(order.candidates) or "없음(키움에 같은 내용 주문 없음)"
+            print(
+                f"응답을 잃은 주문 {order.intent_id} — {order.symbol} {order.side} "
+                f"{order.quantity:,}주 {order.limit_price_krw:,}원 · {order.order_date} "
+                f"{order.sent_at} · {order.status} {order.note}".rstrip()
+            )
+            print(f"  후보 주문번호: {candidates}")
+        return 0
+    if args.command == "ledger-bind":
+        result = repairs.bind(args.intent, args.order_no, args.operator, args.note)
+    elif args.command == "ledger-reject":
+        result = repairs.reject(args.intent, args.operator, args.note)
+    elif args.command == "ledger-clear-latch":
+        result = repairs.clear_latch(args.operator, args.note)
+    else:
+        result = repairs.resume(args.operator, args.note)
+    print(f"[{result.status.value}] {result.detail}")
+    return 0 if result.status is RepairStatus.OK else 1
 
 
 def _send(factories: CliFactories, text: str) -> bool:
@@ -297,6 +398,7 @@ def export_csv(
                 "bids",
                 "status",
                 "detail",
+                "preview",
             ],
             [
                 [
@@ -314,6 +416,7 @@ def export_csv(
                     " ".join(map(str, e.bids)),
                     e.status,
                     e.detail,
+                    e.preview,
                 ]
                 for e in events
             ],
@@ -392,6 +495,11 @@ def render(record: PlanRecord, approval: Approval | None) -> str:
         f"계좌 현금 {plan.cash_krw:,}원 · 총자산 {plan.equity_krw:,}원 · 종목당 목표 "
         f"{plan.target_value_krw:,}원 · 원장 대사 {_reconciled(record.account.reconciled)}",
         *(f"⚠ 데이터 누락 의심을 확인하고 만든 주문안: {reason}" for reason in signal.anomalies),
+        *(
+            [f"빌드 점검 건너뜀 — {signal.gap_check_skipped}"]
+            if signal.gap_check_skipped is not None
+            else []
+        ),
         "",
         f"{'구분':<4} {'종목':<6} {'순위':>4} {'현재':>7} {'목표':>7} {'증감':>7} "
         f"{'기준가':>9} {'증감 금액':>13}  사유",
@@ -422,13 +530,29 @@ def render(record: PlanRecord, approval: Approval | None) -> str:
     ]
     if approval is not None and approval.no_trade:
         lines.append(f"이번 주 매매에서 뺀 종목: {', '.join(approval.no_trade)}")
-    reviews = [line.symbol for line in plan.lines if line.review]
+    reviews = [line.symbol for line in plan.lines if _flagged_sale(line)]
     if reviews and approval is None:
         lines.append(
             f"⚠ 확인 필요 {len(reviews)}종목 {reviews} — 신호에서 빠졌다. 데이터 누락이면 "
-            "승인할 때 --no-trade 로 이번 주 매매에서 뺀다"
+            "승인할 때 --no-trade 로 이번 주 매매에서 뺀다(그만큼 순위 낮은 새 매수도 빠진다)"
+        )
+    unpriced = [line.symbol for line in plan.lines if _unpriced_hold(line)]
+    if unpriced:
+        lines.append(
+            f"⚠ 가격 없음 {len(unpriced)}종목 {unpriced} — 신호일 종가가 없어 직전 종가로 평가하고 "
+            "이번 주 매매 없이 둔다(거래정지 여부 확인)"
         )
     return "\n".join(lines)
+
+
+def _flagged_sale(line: RebalanceLine) -> bool:
+    """신호에서 빠져 파는 보유 종목(데이터 누락일 수 있어 사람이 확인한다)."""
+    return line.review and line.action is not RebalanceAction.HOLD
+
+
+def _unpriced_hold(line: RebalanceLine) -> bool:
+    """신호일 가격이 없어 직전 종가로 평가하고 그대로 둔 보유 종목."""
+    return line.review and line.action is RebalanceAction.HOLD
 
 
 def _reconciled(value: bool | None) -> str:
@@ -456,14 +580,14 @@ def render_telegram(record: PlanRecord, execute_on: date) -> str:
         name = _html(names.get(line.symbol, line.symbol))
         head = f"<b>{name}</b> {line.symbol}"
         if line.action is RebalanceAction.HOLD:
-            holds.append(name)
+            holds.append(f"⚠️{name}" if line.review else name)
             continue
         if line.action is RebalanceAction.SKIP:
             skips.append(f"{head}\n{_html(line.reason)}")
             continue
         amount = abs(line.delta_shares) * (line.reference_price_krw or 0)
         item = f"{head} · {abs(line.delta_shares):,}주 · {_won(amount)}"
-        note = _telegram_note(line, plan.policy.keep_rank, plan.policy.slots)
+        note = _telegram_note(line)
         (sells if line.delta_shares < 0 else buys).append(f"{item}\n{note}" if note else item)
     parts = [
         f"<b>S07 주문지</b> · {_day(execute_on)} 실행\n"
@@ -480,11 +604,20 @@ def render_telegram(record: PlanRecord, execute_on: date) -> str:
     footer = [f"총자산 {_won(plan.equity_krw)} · 종목당 {_won(plan.target_value_krw)}"]
     if signal.anomalies:
         footer.append("<i>데이터 누락 의심을 확인하고 만든 주문지</i>")
-    reviews = [names.get(line.symbol, line.symbol) for line in plan.lines if line.review]
+    if signal.gap_check_skipped is not None:
+        footer.append(f"<i>직전 빌드 점검 건너뜀 — {_html(signal.gap_check_skipped)}</i>")
+    reviews = [names.get(line.symbol, line.symbol) for line in plan.lines if _flagged_sale(line)]
     if reviews:
         footer.append(
             f"<b>⚠️ 확인 {len(reviews)}건</b> — {_html(', '.join(reviews))}"
             f"{_object_particle(reviews[-1])} 이번 주 매매에서 뺄지 승인 때 알려 주세요."
+        )
+    unpriced = [names.get(line.symbol, line.symbol) for line in plan.lines if _unpriced_hold(line)]
+    if unpriced:
+        footer.append(
+            f"<b>⚠️ 가격 없음 {len(unpriced)}건</b> — {_html(', '.join(unpriced))}"
+            f"{_topic_particle(unpriced[-1])} 신호일 종가가 없어(거래정지 등) "
+            "이번 주 매매 없이 둡니다."
         )
     parts.append("\n".join(footer))
     return "\n\n".join(parts)
@@ -507,14 +640,16 @@ def render_telegram_notice(status: PrepareStatus, signal_date: date, detail: str
     )
 
 
-def _telegram_note(line: RebalanceLine, keep_rank: int, slots: int) -> str:
-    if line.review:
-        return "⚠️ " + _html(line.reason.replace(" — ", " · ", 1))
-    if line.action is RebalanceAction.RESIZE:
+def _telegram_note(line: RebalanceLine) -> str:
+    """주문지 줄 아래 한 줄. 도메인이 넘긴 원인 칸으로 고른다(사유 문장을 쪼개지 않는다,
+    2026-10-22 리뷰 #607). 이 칸이 없는 옛 주문안은 사유 문장을 그대로 싣는다."""
+    if line.cause is LineCause.SIGNAL_MISSING:
+        return f"⚠️ 신호에서 빠짐 · {_html(line.missing_why)} ({_html(line.last_seen)})"
+    if line.cause is LineCause.RESIZED:
         return "비중 조정"
-    if line.action is RebalanceAction.SELL and line.rank is not None and line.rank > keep_rank:
+    if line.cause is LineCause.OUTSIDE_BUFFER:
         return f"순위 {line.rank}위"
-    if line.action is RebalanceAction.BUY and (line.rank or 0) <= slots:
+    if line.cause is LineCause.NEW_TOP:
         return ""
     return _html(line.reason)
 
@@ -541,10 +676,19 @@ def _day(day: date) -> str:
 
 def _object_particle(word: str) -> str:
     """마지막 글자에 받침이 있으면 `을`, 없으면 `를`. 한글이 아니면 `을(를)`."""
+    return _particle(word, "을", "를")
+
+
+def _topic_particle(word: str) -> str:
+    """마지막 글자에 받침이 있으면 `은`, 없으면 `는`. 한글이 아니면 `은(는)`."""
+    return _particle(word, "은", "는")
+
+
+def _particle(word: str, after_final: str, after_vowel: str) -> str:
     last = word[-1:]
     if not "가" <= last <= "힣":
-        return "을(를)"
-    return "을" if (ord(last) - ord("가")) % 28 else "를"
+        return f"{after_final}({after_vowel})"
+    return after_final if (ord(last) - ord("가")) % 28 else after_vowel
 
 
 def _html(text: str) -> str:

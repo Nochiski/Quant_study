@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
@@ -13,10 +14,20 @@ from strategy_workbench.application.broker_connection.ports.outgoing.broker impo
     BrokerConnectionProbe,
     BrokerCredentials,
     BrokerCredentialStore,
+    BrokerCredentialsUnreadableError,
     ConnectionOutcome,
 )
 
 ACCOUNT_TAIL_DIGITS = 4
+ACCOUNT_NUMBER_DIGITS = 10
+
+
+def is_account_number(value: str) -> bool:
+    """키움 계좌번호 형식(숫자 10자리). 화면 입력 검증과 키움 어댑터가 같은 규칙을 쓴다."""
+    return re.fullmatch(rf"\d{{{ACCOUNT_NUMBER_DIGITS}}}", value) is not None
+
+
+logger = logging.getLogger(__name__)
 
 OUTCOME_MESSAGES: dict[ConnectionOutcome, str] = {
     ConnectionOutcome.CONNECTED: "연결됐습니다. 키움 모의 계좌가 입력한 계좌번호와 같습니다.",
@@ -42,6 +53,9 @@ OUTCOME_MESSAGES: dict[ConnectionOutcome, str] = {
         "키움 모의 서버에서 응답을 받지 못했습니다. 잠시 뒤 다시 확인해 주세요."
     ),
     ConnectionOutcome.REFUSED: "키움이 확인 요청을 거절했습니다. 잠시 뒤 다시 확인해 주세요.",
+    ConnectionOutcome.UNREADABLE: (
+        "저장된 키움 모의 키를 읽을 수 없습니다. 키와 계좌번호를 다시 저장하거나 지워 주세요."
+    ),
 }
 
 
@@ -58,6 +72,7 @@ class InvalidBrokerCredentialsError(ValueError):
 class BrokerConnectionStatus:
     saved: bool
     account_tail: str | None
+    unreadable: bool = False  # 저장된 항목이 깨져 읽지 못했다(다시 저장·삭제로 고친다)
 
 
 @dataclass(frozen=True)
@@ -73,7 +88,11 @@ class BrokerConnectionService:
         self._probe = probe
 
     def status(self) -> BrokerConnectionStatus:
-        credentials = self._store.load()
+        try:
+            credentials = self._store.load()
+        except BrokerCredentialsUnreadableError as error:
+            logger.warning("kiwoom mock credentials unreadable — %s", error)
+            return BrokerConnectionStatus(False, None, unreadable=True)
         return BrokerConnectionStatus(credentials is not None, _tail(credentials))
 
     def save(self, app_key: str, secret_key: str, account_number: str) -> BrokerConnectionStatus:
@@ -84,7 +103,7 @@ class BrokerConnectionService:
             raise InvalidBrokerCredentialsError("app_key", "앱 키를 입력해 주세요.")
         if not secret_key:
             raise InvalidBrokerCredentialsError("secret_key", "시크릿을 입력해 주세요.")
-        if not re.fullmatch(r"\d{10}", account):
+        if not is_account_number(account):
             raise InvalidBrokerCredentialsError(
                 "account_number", "계좌번호는 숫자 10자리입니다('-'는 빼도 됩니다)."
             )
@@ -95,11 +114,26 @@ class BrokerConnectionService:
         self._store.delete()
 
     def verify(self) -> BrokerConnectionResult:
-        credentials = self._store.load()
+        try:
+            credentials = self._store.load()
+        except BrokerCredentialsUnreadableError as error:
+            logger.warning("kiwoom mock credentials unreadable — %s", error)
+            outcome = ConnectionOutcome.UNREADABLE
+            return BrokerConnectionResult(outcome, OUTCOME_MESSAGES[outcome], None)
         if credentials is None:
-            outcome = ConnectionOutcome.NOT_SAVED
+            outcome, detail = ConnectionOutcome.NOT_SAVED, ""
         else:
-            outcome = self._probe.verify(credentials).outcome
+            check = self._probe.verify(credentials)
+            outcome, detail = check.outcome, check.detail
+        # 화면에는 정해 둔 문장만 보낸다. 원인(detail)은 운영 로그에만 남긴다
+        # (비밀값은 probe 가 지운다).
+        logger.log(
+            logging.INFO if outcome is ConnectionOutcome.CONNECTED else logging.WARNING,
+            "kiwoom mock connection check — outcome=%s account_tail=%s detail=%s",
+            outcome.value,
+            _tail(credentials),
+            detail,
+        )
         return BrokerConnectionResult(outcome, OUTCOME_MESSAGES[outcome], _tail(credentials))
 
 

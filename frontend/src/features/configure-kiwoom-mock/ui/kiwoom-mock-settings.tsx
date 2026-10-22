@@ -44,6 +44,8 @@ export const KiwoomMockSettings = () => {
   };
 
   const saved = connection.data?.saved === true;
+  // 저장된 항목이 깨졌다. 확인은 막고, 다시 저장하거나 지울 수 있게 한다(리뷰 #594).
+  const unreadable = connection.data?.unreadable === true;
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -126,12 +128,14 @@ export const KiwoomMockSettings = () => {
           className="kiwoom-settings__status"
           data-testid="kiwoom-connection-status"
         >
-          <Badge tone={saved ? "ok" : "neutral"}>
+          <Badge tone={saved ? "ok" : unreadable ? "warn" : "neutral"}>
             {saved && connection.data.account_tail !== null
               ? tFill("settings.kiwoom.status.saved", {
                   tail: connection.data.account_tail,
                 })
-              : t("settings.kiwoom.status.empty")}
+              : unreadable
+                ? t("settings.kiwoom.status.unreadable")
+                : t("settings.kiwoom.status.empty")}
           </Badge>
           <div className="kiwoom-settings__actions">
             <Button
@@ -142,8 +146,12 @@ export const KiwoomMockSettings = () => {
                 ? t("settings.kiwoom.verifying")
                 : t("settings.kiwoom.verify")}
             </Button>
-            {saved && !confirming ? (
-              <Button tone="danger" onClick={() => setConfirming(true)}>
+            {(saved || unreadable) && !confirming ? (
+              <Button
+                tone="danger"
+                onClick={() => setConfirming(true)}
+                disabled={check.pending}
+              >
                 {t("settings.kiwoom.delete")}
               </Button>
             ) : null}
@@ -233,7 +241,11 @@ export const KiwoomMockSettings = () => {
           {fieldError("account_number")}
         </div>
         {fieldError("form")}
-        <Button type="submit" tone="primary" disabled={save.pending}>
+        <Button
+          type="submit"
+          tone="primary"
+          disabled={save.pending || check.pending}
+        >
           {save.pending
             ? t("settings.kiwoom.form.saving")
             : t("settings.kiwoom.form.submit")}

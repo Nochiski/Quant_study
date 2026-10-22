@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import ssl
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -47,22 +46,16 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import (
     KiwoomCredentials,
     KiwoomMockBroker,
     KiwoomTransport,
-    UrllibTransport,
-)
-from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
-    LocalFileBrokerCredentialStore,
-    LocalFileProviderSecretStore,
-    default_secrets_path,
+    system_trust_transport,
 )
 from strategy_workbench.application.offline_execution.facade.execution import (
     OfflineExecutionService,
 )
-from strategy_workbench.bootstrap.facade.http import runtime_assistant_settings
+from strategy_workbench.bootstrap.facade.secrets import saved_kiwoom_credentials
 from strategy_workbench.domain.order_execution.facade.orders import Intent
 
 KST = timezone(timedelta(hours=9))
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-ACCOUNT_PATH = "/api/dostk/acnt"
 START_PAUSE_SECONDS = 1.5
 
 
@@ -78,25 +71,11 @@ class Probe:
         self.ledger.close()
 
 
-def _transport() -> KiwoomTransport:
-    """python.org macOS 빌드는 기본 인증서 목록이 비어 있어 OS 신뢰 저장소를 쓴다."""
-    try:
-        import truststore
-    except ImportError:
-        return UrllibTransport()
-    return UrllibTransport(ssl_context=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT))
-
-
 def _credentials() -> KiwoomCredentials:
-    configured = runtime_assistant_settings().secrets_path
-    store = LocalFileProviderSecretStore(
-        configured if configured is not None else default_secrets_path(),
-        forbidden_roots=(REPOSITORY_ROOT,),
-    )
-    saved = LocalFileBrokerCredentialStore(store).load()
+    saved = saved_kiwoom_credentials()
     if saved is None:
         raise SystemExit("저장된 키움 모의 키가 없습니다. 설정 화면에서 먼저 저장하세요.")
-    return KiwoomCredentials(saved.app_key, saved.secret_key, saved.account_number)
+    return saved
 
 
 def open_probe(
@@ -112,16 +91,19 @@ def open_probe(
     if resolved == REPOSITORY_ROOT or REPOSITORY_ROOT in resolved.parents:
         raise SystemExit("--out은 저장소 밖이어야 합니다(원장·조회 원본에 계좌 사실이 담긴다).")
     resolved.mkdir(parents=True, exist_ok=True, mode=0o700)
+    resolved.chmod(0o700)  # 이미 있던 폴더도 본인만(원장·조회 원본에 계좌 사실이 담긴다)
     broker = KiwoomMockBroker(
         _credentials(),
         resolved / "kiwoom-reference.sqlite",
-        transport=transport or _transport(),
+        transport=transport or system_trust_transport(),
         transmit=send,
         now=now,
         monotonic=monotonic,
         sleep=sleep,
     )
     ledger = ExecutionSqliteLedger(resolved / "execution.sqlite")
+    for name in ("kiwoom-reference.sqlite", "execution.sqlite"):
+        (resolved / name).chmod(0o600)
     return Probe(broker, OfflineExecutionService(ledger, broker), ledger, resolved)
 
 
@@ -223,7 +205,7 @@ def run(
             show(probe)
             return 0 if result.status == "ok" else 1
         elif args.command == "quote":
-            body = probe.broker._client.call(  # pyright: ignore[reportPrivateUsage]  # reason: 위와 같음
+            body = probe.broker.client.call(
                 "ka10004", "/api/dostk/mrkcond", {"stk_cd": args.symbol}
             ).body
             print(

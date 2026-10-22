@@ -30,6 +30,7 @@ let status: KiwoomMockConnectionBody;
 let saveBodies: Record<string, unknown>[];
 let saveReply: () => Response;
 let verifyReply: KiwoomMockConnectionCheckBody;
+let verifyGate: Promise<void>;
 let deleted: number;
 
 const server = setupServer(
@@ -43,7 +44,11 @@ const server = setupServer(
     status = { saved: false, account_tail: null };
     return new HttpResponse(null, { status: 204 });
   }),
-  http.post(`${PATH}/verify`, () => HttpResponse.json(verifyReply)),
+  http.post(`${PATH}/verify`, async () => {
+    const reply = verifyReply;
+    await verifyGate;
+    return HttpResponse.json(reply);
+  }),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -56,6 +61,7 @@ beforeEach(() => {
   status = { saved: false, account_tail: null };
   saveBodies = [];
   deleted = 0;
+  verifyGate = Promise.resolve();
   saveReply = () => {
     status = { saved: true, account_tail: "5678" };
     return HttpResponse.json(status);
@@ -175,5 +181,58 @@ describe("KiwoomMockSettings", () => {
     await user.click(screen.getByRole("button", { name: "삭제 확인" }));
     expect(await screen.findByText("저장된 키 없음")).toBeTruthy();
     expect(deleted).toBe(1);
+  });
+
+  it("offers to save again or delete when the saved entry is unreadable", async () => {
+    // 리뷰 #594 P3: 깨진 항목은 500 이 나고 삭제 버튼이 숨어 지울 수 없었다
+    status = { saved: false, account_tail: null, unreadable: true };
+    const user = userEvent.setup();
+    renderWithClient(<KiwoomMockSettings />);
+    expect(
+      await screen.findByText(
+        "저장된 키를 읽을 수 없음 — 다시 저장하거나 지우세요",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "연결 확인" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    await user.click(screen.getByRole("button", { name: "삭제" }));
+    await user.click(screen.getByRole("button", { name: "삭제 확인" }));
+    expect(await screen.findByText("저장된 키 없음")).toBeTruthy();
+    expect(deleted).toBe(1);
+  });
+
+  it("does not show a late check result for keys saved after it started", async () => {
+    // 리뷰 #595 P3: 확인을 기다리는 동안 새 키를 저장하면 옛 키의 "연결됐습니다"가 남았다
+    status = { saved: true, account_tail: "5678" };
+    let release = () => {};
+    verifyGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const user = userEvent.setup();
+    renderWithClient(<KiwoomMockSettings />);
+    await user.click(await screen.findByRole("button", { name: "연결 확인" }));
+    expect(screen.getByRole("button", { name: "저장" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    release();
+    expect(
+      await screen.findByText(
+        "연결됐습니다. 키움 모의 계좌가 입력한 계좌번호와 같습니다.",
+      ),
+    ).toBeTruthy();
+    // 결과가 온 뒤 새 키를 저장하면 그 결과는 지워진다
+    await fill(user, "5099999999");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    await screen.findByText("저장됨 · 계좌 끝 5678");
+    await waitFor(() =>
+      expect(
+        screen.queryByText(
+          "연결됐습니다. 키움 모의 계좌가 입력한 계좌번호와 같습니다.",
+        ),
+      ).toBeNull(),
+    );
   });
 });

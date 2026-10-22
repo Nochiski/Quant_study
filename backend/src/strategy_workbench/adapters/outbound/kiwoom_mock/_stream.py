@@ -5,6 +5,8 @@
   그래서 이 기록기는 한 곳에서만 돌린다.
 - 끊기면 다시 접속한다. 끊긴 사이 알림은 다시 오지 않는다(실측). 누적 칸(`911`·`903`)이 다음 알림에
   반영되지만, 대사의 정본은 조회다.
+- 토큰 발급이 실패해도 끝내지 않고 다시 시도한다. 로그인이 거절되면 그 사유를 돌려주고 멈춘다
+  (호출자가 실패로 드러낸다, 2026-10-22 리뷰 #605).
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import json
 import os
 import ssl
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -21,6 +24,7 @@ from typing import Protocol
 import websockets
 
 from strategy_workbench.adapters.outbound.kiwoom_mock._http import MOCK_WEBSOCKET_URL
+from strategy_workbench.application.offline_execution.facade.execution import BrokerError
 
 _REGISTER = {
     "trnm": "REG",
@@ -42,6 +46,14 @@ class StreamConnection(Protocol):
 Connect = Callable[[], Awaitable[StreamConnection]]
 
 
+@dataclass(frozen=True)
+class FillStreamResult:
+    """받은 체결·접수 알림 건수. `refused`가 있으면 로그인이 거절돼 그날 기록을 멈췄다."""
+
+    received: int
+    refused: str | None = None
+
+
 def mock_connect(ssl_context: ssl.SSLContext | None = None) -> Connect:
     async def connect() -> StreamConnection:
         return await websockets.connect(
@@ -60,18 +72,26 @@ async def record_fills(
     *,
     reconnect_seconds: float = 5.0,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-) -> int:
-    """`until`까지 받는다. 받은 체결·접수 알림 건수를 돌려준다."""
+) -> FillStreamResult:
+    """`until`까지 받는다."""
     received = 0
     while now() < until:
+        try:
+            session_token = token()
+        except BrokerError as error:
+            # 토큰 발급의 일시 오류(응답 없음 등)로 그날 기록을 잃지 않게 다시 시도한다.
+            _write(out, now(), "token_failed", {"error": type(error).__name__})
+            await sleep(reconnect_seconds)
+            continue
         connection: StreamConnection | None = None
         try:
             connection = await connect()
-            await connection.send(json.dumps({"trnm": "LOGIN", "token": token()}))
+            await connection.send(json.dumps({"trnm": "LOGIN", "token": session_token}))
             login = json.loads(await asyncio.wait_for(connection.recv(), 10))
             _write(out, now(), "login", login)
             if login.get("return_code") != 0:
-                return received
+                why = f"return_code={login.get('return_code')} {login.get('return_msg', '')}"
+                return FillStreamResult(received, why)
             await connection.send(json.dumps(_REGISTER))
             while now() < until:
                 remaining = (until - now()).total_seconds()
@@ -92,7 +112,7 @@ async def record_fills(
         finally:
             if connection is not None:
                 await connection.close()
-    return received
+    return FillStreamResult(received)
 
 
 def _write(out: Path, at: datetime, kind: str, message: object) -> None:

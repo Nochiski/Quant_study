@@ -18,6 +18,7 @@ from strategy_workbench.adapters.outbound.scope_signal.facade.source import Scop
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountState,
     Approval,
+    EarlierClose,
     PlanExistsError,
     PlanRecord,
     SignalReadStatus,
@@ -69,10 +70,11 @@ def model_db(
     pq.write_table(
         pa.table(
             {
-                "ticker": ["000001", "000002", "000003", "000001"],
-                "date": [DAY, DAY, DAY, date(2026, 10, 22)],
-                "close": [10_000, 20_000, 30_000, 9_000],
-                "volume": [100, 0, 50, 100],
+                # 000009 는 신호일 행이 없다(거래정지 등). 그 전 마지막 종가는 10-21 7,500원이다
+                "ticker": ["000001", "000002", "000003", "000001", "000009", "000009"],
+                "date": [DAY, DAY, DAY, date(2026, 10, 22), date(2026, 10, 20), date(2026, 10, 21)],
+                "close": [10_000, 20_000, 30_000, 9_000, 7_000, 7_500],
+                "volume": [100, 0, 50, 100, 10, 0],
             }
         ),
         prices / "part0.parquet",
@@ -92,6 +94,8 @@ def test_signal_reads_the_current_build_ranks_and_closes(tmp_path: Path) -> None
     assert snapshot.untraded == frozenset({"000002"})
     scores = root / "model" / "scope@2.0" / f"v={BUILD}" / "scores.parquet"
     assert snapshot.scores_sha256 == hashlib.sha256(scores.read_bytes()).hexdigest()
+    # 신호일 행이 없는 종목만 그 전 마지막 종가를 따로 싣는다(#603 리뷰: 보유 종목 평가용)
+    assert snapshot.earlier_closes == {"000009": EarlierClose(date(2026, 10, 21), 7_500)}
 
 
 @pytest.mark.parametrize(
@@ -235,6 +239,7 @@ def test_plan_store_keeps_review_flags_anomalies_and_no_trade(tmp_path: Path) ->
         previous_build_id="e_prev",
         anomalies=("상위 30위 중 2종목이 사라짐",),
         names=(("000001", "가"), ("000009", "보유")),
+        gap_check_skipped="직전 빌드 e_prev 순위를 쓸 수 없음",
     )
     record = replace(base, signal=signal, plan=plan)
     store = JsonPlanStore(tmp_path)

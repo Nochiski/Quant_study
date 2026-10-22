@@ -22,6 +22,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     SignalRecord,
 )
 from strategy_workbench.domain.rebalance.facade.rebalance import (
+    LineCause,
     RebalanceAction,
     RebalanceLine,
     RebalancePlan,
@@ -128,6 +129,7 @@ def _encode_plan(record: PlanRecord) -> dict[str, object]:
             "previous_build_id": signal.previous_build_id,
             "anomalies": list(signal.anomalies),
             "names": dict(signal.names),
+            "gap_check_skipped": signal.gap_check_skipped,
         },
         "account": {
             "cash_krw": account.cash_krw,
@@ -156,6 +158,9 @@ def _encode_plan(record: PlanRecord) -> dict[str, object]:
                     "reference_price_krw": line.reference_price_krw,
                     "reason": line.reason,
                     "review": line.review,
+                    "cause": None if line.cause is None else line.cause.value,
+                    "missing_why": line.missing_why,
+                    "last_seen": line.last_seen,
                 }
                 for line in plan.lines
             ],
@@ -180,6 +185,7 @@ def _decode_plan(value: dict[str, object]) -> PlanRecord:
             None if signal.get("previous_build_id") is None else str(signal["previous_build_id"]),
             _strings(signal.get("anomalies")),
             _names(signal.get("names")),
+            None if signal.get("gap_check_skipped") is None else str(signal["gap_check_skipped"]),
         ),
         AccountState(
             _int(account["cash_krw"], "cash_krw"),
@@ -213,6 +219,9 @@ def _line(value: object) -> RebalanceLine:
         None if price is None else _int(price, "reference_price_krw"),
         str(value["reason"]),
         bool(value.get("review", False)),
+        None if value.get("cause") is None else LineCause(value["cause"]),
+        str(value.get("missing_why", "")),
+        str(value.get("last_seen", "")),
     )
 
 

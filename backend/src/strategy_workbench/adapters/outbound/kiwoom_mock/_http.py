@@ -20,12 +20,18 @@ from email.message import Message
 from enum import StrEnum
 from typing import IO, Protocol
 
+from strategy_workbench.application.broker_connection.facade.connection import (
+    ACCOUNT_NUMBER_DIGITS,
+    BrokerCredentials,
+    is_account_number,
+)
 from strategy_workbench.application.offline_execution.facade.execution import BrokerError
 
 logger = logging.getLogger(__name__)
 
 # 모의 전용 주소. 실전 주소는 이 어댑터에 없고, 주소를 바꾸는 인자도 두지 않는다.
 MOCK_BASE_URL = "https://mockapi.kiwoom.com"
+ACCOUNT_PATH = "/api/dostk/acnt"  # 계좌 TR 경로(ka00001·kt00001·kt00007·kt00018·ka10170)
 # 같은 모의 호스트의 웹소켓. 실시간 주문체결(`00`) 기록에만 쓴다(S07).
 MOCK_WEBSOCKET_URL = "wss://mockapi.kiwoom.com:10000/api/websocket"
 # 한국은 일광절약시간이 없다. 고정 오프셋으로 Windows의 tzdata 의존을 피한다.
@@ -151,8 +157,11 @@ class UrllibTransport:
                 ) from read_error
             return _decode(path, error.code, _headers(error.headers), payload)
         except (urllib.error.URLError, OSError) as error:
+            # URLError 는 원인(reason)을 감싼다. 인증서 확인 실패 같은 원인을 함께 남긴다.
+            reason = getattr(error, "reason", error)
             raise KiwoomNoResponseError(
-                f"no response from kiwoom mock — path={path} error={type(error).__name__}"
+                f"no response from kiwoom mock — path={path} error={type(error).__name__} "
+                f"reason={type(reason).__name__}: {reason}"
             ) from error
 
 
@@ -203,10 +212,16 @@ class KiwoomCredentials:
     def __post_init__(self) -> None:
         if not self.app_key.strip() or not self.secret_key.strip():
             raise ValueError("kiwoom app key and secret must be non-empty")
-        if not re.fullmatch(r"\d{10}", self.account_number):
+        if not is_account_number(self.account_number):
             raise ValueError(
-                f"kiwoom account number must be 10 digits — length={len(self.account_number)}"
+                f"kiwoom account number must be {ACCOUNT_NUMBER_DIGITS} digits — "
+                f"length={len(self.account_number)}"
             )
+
+    @classmethod
+    def from_saved(cls, saved: BrokerCredentials) -> KiwoomCredentials:
+        """설정 화면이 저장한 자격증명을 키움 어댑터 값으로 옮긴다(옮기는 곳은 여기 하나)."""
+        return cls(saved.app_key, saved.secret_key, saved.account_number)
 
 
 class _Pacer:
@@ -281,7 +296,7 @@ class KiwoomClient:
             raise KiwoomNoResponseError("kiwoom token response has no valid expires_dt") from error
         if not token:
             raise KiwoomNoResponseError("kiwoom token response has no token")
-        account = self._query("ka00001", "/api/dostk/acnt", {}, token=token)
+        account = self._query("ka00001", ACCOUNT_PATH, {}, token=token)
         self._raise_for(account, "ka00001")
         if _text(account.body, "acctNo") != self._credentials.account_number:
             raise KiwoomBlockedError(
@@ -384,7 +399,19 @@ class KiwoomClient:
             headers["next-key"] = next_key
         self._pacer.wait(api_id)
         started = self._monotonic()
-        response = self._transport.post(path, headers, body)
+        # 전송 전에 남긴다. 연결 자체가 실패해도(인증서·DNS) 어느 호출이었는지 기록이 남는다.
+        logger.info("kiwoom mock call — api_id=%s path=%s", api_id, path)
+        try:
+            response = self._transport.post(path, headers, body)
+        except BrokerError as error:
+            logger.warning(
+                "kiwoom mock call failed — api_id=%s path=%s elapsed_ms=%d error=%s",
+                api_id,
+                path,
+                round((self._monotonic() - started) * 1000),
+                self._scrub(str(error)),
+            )
+            raise
         logger.info(
             "kiwoom mock call — api_id=%s status=%s return_code=%s error_code=%s "
             "cont=%s elapsed_ms=%d",

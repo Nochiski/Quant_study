@@ -1453,7 +1453,8 @@ export type ConnectionOutcome =
   | "auth_failed"
   | "account_mismatch"
   | "no_response"
-  | "refused";
+  | "refused"
+  | "unreadable";
 
 /**
  * ConstantNode
@@ -3855,6 +3856,12 @@ export type KiwoomMockConnectionBody = {
    * Saved
    */
   saved: boolean;
+  /**
+   * Unreadable
+   *
+   * 저장된 항목이 깨져 읽지 못했다. 다시 저장하거나 지우면 고쳐진다.
+   */
+  unreadable?: boolean;
 };
 
 /**

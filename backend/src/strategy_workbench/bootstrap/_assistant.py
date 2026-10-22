@@ -48,7 +48,6 @@ from strategy_workbench.adapters.outbound.assistant_sqlite.facade.repository imp
 from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import ScriptedLlmProvider
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
     LocalFileProviderSecretStore,
-    default_secrets_path,
 )
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
 from strategy_workbench.application.assistant_chat.facade.context import AssistantContextBuilder
@@ -84,6 +83,7 @@ from strategy_workbench.domain.assistant.facade.models import (
 from strategy_workbench.domain.factor.facade.registry import FactorRegistry
 
 from ._file_guard import restrict_to_current_user
+from ._secrets import local_secret_store, repository_root
 
 logger = logging.getLogger(__name__)
 
@@ -255,17 +255,6 @@ class AssistantServices:
     secrets: LocalFileProviderSecretStore
 
 
-def repository_root() -> Path:
-    """**소스 체크아웃 기준** 저장소 루트. 비밀 파일이 들어가면 안 되는 트리다.
-
-    `backend/src/strategy_workbench/bootstrap/`에서 네 단계 위다. 같은 파일의 `.local` 경로
-    계산(`_http.py`의 `parents[3]`)과 같은 관례이고, 이 앱은 editable 설치(`uv sync`)로만
-    돌기 때문에 성립한다. 비 editable 설치에서는 관련 없는 디렉터리를 가리키므로, 그런 배포가
-    생기면 저장소 루트를 설정으로 받아야 한다.
-    """
-    return Path(__file__).resolve().parents[4]
-
-
 class _LazyProviderRegistry(Mapping[ProviderKind, LlmProviderPort]):
     """등록된 팩토리를 **처음 필요할 때** 한 번만 부르는 공급자 맵.
 
@@ -351,10 +340,7 @@ def build_assistant_services(
         restrict_to_current_user(database.database_path)
     profile_repository = SQLiteProviderProfileRepository(database)
     session_repository = SQLiteChatSessionRepository(database)
-    secrets = LocalFileProviderSecretStore(
-        settings.secrets_path if settings.secrets_path is not None else default_secrets_path(),
-        forbidden_roots=(repository_root(),),
-    )
+    secrets = local_secret_store(settings.secrets_path)
     providers = _LazyProviderRegistry(settings.provider_factories)
     compiler = _AuthoringStrategyCompiler(strategy_authoring)
     profiles = ProviderProfileService(

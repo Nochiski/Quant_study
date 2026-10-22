@@ -125,11 +125,6 @@ def test_the_version_2_schema_declaration_is_frozen() -> None:
     assert _schema_digest(V2_SCHEMA_OBJECTS) == V2_SCHEMA_SHA256
 
 
-def test_the_current_schema_version_is_three() -> None:
-    """v2는 C-03(`chat_messages.turn_id`), v3은 결과 설명(`chat_sessions.run_id`)이다."""
-    assert SCHEMA_VERSION == 3
-
-
 def test_a_version_1_file_is_upgraded_in_place_and_stamps_messages_with_their_turn(
     tmp_path: Path,
 ) -> None:

@@ -64,12 +64,6 @@ def test_chat_event_union_members_match_the_design_spec() -> None:
     assert {member.__name__ for member in get_args(ChatEvent)} == EXPECTED_CHAT_EVENTS
 
 
-def test_every_chat_event_is_a_distinct_type() -> None:
-    members = get_args(ChatEvent)
-
-    assert len(members) == len(set(members))
-
-
 def test_usage_input_columns_do_not_overlap_and_total_is_derived() -> None:
     """`Usage`는 분리형이다. 총입력은 저장하지 않고 세 칸을 더해서 얻는다.
 

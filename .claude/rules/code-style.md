@@ -93,4 +93,4 @@ stub 없는 lib(데이터 벤더 SDK, 브로커 API 클라이언트, 일부 지�
 
 - 결과/실패 값 설계: `.claude/rules/python.md`
 - 예외/로그 메시지 진단 디테일: `.claude/rules/error-messages.md`
-- 테스트 범위: `.claude/rules/testing.md`
+- 테스트를 언제 쓰고 언제 지우나: `.claude/rules/testing.md`

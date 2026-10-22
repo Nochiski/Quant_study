@@ -150,6 +150,14 @@ class WeeklyRebalanceService:
                 PrepareStatus.INVALID_INPUT,
                 detail=f"{error} — plan_id={plan_id} build_id={signal.build_id}",
             )
+        skipped = (
+            None
+            if signal.previous_ranks is not None
+            else "직전 빌드 없음"
+            if signal.previous_build_id is None
+            else f"직전 빌드 {signal.previous_build_id} 순위를 쓸 수 없음"
+            "(읽기 실패 또는 같은 날 재빌드)"
+        )
         record = PlanRecord(
             plan_id,
             self._now(),
@@ -167,6 +175,7 @@ class WeeklyRebalanceService:
                     for line in plan.lines
                     if signal.names is not None and line.symbol in signal.names
                 ),
+                skipped,
             ),
             account,
             plan,

@@ -128,6 +128,7 @@ def _encode_plan(record: PlanRecord) -> dict[str, object]:
             "previous_build_id": signal.previous_build_id,
             "anomalies": list(signal.anomalies),
             "names": dict(signal.names),
+            "gap_check_skipped": signal.gap_check_skipped,
         },
         "account": {
             "cash_krw": account.cash_krw,
@@ -180,6 +181,7 @@ def _decode_plan(value: dict[str, object]) -> PlanRecord:
             None if signal.get("previous_build_id") is None else str(signal["previous_build_id"]),
             _strings(signal.get("anomalies")),
             _names(signal.get("names")),
+            None if signal.get("gap_check_skipped") is None else str(signal["gap_check_skipped"]),
         ),
         AccountState(
             _int(account["cash_krw"], "cash_krw"),

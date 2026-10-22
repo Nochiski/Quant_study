@@ -491,6 +491,11 @@ def render(record: PlanRecord, approval: Approval | None) -> str:
         f"계좌 현금 {plan.cash_krw:,}원 · 총자산 {plan.equity_krw:,}원 · 종목당 목표 "
         f"{plan.target_value_krw:,}원 · 원장 대사 {_reconciled(record.account.reconciled)}",
         *(f"⚠ 데이터 누락 의심을 확인하고 만든 주문안: {reason}" for reason in signal.anomalies),
+        *(
+            [f"빌드 점검 건너뜀 — {signal.gap_check_skipped}"]
+            if signal.gap_check_skipped is not None
+            else []
+        ),
         "",
         f"{'구분':<4} {'종목':<6} {'순위':>4} {'현재':>7} {'목표':>7} {'증감':>7} "
         f"{'기준가':>9} {'증감 금액':>13}  사유",
@@ -595,6 +600,8 @@ def render_telegram(record: PlanRecord, execute_on: date) -> str:
     footer = [f"총자산 {_won(plan.equity_krw)} · 종목당 {_won(plan.target_value_krw)}"]
     if signal.anomalies:
         footer.append("<i>데이터 누락 의심을 확인하고 만든 주문지</i>")
+    if signal.gap_check_skipped is not None:
+        footer.append(f"<i>직전 빌드 점검 건너뜀 — {_html(signal.gap_check_skipped)}</i>")
     reviews = [names.get(line.symbol, line.symbol) for line in plan.lines if _flagged_sale(line)]
     if reviews:
         footer.append(

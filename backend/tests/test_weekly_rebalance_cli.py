@@ -292,6 +292,34 @@ def test_telegram_marks_a_held_name_without_a_signal_day_price() -> None:
     assert "가격 없음 1종목 ['000001']" in shown and "확인 필요" not in shown
 
 
+def test_telegram_says_when_the_gap_check_was_skipped() -> None:
+    # 리뷰 #606 P3: 빌드 점검을 건너뛴 판도 주문지에서 '점검 통과'처럼 보였다
+    names = {"000003": "HMM"}
+    plan = plan_rebalance(
+        RebalancePolicy(slots=3, keep_rank=5),
+        ranks={"000003": 1},
+        holdings={},
+        prices={"000003": 10_000},
+        cash_krw=1_000_000,
+        blocked={},
+    )
+    signal = SignalRecord(
+        "scope@2.0",
+        "e_b",
+        "2026-10-23",
+        "ab" * 32,
+        "e_p",
+        (),
+        "e_prev",
+        names=tuple(names.items()),
+        gap_check_skipped="직전 빌드 e_prev 순위를 쓸 수 없음(읽기 실패 또는 같은 날 재빌드)",
+    )
+    record = PlanRecord("weekly-2026-10-23", NOW, signal, AccountState(1_000_000, {}, None), plan)
+    text = render_telegram(record, date(2026, 10, 26))
+    assert "<i>직전 빌드 점검 건너뜀 — 직전 빌드 e_prev 순위를 쓸 수 없음" in text
+    assert "빌드 점검 건너뜀 — 직전 빌드 e_prev" in render(record, None)
+
+
 def test_approve_prints_the_new_buys_dropped_with_a_kept_sale(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

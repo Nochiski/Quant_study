@@ -194,6 +194,20 @@ def test_the_gap_check_looks_at_the_buffer_of_the_policy() -> None:
     assert result.status is PrepareStatus.OK
 
 
+def test_a_skipped_gap_check_is_recorded_with_why() -> None:
+    # 리뷰 #606 P3: '점검 통과'와 '점검 건너뜀'이 구분되지 않았다
+    # (같은 날 재빌드한 판이 가장 위험하다)
+    rebuilt = snapshot(previous_build_id="e_same_day", previous_ranks=None)
+    record = service(Signals(SignalRead(SignalReadStatus.OK, rebuilt))).prepare(DAY).record
+    assert record is not None and record.signal.gap_check_skipped is not None
+    assert "e_same_day" in record.signal.gap_check_skipped
+    first = service(Signals(SignalRead(SignalReadStatus.OK, snapshot()))).prepare(DAY).record
+    assert first is not None and first.signal.gap_check_skipped == "직전 빌드 없음"
+    checked = snapshot(previous_build_id="e_prev", previous_ranks={"000001": 1})
+    plain = service(Signals(SignalRead(SignalReadStatus.OK, checked))).prepare(DAY).record
+    assert plain is not None and plain.signal.gap_check_skipped is None
+
+
 def test_held_name_without_a_signal_day_price_is_held_on_its_earlier_close() -> None:
     # 리뷰 #603: 거래정지로 신호일 가격 행이 없는 보유 종목 하나 때문에 주문안 전체가 실패했다
     signal = snapshot(earlier_closes={"000008": EarlierClose(date(2026, 10, 20), 12_000)})

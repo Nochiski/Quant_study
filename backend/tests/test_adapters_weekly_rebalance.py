@@ -239,6 +239,7 @@ def test_plan_store_keeps_review_flags_anomalies_and_no_trade(tmp_path: Path) ->
         previous_build_id="e_prev",
         anomalies=("상위 30위 중 2종목이 사라짐",),
         names=(("000001", "가"), ("000009", "보유")),
+        gap_check_skipped="직전 빌드 e_prev 순위를 쓸 수 없음",
     )
     record = replace(base, signal=signal, plan=plan)
     store = JsonPlanStore(tmp_path)

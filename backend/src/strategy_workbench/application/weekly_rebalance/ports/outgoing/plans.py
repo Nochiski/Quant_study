@@ -31,6 +31,9 @@ class SignalRecord:
     anomalies: tuple[str, ...] = ()
     # 주문안 줄에 나온 종목의 이름(종목코드, 이름)
     names: tuple[tuple[str, str], ...] = ()
+    # 직전 빌드와 견주는 점검을 건너뛴 이유. None 이면 점검했다(2026-10-22 리뷰 #606).
+    # 이 칸이 생기기 전에 남긴 주문안도 None 으로 읽힌다.
+    gap_check_skipped: str | None = None
 
 
 @dataclass(frozen=True)

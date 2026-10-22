@@ -1,0 +1,123 @@
+"""주간 리밸런싱(S07) 명령줄의 composition root.
+
+키는 설정 화면이 저장한 사용자 설정 폴더의 `secrets.json`에서 읽는다(명령줄·환경 변수로
+받지 않는다).
+작업 폴더는 저장소 밖이어야 한다. 원장·주문안에 계좌 사실이 담긴다.
+
+    <작업 폴더>/ledger/execution.sqlite        S05 실행 원장(실행기가 만든다)
+    <작업 폴더>/ledger/kiwoom-reference.sqlite 키움 모의 참조 원장
+    <작업 폴더>/plans/                         주문안·승인
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from strategy_workbench.adapters.inbound.weekly_rebalance_cli.facade.command import run_cli
+from strategy_workbench.adapters.outbound.execution_sqlite.facade.ledger import (
+    ExecutionSqliteLedger,
+)
+from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import (
+    KiwoomCredentials,
+    KiwoomMockBroker,
+    KiwoomTransport,
+    system_trust_transport,
+)
+from strategy_workbench.adapters.outbound.rebalance_files.facade.plans import JsonPlanStore
+from strategy_workbench.adapters.outbound.scope_signal.facade.source import ScopeSignalSource
+from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
+    LocalFileBrokerCredentialStore,
+    LocalFileProviderSecretStore,
+    default_secrets_path,
+)
+from strategy_workbench.application.offline_execution.facade.execution import (
+    BrokerError,
+    ExecutionStatus,
+    OfflineExecutionService,
+)
+from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
+    AccountState,
+    AccountUnavailableError,
+    WeeklyRebalanceService,
+)
+from strategy_workbench.bootstrap.facade.http import runtime_assistant_settings
+
+KST = timezone(timedelta(hours=9))
+REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
+
+
+class KiwoomAccountSource:
+    """주문안용 계좌. 실행 원장이 있으면 먼저 대사하고, 없으면 키움 조회만 쓴다. 주문하지 않는다."""
+
+    def __init__(
+        self,
+        workdir: Path,
+        credentials: KiwoomCredentials | None = None,
+        *,
+        transport: KiwoomTransport | None = None,
+    ) -> None:
+        self._ledger_dir = workdir / "ledger"
+        self._credentials = credentials
+        self._transport = transport
+
+    def current(self) -> AccountState:
+        self._ledger_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        broker = KiwoomMockBroker(
+            self._credentials or saved_credentials(),
+            self._ledger_dir / "kiwoom-reference.sqlite",
+            transport=self._transport or system_trust_transport(),
+        )
+        try:
+            reconciled: bool | None = None
+            detail = "실행 원장 없음"
+            ledger_path = self._ledger_dir / "execution.sqlite"
+            if ledger_path.exists():
+                ledger = ExecutionSqliteLedger(ledger_path)
+                try:
+                    result = OfflineExecutionService(ledger, broker).recover()
+                finally:
+                    ledger.close()
+                reconciled = result.status is ExecutionStatus.OK
+                detail = f"{result.status.value} {result.detail} {result.reconciliation}".strip()
+            account = broker.snapshot().account
+        except BrokerError as error:
+            raise AccountUnavailableError(f"kiwoom account unavailable — {error}") from error
+        finally:
+            broker.close()
+        return AccountState(account.cash_krw, dict(account.holdings), reconciled, detail)
+
+
+def saved_credentials() -> KiwoomCredentials:
+    configured = runtime_assistant_settings().secrets_path
+    store = LocalFileProviderSecretStore(
+        configured if configured is not None else default_secrets_path(),
+        forbidden_roots=(REPOSITORY_ROOT,),
+    )
+    saved = LocalFileBrokerCredentialStore(store).load()
+    if saved is None:
+        raise AccountUnavailableError("saved kiwoom mock keys not found — save them in settings")
+    return KiwoomCredentials(saved.app_key, saved.secret_key, saved.account_number)
+
+
+def outside_repository(workdir: Path) -> Path:
+    resolved = workdir.expanduser().resolve()
+    if resolved == REPOSITORY_ROOT or REPOSITORY_ROOT in resolved.parents:
+        raise SystemExit("--workdir는 저장소 밖이어야 합니다(원장·주문안에 계좌 사실이 담긴다).")
+    resolved.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return resolved
+
+
+def build_weekly_rebalance(workdir: Path, model_root: Path | None) -> WeeklyRebalanceService:
+    root = outside_repository(workdir)
+    return WeeklyRebalanceService(
+        # show·approve는 신호를 읽지 않는다. prepare는 --model-root를 반드시 받는다.
+        ScopeSignalSource((model_root or root / "model_db").expanduser()),
+        KiwoomAccountSource(root),
+        JsonPlanStore(root),
+        now=lambda: datetime.now(KST),
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run_cli(build_weekly_rebalance, argv)

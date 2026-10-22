@@ -1,0 +1,190 @@
+"""모델 DB의 장 마감 빌드에서 scope 순위와 신호일 종가를 읽는다(S07).
+
+모델 DB 배치(서버 quant-ledger의 `data/model_db`):
+
+- `model/latest_evening.json`: 마지막 성공 장 마감 빌드
+  (`build_id`·`date`·`fi_build_id`·모델별 게이트)
+- `model/<모델>/MANIFEST.json`: 모델별 현재 빌드(`current_build`)
+- `model/<모델>/v=<build_id>/scores.parquet`: `stock_code`·`rank`·`score_date`
+- `factor_inputs/fi_prices/v=<fi_build_id>/*.parquet`: 점수를 계산한 가격 판
+  (`ticker`·`date`·`close`·`volume`)
+
+현재 빌드 포인터가 가리키는 판만 읽는다. 폴더에 남은 옛 판을 훑지 않는다.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import date
+from pathlib import Path
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
+    SignalRead,
+    SignalReadStatus,
+    SignalSnapshot,
+)
+
+DEFAULT_MODEL_ID = "scope@1.0"
+# 게이트 기록 상태. warn은 통과에 경고 표시가 붙은 것이고 skip은 그 게이트가 판정하지 않은 것이다.
+_ACCEPTED_GATES = frozenset({"pass", "warn", "skip"})
+
+
+class _Unreadable(Exception):
+    pass
+
+
+class ScopeSignalSource:
+    def __init__(self, model_db_root: Path, *, model_id: str = DEFAULT_MODEL_ID) -> None:
+        self._root = model_db_root
+        self._model_id = model_id
+
+    def read(self, signal_date: date) -> SignalRead:
+        try:
+            return self._read(signal_date)
+        except _Unreadable as error:
+            return SignalRead(SignalReadStatus.UNREADABLE, detail=str(error))
+
+    def _read(self, signal_date: date) -> SignalRead:
+        latest = _json(self._root / "model" / "latest_evening.json")
+        identity = f"model_id={self._model_id} signal_date={signal_date.isoformat()}"
+        if latest.get("status") != "ok" or latest.get("basis") != "evening":
+            return SignalRead(
+                SignalReadStatus.NOT_READY,
+                detail=f"latest evening build is not ok — {identity} "
+                f"status={latest.get('status')!r} basis={latest.get('basis')!r}",
+            )
+        if latest.get("date") != signal_date.isoformat():
+            return SignalRead(
+                SignalReadStatus.NOT_READY,
+                detail=f"latest evening build is for another date — {identity} "
+                f"latest_date={latest.get('date')!r}",
+            )
+        build_id, prices_build_id = _text(latest, "build_id"), _text(latest, "fi_build_id")
+        excluded = latest.get("excluded_specs")
+        specs = latest.get("specs")
+        spec = specs.get(self._model_id) if isinstance(specs, dict) else None
+        if (isinstance(excluded, dict) and self._model_id in excluded) or not isinstance(
+            spec, dict
+        ):
+            return SignalRead(
+                SignalReadStatus.GATE_FAILED,
+                detail=f"model missing or excluded from the build — {identity} build_id={build_id}",
+            )
+        gates = spec.get("gates") or {}
+        failed = {
+            name: gate.get("status")
+            for name, gate in gates.items()
+            if not isinstance(gate, dict) or gate.get("status") not in _ACCEPTED_GATES
+        }
+        if not gates or failed:
+            return SignalRead(
+                SignalReadStatus.GATE_FAILED,
+                detail=f"model gates did not pass — {identity} build_id={build_id} "
+                f"failed={failed or 'no gates'}",
+            )
+        model_dir = self._root / "model" / self._model_id
+        current = _text(_json(model_dir / "MANIFEST.json"), "current_build")
+        if current != build_id:
+            raise _Unreadable(
+                f"model manifest points elsewhere — {identity} latest={build_id} manifest={current}"
+            )
+        scores_path = model_dir / f"v={build_id}" / "scores.parquet"
+        ranks = _ranks(scores_path, signal_date)
+        closes, untraded = _closes(
+            self._root / "factor_inputs" / "fi_prices" / f"v={prices_build_id}", signal_date
+        )
+        return SignalRead(
+            SignalReadStatus.OK,
+            SignalSnapshot(
+                self._model_id,
+                build_id,
+                signal_date,
+                ranks,
+                closes,
+                untraded,
+                hashlib.sha256(scores_path.read_bytes()).hexdigest(),
+                prices_build_id,
+            ),
+        )
+
+
+def _json(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise _Unreadable(f"cannot read json — file={path.name} error={error}") from error
+    if not isinstance(value, dict):
+        raise _Unreadable(f"json is not an object — file={path.name}")
+    return value
+
+
+def _text(value: dict[str, object], key: str) -> str:
+    text = value.get(key)
+    if not isinstance(text, str) or not text:
+        raise _Unreadable(f"missing field — key={key}")
+    return text
+
+
+def _ranks(path: Path, signal_date: date) -> dict[str, int]:
+    try:
+        table = pq.read_table(path, columns=["stock_code", "rank", "score_date"])
+    except (OSError, ValueError, KeyError) as error:
+        raise _Unreadable(f"cannot read scores — build={path.parent.name} error={error}") from error
+    dates = set(table.column("score_date").to_pylist())
+    if dates != {signal_date.isoformat()}:
+        raise _Unreadable(
+            f"scores are not for the signal date — build={path.parent.name} dates={sorted(dates)}"
+        )
+    ranks: dict[str, int] = {}
+    for code, rank in zip(
+        table.column("stock_code").to_pylist(), table.column("rank").to_pylist(), strict=True
+    ):
+        if not isinstance(code, str) or len(code) != 6 or not isinstance(rank, int) or rank < 1:
+            raise _Unreadable(f"invalid score row — code={code!r} rank={rank!r}")
+        if code in ranks:
+            raise _Unreadable(f"duplicate score row — code={code}")
+        ranks[code] = rank
+    if len(set(ranks.values())) != len(ranks):
+        raise _Unreadable(f"ranks are not unique — build={path.parent.name} n={len(ranks)}")
+    return ranks
+
+
+def _closes(folder: Path, signal_date: date) -> tuple[dict[str, int], frozenset[str]]:
+    files = sorted(folder.glob("*.parquet"))
+    if not files:
+        raise _Unreadable(f"price build has no parquet files — build={folder.name}")
+    try:
+        table = pa.concat_tables(
+            [
+                pq.read_table(
+                    file,
+                    columns=["ticker", "date", "close", "volume"],
+                    filters=[("date", "=", signal_date)],
+                )
+                for file in files
+            ]
+        )
+    except (OSError, ValueError, KeyError) as error:
+        raise _Unreadable(f"cannot read prices — build={folder.name} error={error}") from error
+    closes: dict[str, int] = {}
+    untraded: set[str] = set()
+    for ticker, close, volume in zip(
+        table.column("ticker").to_pylist(),
+        table.column("close").to_pylist(),
+        table.column("volume").to_pylist(),
+        strict=True,
+    ):
+        if not isinstance(close, int) or close <= 0:
+            continue
+        closes[ticker] = close
+        if not volume:
+            untraded.add(ticker)
+    if not closes:
+        raise _Unreadable(
+            f"no closes on the signal date — build={folder.name} date={signal_date.isoformat()}"
+        )
+    return closes, frozenset(untraded)

@@ -1,0 +1,47 @@
+"""Outgoing port: 장 마감 모델 신호(순위)와 그 신호를 낸 날의 기준가격."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import date
+from enum import StrEnum
+from typing import Protocol
+
+__all__ = ["SignalRead", "SignalReadStatus", "SignalSnapshot", "SignalSource"]
+
+
+class SignalReadStatus(StrEnum):
+    OK = "ok"
+    NOT_READY = "not_ready"  # 그 날짜의 빌드가 아직 현재 빌드가 아니다
+    GATE_FAILED = "gate_failed"  # 빌드 게이트가 통과하지 않았거나 모델이 제외됐다
+    UNREADABLE = "unreadable"  # 파일이 없거나 형식·내용이 맞지 않는다
+
+
+@dataclass(frozen=True)
+class SignalSnapshot:
+    """한 빌드의 순위(1이 가장 좋다)와, 점수를 계산한 가격 판의 신호일 종가(원)."""
+
+    model_id: str
+    build_id: str
+    signal_date: date
+    ranks: Mapping[str, int]
+    closes_krw: Mapping[str, int]
+    untraded: frozenset[str]  # 신호일 거래량 0
+    scores_sha256: str
+    prices_build_id: str
+
+
+@dataclass(frozen=True)
+class SignalRead:
+    status: SignalReadStatus
+    snapshot: SignalSnapshot | None = None
+    detail: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.status is SignalReadStatus.OK and self.snapshot is not None
+
+
+class SignalSource(Protocol):
+    def read(self, signal_date: date) -> SignalRead: ...

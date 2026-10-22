@@ -41,14 +41,17 @@ from strategy_workbench.adapters.outbound.kiwoom_mock._rows import (
     NO_ORIGINAL,
     UNTRACKED_PREFIX,
     ContractViolation,
-    FeeRow,
-    FeesNotReady,
+    DayTrade,
+    JournalNotReady,
+    Observation,
     OrderRow,
-    fees_today,
+    Participant,
+    day_trades,
     is_candidate,
     number,
     observe,
     order_number,
+    split_day_amounts,
     symbol,
     text,
     untracked_fact,
@@ -75,7 +78,7 @@ DEFAULT_REMATCH_MARGIN = timedelta(seconds=60)
 @dataclass(frozen=True)
 class _Reads:
     orders: list[OrderRow]
-    fees: list[FeeRow]
+    day_trades: dict[str, DayTrade]
     holdings: tuple[tuple[str, int], ...]
     cash_krw: int
 
@@ -136,7 +139,7 @@ class KiwoomMockBroker:
                 reads.cash_krw, reads.holdings, sum(f.reserved_cash_krw for f in tracked)
             )
             return Snapshot(account, tuple(facts))
-        except FeesNotReady as error:
+        except JournalNotReady as error:
             raise BrokerError(str(error)) from error
         except (ContractViolation, ValueError) as error:
             self._violation(f"snapshot — {error}")
@@ -269,14 +272,14 @@ class KiwoomMockBroker:
         )
 
     def _stable_reads(self) -> _Reads:
-        """주문 → 수수료 → 보유 → 현금 → 주문. 두 번 읽은 주문이 같을 때만 쓴다."""
+        """주문 → 당일매매일지 → 보유 → 현금 → 주문. 두 번 읽은 주문이 같을 때만 쓴다."""
         for _ in range(self._max_snapshot_reads):
             first = self._order_rows("")
-            fees = self._client.rows(
-                "ka10076",
+            journal = self._client.rows(
+                "ka10170",
                 _ACCOUNT_PATH,
-                {"stk_cd": "", "qry_tp": "0", "sell_tp": "0", "ord_no": "", "stex_tp": "0"},
-                "cntr",
+                {"base_dt": "", "ottks_tp": "2", "ch_crd_tp": "0"},
+                "tdy_trde_diary",
             )
             holdings = self._client.rows(
                 "kt00018",
@@ -290,7 +293,7 @@ class KiwoomMockBroker:
                 try:
                     return _Reads(
                         [OrderRow.parse(row) for row in second],
-                        [FeeRow.parse(row) for row in fees],
+                        day_trades([DayTrade.parse(row) for row in journal]),
                         _holdings(holdings),
                         # D+2 추정예수금을 S05 현금으로 본다(③에서 확인).
                         number(cash, "d2_entra"),
@@ -307,7 +310,7 @@ class KiwoomMockBroker:
         for order_date in sorted({r.order_date for r in records if not r.finalized} - {today}):
             rows_by_date[order_date] = [OrderRow.parse(row) for row in self._order_rows(order_date)]
         bound = {(r.order_date, r.ord_no) for r in records if r.ord_no is not None}
-        facts: list[OrderFact] = []
+        resolved: list[ReferenceOrder] = []
         for record in records:
             if record.fact is None and record.status in (
                 ReferenceStatus.PENDING,
@@ -317,12 +320,23 @@ class KiwoomMockBroker:
                 record = self._rematch(record, rows_by_date[record.order_date], bound)
                 if record.ord_no is not None:
                     bound.add((record.order_date, record.ord_no))
-            fact = self._fact(record, today, rows_by_date.get(record.order_date), reads.fees)
+            resolved.append(record)
+        seen = {
+            record.intent.intent_id: self._seen(record, today, rows_by_date.get(record.order_date))
+            for record in resolved
+        }
+        untracked = [
+            row
+            for row in reads.orders
+            if row.original == NO_ORIGINAL and (today, row.ord_no) not in bound
+        ]
+        amounts = self._day_amounts(today, resolved, seen, untracked, reads.day_trades)
+        facts: list[OrderFact] = []
+        for record in resolved:
+            fact = self._fact(record, today, seen[record.intent.intent_id], amounts)
             if fact is not None:
                 facts.append(fact)
-        for row in reads.orders:
-            if row.original == NO_ORIGINAL and (today, row.ord_no) not in bound:
-                facts.append(untracked_fact(today, row))
+        facts.extend(untracked_fact(today, row) for row in untracked)
         return facts
 
     def _rematch(
@@ -375,15 +389,12 @@ class KiwoomMockBroker:
         )
         return record
 
-    def _fact(
-        self,
-        record: ReferenceOrder,
-        today: str,
-        rows: list[OrderRow] | None,
-        fee_rows: list[FeeRow],
-    ) -> OrderFact | None:
+    def _seen(
+        self, record: ReferenceOrder, today: str, rows: list[OrderRow] | None
+    ) -> Observation | None:
+        """새로 관측할 주문의 상태·체결수량. 마지막 사실을 그대로 둘 주문은 None이다."""
         if record.ord_no is None or record.finalized or rows is None:
-            return record.fact
+            return None
         identity = f"intent_id={record.intent.intent_id} ord_no={record.ord_no}"
         closed_day = record.order_date < today
         main = next(
@@ -394,25 +405,84 @@ class KiwoomMockBroker:
             if closed_day or record.fact is None:
                 raise ContractViolation(f"bound kiwoom order is missing from orders — {identity}")
             # 접수 직후 조회에 아직 안 보일 수 있다. 마지막 관측을 유지한다.
-            return record.fact
+            return None
         related = [row for row in rows if row.original == record.ord_no]
-        seen = observe(record.intent, main, related, closed_day=closed_day)
+        return observe(record.intent, main, related, closed_day=closed_day)
+
+    def _day_amounts(
+        self,
+        today: str,
+        records: list[ReferenceOrder],
+        seen: dict[str, Observation | None],
+        untracked: list[OrderRow],
+        journal: dict[str, DayTrade],
+    ) -> dict[str, tuple[int, int]]:
+        """오늘 주문을 종목별로 묶어 당일매매일지 합계를 나눈다."""
+        settled: dict[str, list[OrderFact]] = {}
+        pending: dict[str, list[Participant]] = {}
+        outside: dict[str, list[Participant]] = {}
+        for record in records:
+            if record.order_date != today:
+                continue
+            code = record.intent.symbol
+            observation = seen[record.intent.intent_id]
+            if observation is not None:
+                pending.setdefault(code, []).append(
+                    Participant(
+                        record.intent.intent_id, record.intent.side, observation.filled_quantity
+                    )
+                )
+            elif record.fact is not None and record.fact.filled_quantity:
+                settled.setdefault(code, []).append(record.fact)
+        for row in untracked:
+            outside.setdefault(row.symbol, []).append(
+                Participant(row.ord_no, row.side or "buy", row.filled_quantity)
+            )
+        amounts: dict[str, tuple[int, int]] = {}
+        for code in sorted({*settled, *pending, *outside, *journal}):
+            amounts.update(
+                split_day_amounts(
+                    journal.get(code, DayTrade(code, 0, 0, 0, 0, 0)),
+                    settled.get(code, []),
+                    pending.get(code, []),
+                    outside.get(code, []),
+                )
+            )
+        return amounts
+
+    def _fact(
+        self,
+        record: ReferenceOrder,
+        today: str,
+        seen: Observation | None,
+        amounts: dict[str, tuple[int, int]],
+    ) -> OrderFact | None:
+        if seen is None:
+            return record.fact
+        identity = f"intent_id={record.intent.intent_id} ord_no={record.ord_no}"
         previous = record.fact
-        if closed_day:
-            # 지난 날의 수수료는 다시 읽을 수 없다. 마지막 관측 뒤 체결이 늘었으면 멈춘다.
+        if record.order_date < today:
+            # 지난 날의 합계는 다시 읽지 않는다. 마지막 관측 뒤 체결이 늘었으면 멈춘다.
             if seen.filled_quantity != (0 if previous is None else previous.filled_quantity):
                 raise ContractViolation(
-                    f"fills after the last same-day observation have unknown fees — {identity}"
+                    f"fills after the last same-day observation have unknown amounts — {identity}"
                 )
-            fees = 0 if previous is None else previous.fees_krw
+            value, fees = (
+                (0, 0)
+                if previous is None
+                else (
+                    previous.filled_value_krw,
+                    previous.fees_krw,
+                )
+            )
         else:
-            fees = fees_today(record.ord_no, seen.filled_quantity, fee_rows)
+            value, fees = amounts[record.intent.intent_id]
         if previous is not None and (
             previous.state,
             previous.filled_quantity,
             previous.filled_value_krw,
             previous.fees_krw,
-        ) == (seen.state, seen.filled_quantity, seen.filled_value_krw, fees):
+        ) == (seen.state, seen.filled_quantity, value, fees):
             fact = previous
         else:
             fact = OrderFact(
@@ -420,7 +490,7 @@ class KiwoomMockBroker:
                 seen.state,
                 1 if previous is None else previous.revision + 1,
                 seen.filled_quantity,
-                seen.filled_value_krw,
+                value,
                 fees,
             )
             if previous is not None:

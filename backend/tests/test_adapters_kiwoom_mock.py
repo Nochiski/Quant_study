@@ -75,10 +75,12 @@ class Call:
 
 
 class FakeKiwoom:
-    """키움 모의 서버 대역. 필드 모양은 공식 명세, 표기 값은 2026-10-20 모의 실측을 따른다.
+    """키움 모의 서버 대역. 필드 모양은 공식 명세, 표기 값은 2026-10-20·21 모의 실측을 따른다.
 
     실측 표기는 명세 예시와 다르다: REST 주문의 통신구분은 "모의투자", 지정가 매매구분은 "보통가",
     접수구분은 "주문완료", 원주문의 정정취소는 "일반", 취소 행은 같은 주문구분에 "취소"다.
+    `kt00007` 체결단가는 평균을 원 단위로 반올림한 값이고, `ka10170` 당일매매일지는 종목별
+    금액·비용을 원 단위로 정확히 준다.
     """
 
     def __init__(self, clock: Clock, *, account: str = ACCOUNT) -> None:
@@ -93,7 +95,8 @@ class FakeKiwoom:
         self.holdings: dict[str, int] = {SYMBOL: 10}
         self.rows: list[dict[str, str]] = []
         self.past: dict[str, list[dict[str, str]]] = {}
-        self.fees: dict[str, dict[str, str]] = {}
+        self.journal: dict[str, dict[str, int]] = {}
+        self.journal_lag: list[tuple[str, str, int, int, int]] = []
         self.calls: list[Call] = []
         self.after: dict[str, list[Callable[[], None]]] = {}  # 한 번만 돈다
         self.every: dict[str, list[Callable[[], None]]] = {}  # 호출마다 돈다
@@ -152,8 +155,12 @@ class FakeKiwoom:
         rows = self.rows if body["ord_dt"] == "" else self.past.get(str(body["ord_dt"]), [])
         return self._page(rows, "acnt_ord_cntr_prps_dtl", headers)
 
-    def _ka10076(self, _: dict[str, object], headers: dict[str, str]) -> KiwoomHttpResponse:
-        return self._page(list(self.fees.values()), "cntr", headers)
+    def _ka10170(self, _: dict[str, object], headers: dict[str, str]) -> KiwoomHttpResponse:
+        rows = [
+            {"stk_cd": code, **{key: str(value) for key, value in totals.items()}}
+            for code, totals in sorted(self.journal.items())
+        ]
+        return self._page(rows, "tdy_trde_diary", headers)
 
     def _kt00018(self, _: dict[str, object], headers: dict[str, str]) -> KiwoomHttpResponse:
         rows = [
@@ -273,33 +280,44 @@ class FakeKiwoom:
         *,
         commission: int = 0,
         tax: int = 0,
-        fee_row: bool = True,
+        journal: bool = True,
     ) -> None:
         row = self.row(ord_no)
         filled = int(row["cntr_qty"]) + quantity
         value = self._values.get(ord_no, 0) + quantity * price
         self._values[ord_no] = value
         row["cntr_qty"] = pad(filled)
-        row["cntr_uv"] = pad(value // filled)
+        row["cntr_uv"] = pad((2 * value + filled) // (2 * filled))  # 원 단위 반올림 평균
         row["ord_remnq"] = pad(int(row["ord_remnq"]) - quantity)
         buy = "매수" in row["io_tp_nm"]
         code = row["stk_cd"][1:]
         self.holdings[code] = self.holdings.get(code, 0) + (quantity if buy else -quantity)
         self.cash += (-quantity * price if buy else quantity * price) - commission - tax
-        previous = self.fees.get(ord_no, {"tdy_trde_cmsn": "0", "tdy_trde_tax": "0"})
-        if fee_row:
-            self.fees[ord_no] = {
-                "ord_no": ord_no,
-                "cntr_qty": str(filled),
-                "tdy_trde_cmsn": str(int(previous["tdy_trde_cmsn"]) + commission),
-                "tdy_trde_tax": str(int(previous["tdy_trde_tax"]) + tax),
-            }
+        entry = (code, "buy" if buy else "sell", quantity, quantity * price, commission + tax)
+        if journal:
+            self._journal(*entry)
+        else:
+            self.journal_lag.append(entry)
+
+    def catch_up_journal(self) -> None:
+        for entry in self.journal_lag:
+            self._journal(*entry)
+        self.journal_lag = []
+
+    def _journal(self, code: str, side: str, quantity: int, value: int, costs: int) -> None:
+        totals = self.journal.setdefault(
+            code,
+            {"buy_qty": 0, "buy_amt": 0, "sell_qty": 0, "sell_amt": 0, "cmsn_alm_tax": 0},
+        )
+        totals[f"{side}_qty"] += quantity
+        totals[f"{side}_amt"] += value
+        totals["cmsn_alm_tax"] += costs
 
     def roll_day(self) -> None:
         date = self.clock.now_value.strftime("%Y%m%d")
         self.past[date] = self.rows
         self.rows = []
-        self.fees = {}
+        self.journal = {}
         self.clock.now_value = (self.clock.now_value + timedelta(days=1)).replace(hour=8, minute=0)
 
 
@@ -651,22 +669,76 @@ def test_fill_after_the_last_same_day_observation_latches(tmp_path: Path) -> Non
     r.fake.roll_day()
     assert r.service.recover().status == ExecutionStatus.ERROR
     latched = r.broker.latch()
-    assert latched is not None and "unknown fees" in latched
+    assert latched is not None and "unknown amounts" in latched
 
 
-def test_lagging_fee_rows_are_transient(tmp_path: Path) -> None:
+def test_lagging_day_journal_is_transient(tmp_path: Path) -> None:
     r = started(tmp_path)
     r.service.submit(buy())
-    r.fake.fill("0000001", 2, 70_000, commission=21, fee_row=False)
+    r.fake.fill("0000001", 2, 70_000, commission=21, journal=False)
     assert r.service.recover().status == ExecutionStatus.ERROR
     assert r.broker.latch() is None
-    r.fake.fees["0000001"] = {
-        "ord_no": "0000001",
-        "cntr_qty": "2",
-        "tdy_trde_cmsn": "21",
-        "tdy_trde_tax": "0",
-    }
+    r.fake.catch_up_journal()
     assert r.service.recover().status == ExecutionStatus.OK
+
+
+# --- 여러 번 나눠 체결된 주문의 금액(2026-10-21 실측) ------------------------------------------
+
+
+def test_multi_price_fills_take_exact_amounts_from_the_day_journal(tmp_path: Path) -> None:
+    # 실측: 122주가 12번 체결되자 kt00007 체결단가(반올림 평균) × 수량이 실제보다 22원 적어 멈췄다.
+    r = started(tmp_path)
+    r.service.submit(buy(quantity=3))
+    r.fake.fill("0000001", 1, 69_900, commission=240)
+    r.fake.fill("0000001", 2, 70_000, commission=490)
+    assert r.fake.row("0000001")["cntr_uv"] == pad(69_967)  # 209,900 / 3 = 69,966.7
+    assert r.service.recover().status == ExecutionStatus.OK
+    filled = fact_of(r.ledger)
+    assert (filled.state, filled.filled_value_krw, filled.fees_krw) == (
+        OrderState.FILLED,
+        209_900,
+        730,
+    )
+
+
+def test_requote_after_cancel_takes_the_rest_of_the_symbol_total(tmp_path: Path) -> None:
+    r = started(tmp_path)
+    r.service.submit(buy("first", quantity=5))
+    r.fake.fill("0000001", 2, 69_900, commission=480)
+    assert r.service.cancel("first").status == ExecutionStatus.OK
+    assert r.service.submit(buy("second", quantity=3, price=70_100)).status == ExecutionStatus.OK
+    second = next(row["ord_no"] for row in r.fake.rows if row["ord_uv"] == pad(70_100))
+    r.fake.fill(second, 1, 70_000, commission=240)
+    r.fake.fill(second, 2, 70_100, commission=490)
+    assert r.service.recover().status == ExecutionStatus.OK
+    first, later = fact_of(r.ledger, "first"), fact_of(r.ledger, "second")
+    assert (first.filled_value_krw, first.fees_krw) == (139_800, 480)
+    assert (later.state, later.filled_value_krw, later.fees_krw) == (
+        OrderState.FILLED,
+        210_200,
+        730,
+    )
+
+
+def test_two_open_orders_with_fills_on_one_symbol_latch(tmp_path: Path) -> None:
+    r = started(tmp_path)
+    r.service.submit(buy("a", quantity=2))
+    r.service.submit(buy("b", quantity=2, price=70_100))
+    r.fake.fill("0000001", 1, 70_000, commission=240)
+    r.fake.fill("0000002", 1, 70_100, commission=240)
+    assert r.service.recover().status == ExecutionStatus.ERROR
+    latched = r.broker.latch()
+    assert latched is not None and "several open orders" in latched
+
+
+def test_untracked_fills_on_the_same_symbol_latch(tmp_path: Path) -> None:
+    r = started(tmp_path)
+    r.service.submit(buy(quantity=2))
+    r.fake.fill("0000001", 1, 70_000, commission=240)
+    r.fake.fill(r.fake.manual_order(quantity=1), 1, 70_000, commission=240)
+    assert r.service.recover().status == ExecutionStatus.ERROR
+    latched = r.broker.latch()
+    assert latched is not None and "did not send" in latched
 
 
 # --- 비밀값과 주소 -------------------------------------------------------------------------

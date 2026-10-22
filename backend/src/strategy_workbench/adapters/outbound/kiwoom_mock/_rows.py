@@ -1,7 +1,9 @@
 """키움 조회 행을 S05 누적 사실로 옮기는 해석.
 
-키움 필드의 뜻 가운데 ③ 모의 실측 전까지 확정하지 못한 것(체결단가가 평균인지, 수수료 행이 주문당
-하나인지, 거부가 어떻게 남는지)은 추정하지 않고 `ContractViolation`으로 멈춘다.
+주문의 상태와 체결수량은 `kt00007`, 체결금액과 비용은 `ka10170` 당일매매일지의 종목별 하루 합계에서
+읽는다. 2026-10-21 모의 실측에서 여러 번 나눠 체결된 주문의 `kt00007` 체결단가는 평균을 원 단위로
+반올림한 값이었고, `ka10076` 수수료는 체결 건마다 10원 미만을 버린 합이라 현금 차감과 달랐다.
+해석과 맞지 않는 응답은 추정하지 않고 `ContractViolation`으로 멈춘다.
 """
 
 from __future__ import annotations
@@ -26,8 +28,8 @@ class ContractViolation(Exception):
     """키움 응답이 이 어댑터의 해석과 맞지 않는다. 어댑터는 정지 래치를 건다."""
 
 
-class FeesNotReady(Exception):
-    """체결은 보이는데 수수료 행이 아직 따라오지 않았다. 다음 조회에서 다시 본다."""
+class JournalNotReady(Exception):
+    """당일매매일지와 주문 조회의 체결수량이 아직 맞지 않는다. 다음 조회에서 다시 본다."""
 
 
 def number(row: Mapping[str, object], key: str) -> int:
@@ -116,20 +118,50 @@ class OrderRow:
 
 
 @dataclass(frozen=True)
-class FeeRow:
-    """`ka10076` 체결요청의 한 행. 수수료와 세금을 합쳐 S05 비용으로 본다."""
+class DayTrade:
+    """`ka10170` 당일매매일지의 한 종목. 하루 합계가 원 단위로 정확하다.
 
-    ord_no: str
-    filled_quantity: int
-    fees_krw: int
+    2026-10-21 모의 실측에서 매수금액과 수수료가 현금(`d2_entra`) 차감과 일치했다. 수수료와
+    세금(`cmsn_alm_tax`)은 매수·매도를 합친 값이다.
+    """
+
+    symbol: str
+    buy_quantity: int
+    buy_value_krw: int
+    sell_quantity: int
+    sell_value_krw: int
+    costs_krw: int
 
     @classmethod
-    def parse(cls, row: Mapping[str, object]) -> FeeRow:
+    def parse(cls, row: Mapping[str, object]) -> DayTrade:
         return cls(
-            ord_no=order_number(text(row, "ord_no")),
-            filled_quantity=number(row, "cntr_qty"),
-            fees_krw=number(row, "tdy_trde_cmsn") + number(row, "tdy_trde_tax"),
+            symbol=symbol(text(row, "stk_cd")),
+            buy_quantity=number(row, "buy_qty"),
+            buy_value_krw=number(row, "buy_amt"),
+            sell_quantity=number(row, "sell_qty"),
+            sell_value_krw=number(row, "sell_amt"),
+            costs_krw=number(row, "cmsn_alm_tax"),
         )
+
+
+def day_trades(rows: list[DayTrade]) -> dict[str, DayTrade]:
+    """같은 종목이 여러 줄이면 합친다."""
+    totals: dict[str, DayTrade] = {}
+    for row in rows:
+        seen = totals.get(row.symbol)
+        totals[row.symbol] = (
+            row
+            if seen is None
+            else DayTrade(
+                row.symbol,
+                seen.buy_quantity + row.buy_quantity,
+                seen.buy_value_krw + row.buy_value_krw,
+                seen.sell_quantity + row.sell_quantity,
+                seen.sell_value_krw + row.sell_value_krw,
+                seen.costs_krw + row.costs_krw,
+            )
+        )
+    return totals
 
 
 def is_candidate(row: OrderRow, intent: Intent, sent_at: datetime, margin: timedelta) -> bool:
@@ -154,7 +186,6 @@ def is_candidate(row: OrderRow, intent: Intent, sent_at: datetime, margin: timed
 class Observation:
     state: OrderState
     filled_quantity: int
-    filled_value_krw: int
 
 
 def observe(
@@ -204,27 +235,81 @@ def observe(
         state = OrderState.PARTIAL
     else:
         state = OrderState.OPEN
-    # 체결단가가 평균이라고 본다. 반올림이 있으면 현금 대사가 어긋나 멈춘다(③에서 확인).
-    return Observation(state, filled, filled * main.fill_price_krw)
+    # 체결단가는 반올림한 평균이라 금액에 쓰지 않는다. 금액은 split_day_amounts가 정한다.
+    return Observation(state, filled)
 
 
-def fees_today(ord_no: str, filled_quantity: int, rows: list[FeeRow]) -> int:
-    """주문 하나의 수수료 행은 건별이든 한 줄이든 체결수량 합이 맞아야 한다."""
-    if not filled_quantity:
-        return 0
-    matched = [row for row in rows if row.ord_no == ord_no]
-    reported = sum(row.filled_quantity for row in matched)
-    if reported < filled_quantity:
-        raise FeesNotReady(
-            f"kiwoom fee rows lag the fills — ord_no={ord_no} filled={filled_quantity} "
-            f"fee_rows_filled={reported}"
-        )
-    if reported > filled_quantity:
+@dataclass(frozen=True)
+class Participant:
+    """종목 하나의 하루 합계를 나눠 받을 오늘 주문."""
+
+    key: str
+    side: str
+    filled_quantity: int
+
+
+def split_day_amounts(
+    day: DayTrade,
+    settled: list[OrderFact],
+    pending: list[Participant],
+    untracked: list[Participant],
+) -> dict[str, tuple[int, int]]:
+    """하루 합계에서 확정된 주문 몫을 빼고 남은 체결금액·비용을 진행 중인 주문 한 건에 준다.
+
+    확정된 주문은 마지막 관측 값을 그대로 둔다. 체결이 있는 진행 중 주문이 둘 이상이거나 이 어댑터가
+    보내지 않은 주문의 체결이 섞이면 나눌 근거가 없어 멈춘다. 반환은 진행 중 주문마다
+    (금액, 비용)이다.
+    """
+    identity = f"symbol={day.symbol}"
+    journal = {
+        "buy": (day.buy_quantity, day.buy_value_krw),
+        "sell": (day.sell_quantity, day.sell_value_krw),
+    }
+    known_value = {"buy": 0, "sell": 0}
+    quantity = {"buy": 0, "sell": 0}
+    known_costs = 0
+    for fact in settled:
+        known_value[fact.intent.side] += fact.filled_value_krw
+        quantity[fact.intent.side] += fact.filled_quantity
+        known_costs += fact.fees_krw
+    for participant in (*pending, *untracked):
+        quantity[participant.side] += participant.filled_quantity
+    for side, (journal_quantity, _) in journal.items():
+        if journal_quantity != quantity[side]:
+            raise JournalNotReady(
+                f"kiwoom day journal and orders disagree — {identity} side={side} "
+                f"journal_quantity={journal_quantity} order_quantity={quantity[side]}"
+            )
+    amounts = {participant.key: (0, 0) for participant in pending}
+    filled = [participant for participant in pending if participant.filled_quantity]
+    if any(participant.filled_quantity for participant in untracked):
+        if filled:
+            raise ContractViolation(
+                f"fills of an order this adapter did not send share the symbol — {identity}"
+            )
+        return amounts
+    if len(filled) > 1:
         raise ContractViolation(
-            f"kiwoom fee rows exceed the fills — ord_no={ord_no} filled={filled_quantity} "
-            f"fee_rows_filled={reported} rows={len(matched)}"
+            f"several open orders with fills share the symbol — {identity} "
+            f"intents={[participant.key for participant in filled]}"
         )
-    return sum(row.fees_krw for row in matched)
+    rest = {side: value - known_value[side] for side, (_, value) in journal.items()}
+    rest_costs = day.costs_krw - known_costs
+    if filled:
+        owner = filled[0]
+        other = "sell" if owner.side == "buy" else "buy"
+        if rest[owner.side] <= 0 or rest[other] or rest_costs < 0:
+            raise ContractViolation(
+                f"day journal leaves no valid remainder — {identity} intent={owner.key} "
+                f"rest={rest} rest_costs={rest_costs}"
+            )
+        amounts[owner.key] = (rest[owner.side], rest_costs)
+    elif rest["buy"] or rest["sell"] or rest_costs:
+        raise ContractViolation(
+            f"day journal differs from settled orders — {identity} rest={rest} "
+            f"rest_costs={rest_costs}"
+        )
+    return amounts
 
 
 def untracked_fact(order_date: str, row: OrderRow) -> OrderFact:

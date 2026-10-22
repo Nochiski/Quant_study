@@ -11,14 +11,17 @@
 - 주식 수 = 목표 금액 ÷ (기준가격 × (1 + 수수료율)) 내림.
 - 보유 종목이 신호에서 빠졌으면(순위 없음) 파는 줄로 두되 확인 필요(`review`)로 표시한다. 신호에서
   빠지는 일은 데이터 누락으로도 생긴다(2026-09-28: 상위 30의 두 종목이 6~7거래일 빠졌다 복귀).
-  사람이 매주 승인하며 그 주 매매에서 뺄 수 있다(10-21 사용자 결정).
+  사람이 매주 승인하며 그 주 매매에서 뺄 수 있다(10-21 사용자 결정). 뺀 보유 종목은 자리를 그대로
+  차지하므로 그 수만큼 순위가 낮은 새 매수도 그 주는 하지 않는다(`week_targets`).
+- 보유 종목의 신호일 가격 행이 없으면(거래정지 등) 호출자가 직전 종가로 평가하고 매매를 막는다.
+  그 종목은 그대로 두고 확인 필요로 표시한다(`stale_prices`).
 
 금액은 원 단위 정수, 비율은 bp 정수로 계산해 부동소수 반올림이 끼지 않는다.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -109,9 +112,10 @@ def plan_rebalance(
     blocked: Mapping[str, str],
     previous_ranks: Mapping[str, int] | None = None,
     missing_reasons: Mapping[str, str] | None = None,
+    stale_prices: Collection[str] = (),
 ) -> RebalancePlan:
     """순위(1이 가장 좋다)·보유 주식 수·기준가격(원)·현금(원)·매매가 막힌 종목과 사유로
-    목표를 정한다."""
+    목표를 정한다. `stale_prices`는 신호일이 아닌 날 종가로 평가한 종목이다."""
     _validate(ranks, holdings, prices, cash_krw)
     equity = cash_krw + sum(shares * prices[symbol] for symbol, shares in holdings.items())
     target_value = equity * (BP - policy.cash_reserve_bp) // BP // policy.slots
@@ -148,7 +152,8 @@ def plan_rebalance(
         rank, shares, price = ranks.get(symbol), holdings[symbol], prices[symbol]
         if symbol in blocked:
             reason = f"매매가 막혀 그대로 둔다 — {blocked[symbol]}"
-            lines.append(_line(symbol, RebalanceAction.HOLD, rank, shares, shares, prices, reason))
+            stale, hold = symbol in stale_prices, RebalanceAction.HOLD
+            lines.append(_line(symbol, hold, rank, shares, shares, prices, reason, review=stale))
             continue
         gap = abs(shares * price - target_value)
         resized = policy.shares_for(target_value, price)
@@ -188,6 +193,40 @@ def plan_rebalance(
 
     lines.sort(key=lambda line: (_ACTION_ORDER[line.action], line.rank or 0, line.symbol))
     return RebalancePlan(policy, cash_krw, equity, target_value, tuple(lines))
+
+
+@dataclass(frozen=True)
+class WeekTargets:
+    """승인에서 이번 주 매매에서 뺀 종목을 반영한 목표 주식 수와, 함께 뺀 새 매수(순위 낮은 순)."""
+
+    targets: Mapping[str, int]
+    dropped_buys: tuple[str, ...]
+
+
+def week_targets(plan: RebalancePlan, no_trade: Collection[str]) -> WeekTargets:
+    """뺀 종목은 사지도 팔지도 않는다. 팔려던 보유 종목을 빼면 그 종목이 자리를 그대로 차지하므로
+    같은 수만큼 순위가 낮은 새 매수부터 그 주는 하지 않는다(주문안을 그 종목을 남긴 채 다시 계산한
+    것과 같다). 빼서 새 매매를 만들지는 않는다 — 함께 뺄 새 매수가 모자라면 그 주는 자리 수보다 많이
+    들고 간다."""
+    excluded = frozenset(no_trade)
+    kept_sales = sum(
+        line.symbol in excluded and line.action is RebalanceAction.SELL for line in plan.lines
+    )
+    new_buys = sorted(
+        (
+            line
+            for line in plan.lines
+            if line.action is RebalanceAction.BUY and line.symbol not in excluded
+        ),
+        key=lambda line: (line.rank or 0, line.symbol),
+        reverse=True,
+    )
+    dropped = tuple(line.symbol for line in new_buys[:kept_sales])
+    skipped = excluded | set(dropped)
+    targets = {
+        symbol: shares for symbol, shares in plan.target_shares().items() if symbol not in skipped
+    }
+    return WeekTargets(targets, dropped)
 
 
 def signal_anomalies(

@@ -27,9 +27,11 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
     RebalancePolicy,
     plan_rebalance,
     signal_anomalies,
+    week_targets,
 )
 
 UNTRADED_REASON = "신호일 거래량 0(거래정지 가능)"
+EARLIER_CLOSE_REASON = "신호일 종가 없음(거래정지 등) — {day} 종가로 평가"
 
 
 class PrepareStatus(StrEnum):
@@ -58,9 +60,12 @@ class ApproveStatus(StrEnum):
 
 @dataclass(frozen=True)
 class ApproveResult:
+    """`dropped_buys`는 뺀 보유 종목이 자리를 차지해 이번 주 함께 하지 않는 새 매수다."""
+
     status: ApproveStatus
     approval: Approval | None = None
     detail: str = ""
+    dropped_buys: tuple[str, ...] = ()
 
 
 def plan_id_for(signal_date: date) -> str:
@@ -114,16 +119,28 @@ class WeeklyRebalanceService:
             return PrepareResult(PrepareStatus.ACCOUNT_UNAVAILABLE, detail=str(error))
         if account.reconciled is False:
             return PrepareResult(PrepareStatus.NOT_RECONCILED, detail=account.detail)
+        prices = dict(signal.closes_krw)
+        blocked = dict.fromkeys(signal.untraded, UNTRADED_REASON)
+        # 신호일 가격 행이 없는 보유 종목은 그 전 마지막 종가로 평가하고 매매하지 않는다(확인 표시).
+        earlier = {
+            symbol: close
+            for symbol, close in (signal.earlier_closes or {}).items()
+            if symbol in account.holdings and symbol not in prices
+        }
+        for symbol, close in earlier.items():
+            prices[symbol] = close.close_krw
+            blocked[symbol] = EARLIER_CLOSE_REASON.format(day=close.day.isoformat())
         try:
             plan = plan_rebalance(
                 self._policy,
                 ranks=signal.ranks,
                 holdings=account.holdings,
-                prices=signal.closes_krw,
+                prices=prices,
                 cash_krw=account.cash_krw,
-                blocked=dict.fromkeys(signal.untraded, UNTRADED_REASON),
+                blocked=blocked,
                 previous_ranks=signal.previous_ranks,
                 missing_reasons=signal.exclusion_reasons,
+                stale_prices=frozenset(earlier),
             )
         except ValueError as error:
             return PrepareResult(
@@ -181,7 +198,8 @@ class WeeklyRebalanceService:
             self._plans.save_approval(plan_id, approval)
         except PlanExistsError:
             return ApproveResult(ApproveStatus.ALREADY_APPROVED, self._plans.approval(plan_id))
-        return ApproveResult(ApproveStatus.OK, approval)
+        dropped = week_targets(record.plan, approval.no_trade).dropped_buys
+        return ApproveResult(ApproveStatus.OK, approval, dropped_buys=dropped)
 
     def plan(self, plan_id: str) -> tuple[PlanRecord | None, Approval | None]:
         return self._plans.load(plan_id), self._plans.approval(plan_id)

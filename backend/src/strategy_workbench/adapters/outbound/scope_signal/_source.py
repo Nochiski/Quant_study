@@ -7,7 +7,8 @@
 - `model/<모델>/MANIFEST.json`: 모델별 현재 빌드(`current_build`)
 - `model/<모델>/v=<build_id>/scores.parquet`: `stock_code`·`rank`·`score_date`
 - `factor_inputs/fi_prices/v=<fi_build_id>/*.parquet`: 점수를 계산한 가격 판
-  (`ticker`·`date`·`close`·`volume`)
+  (`ticker`·`date`·`close`·`volume`). 신호일 행이 없는 종목(거래정지 등)은 같은 판의 그 전 마지막
+  종가를 따로 싣는다(보유 종목 평가용).
 
 현재 빌드 포인터가 가리키는 판만 읽는다. 폴더에 남은 옛 판을 훑지 않는다.
 """
@@ -23,6 +24,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
+    EarlierClose,
     SignalRead,
     SignalReadStatus,
     SignalSnapshot,
@@ -96,9 +98,9 @@ class ScopeSignalSource:
             )
         scores_path = model_dir / f"v={build_id}" / "scores.parquet"
         ranks = _ranks(scores_path, signal_date)
-        closes, untraded = _closes(
-            self._root / "factor_inputs" / "fi_prices" / f"v={prices_build_id}", signal_date
-        )
+        prices_dir = self._root / "factor_inputs" / "fi_prices" / f"v={prices_build_id}"
+        closes, untraded = _closes(prices_dir, signal_date)
+        earlier = _earlier_closes(prices_dir, signal_date, closes)
         previous_id, previous_ranks = _previous(model_dir, manifest, build_id, signal_date)
         names, reasons = _universe_notes(
             self._root / "factor_inputs" / "fi_universe" / f"v={prices_build_id}", ranks, closes
@@ -118,6 +120,7 @@ class ScopeSignalSource:
                 previous_ranks,
                 names,
                 reasons,
+                earlier,
             ),
         )
 
@@ -281,3 +284,35 @@ def _closes(folder: Path, signal_date: date) -> tuple[dict[str, int], frozenset[
             f"no closes on the signal date — build={folder.name} date={signal_date.isoformat()}"
         )
     return closes, frozenset(untraded)
+
+
+def _earlier_closes(
+    folder: Path, signal_date: date, closes: dict[str, int]
+) -> dict[str, EarlierClose]:
+    """신호일 행이 없는 종목의 그 전 마지막 양수 종가. 읽지 못하면 비운다(그런 보유 종목이 있으면
+    주문안이 막힌다)."""
+    try:
+        table = pa.concat_tables(
+            [
+                pq.read_table(
+                    file,
+                    columns=["ticker", "date", "close"],
+                    filters=[("date", "<", signal_date), ("ticker", "not in", sorted(closes))],
+                )
+                for file in sorted(folder.glob("*.parquet"))
+            ]
+        )
+    except (OSError, ValueError, KeyError, pa.ArrowInvalid):
+        return {}
+    latest: dict[str, EarlierClose] = {}
+    for ticker, day, close in zip(
+        table.column("ticker").to_pylist(),
+        table.column("date").to_pylist(),
+        table.column("close").to_pylist(),
+        strict=True,
+    ):
+        if not isinstance(ticker, str) or not isinstance(close, int) or close <= 0:
+            continue
+        if ticker not in latest or day > latest[ticker].day:
+            latest[ticker] = EarlierClose(day, close)
+    return latest

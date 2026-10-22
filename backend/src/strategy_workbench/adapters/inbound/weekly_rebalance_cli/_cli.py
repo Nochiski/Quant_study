@@ -169,6 +169,8 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
         return 0
     result = planning.approve(args.plan, args.approver, args.note, tuple(args.no_trade))
     print(f"[{result.status.value}] plan={args.plan} {result.detail}".rstrip())
+    if result.dropped_buys:
+        print(f"함께 뺀 새 매수(자리를 그대로 차지): {', '.join(result.dropped_buys)}")
     return 0 if result.status is ApproveStatus.OK else 1
 
 
@@ -422,13 +424,29 @@ def render(record: PlanRecord, approval: Approval | None) -> str:
     ]
     if approval is not None and approval.no_trade:
         lines.append(f"이번 주 매매에서 뺀 종목: {', '.join(approval.no_trade)}")
-    reviews = [line.symbol for line in plan.lines if line.review]
+    reviews = [line.symbol for line in plan.lines if _flagged_sale(line)]
     if reviews and approval is None:
         lines.append(
             f"⚠ 확인 필요 {len(reviews)}종목 {reviews} — 신호에서 빠졌다. 데이터 누락이면 "
-            "승인할 때 --no-trade 로 이번 주 매매에서 뺀다"
+            "승인할 때 --no-trade 로 이번 주 매매에서 뺀다(그만큼 순위 낮은 새 매수도 빠진다)"
+        )
+    unpriced = [line.symbol for line in plan.lines if _unpriced_hold(line)]
+    if unpriced:
+        lines.append(
+            f"⚠ 가격 없음 {len(unpriced)}종목 {unpriced} — 신호일 종가가 없어 직전 종가로 평가하고 "
+            "이번 주 매매 없이 둔다(거래정지 여부 확인)"
         )
     return "\n".join(lines)
+
+
+def _flagged_sale(line: RebalanceLine) -> bool:
+    """신호에서 빠져 파는 보유 종목(데이터 누락일 수 있어 사람이 확인한다)."""
+    return line.review and line.action is not RebalanceAction.HOLD
+
+
+def _unpriced_hold(line: RebalanceLine) -> bool:
+    """신호일 가격이 없어 직전 종가로 평가하고 그대로 둔 보유 종목."""
+    return line.review and line.action is RebalanceAction.HOLD
 
 
 def _reconciled(value: bool | None) -> str:
@@ -456,7 +474,7 @@ def render_telegram(record: PlanRecord, execute_on: date) -> str:
         name = _html(names.get(line.symbol, line.symbol))
         head = f"<b>{name}</b> {line.symbol}"
         if line.action is RebalanceAction.HOLD:
-            holds.append(name)
+            holds.append(f"⚠️{name}" if line.review else name)
             continue
         if line.action is RebalanceAction.SKIP:
             skips.append(f"{head}\n{_html(line.reason)}")
@@ -480,11 +498,18 @@ def render_telegram(record: PlanRecord, execute_on: date) -> str:
     footer = [f"총자산 {_won(plan.equity_krw)} · 종목당 {_won(plan.target_value_krw)}"]
     if signal.anomalies:
         footer.append("<i>데이터 누락 의심을 확인하고 만든 주문지</i>")
-    reviews = [names.get(line.symbol, line.symbol) for line in plan.lines if line.review]
+    reviews = [names.get(line.symbol, line.symbol) for line in plan.lines if _flagged_sale(line)]
     if reviews:
         footer.append(
             f"<b>⚠️ 확인 {len(reviews)}건</b> — {_html(', '.join(reviews))}"
             f"{_object_particle(reviews[-1])} 이번 주 매매에서 뺄지 승인 때 알려 주세요."
+        )
+    unpriced = [names.get(line.symbol, line.symbol) for line in plan.lines if _unpriced_hold(line)]
+    if unpriced:
+        footer.append(
+            f"<b>⚠️ 가격 없음 {len(unpriced)}건</b> — {_html(', '.join(unpriced))}"
+            f"{_topic_particle(unpriced[-1])} 신호일 종가가 없어(거래정지 등) "
+            "이번 주 매매 없이 둡니다."
         )
     parts.append("\n".join(footer))
     return "\n\n".join(parts)
@@ -541,10 +566,19 @@ def _day(day: date) -> str:
 
 def _object_particle(word: str) -> str:
     """마지막 글자에 받침이 있으면 `을`, 없으면 `를`. 한글이 아니면 `을(를)`."""
+    return _particle(word, "을", "를")
+
+
+def _topic_particle(word: str) -> str:
+    """마지막 글자에 받침이 있으면 `은`, 없으면 `는`. 한글이 아니면 `은(는)`."""
+    return _particle(word, "은", "는")
+
+
+def _particle(word: str, after_final: str, after_vowel: str) -> str:
     last = word[-1:]
     if not "가" <= last <= "힣":
-        return "을(를)"
-    return "을" if (ord(last) - ord("가")) % 28 else "를"
+        return f"{after_final}({after_vowel})"
+    return after_final if (ord(last) - ord("가")) % 28 else after_vowel
 
 
 def _html(text: str) -> str:

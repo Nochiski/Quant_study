@@ -14,6 +14,7 @@ import pytest
 from strategy_workbench.adapters.inbound.weekly_rebalance_cli.facade.command import (
     CliFactories,
     ServiceFactory,
+    render,
     render_telegram,
     run_cli,
 )
@@ -227,6 +228,56 @@ def test_telegram_plan_follows_the_confirmed_template() -> None:
         "총자산 1,000만 · 종목당 327만\n"
         "<b>⚠️ 확인 1건</b> — 알멕을 이번 주 매매에서 뺄지 승인 때 알려 주세요."
     )
+
+
+def test_telegram_marks_a_held_name_without_a_signal_day_price() -> None:
+    # 리뷰 #603: 신호일 가격이 없어 직전 종가로 평가하고 그대로 둔 보유 종목은 따로 알린다
+    names = {"000001": "알멕", "000003": "HMM"}
+    plan = plan_rebalance(
+        RebalancePolicy(slots=3, keep_rank=5),
+        ranks={"000003": 1},
+        holdings={"000001": 100, "000003": 100},
+        prices=dict.fromkeys(names, 10_000),
+        cash_krw=1_000_000,
+        blocked={"000001": "신호일 종가 없음(거래정지 등) — 2026-10-21 종가로 평가"},
+        stale_prices={"000001"},
+    )
+    record = PlanRecord(
+        "weekly-2026-10-23",
+        NOW,
+        SignalRecord(
+            "scope@2.0", "e_b", "2026-10-23", "ab" * 32, "e_p", (), names=tuple(names.items())
+        ),
+        AccountState(1_000_000, {}, None),
+        plan,
+    )
+    text = render_telegram(record, date(2026, 10, 26))
+    assert "<b>유지 2</b>\n<blockquote>⚠️알멕 · HMM</blockquote>" in text
+    assert text.endswith(
+        "<b>⚠️ 가격 없음 1건</b> — 알멕은 신호일 종가가 없어(거래정지 등) 이번 주 매매 없이 둡니다."
+    )
+    assert "이번 주 매매에서 뺄지" not in text
+    shown = render(record, None)
+    assert "가격 없음 1종목 ['000001']" in shown and "확인 필요" not in shown
+
+
+def test_approve_prints_the_new_buys_dropped_with_a_kept_sale(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plans = Plans()
+    held = Account(AccountState(2_000_000, {"000009": 100}, None))
+    factories = CliFactories(
+        _planner(Signals(), held, plans), _no_execution, _no_recorder, _no_notifier
+    )
+    common = ["--workdir", str(tmp_path)]
+    prepare = ["prepare", *common, "--model-root", str(tmp_path), "--signal-date", "2026-10-23"]
+    assert run_cli(factories, prepare) == 0
+    capsys.readouterr()
+    approve = ["approve", *common, "--plan", "weekly-2026-10-23", "--approver", "동민"]
+    assert run_cli(factories, [*approve, "--no-trade", "000009"]) == 0
+    printed = capsys.readouterr().out
+    assert "[ok] plan=weekly-2026-10-23" in printed
+    assert "함께 뺀 새 매수(자리를 그대로 차지): 000003" in printed
 
 
 def _planner(signals: Signals, account: Account, plans: Plans) -> ServiceFactory:

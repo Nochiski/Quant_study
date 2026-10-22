@@ -93,6 +93,11 @@ class Gateway:
             return SubmitOutcome(SubmitStatus.RETRY, "orders kept changing")
         if request.intent_id in self.orders:
             return SubmitOutcome(SubmitStatus.EXISTS)
+        state = self.state()
+        cost = request.quantity * request.limit_price_krw + request.fee_budget_krw
+        if request.side == "buy" and cost > state.cash_krw - state.reserved_cash_krw:
+            # S05 처럼 대금 + 비용 상한이 쓸 수 있는 현금을 넘으면 보내지 않는다
+            return SubmitOutcome(SubmitStatus.BLOCKED, "insufficient cash")
         self.submitted.append(request)
         view = OrderView(
             request.intent_id,
@@ -201,7 +206,6 @@ def rig(
         now=lambda: now,
         sleep=lambda _: None,
         policy=policy,
-        sizing=RebalancePolicy(slots=3, keep_rank=5),
         waits=Waits(0, 8, 0, 0, 3),
     )
     return Rig(plans, gateway, market, log, service)
@@ -356,12 +360,37 @@ def test_close_records_shortfall_missed_cost_and_raw_evidence() -> None:
 
 def test_no_trade_symbols_from_the_approval_are_neither_bought_nor_sold() -> None:
     r = rig(approved=False)
-    r.plans.save_approval(PLAN, Approval(MONDAY, "동민", no_trade=("00000A", "00000E")))
+    r.plans.save_approval(PLAN, Approval(MONDAY, "동민", no_trade=("00000A",)))
     r.service.execute(PLAN, Phase.OPEN, send=True)
-    assert {o.symbol for o in r.gateway.submitted} == {"00000B"}
+    assert {o.symbol for o in r.gateway.submitted} == {"00000E", "00000B"}
     assert any(e.kind == "no_trade" for e in r.log.events_)
     r.service.execute(PLAN, Phase.CHASE, send=True)
-    assert {o.symbol for o in r.gateway.submitted} == {"00000B"}
+    assert {o.symbol for o in r.gateway.submitted} == {"00000E", "00000B"}
     r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
     record = r.service.close().record
-    assert record is not None and {o.symbol for o in record.orders} == {"00000B"}
+    assert record is not None and {o.symbol for o in record.orders} == {"00000E", "00000B"}
+
+
+def test_keeping_a_name_planned_for_sale_also_drops_the_lowest_new_buy() -> None:
+    # 리뷰 #606: 파는 E 를 빼면 E 가 자리를 그대로 차지한다. 대체 매수 중 순위가 낮은 B 를 함께 뺀다
+    r = rig(approved=False)
+    r.plans.save_approval(PLAN, Approval(MONDAY, "동민", no_trade=("00000E",)))
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    r.service.execute(PLAN, Phase.CHASE, send=True)
+    assert {o.symbol for o in r.gateway.submitted} == {"00000A"}
+    assert r.gateway.holdings["00000E"] == 100
+    no_trade = next(e.detail for e in r.log.events_ if e.kind == "no_trade")
+    assert "함께 뺀 새 매수 ['00000B']" in no_trade
+    r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
+    record = r.service.close().record
+    assert record is not None and {o.symbol for o in record.orders} == {"00000A"}
+
+
+def test_cash_limited_buy_is_sized_with_the_fee_budget_the_ledger_checks() -> None:
+    # 리뷰 #603: 수량은 35bp 로 정하고 S05 는 40bp 로 현금을 검사해 주문 전체가 막혔다
+    r = rig()
+    r.gateway.cash = 992_811  # 매도 999,000원 · A 130주(1,307,811원) 뒤 B 에 684,000원이 남는다
+    result = r.service.execute(PLAN, Phase.OPEN, send=True)
+    b = next(line for line in result.lines if line.symbol == "00000B")
+    # 684,000 ÷ (10,020 × 1.0040) = 67.99 → 67주. 35bp 로는 68주(684,086원)라 현금을 넘었다
+    assert (b.outcome, b.quantity) == ("sent", 67)

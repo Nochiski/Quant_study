@@ -10,6 +10,7 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
     RebalancePolicy,
     plan_rebalance,
     signal_anomalies,
+    week_targets,
 )
 
 POLICY = RebalancePolicy(slots=3, keep_rank=5)
@@ -195,6 +196,70 @@ def test_held_name_missing_from_the_signal_is_sold_but_flagged_for_review() -> N
     )
     [line] = [line for line in explained.lines if line.symbol == "000009"]
     assert line.reason == "신호에서 빠짐 — WISE 추정치 공백 (직전 빌드 25위)"
+
+
+def test_held_name_priced_from_an_earlier_close_is_held_and_flagged_for_review() -> None:
+    # 999999 는 신호일 가격 행이 없어(거래정지 등) 직전 종가로 평가한다(#603 리뷰).
+    # 팔지도 사지도 않는다
+    plan = plan_rebalance(
+        POLICY,
+        ranks={"000001": 1, "000002": 2},
+        holdings={"999999": 100},
+        prices={"000001": 10_000, "000002": 10_000, "999999": 12_000},
+        cash_krw=1_800_000,
+        blocked={"999999": "신호일 종가 없음(거래정지 등) — 10-20 종가로 평가"},
+        stale_prices={"999999"},
+    )
+    [line] = [line for line in plan.lines if line.symbol == "999999"]
+    assert (line.action, line.target_shares, line.review) == (RebalanceAction.HOLD, 100, True)
+    assert plan.equity_krw == 3_000_000  # 1,800,000 + 100 × 12,000
+    assert not any(other.review for other in plan.lines if other.symbol != "999999")
+
+
+def _missing_held_plan() -> RebalancePlan:
+    """000001(1위)은 남기고 999999 는 신호에서 빠져 팔며, 빈 두 자리를 2·3위로 채운다."""
+    codes = _codes(6)
+    return plan_rebalance(
+        POLICY,
+        ranks={code: rank for rank, code in enumerate(codes, 1)},
+        holdings={"000001": 100, "999999": 100},
+        prices={**dict.fromkeys(codes, 10_000), "999999": 10_000},
+        cash_krw=1_000_000,
+        blocked={},
+    )
+
+
+def test_excluding_a_flagged_sale_keeps_the_name_and_drops_the_lowest_new_buy() -> None:
+    plan = _missing_held_plan()
+    assert _lines(plan)["999999"] == (RebalanceAction.SELL, 100, 0)
+    week = week_targets(plan, {"999999"})
+    # 999999 가 자리를 그대로 차지하므로 대체 매수 중 순위가 낮은 3위를 이번 주는 사지 않는다
+    # (#606 리뷰)
+    assert week.dropped_buys == ("000003",)
+    assert week.targets == {"000001": 100, "000002": 97}
+
+
+def test_excluding_a_buy_only_removes_that_buy() -> None:
+    week = week_targets(_missing_held_plan(), {"000002"})
+    assert week.dropped_buys == ()
+    assert week.targets == {"000001": 100, "999999": 0, "000003": 97}
+
+
+def test_excluding_a_sale_with_no_new_buy_holds_more_names_than_slots() -> None:
+    codes = _codes(5)
+    plan = plan_rebalance(
+        POLICY,
+        ranks={code: rank for rank, code in enumerate(codes, 1)},
+        holdings=dict.fromkeys(codes[1:], 100),  # 2~5위 네 종목 → 5위를 자리 넘침으로 판다
+        prices=dict.fromkeys(codes, 10_000),
+        cash_krw=0,
+        blocked={},
+    )
+    week = week_targets(plan, {"000005"})
+    # 뺀다고 다른 종목을 새로 팔지 않는다. 이번 주는 네 종목을 들고 간다
+    assert week.dropped_buys == ()
+    assert "000005" not in week.targets
+    assert all(week.targets[code] == 100 for code in codes[1:4])
 
 
 def test_signal_anomalies_flag_bulk_disappearance_from_the_top() -> None:

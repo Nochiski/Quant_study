@@ -8,7 +8,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Protocol
 
-__all__ = ["SignalRead", "SignalReadStatus", "SignalSnapshot", "SignalSource"]
+__all__ = ["EarlierClose", "SignalRead", "SignalReadStatus", "SignalSnapshot", "SignalSource"]
 
 
 class SignalReadStatus(StrEnum):
@@ -16,6 +16,14 @@ class SignalReadStatus(StrEnum):
     NOT_READY = "not_ready"  # 그 날짜의 빌드가 아직 현재 빌드가 아니다
     GATE_FAILED = "gate_failed"  # 빌드 게이트가 통과하지 않았거나 모델이 제외됐다
     UNREADABLE = "unreadable"  # 파일이 없거나 형식·내용이 맞지 않는다
+
+
+@dataclass(frozen=True)
+class EarlierClose:
+    """신호일 가격 행이 없는 종목(거래정지 등)의, 같은 가격 판에서 신호일 전 마지막 종가(원)."""
+
+    day: date
+    close_krw: int
 
 
 @dataclass(frozen=True)
@@ -39,6 +47,8 @@ class SignalSnapshot:
     # 못 읽으면 None이다.
     names: Mapping[str, str] | None = None
     exclusion_reasons: Mapping[str, str] | None = None
+    # 신호일 가격 행이 없는 종목의 그 전 마지막 종가. 보유 종목 평가에만 쓴다.
+    earlier_closes: Mapping[str, EarlierClose] | None = None
 
 
 @dataclass(frozen=True)

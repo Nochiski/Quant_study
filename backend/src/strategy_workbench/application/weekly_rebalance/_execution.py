@@ -2,7 +2,7 @@
 
 주문은 실행일 오전에 모두 낸다. 미루지 않고 시장가로 호가를 긁지도 않는다(2026-10-21 사용자 결정).
 
-- 주문안이 있어야 하고, 첫 4주는 승인이 있어야 한다. 신호일 뒤 며칠 안에만 낸다.
+- 주문안이 있어야 하고, 매주 승인이 있어야 한다(10-21 사용자 결정). 신호일 뒤 며칠 안에만 낸다.
 - 여는 단계(09:05): 매도를 먼저 내고 체결을 잠깐 기다린 뒤, 그때 현금으로 살 수 있는 만큼 매수한다.
 - 추적 단계(09:15~11:30, 10분마다): 살아 있는 잔량을 취소하고, 취소가 확정되면 남은 목표를 그때
   호가로 다시 낸다. 마지막 추적에서 낸 주문은 장 마감까지 걸어 둔다.
@@ -10,7 +10,9 @@
   없는(거래정지 등) 종목만 그 회차를 건너뛰고 기록한다.
 - 한 종목·방향에는 주문을 하나만 둔다. 의도 ID는 `<주문안>-<종목>-<방향>`, 다시 낸 주문은
   `-c<회차>`이고, 살아 있는 주문을 목표에서 빼고 내므로 다시 돌려도 같은 수량을 두 번 내지 않는다.
-- 승인에서 이번 주 매매에서 뺀 종목(`no_trade`)은 사지도 팔지도 않는다.
+- 승인에서 이번 주 매매에서 뺀 종목(`no_trade`)은 사지도 팔지도 않는다. 팔려던 보유 종목을 빼면 그
+  종목이 자리를 차지하므로 순위가 낮은 새 매수도 그만큼 하지 않는다(`week_targets`).
+- 살 수량은 S05가 현금을 검사하는 비용 상한(`ExecutionPolicy.buy_fee_budget_bp`)으로 정한다.
 - 장 마감 기록은 신호 기준가 대비 체결 차이와 미체결 기회비용, 그날 총자산을 남긴다.
 """
 
@@ -44,11 +46,11 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.records impo
 )
 from strategy_workbench.domain.rebalance.facade.rebalance import (
     ExecutionPolicy,
-    RebalancePolicy,
     affordable_shares,
     limit_price,
     missed_krw,
     shortfall_bp,
+    week_targets,
 )
 
 
@@ -120,7 +122,6 @@ class WeeklyExecutionService:
         now: Callable[[], datetime],
         sleep: Callable[[float], None],
         policy: ExecutionPolicy | None = None,
-        sizing: RebalancePolicy | None = None,
         require_approval: bool = True,
         max_stale_days: int = 5,
         waits: Waits | None = None,
@@ -132,7 +133,6 @@ class WeeklyExecutionService:
         self._now = now
         self._sleep = sleep
         self._policy = policy or ExecutionPolicy()
-        self._sizing = sizing or RebalancePolicy()
         self._require_approval = require_approval
         self._max_stale_days = max_stale_days
         self._waits = waits or Waits()
@@ -164,8 +164,13 @@ class WeeklyExecutionService:
                 return ExecuteResult(ExecuteStatus.HALTED, detail=state.detail)
             lines: list[OrderLine] = []
             if phase is Phase.OPEN and excluded:
+                dropped = week_targets(record.plan, excluded).dropped_buys
                 self._event(
-                    plan_id, phase, "no_trade", detail=f"이번 주 매매에서 뺌 {sorted(excluded)}"
+                    plan_id,
+                    phase,
+                    "no_trade",
+                    detail=f"이번 주 매매에서 뺌 {sorted(excluded)} · "
+                    f"함께 뺀 새 매수 {list(dropped)}",
                 )
             if phase is Phase.CHASE:
                 lines += self._cancel_open(record, state, send=send)
@@ -349,7 +354,8 @@ class WeeklyExecutionService:
         if limit is None:
             return skipped("no_quote", "호가가 없다(거래정지·VI 가능) — 다음 회차에 다시 본다")
         if available is not None:
-            quantity = min(quantity, affordable_shares(available, limit, self._sizing.fee_rate_bp))
+            affordable = affordable_shares(available, limit, self._policy.buy_fee_budget_bp)
+            quantity = min(quantity, affordable)
             if quantity <= 0:
                 return skipped("skipped", f"살 현금이 없다 — available={available}", limit)
         request = OrderRequest(
@@ -425,11 +431,12 @@ class WeeklyExecutionService:
             for symbol, shares in sorted(state.holdings.items())
         )
         approval = self._plans.approval(plan_id)
-        excluded = set(approval.no_trade) if approval is not None else set()
+        excluded = frozenset(approval.no_trade if approval is not None else ())
+        skipped = excluded | set(week_targets(record.plan, excluded).dropped_buys)
         planned = {
             (line.symbol, "buy" if line.delta_shares > 0 else "sell"): abs(line.delta_shares)
             for line in record.plan.lines
-            if line.delta_shares and line.symbol not in excluded
+            if line.delta_shares and line.symbol not in skipped
         }
         references = {line.symbol: line.reference_price_krw or 0 for line in record.plan.lines}
         orders: list[DayOrder] = []
@@ -517,12 +524,9 @@ class WeeklyExecutionService:
 
 
 def _deltas(record: PlanRecord, state: GatewayState, excluded: frozenset[str]) -> dict[str, int]:
-    """주문안 종목만 본다(이번 주 뺀 종목 제외). 지금 보유와 살아 있는 주문을 목표에서 뺀다."""
-    targets = {
-        symbol: shares
-        for symbol, shares in record.plan.target_shares().items()
-        if symbol not in excluded
-    }
+    """주문안 종목만 본다(이번 주 뺀 종목과 함께 빠진 새 매수 제외). 지금 보유와 살아 있는 주문을
+    목표에서 뺀다."""
+    targets = week_targets(record.plan, excluded).targets
     projected: dict[str, int] = dict(state.holdings)
     for order in state.orders:
         sign = 1 if order.side == "buy" else -1

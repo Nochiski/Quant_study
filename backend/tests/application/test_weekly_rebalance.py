@@ -11,6 +11,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountUnavailableError,
     Approval,
     ApproveStatus,
+    EarlierClose,
     PlanExistsError,
     PlanRecord,
     PrepareStatus,
@@ -148,7 +149,7 @@ def test_unavailable_inputs_leave_no_plan() -> None:
             Account(AccountState(0, {"000001": 1}, False, "cash mismatch")),
             PrepareStatus.NOT_RECONCILED,
         ),
-        # 보유 종목 000008의 기준가격이 신호 가격 판에 없다
+        # 보유 종목 000008의 기준가격이 신호일에도, 그 전에도 가격 판에 없다
         (Signals(), Account(AccountState(0, {"000008": 1}, True)), PrepareStatus.INVALID_INPUT),
     ]
     for signals, account, status in cases:
@@ -181,6 +182,29 @@ def test_suspected_data_gap_holds_the_plan_until_a_person_accepts_it() -> None:
     )
     assert accepted.status is PrepareStatus.OK and accepted.record is not None
     assert accepted.record.signal.anomalies and accepted.record.signal.previous_build_id == "e_prev"
+
+
+def test_held_name_without_a_signal_day_price_is_held_on_its_earlier_close() -> None:
+    # 리뷰 #603: 거래정지로 신호일 가격 행이 없는 보유 종목 하나 때문에 주문안 전체가 실패했다
+    signal = snapshot(earlier_closes={"000008": EarlierClose(date(2026, 10, 20), 12_000)})
+    account = Account(AccountState(1_800_000, {"000008": 100}, True))
+    result = service(Signals(SignalRead(SignalReadStatus.OK, signal)), account).prepare(DAY)
+    assert result.status is PrepareStatus.OK and result.record is not None
+    [held] = [line for line in result.record.plan.lines if line.symbol == "000008"]
+    assert (held.action, held.target_shares, held.review) == (RebalanceAction.HOLD, 100, True)
+    assert held.reference_price_krw == 12_000
+    assert "신호일 종가 없음(거래정지 등) — 2026-10-20 종가로 평가" in held.reason
+    assert result.record.plan.equity_krw == 3_000_000
+
+
+def test_approval_reports_the_new_buys_dropped_with_a_kept_sale() -> None:
+    plans = Plans()
+    held = Account(AccountState(2_000_000, {"000009": 100}, None))
+    rebalance = service(account=held, plans=plans)
+    rebalance.prepare(DAY)  # 000009 는 신호에서 빠져 팔고, 1~3위를 산다
+    approved = rebalance.approve("weekly-2026-10-23", "동민", no_trade=("000009",))
+    assert approved.status is ApproveStatus.OK
+    assert approved.dropped_buys == ("000003",)
 
 
 def test_approval_can_take_symbols_out_of_this_week() -> None:

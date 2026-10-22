@@ -20,6 +20,11 @@ from email.message import Message
 from enum import StrEnum
 from typing import IO, Protocol
 
+from strategy_workbench.application.broker_connection.facade.connection import (
+    ACCOUNT_NUMBER_DIGITS,
+    BrokerCredentials,
+    is_account_number,
+)
 from strategy_workbench.application.offline_execution.facade.execution import BrokerError
 
 logger = logging.getLogger(__name__)
@@ -207,10 +212,16 @@ class KiwoomCredentials:
     def __post_init__(self) -> None:
         if not self.app_key.strip() or not self.secret_key.strip():
             raise ValueError("kiwoom app key and secret must be non-empty")
-        if not re.fullmatch(r"\d{10}", self.account_number):
+        if not is_account_number(self.account_number):
             raise ValueError(
-                f"kiwoom account number must be 10 digits — length={len(self.account_number)}"
+                f"kiwoom account number must be {ACCOUNT_NUMBER_DIGITS} digits — "
+                f"length={len(self.account_number)}"
             )
+
+    @classmethod
+    def from_saved(cls, saved: BrokerCredentials) -> KiwoomCredentials:
+        """설정 화면이 저장한 자격증명을 키움 어댑터 값으로 옮긴다(옮기는 곳은 여기 하나)."""
+        return cls(saved.app_key, saved.secret_key, saved.account_number)
 
 
 class _Pacer:

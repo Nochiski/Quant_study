@@ -39,7 +39,7 @@ def test_env_file_reads_only_the_chosen_paper_pair(
     env = tmp_path / ".env"
     env.write_text(ENV)
     monkeypatch.setenv(ENV_FILE_ENV, str(env))
-    credentials = load_credentials(tmp_path / "repo")
+    credentials = load_credentials()
     assert (credentials.app_key, credentials.secret_key, credentials.account_number) == (
         "fake-app-2-0123456789",
         "fake-secret-2-0123456789",
@@ -56,12 +56,12 @@ def test_missing_names_are_reported_without_values(
     monkeypatch.setenv(ENV_FILE_ENV, str(env))
     monkeypatch.setenv(KEY_PAIR_ENV, "1")  # 1번 쌍에는 계좌번호가 없다
     with pytest.raises(AccountUnavailableError) as raised:
-        load_credentials(tmp_path / "repo")
+        load_credentials()
     assert "PAPER_TRADING_KIWOOM_ACCOUNT_1" in str(raised.value)
     assert "fake-app-1" not in str(raised.value)
     monkeypatch.setenv(KEY_PAIR_ENV, "2; rm")
     with pytest.raises(AccountUnavailableError):
-        load_credentials(tmp_path / "repo")
+        load_credentials()
 
 
 def test_telegram_token_comes_from_the_named_variable_only(

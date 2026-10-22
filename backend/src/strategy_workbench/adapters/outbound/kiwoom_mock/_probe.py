@@ -48,9 +48,7 @@ class KiwoomConnectionProbe:
 
     def verify(self, credentials: BrokerCredentials) -> ConnectionCheck:
         try:
-            kiwoom = KiwoomCredentials(
-                credentials.app_key, credentials.secret_key, credentials.account_number
-            )
+            kiwoom = KiwoomCredentials.from_saved(credentials)
         except ValueError as error:
             return ConnectionCheck(ConnectionOutcome.AUTH_FAILED, str(error))
         client = KiwoomClient(

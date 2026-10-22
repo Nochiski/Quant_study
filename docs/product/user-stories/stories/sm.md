@@ -537,3 +537,7 @@
 - 비고: 연결 확인은 토큰 발급과 계좌 대조만 하고 주문하지 않는다. 키는 각자 PC의 사용자 설정 폴더
   `secrets.json`에만 저장된다. e2e는 키움 대신 대본 probe(`STRATEGY_WORKBENCH_BROKER_FAKE_PROBE=1`)를 쓴다.
   연결 안내는 `docs/manual/strategy-workbench/kiwoom-mock-connection.md`다.
+- 비고(2026-10-22 리뷰 #594·#595): 저장된 키 항목이 깨졌으면 "저장된 키를 읽을 수 없음 — 다시 저장하거나
+  지우세요"와 "삭제"가 보이고 "연결 확인"은 누를 수 없다. 연결 확인을 기다리는 동안에는 저장·삭제를 막고, 새
+  키를 저장하거나 지운 뒤에 도착한 옛 확인 결과는 보이지 않는다. 둘 다 컴포넌트 테스트
+  (`configure-kiwoom-mock.test.tsx`)가 확인한다 — 깨진 파일을 e2e 서버에 심는 통로는 두지 않았다.

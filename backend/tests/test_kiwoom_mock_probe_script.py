@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import stat
 import sys
 from collections.abc import Iterator
 from importlib import import_module
@@ -110,3 +111,19 @@ def test_resume_lifts_the_halt_only_when_reconciled(probe: ModuleType, tmp_path:
     send = ("--price", "70000", *ORDER, "--send")
     assert _run(probe, fake, clock, "--out", out, "buy", "--intent", "b1", *send) == 0
     assert fake.api_ids().count("kt10000") == 1
+
+
+@pytest.mark.usefixtures("saved_keys")
+def test_measurement_files_are_private_even_in_an_existing_folder(
+    probe: ModuleType, tmp_path: Path
+) -> None:
+    # 리뷰 #596 P3: 실제로 600 인 것은 조회 원본뿐이었고 원장 두 파일은 umask 를 따랐다
+    out = tmp_path / "out"
+    out.mkdir(mode=0o755)
+    out.chmod(0o755)
+    clock = Clock()
+    assert _run(probe, FakeKiwoom(clock), clock, "--out", str(out), "status") in (0, 1)
+    assert stat.S_IMODE(out.stat().st_mode) == 0o700
+    for name in ("kiwoom-reference.sqlite", "execution.sqlite"):
+        assert stat.S_IMODE((out / name).stat().st_mode) == 0o600
+

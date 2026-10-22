@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from strategy_workbench.bootstrap import _assistant, _container, _http
+from strategy_workbench.bootstrap import _container, _http, _secrets
 
 from .conftest import RUNTIME_PATH_GUARD, RUNTIME_SETTING_ENVS
 from .runtime_path_guard import RuntimePathGuard
@@ -93,7 +93,7 @@ def test_runtime_defaults_point_under_the_per_test_tmp_directory(
     assert _http.runtime_research_db_path().parent == root
     assert _http.runtime_continuous_db_path().parent == root
     assert _container.DEFAULT_RUN_ARTIFACT_ROOT.parent == root
-    assert _assistant.default_secrets_path().parent == root
+    assert _secrets.default_secrets_path().parent == root
     for name in RUNTIME_SETTING_ENVS:
         assert name not in os.environ
 

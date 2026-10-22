@@ -13,7 +13,10 @@ from strategy_workbench.adapters.outbound.secrets_local._store import (
     LocalFileProviderSecretStore,
 )
 from strategy_workbench.application.assistant_chat.facade.ports import ProviderSecretMissingError
-from strategy_workbench.application.broker_connection.facade.connection import BrokerCredentials
+from strategy_workbench.application.broker_connection.facade.connection import (
+    BrokerCredentials,
+    BrokerCredentialsUnreadableError,
+)
 
 BROKER_ENTRY = "broker.kiwoom_mock"
 
@@ -27,6 +30,10 @@ class LocalFileBrokerCredentialStore:
             raw = self._store.get(BROKER_ENTRY)
         except ProviderSecretMissingError:
             return None
+        except SecretStoreStorageError as error:
+            raise BrokerCredentialsUnreadableError(
+                f"secrets file is unreadable — entry={BROKER_ENTRY} error={type(error).__name__}"
+            ) from error
         try:
             data = json.loads(raw)
             return BrokerCredentials(
@@ -34,7 +41,7 @@ class LocalFileBrokerCredentialStore:
             )
         except (ValueError, TypeError, KeyError) as error:
             # 값은 싣지 않는다. 항목 이름과 깨진 모양만 알린다.
-            raise SecretStoreStorageError(
+            raise BrokerCredentialsUnreadableError(
                 f"stored broker credentials are unreadable — entry={BROKER_ENTRY} "
                 f"error={type(error).__name__}"
             ) from error

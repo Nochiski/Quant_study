@@ -14,7 +14,7 @@ from strategy_workbench.adapters.outbound.run_worker_process.facade.execution im
     ProcessRunExecution,
 )
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import default_secrets_path
-from strategy_workbench.bootstrap import _assistant, _container, _http
+from strategy_workbench.bootstrap import _container, _http, _secrets
 
 from .runtime_path_guard import RuntimePathGuard
 
@@ -60,7 +60,7 @@ def _redirect_runtime_defaults(monkeypatch: pytest.MonkeyPatch, root: Path) -> N
     monkeypatch.setattr(_http, "DEFAULT_RESEARCH_DB_PATH", root / "research.sqlite3")
     monkeypatch.setattr(_http, "DEFAULT_CONTINUOUS_DB_PATH", root / "continuous-accounts.sqlite3")
     monkeypatch.setattr(_container, "DEFAULT_RUN_ARTIFACT_ROOT", root / "backtest-runs")
-    monkeypatch.setattr(_assistant, "default_secrets_path", lambda: root / "secrets.json")
+    monkeypatch.setattr(_secrets, "default_secrets_path", lambda: root / "secrets.json")
 
 
 def _fail_if_touched(when: str) -> None:

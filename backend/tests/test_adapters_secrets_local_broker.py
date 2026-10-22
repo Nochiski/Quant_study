@@ -14,9 +14,11 @@ from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
     BROKER_ENTRY,
     LocalFileBrokerCredentialStore,
     LocalFileProviderSecretStore,
-    SecretStoreStorageError,
 )
-from strategy_workbench.application.broker_connection.facade.connection import BrokerCredentials
+from strategy_workbench.application.broker_connection.facade.connection import (
+    BrokerCredentials,
+    BrokerCredentialsUnreadableError,
+)
 
 CREDENTIALS = BrokerCredentials("fake-app-key-0123", "fake-secret-0123", "5012345678")
 
@@ -44,6 +46,6 @@ def test_file_stays_owner_only(tmp_path: Path) -> None:
 def test_unreadable_entry_fails_without_echoing_values(tmp_path: Path) -> None:
     path = tmp_path / "secrets.json"
     path.write_text(json.dumps({BROKER_ENTRY: '{"app_key": "fake-app-key-0123"}'}))
-    with pytest.raises(SecretStoreStorageError) as raised:
+    with pytest.raises(BrokerCredentialsUnreadableError) as raised:
         LocalFileBrokerCredentialStore(LocalFileProviderSecretStore(path)).load()
     assert "fake-app-key-0123" not in str(raised.value)

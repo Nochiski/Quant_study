@@ -111,7 +111,7 @@ class KiwoomAccountSource:
 
 
 def saved_credentials() -> KiwoomCredentials:
-    return load_credentials(REPOSITORY_ROOT)
+    return load_credentials()
 
 
 def outside_repository(workdir: Path) -> Path:

@@ -2780,6 +2780,8 @@ const ko = {
   "settings.kiwoom.guide": "처음 연결한다면 저장소의 연결 안내(docs/manual/strategy-workbench/kiwoom-mock-connection.md)를 먼저 보세요. 신청, IP 등록, 키 받기 순서가 있습니다.",
   "settings.kiwoom.status.saved": "저장됨 · 계좌 끝 {tail}",
   "settings.kiwoom.status.empty": "저장된 키 없음",
+  "settings.kiwoom.status.unreadable":
+    "저장된 키를 읽을 수 없음 — 다시 저장하거나 지우세요",
   "settings.kiwoom.loadError": "연결 설정을 불러오지 못했습니다.",
   "settings.kiwoom.form.title": "키 저장",
   "settings.kiwoom.form.appKey": "App Key",
@@ -5754,6 +5756,8 @@ export const messages = {
     "settings.kiwoom.guide": "For a first connection, read the repository guide (docs/manual/strategy-workbench/kiwoom-mock-connection.md). It covers the application, IP registration and key download steps.",
     "settings.kiwoom.status.saved": "Saved · account ending {tail}",
     "settings.kiwoom.status.empty": "No key saved",
+    "settings.kiwoom.status.unreadable":
+      "Saved key is unreadable — save it again or delete it",
     "settings.kiwoom.loadError": "Could not load the connection settings.",
     "settings.kiwoom.form.title": "Save key",
     "settings.kiwoom.form.appKey": "App Key",

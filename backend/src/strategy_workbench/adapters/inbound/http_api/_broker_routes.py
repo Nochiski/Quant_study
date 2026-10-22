@@ -58,6 +58,10 @@ class SaveKiwoomMockConnectionBody:
 class KiwoomMockConnectionBody:
     saved: bool
     account_tail: str | None
+    unreadable: Annotated[
+        bool,
+        Field(description="저장된 항목이 깨져 읽지 못했다. 다시 저장하거나 지우면 고쳐진다."),
+    ] = False
 
 
 @dataclass(frozen=True)
@@ -94,7 +98,9 @@ class _BrokerBodyRoute(CodedBodyValidationRoute):
 
 
 def _status(status: BrokerConnectionStatus) -> KiwoomMockConnectionBody:
-    return KiwoomMockConnectionBody(saved=status.saved, account_tail=status.account_tail)
+    return KiwoomMockConnectionBody(
+        saved=status.saved, account_tail=status.account_tail, unreadable=status.unreadable
+    )
 
 
 def _check(result: BrokerConnectionResult) -> KiwoomMockConnectionCheckBody:

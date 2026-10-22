@@ -20,17 +20,12 @@ from pathlib import Path
 
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import KiwoomCredentials
 from strategy_workbench.adapters.outbound.secrets_local.facade.env import read_env_values
-from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
-    LocalFileBrokerCredentialStore,
-    LocalFileProviderSecretStore,
-    default_secrets_path,
-)
 from strategy_workbench.adapters.outbound.telegram_notice.facade.sender import TelegramNotice
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountUnavailableError,
     NoticeError,
 )
-from strategy_workbench.bootstrap.facade.http import runtime_assistant_settings
+from strategy_workbench.bootstrap.facade.secrets import saved_kiwoom_credentials
 
 ENV_FILE_ENV = "STRATEGY_WORKBENCH_KIWOOM_ENV_FILE"
 KEY_PAIR_ENV = "STRATEGY_WORKBENCH_KIWOOM_KEY_PAIR"
@@ -41,21 +36,16 @@ TELEGRAM_TOKEN_VAR_ENV = "STRATEGY_WORKBENCH_TELEGRAM_TOKEN_VAR"
 TELEGRAM_CHAT_ID_ENV = "STRATEGY_WORKBENCH_TELEGRAM_CHAT_ID"
 
 
-def load_credentials(repository_root: Path) -> KiwoomCredentials:
+def load_credentials() -> KiwoomCredentials:
     env_file = os.environ.get(ENV_FILE_ENV)
     if env_file:
         return env_file_credentials(
             Path(env_file).expanduser(), os.environ.get(KEY_PAIR_ENV, DEFAULT_KEY_PAIR)
         )
-    configured = runtime_assistant_settings().secrets_path
-    store = LocalFileProviderSecretStore(
-        configured if configured is not None else default_secrets_path(),
-        forbidden_roots=(repository_root,),
-    )
-    saved = LocalFileBrokerCredentialStore(store).load()
+    saved = saved_kiwoom_credentials()
     if saved is None:
         raise AccountUnavailableError("saved kiwoom mock keys not found — save them in settings")
-    return KiwoomCredentials(saved.app_key, saved.secret_key, saved.account_number)
+    return saved
 
 
 def env_file_credentials(path: Path, pair: str) -> KiwoomCredentials:

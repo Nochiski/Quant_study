@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import ssl
 import time
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
@@ -35,7 +34,7 @@ from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
-from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import UrllibTransport
+from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import system_trust_transport
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.probe import (
     KiwoomConnectionProbe,
     ScriptedConnectionProbe,
@@ -364,17 +363,11 @@ def build_container(
 def _broker_probe(*, fake: bool) -> BrokerConnectionProbe:
     """키움 연결 확인 probe. e2e 대본은 `fake`일 때만 쓴다(`STRATEGY_WORKBENCH_BROKER_FAKE_PROBE`).
 
-    python.org macOS 빌드는 기본 인증서 목록이 비어 있다. OS 신뢰 저장소를 읽는 `truststore`가
-    설치돼 있으면 그것을 쓰고, 없으면 파이썬 기본값으로 둔다(Windows 기본값은 OS 저장소를 읽는다).
+    TLS 전송은 키움 어댑터의 `system_trust_transport`(OS 신뢰 저장소) 하나를 쓴다.
     """
     if fake:
         return ScriptedConnectionProbe()
-    try:
-        import truststore
-    except ImportError:
-        return KiwoomConnectionProbe()
-    context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    return KiwoomConnectionProbe(transport=UrllibTransport(ssl_context=context))
+    return KiwoomConnectionProbe(transport=system_trust_transport())
 
 
 def _run_execution(

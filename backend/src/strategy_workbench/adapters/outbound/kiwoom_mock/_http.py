@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 # 모의 전용 주소. 실전 주소는 이 어댑터에 없고, 주소를 바꾸는 인자도 두지 않는다.
 MOCK_BASE_URL = "https://mockapi.kiwoom.com"
+# 같은 모의 호스트의 웹소켓. 실시간 주문체결(`00`) 기록에만 쓴다(S07).
+MOCK_WEBSOCKET_URL = "wss://mockapi.kiwoom.com:10000/api/websocket"
 # 한국은 일광절약시간이 없다. 고정 오프셋으로 Windows의 tzdata 의존을 피한다.
 KST = timezone(timedelta(hours=9))
 # 모의투자는 TR당 초당 1회다. 서버 도착 간격이 흔들려도 넘지 않게 여유를 둔다.
@@ -119,6 +121,8 @@ class UrllibTransport:
         if timeout_seconds <= 0:
             raise ValueError(f"timeout_seconds must be positive — got={timeout_seconds!r}")
         self._timeout_seconds = timeout_seconds
+        # 같은 신뢰 저장소로 웹소켓(S07 체결 기록)도 연다.
+        self.ssl_context = ssl_context
         handlers: list[urllib.request.BaseHandler] = [_RefuseRedirect()]
         if ssl_context is not None:
             handlers.append(urllib.request.HTTPSHandler(context=ssl_context))
@@ -287,6 +291,13 @@ class KiwoomClient:
         self._token = token
         self._expires_at = expires_at.replace(tzinfo=KST)
         return True
+
+    def session_token(self) -> str:
+        """웹소켓 로그인용 토큰. 이 노드 안에서만 쓰고 어디에도 남기지 않는다."""
+        self.ensure_session()
+        if self._token is None:
+            raise KiwoomNoResponseError("kiwoom session has no token")
+        return self._token
 
     def call(
         self,

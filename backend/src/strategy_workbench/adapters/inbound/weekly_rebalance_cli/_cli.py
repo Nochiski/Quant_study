@@ -8,6 +8,7 @@
     close    --workdir <폴더> [--plan weekly-YYYY-MM-DD]
     report   --workdir <폴더>
     export   --workdir <폴더>   # <작업 폴더>/exports 에 분석·복기용 CSV 4개
+    record-fills --workdir <폴더> --until HH:MM   # 장중 실시간 체결 알림 기록(한 곳에서만)
 
 `execute`는 `--send`가 있어야 주문을 보낸다. 없으면 무엇을 보낼지만 보인다. 첫 4주는 승인한
 주문안만 보낸다(`--without-approval`은 그 뒤에 쓴다). 주문안은 신호 날짜마다 한 번만 쓰인다.
@@ -21,7 +22,7 @@ import os
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
@@ -43,12 +44,15 @@ from strategy_workbench.domain.rebalance.facade.rebalance import RebalanceAction
 ServiceFactory = Callable[[Path, Path | None], WeeklyRebalanceService]
 # (작업 폴더, 보내는가, 승인이 필요한가) → 실행기. 끝나면 원장·연결을 닫는다.
 ExecutionFactory = Callable[[Path, bool, bool], AbstractContextManager[WeeklyExecutionService]]
+# (작업 폴더, 끝낼 시각) → 받은 체결·접수 알림 건수
+FillRecorder = Callable[[Path, time], int]
 
 
 @dataclass(frozen=True)
 class CliFactories:
     planning: ServiceFactory
     execution: ExecutionFactory
+    recorder: FillRecorder
 
 
 _ACTION_LABELS = {
@@ -82,7 +86,9 @@ def _parser() -> argparse.ArgumentParser:
     close.add_argument("--plan", default=None, help="생략하면 가장 최근 주문안")
     report = commands.add_parser("report", help="하루 기록을 모아 보인다")
     export = commands.add_parser("export", help="분석·복기용 CSV를 <작업 폴더>/exports에 쓴다")
-    for command in (prepare, show, approve, execute, close, report, export):
+    fills = commands.add_parser("record-fills", help="장중 실시간 체결 알림을 기록한다")
+    fills.add_argument("--until", type=time.fromisoformat, required=True, help="끝낼 시각 HH:MM")
+    for command in (prepare, show, approve, execute, close, report, export, fills):
         command.add_argument(
             "--workdir", type=Path, required=True, help="원장·주문안 폴더(저장소 밖)"
         )
@@ -91,6 +97,10 @@ def _parser() -> argparse.ArgumentParser:
 
 def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "record-fills":
+        received = factories.recorder(args.workdir, args.until)
+        print(f"[ok] received={received}")
+        return 0
     if args.command in ("execute", "close", "report", "export"):
         send = bool(getattr(args, "send", False))
         require_approval = not getattr(args, "without_approval", False)

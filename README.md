@@ -374,7 +374,7 @@ uv run server
 | `code-style.md`               | `**/*.py`                            | 기존 헬퍼 재사용, 기능/정리 커밋 분리, ruff·pyright 게이트, 네이밍 |
 | `python.md`                   | `**/*.py`                            | 성공/실패는 튜플 대신 Result 값 타입으로                           |
 | `error-messages.md`           | `**/*.py`                            | 예외·로그에 재현 가능한 컨텍스트 포함                              |
-| `testing.md`                  | `{backend,database}/{tests,scripts}/`, `tools/tests/` | 산출물 파일 존재/내용을 단언하는 테스트 금지, 런타임 상태 경로 격리 |
+| `testing.md`                  | `{backend,database,tools}/**/*.py`, `backend/rust/` | 테스트를 언제 쓰나·어떻게 쓰나·언제 지우나(커버리지는 기준 아님), real > fake > mock, 산출물 단언 금지, 런타임 상태 경로 격리 |
 | `pr-review.md`                | 전체                                 | PR 본문 양식, 결함 보고 4요소                                      |
 | `collaboration-language.md`   | 전체                                 | 코드 주석·Issue·PR 한글 작성 규칙의 단일 정본                      |
 | `backend-package-boundary.md` | `backend/**/*.py`                    | 헥사고날 방향, facade, `DEPENDS_ON`, mock adapter 경계             |
@@ -383,5 +383,5 @@ uv run server
 | `frontend-fsd.md`             | `frontend/src/`                      | FSD 단방향, slice 격리, public API                                 |
 | `frontend-api-state.md`       | frontend API/state                   | 생성 SDK, 서버·draft·UI 상태 소유권                                |
 | `frontend-ui-quality.md`      | frontend UI                          | primitive, token, 접근성, i18n, raw metric                         |
-| `frontend-testing.md`         | frontend test/e2e                    | 사용자 동작·wire 경계 테스트                                       |
+| `frontend-testing.md`         | frontend test/e2e                    | 사용자 동작·wire 경계 테스트, 프론트 경로의 쓰나·지우나 기준          |
 | `frontend-react-effects.md`   | `frontend/src/`                      | React 밖 콜백이 읽는 상태는 commit 시점에 동기화(`useCommittedRef`) |

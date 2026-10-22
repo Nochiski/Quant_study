@@ -38,6 +38,7 @@ _MODE_MISMATCH_CODES = frozenset({"8030", "8031"})
 _IP_CODES = frozenset({"8010", "8040", "8050", "8103"})
 _AUTH_CODES = frozenset({"8001", "8002", "8020"})
 _INVALID_TOKEN = "8005"
+_RATE_LIMITED = "1700"
 
 
 class KiwoomBlock(StrEnum):
@@ -258,7 +259,7 @@ class KiwoomClient:
         ):
             return False
         self._token = None
-        response = self._send(
+        response = self._query(
             "au10001",
             "/oauth2/token",
             {
@@ -276,7 +277,7 @@ class KiwoomClient:
             raise KiwoomNoResponseError("kiwoom token response has no valid expires_dt") from error
         if not token:
             raise KiwoomNoResponseError("kiwoom token response has no token")
-        account = self._send("ka00001", "/api/dostk/acnt", {}, token=token)
+        account = self._query("ka00001", "/api/dostk/acnt", {}, token=token)
         self._raise_for(account, "ka00001")
         if _text(account.body, "acctNo") != self._credentials.account_number:
             raise KiwoomBlockedError(
@@ -298,11 +299,11 @@ class KiwoomClient:
     ) -> KiwoomHttpResponse:
         """조회 TR 한 쪽. 토큰 무효(8005)면 한 번만 새 토큰으로 다시 읽는다."""
         self.ensure_session()
-        response = self._send(api_id, path, body, self._token, continuation, next_key)
+        response = self._query(api_id, path, body, self._token, continuation, next_key)
         if _error_code(response) == _INVALID_TOKEN:
             self._token = None
             self.ensure_session()
-            response = self._send(api_id, path, body, self._token, continuation, next_key)
+            response = self._query(api_id, path, body, self._token, continuation, next_key)
         self._raise_for(response, api_id)
         return response
 
@@ -334,6 +335,26 @@ class KiwoomClient:
         response = self._send(api_id, "/api/dostk/ordr", body, self._token)
         self._raise_for(response, api_id)
         return response.body
+
+    def _query(
+        self,
+        api_id: str,
+        path: str,
+        body: Mapping[str, object],
+        token: str | None,
+        continuation: str = "",
+        next_key: str = "",
+    ) -> KiwoomHttpResponse:
+        """조회 TR 전송. 호출 한도(1700)면 간격을 지켜 한 번만 다시 보낸다.
+
+        다른 프로세스가 같은 TR을 막 불렀으면 이 프로세스의 간격 계산으로는 피할 수 없다(2026-10-21
+        실측). 주문 TR에는 쓰지 않는다. 주문은 다시 보내지 않는다.
+        """
+        response = self._send(api_id, path, body, token, continuation, next_key)
+        if _error_code(response) == _RATE_LIMITED:
+            logger.warning("kiwoom mock rate limited — api_id=%s retrying once", api_id)
+            response = self._send(api_id, path, body, token, continuation, next_key)
+        return response
 
     def _send(
         self,

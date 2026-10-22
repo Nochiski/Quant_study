@@ -118,6 +118,11 @@ class KiwoomMockBroker:
     def close(self) -> None:
         self._reference.close()
 
+    @property
+    def client(self) -> KiwoomClient:
+        """같은 토큰과 호출 간격을 함께 쓰려는 이 노드 안 조회용(S07 호가). 주문하지 않는다."""
+        return self._client
+
     def latch(self) -> str | None:
         """걸려 있는 정지 래치의 사유. 없으면 None이다."""
         return self._reference.latch()
@@ -125,6 +130,33 @@ class KiwoomMockBroker:
     def clear_latch(self) -> None:
         """사람이 원인을 확인한 뒤에만 부른다."""
         self._reference.clear_latch()
+
+    def raw_reads(self) -> dict[str, object]:
+        """감사·복기용 조회 원본: 당일 주문(`kt00007`)·당일매매일지(`ka10170`)·잔고(`kt00018`)·
+        예수금(`kt00001`). 계좌번호 칸이 있는 TR은 부르지 않는다. 해석하지 않고 그대로 낸다."""
+        self._ready()
+        cash = self._client.call("kt00001", _ACCOUNT_PATH, {"qry_tp": "3"}).body
+        return {
+            "taken_at": self._kst().isoformat(timespec="seconds"),
+            "kt00007": self._order_rows(""),
+            "ka10170": self._client.rows(
+                "ka10170",
+                _ACCOUNT_PATH,
+                {"base_dt": "", "ottks_tp": "2", "ch_crd_tp": "0"},
+                "tdy_trde_diary",
+            ),
+            "kt00018": self._client.rows(
+                "kt00018",
+                _ACCOUNT_PATH,
+                {"qry_tp": "1", "dmst_stex_tp": "KRX"},
+                "acnt_evlt_remn_indv_tot",
+            ),
+            "kt00001": {
+                key: value
+                for key, value in cash.items()
+                if key not in ("return_code", "return_msg")
+            },
+        }
 
     # --- BrokerPort -------------------------------------------------------------------------
 

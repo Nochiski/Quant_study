@@ -10,4 +10,5 @@ DEPENDS_ON: tuple[str, ...] = (
     "adapters.outbound.scope_signal",
     "adapters.outbound.secrets_local",
     "bootstrap",
+    "domain.order_execution",
 )

@@ -88,8 +88,11 @@ bootstrap ─> application + adapters
   읽고(pyarrow는 이 어댑터 안에만), `adapters/outbound/rebalance_files`가 주문안·승인을 한 번만 쓴다.
   `adapters/inbound/weekly_rebalance_cli`는 입력 해석·출력만 맡고, 별도 composition root
   `bootstrap/weekly_rebalance`(`python -m strategy_workbench.bootstrap.weekly_rebalance`)가 계좌 읽기를
-  S05 실행 원장 대사와 키움 모의 조회로 조립한다. 이 유스케이스는 S05·S06 노드를 import하지 않으며,
-  주문 전송은 이 노드의 범위가 아니다. 상세는 `docs/planning/research-to-trading/S07-weekly-rebalance.md`다.
+  S05 실행 원장 대사와 키움 모의 조회로 조립한다. 이 유스케이스는 S05·S06 노드를 import하지 않는다.
+  주문은 자체 outgoing `OrderGateway`·`MarketSource`·`ExecutionLog`로만 낸다. bootstrap의
+  `OfflineOrderGateway`가 S05 `OfflineExecutionService`를 감싸고(새 application → application 화살표
+  없음), `kiwoom_mock`의 `KiwoomMarket`이 주문 어댑터와 같은 접속으로 호가·현재가를 답한다. 상세는
+  `docs/planning/research-to-trading/S07-weekly-rebalance.md`다.
 - 완료 run의 계좌 보고서는 `domain/backtest`의 순수 projection·전용
   `facade/account_report.py`가 금액·상태·초기자본 기준 해석을 소유한다.
   `application/backtest_run`은 `self.result(run_id)`의 완료·해시·역직렬화 검증을 한 번 재사용한 뒤

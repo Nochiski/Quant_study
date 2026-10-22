@@ -68,6 +68,17 @@ class JsonPlanStore:
             str(value.get("note", "")),
         )
 
+    def plan_ids(self) -> tuple[str, ...]:
+        if not self._folder.exists():
+            return ()
+        return tuple(
+            sorted(
+                path.stem
+                for path in self._folder.glob("*.json")
+                if not path.stem.endswith(".approval")
+            )
+        )
+
     def _path(self, plan_id: str, suffix: str) -> Path:
         if not _PLAN_ID.fullmatch(plan_id):
             raise ValueError(f"invalid plan id — plan_id={plan_id!r}")

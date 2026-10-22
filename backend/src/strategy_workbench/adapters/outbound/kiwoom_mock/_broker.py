@@ -179,12 +179,20 @@ class KiwoomMockBroker:
     def submit(self, intent: Intent) -> OrderFact:
         now = self._kst()
         order_date, sent_at = now.strftime("%Y%m%d"), now.strftime("%H:%M:%S")
-        refusal = self._refusal(intent)
+        refusal = self._refusal(intent, order_date)
         if refusal is None:
             try:
                 self._ready()
+            except KiwoomBlockedError as error:
+                if error.reason is KiwoomBlock.ACCOUNT_MISMATCH:
+                    raise  # 남의 계좌 원장이거나 키가 다른 계좌다. 이 원장에 아무것도 쓰지 않는다.
+                refusal = f"connection not ready — {error}"
             except BrokerError as error:
                 refusal = f"connection not ready — {error}"
+        elif not self._reference.bind_account(self._account_sha256):
+            raise KiwoomBlockedError(
+                KiwoomBlock.ACCOUNT_MISMATCH, "reference ledger belongs to another account"
+            )
         if refusal is not None:
             # 보내지 않은 것이 확실하므로 결과를 모름으로 두지 않고 거부로 확정한다.
             fact = OrderFact(intent, OrderState.REJECTED, revision=1)
@@ -274,11 +282,26 @@ class KiwoomMockBroker:
                 KiwoomBlock.ACCOUNT_MISMATCH, "reference ledger belongs to another account"
             )
 
-    def _refusal(self, intent: Intent) -> str | None:
+    def _refusal(self, intent: Intent, order_date: str) -> str | None:
         if not self._transmit:
             return "transmit disabled (dry-run default)"
         if not _SYMBOL.fullmatch(intent.symbol):
             return f"symbol is not a 6-character KRX code — symbol={intent.symbol!r}"
+        # 한 종목에 끝나지 않은 주문은 하나만 둔다. 둘이 함께 체결되면 당일매매일지의 종목 합계를
+        # 주문별로 나눌 수 없어 래치가 걸린다(_rows.split_day_amounts). 보내기 전에 거부로 확정한다.
+        unfinished = sorted(
+            record.intent.intent_id
+            for record in self._reference.orders()
+            if record.order_date == order_date
+            and record.intent.symbol == intent.symbol
+            and not record.finalized
+            and record.status is not ReferenceStatus.REFUSED
+        )
+        if unfinished:
+            return (
+                f"unfinished order on the same symbol — symbol={intent.symbol} "
+                f"unfinished={unfinished}"
+            )
         return None
 
     def _violation(self, detail: str) -> NoReturn:

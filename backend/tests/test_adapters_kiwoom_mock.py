@@ -443,6 +443,21 @@ def test_reference_ledger_is_bound_to_one_account(tmp_path: Path) -> None:
     assert raised.value.reason == KiwoomBlock.ACCOUNT_MISMATCH
 
 
+def test_a_broker_for_another_account_writes_nothing_to_the_ledger(tmp_path: Path) -> None:
+    # 리뷰 #593 P2: 계좌 A 원장에 계좌 B 브로커가 거부 기록을 남겨 A 의 대사가 영구히 멈췄다
+    r = started(tmp_path)
+    r.broker.close()
+    other = FakeKiwoom(r.clock, account="5099999999")
+    for transmit in (True, False):
+        broker = make_broker(tmp_path, r.clock, other, transmit=transmit, account="5099999999")
+        with pytest.raises(KiwoomBlockedError) as raised:
+            broker.submit(buy())
+        assert raised.value.reason == KiwoomBlock.ACCOUNT_MISMATCH
+        broker.close()
+    mine = make_broker(tmp_path, r.clock, r.fake, transmit=True)
+    assert mine.snapshot().orders == ()
+
+
 def test_symbol_outside_krx_code_format_is_refused(tmp_path: Path) -> None:
     r = started(tmp_path)
     result = r.service.submit(Intent("odd", "SAMSUNG", "buy", 1, 70_000))
@@ -451,6 +466,23 @@ def test_symbol_outside_krx_code_format_is_refused(tmp_path: Path) -> None:
 
 
 # --- 정상 주문 수명 -------------------------------------------------------------------------
+
+
+def test_a_second_order_on_a_symbol_with_an_unfinished_order_is_refused_before_sending(
+    tmp_path: Path,
+) -> None:
+    # 리뷰 #596 P2: 같은 종목 미종결 주문 옆에 둘째 주문이 체결되면 금액을 나눌 수 없어 계좌가 정지됐다
+    r = started(tmp_path)
+    assert r.service.submit(buy()).status == ExecutionStatus.OK
+    r.fake.fill("0000001", 2, 70_000, commission=21)
+    second = r.service.submit(buy("signal-2", quantity=3))
+    assert second.order is not None and second.order.state == OrderState.REJECTED
+    assert r.fake.api_ids().count("kt10000") == 1
+    # 앞 주문이 끝나면(취소 확정) 같은 종목에 다시 낼 수 있다
+    assert r.service.cancel("signal-1").status == ExecutionStatus.OK
+    third = r.service.submit(buy("signal-3", quantity=3))
+    assert third.order is not None and third.order.state == OrderState.OPEN
+    assert r.fake.api_ids().count("kt10000") == 2
 
 
 def test_order_lifecycle_partial_fill_then_cancel(tmp_path: Path) -> None:
@@ -627,8 +659,8 @@ def test_snapshot_gives_up_when_orders_keep_changing(tmp_path: Path) -> None:
 
 def test_paging_reads_every_page(tmp_path: Path) -> None:
     r = started(tmp_path)
-    for index in range(3):
-        r.service.submit(buy(f"signal-{index}", price=70_000 + index * 100))
+    for index, symbol in enumerate(("005930", "000660", "035420")):
+        r.service.submit(Intent(f"signal-{index}", symbol, "buy", 5, 70_000 + index * 100, 1_000))
     r.fake.page_size = 1
     snapshot = r.broker.snapshot()
     assert len(snapshot.orders) == 3
@@ -742,9 +774,13 @@ def test_requote_after_cancel_takes_the_rest_of_the_symbol_total(tmp_path: Path)
     )
 
 
-def test_two_open_orders_with_fills_on_one_symbol_latch(tmp_path: Path) -> None:
+def test_two_open_orders_with_fills_on_one_symbol_latch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 전송 전 거부(#596 리뷰)를 우회해 둘이 나간 경우에도 금액을 지어내지 않고 멈추는 방어선
     r = started(tmp_path)
     r.service.submit(buy("a", quantity=2))
+    monkeypatch.setattr(r.broker, "_refusal", lambda intent, order_date: None)
     r.service.submit(buy("b", quantity=2, price=70_100))
     r.fake.fill("0000001", 1, 70_000, commission=240)
     r.fake.fill("0000002", 1, 70_100, commission=240)

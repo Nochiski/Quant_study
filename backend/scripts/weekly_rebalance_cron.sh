@@ -98,7 +98,9 @@ case "$PHASE" in
     wr close --workdir "$S07_WORKDIR"
     ;;
   prepare)
-    if [ "$(calendar week_end)" != "yes" ]; then
+    # 대입문에서 판정해야 실패가 set -e 로 멈춘다. `[ "$(…)" ]` 안의 실패는 빈 값이 되어 건너뜀으로 가려진다.
+    WEEK_END="$(calendar week_end)"
+    if [ "$WEEK_END" != "yes" ]; then
       log "그 주 마지막 거래일 아님 — 건너뜀"
       exit 0
     fi

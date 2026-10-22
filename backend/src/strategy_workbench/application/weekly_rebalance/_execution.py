@@ -13,7 +13,9 @@
 - 승인에서 이번 주 매매에서 뺀 종목(`no_trade`)은 사지도 팔지도 않는다. 팔려던 보유 종목을 빼면 그
   종목이 자리를 차지하므로 순위가 낮은 새 매수도 그만큼 하지 않는다(`week_targets`).
 - 살 수량은 S05가 현금을 검사하는 비용 상한(`ExecutionPolicy.buy_fee_budget_bp`)으로 정한다.
-- 장 마감 기록은 신호 기준가 대비 체결 차이와 미체결 기회비용, 그날 총자산을 남긴다.
+- 장 마감 기록은 신호 기준가 대비 체결 차이와 미체결 기회비용, 그날 총자산을 남긴다. 주문 줄과
+  거래 금액은 그날 낸 주문만 센다. 주문은 당일만 유효하므로(잔량은 장 마감에 사라진다) 그날 체결도
+  그날 낸 주문에서만 생긴다. 실행일이 아닌 날은 보유·현금·총자산만 남는다.
 """
 
 from __future__ import annotations
@@ -415,10 +417,20 @@ class WeeklyExecutionService:
         record = None if plan_id is None else self._plans.load(plan_id)
         if plan_id is None or record is None:
             return CloseResult(CloseStatus.NOT_FOUND, detail=f"no plan — plan_id={plan_id}")
+        today = self._now().date()
+        sent_today = {
+            event.intent_id
+            for event in self._log.events()
+            if event.plan_id == plan_id and event.kind == "submit" and event.at.date() == today
+        }
         try:
             state = self._gateway.state()
-            plan_orders = [o for o in state.orders if o.intent_id.startswith(f"{plan_id}-")]
-            planned_symbols = {line.symbol for line in record.plan.lines if line.delta_shares}
+            plan_orders = [o for o in state.orders if o.intent_id in sent_today]
+            planned_symbols = (
+                {line.symbol for line in record.plan.lines if line.delta_shares}
+                if plan_orders
+                else set()
+            )
             symbols = sorted(
                 set(state.holdings) | {o.symbol for o in plan_orders} | planned_symbols
             )
@@ -436,7 +448,7 @@ class WeeklyExecutionService:
         planned = {
             (line.symbol, "buy" if line.delta_shares > 0 else "sell"): abs(line.delta_shares)
             for line in record.plan.lines
-            if line.delta_shares and line.symbol not in skipped
+            if line.delta_shares and line.symbol not in skipped and plan_orders
         }
         references = {line.symbol: line.reference_price_krw or 0 for line in record.plan.lines}
         orders: list[DayOrder] = []
@@ -465,7 +477,7 @@ class WeeklyExecutionService:
                 )
             )
         day_record = DayRecord(
-            self._now().date(),
+            today,
             self._now(),
             plan_id,
             state.matched,

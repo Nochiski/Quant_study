@@ -358,6 +358,29 @@ def test_close_records_shortfall_missed_cost_and_raw_evidence() -> None:
     assert r.service.days() == (record,)
 
 
+def test_close_on_a_later_day_does_not_record_the_weeks_fills_again() -> None:
+    # 리뷰 #604: 화~금 장 마감 기록이 월요일 누적 체결과 주문 줄을 날마다 다시 적어 합계가 부풀었다
+    r = rig()
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    r.gateway.fill(f"{PLAN}-00000A-buy", 50, 10_020)
+    r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
+    monday = r.service.close().record
+    assert monday is not None and monday.orders and monday.traded_krw == 999_000 + 501_000
+    tuesday = WeeklyExecutionService(
+        r.plans,
+        r.gateway,
+        r.market,
+        r.log,
+        now=lambda: MONDAY + timedelta(days=1, hours=6),
+        sleep=lambda _: None,
+        waits=Waits(0, 8, 0, 0, 3),
+    )
+    record = tuesday.close().record
+    assert record is not None and (record.traded_krw, record.orders) == (0, ())
+    assert record.equity_krw == monday.equity_krw  # 보유·현금은 그날 값 그대로 남긴다
+    assert [day.traded_krw for day in r.log.days()] == [1_500_000, 0]
+
+
 def test_no_trade_symbols_from_the_approval_are_neither_bought_nor_sold() -> None:
     r = rig(approved=False)
     r.plans.save_approval(PLAN, Approval(MONDAY, "동민", no_trade=("00000A",)))

@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 # 모의 전용 주소. 실전 주소는 이 어댑터에 없고, 주소를 바꾸는 인자도 두지 않는다.
 MOCK_BASE_URL = "https://mockapi.kiwoom.com"
+ACCOUNT_PATH = "/api/dostk/acnt"  # 계좌 TR 경로(ka00001·kt00001·kt00007·kt00018·ka10170)
 # 같은 모의 호스트의 웹소켓. 실시간 주문체결(`00`) 기록에만 쓴다(S07).
 MOCK_WEBSOCKET_URL = "wss://mockapi.kiwoom.com:10000/api/websocket"
 # 한국은 일광절약시간이 없다. 고정 오프셋으로 Windows의 tzdata 의존을 피한다.
@@ -284,7 +285,7 @@ class KiwoomClient:
             raise KiwoomNoResponseError("kiwoom token response has no valid expires_dt") from error
         if not token:
             raise KiwoomNoResponseError("kiwoom token response has no token")
-        account = self._query("ka00001", "/api/dostk/acnt", {}, token=token)
+        account = self._query("ka00001", ACCOUNT_PATH, {}, token=token)
         self._raise_for(account, "ka00001")
         if _text(account.body, "acctNo") != self._credentials.account_number:
             raise KiwoomBlockedError(

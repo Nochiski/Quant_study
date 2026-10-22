@@ -66,6 +66,8 @@ from strategy_workbench.domain.rebalance.facade.rebalance import RebalanceAction
 ServiceFactory = Callable[[Path, Path | None], WeeklyRebalanceService]
 # (작업 폴더, 보내는가, 승인이 필요한가) → 실행기. 끝나면 원장·연결을 닫는다.
 ExecutionFactory = Callable[[Path, bool, bool], AbstractContextManager[WeeklyExecutionService]]
+
+
 @dataclass(frozen=True)
 class FillRecording:
     """받은 체결·접수 알림 건수. `refused`가 있으면 로그인이 거절돼 그날 기록을 멈췄다."""

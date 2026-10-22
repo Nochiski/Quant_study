@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import time
@@ -18,9 +17,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import NoReturn
+from types import MappingProxyType
+from typing import Final, NoReturn
 
 from strategy_workbench.adapters.outbound.kiwoom_mock._http import (
+    ACCOUNT_PATH,
     KST,
     MOCK_MIN_INTERVAL_SECONDS,
     KiwoomAnsweredError,
@@ -46,14 +47,14 @@ from strategy_workbench.adapters.outbound.kiwoom_mock._rows import (
     Observation,
     OrderRow,
     Participant,
+    cash_of,
     day_trades,
+    holdings_of,
     is_candidate,
-    number,
     observe,
     order_number,
     same_order,
     split_day_amounts,
-    symbol,
     text,
     untracked_fact,
 )
@@ -70,7 +71,11 @@ from strategy_workbench.domain.order_execution.facade.orders import (
 
 logger = logging.getLogger(__name__)
 
-_ACCOUNT_PATH = "/api/dostk/acnt"
+# 조회 요청 본문. 감사용 원본(raw_reads)과 대사 입력(_stable_reads)이 같은 조건으로 읽게
+# 한 벌만 둔다(2026-10-22 리뷰 #596).
+_DAY_JOURNAL_QUERY: Final = MappingProxyType({"base_dt": "", "ottks_tp": "2", "ch_crd_tp": "0"})
+_HOLDINGS_QUERY: Final = MappingProxyType({"qry_tp": "1", "dmst_stex_tp": "KRX"})
+_CASH_QUERY: Final = MappingProxyType({"qry_tp": "3"})
 _SYMBOL = re.compile(r"[0-9A-Z]{6}")
 # 재식별 후보의 주문 시각 하한 여유. 키움과 PC 시각 차이는 ③에서 재고 정한다.
 DEFAULT_REMATCH_MARGIN = timedelta(seconds=60)
@@ -110,7 +115,7 @@ class KiwoomMockBroker:
             sleep=sleep,
             min_interval_seconds=min_interval_seconds,
         )
-        self._account_sha256 = hashlib.sha256(credentials.account_number.encode()).hexdigest()
+        self._account_number = credentials.account_number
         self._reference = KiwoomReference(reference_path)
         self._transmit = transmit
         self._rematch_margin = rematch_margin
@@ -136,20 +141,20 @@ class KiwoomMockBroker:
         """감사·복기용 조회 원본: 당일 주문(`kt00007`)·당일매매일지(`ka10170`)·잔고(`kt00018`)·
         예수금(`kt00001`). 계좌번호 칸이 있는 TR은 부르지 않는다. 해석하지 않고 그대로 낸다."""
         self._ready()
-        cash = self._client.call("kt00001", _ACCOUNT_PATH, {"qry_tp": "3"}).body
+        cash = self._client.call("kt00001", ACCOUNT_PATH, _CASH_QUERY).body
         return {
             "taken_at": self._kst().isoformat(timespec="seconds"),
             "kt00007": self._order_rows(""),
             "ka10170": self._client.rows(
                 "ka10170",
-                _ACCOUNT_PATH,
-                {"base_dt": "", "ottks_tp": "2", "ch_crd_tp": "0"},
+                ACCOUNT_PATH,
+                _DAY_JOURNAL_QUERY,
                 "tdy_trde_diary",
             ),
             "kt00018": self._client.rows(
                 "kt00018",
-                _ACCOUNT_PATH,
-                {"qry_tp": "1", "dmst_stex_tp": "KRX"},
+                ACCOUNT_PATH,
+                _HOLDINGS_QUERY,
                 "acnt_evlt_remn_indv_tot",
             ),
             "kt00001": {
@@ -190,7 +195,7 @@ class KiwoomMockBroker:
                 refusal = f"connection not ready — {error}"
             except BrokerError as error:
                 refusal = f"connection not ready — {error}"
-        elif not self._reference.bind_account(self._account_sha256):
+        elif not self._reference.bind_account(self._account_number):
             raise KiwoomBlockedError(
                 KiwoomBlock.ACCOUNT_MISMATCH, "reference ledger belongs to another account"
             )
@@ -339,7 +344,7 @@ class KiwoomMockBroker:
     def _session(self) -> None:
         """연결(토큰·계좌 대조)과 참조 원장의 계좌만 확인한다. 래치는 보지 않는다."""
         self._client.ensure_session()
-        if not self._reference.bind_account(self._account_sha256):
+        if not self._reference.bind_account(self._account_number):
             raise KiwoomBlockedError(
                 KiwoomBlock.ACCOUNT_MISMATCH, "reference ledger belongs to another account"
             )
@@ -375,7 +380,7 @@ class KiwoomMockBroker:
         # 당일은 빈 날짜(명세 예시)로, 지난 날은 주문일자로 읽는다.
         return self._client.rows(
             "kt00007",
-            _ACCOUNT_PATH,
+            ACCOUNT_PATH,
             {
                 "ord_dt": order_date,
                 "qry_tp": "1",
@@ -394,26 +399,25 @@ class KiwoomMockBroker:
             first = self._order_rows("")
             journal = self._client.rows(
                 "ka10170",
-                _ACCOUNT_PATH,
-                {"base_dt": "", "ottks_tp": "2", "ch_crd_tp": "0"},
+                ACCOUNT_PATH,
+                _DAY_JOURNAL_QUERY,
                 "tdy_trde_diary",
             )
             holdings = self._client.rows(
                 "kt00018",
-                _ACCOUNT_PATH,
-                {"qry_tp": "1", "dmst_stex_tp": "KRX"},
+                ACCOUNT_PATH,
+                _HOLDINGS_QUERY,
                 "acnt_evlt_remn_indv_tot",
             )
-            cash = self._client.call("kt00001", _ACCOUNT_PATH, {"qry_tp": "3"}).body
+            cash = self._client.call("kt00001", ACCOUNT_PATH, _CASH_QUERY).body
             second = self._order_rows("")
             if first == second:
                 try:
                     return _Reads(
                         [OrderRow.parse(row) for row in second],
                         day_trades([DayTrade.parse(row) for row in journal]),
-                        _holdings(holdings),
-                        # D+2 추정예수금을 S05 현금으로 본다(③에서 확인).
-                        number(cash, "d2_entra"),
+                        holdings_of(holdings),
+                        cash_of(cash),
                     )
                 except ContractViolation as error:
                     self._violation(f"unreadable kiwoom rows — {error}")
@@ -619,17 +623,6 @@ class KiwoomMockBroker:
         return fact
 
 
-def _holdings(rows: list[dict[str, object]]) -> tuple[tuple[str, int], ...]:
-    """같은 종목이 신용구분별로 여러 줄일 수 있어 합친다."""
-    totals: dict[str, int] = {}
-    for row in rows:
-        quantity = number(row, "rmnd_qty")
-        if quantity:
-            code = symbol(text(row, "stk_cd"))
-            totals[code] = totals.get(code, 0) + quantity
-    return tuple(sorted(totals.items()))
-
-
 @dataclass(frozen=True)
 class UnresolvedReference:
     """응답을 잃어 주문번호에 묶이지 않은 의도 하나와, 사람이 고를 수 있는 키움 주문번호."""
@@ -647,4 +640,3 @@ def _unresolved(record: ReferenceOrder) -> bool:
         ReferenceStatus.PENDING,
         ReferenceStatus.ANSWERED,
     )
-

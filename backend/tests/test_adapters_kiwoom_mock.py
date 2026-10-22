@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import sqlite3
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -458,6 +460,31 @@ def test_reference_ledger_is_bound_to_one_account(tmp_path: Path) -> None:
     with pytest.raises(KiwoomBlockedError) as raised:
         broker.snapshot()
     assert raised.value.reason == KiwoomBlock.ACCOUNT_MISMATCH
+
+
+def test_the_ledger_keeps_only_the_account_tail_and_upgrades_the_old_hash(tmp_path: Path) -> None:
+    # 리뷰 #593 P3: 10자리 계좌번호의 salt 없는 SHA-256 은 바로 복원된다. 끝 4자리만 남긴다
+    r = started(tmp_path)
+    r.broker.close()
+    path = tmp_path / "kiwoom.sqlite"
+    with sqlite3.connect(path) as connection:
+        meta = dict(connection.execute("SELECT key, value FROM kiwoom_meta").fetchall())
+        assert meta["account_tail"] == ACCOUNT[-4:] and "account_sha256" not in meta
+        # 예전 판 원장처럼 전체 해시만 남긴다
+        connection.execute("DELETE FROM kiwoom_meta WHERE key = 'account_tail'")
+        legacy = hashlib.sha256(ACCOUNT.encode()).hexdigest()
+        connection.execute("INSERT INTO kiwoom_meta VALUES ('account_sha256', ?)", (legacy,))
+    other = FakeKiwoom(r.clock, account="5099999999")
+    stranger = make_broker(tmp_path, r.clock, other, transmit=True, account="5099999999")
+    with pytest.raises(KiwoomBlockedError):
+        stranger.snapshot()  # 해시가 다른 계좌는 그대로 막는다
+    stranger.close()
+    mine = make_broker(tmp_path, r.clock, r.fake, transmit=True)
+    mine.snapshot()
+    mine.close()
+    with sqlite3.connect(path) as connection:
+        meta = dict(connection.execute("SELECT key, value FROM kiwoom_meta").fetchall())
+    assert meta["account_tail"] == ACCOUNT[-4:] and "account_sha256" not in meta
 
 
 def test_a_broker_for_another_account_writes_nothing_to_the_ledger(tmp_path: Path) -> None:

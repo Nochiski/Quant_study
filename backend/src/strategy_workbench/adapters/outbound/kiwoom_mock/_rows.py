@@ -344,3 +344,20 @@ def untracked_fact(order_date: str, row: OrderRow) -> OrderFact:
     else:
         state = OrderState.OPEN
     return OrderFact(intent, state, 1, filled, filled * row.fill_price_krw if filled else 0)
+
+
+def holdings_of(rows: list[dict[str, object]]) -> tuple[tuple[str, int], ...]:
+    """`kt00018` 보유. 같은 종목이 신용구분별로 여러 줄일 수 있어 합친다."""
+    totals: dict[str, int] = {}
+    for row in rows:
+        quantity = number(row, "rmnd_qty")
+        if quantity:
+            code = symbol(text(row, "stk_cd"))
+            totals[code] = totals.get(code, 0) + quantity
+    return tuple(sorted(totals.items()))
+
+
+def cash_of(body: Mapping[str, object]) -> int:
+    """`kt00001` 현금. D+2 추정예수금(`d2_entra`)을 S05 현금으로 본다 — 2026-10-20 모의 실측에서
+    체결 즉시 움직인 칸이다(`entr`는 결제 전이라 그대로였다)."""
+    return number(body, "d2_entra")

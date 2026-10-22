@@ -22,7 +22,10 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.plans import
     PlanStore,
     SignalRecord,
 )
-from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal import SignalSource
+from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal import (
+    SignalRead,
+    SignalSource,
+)
 from strategy_workbench.domain.rebalance.facade.rebalance import (
     RebalancePolicy,
     plan_rebalance,
@@ -200,6 +203,10 @@ class WeeklyRebalanceService:
             return ApproveResult(ApproveStatus.ALREADY_APPROVED, self._plans.approval(plan_id))
         dropped = week_targets(record.plan, approval.no_trade).dropped_buys
         return ApproveResult(ApproveStatus.OK, approval, dropped_buys=dropped)
+
+    def signal_status(self, signal_date: date) -> SignalRead:
+        """예약 실행이 장 마감 빌드를 기다릴 때 묻는다. 준비 판정은 신호 어댑터 한 곳이 한다."""
+        return self._signals.read(signal_date)
 
     def plan(self, plan_id: str) -> tuple[PlanRecord | None, Approval | None]:
         return self._plans.load(plan_id), self._plans.approval(plan_id)

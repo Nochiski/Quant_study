@@ -340,6 +340,24 @@ def test_ledger_commands_show_and_repair_with_an_operator(
     assert run_cli(no_repair, ["ledger-status", *common]) == 1
 
 
+def test_signal_status_tells_the_schedule_whether_to_keep_waiting(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # 리뷰 #605 P3: 빌드 준비 판정이 셸과 신호 어댑터에 갈라져 있었다. 셸은 이 명령만 묻는다
+    folders = ["--workdir", str(tmp_path), "--model-root", str(tmp_path)]
+    common = [*folders, "--signal-date", "2026-10-23"]
+    cases = [
+        (SignalRead(SignalReadStatus.OK, snapshot()), 0),
+        (SignalRead(SignalReadStatus.NOT_READY, detail="other date"), 3),
+        (SignalRead(SignalReadStatus.GATE_FAILED, detail="MG1 fail"), 1),
+    ]
+    for read, code in cases:
+        planner = _planner(Signals(read), Account(), Plans())
+        factories = CliFactories(planner, _no_execution, _no_recorder, _no_notifier)
+        assert run_cli(factories, ["signal-status", *common]) == code
+        assert f"[{read.status.value}]" in capsys.readouterr().out
+
+
 def _planner(signals: Signals, account: Account, plans: Plans) -> ServiceFactory:
     def factory(workdir: Path, model_root: Path | None) -> WeeklyRebalanceService:
         return WeeklyRebalanceService(

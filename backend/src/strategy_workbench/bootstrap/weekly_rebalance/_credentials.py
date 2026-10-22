@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import KiwoomCredentials
+from strategy_workbench.adapters.outbound.secrets_local.facade.env import read_env_values
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
     LocalFileBrokerCredentialStore,
     LocalFileProviderSecretStore,
@@ -66,7 +67,7 @@ def env_file_credentials(path: Path, pair: str) -> KiwoomCredentials:
         f"{_NAME_PREFIX}ACCOUNT_{pair}": "account_number",
     }
     try:
-        found = _env_values(path, frozenset(wanted))
+        found = read_env_values(path, wanted)
     except OSError as error:
         raise AccountUnavailableError(
             f"cannot read the kiwoom env file — file={path.name} error={type(error).__name__}"
@@ -89,7 +90,7 @@ def telegram_notice() -> TelegramNotice:
         raise NoticeError(f"telegram notice is not configured — unset={unset}")
     path = Path(env_file).expanduser()
     try:
-        token = _env_values(path, frozenset({token_var})).get(token_var, "")
+        token = read_env_values(path, (token_var,)).get(token_var, "")
     except OSError as error:
         raise NoticeError(
             f"cannot read the telegram env file — file={path.name} error={type(error).__name__}"
@@ -97,13 +98,3 @@ def telegram_notice() -> TelegramNotice:
     if not token:
         raise NoticeError(f"telegram token missing in env file — name={token_var}")
     return TelegramNotice(token, chat_id)
-
-
-def _env_values(path: Path, names: frozenset[str]) -> dict[str, str]:
-    """`.env`에서 `names`에 든 이름의 값만 읽는다. 다른 줄의 값은 보관하지 않는다."""
-    values: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        name, separator, value = line.strip().removeprefix("export ").partition("=")
-        if separator and name.strip() in names:
-            values[name.strip()] = value.strip().strip("\"'")
-    return values

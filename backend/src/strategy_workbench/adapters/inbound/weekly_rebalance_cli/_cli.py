@@ -11,6 +11,8 @@
     export   --workdir <폴더>   # <작업 폴더>/exports 에 분석·복기용 CSV 4개
     record-fills --workdir <폴더> --until HH:MM   # 장중 실시간 체결 알림 기록(한 곳에서만)
     notify-plan --workdir <폴더> --plan weekly-YYYY-MM-DD --execute-on YYYY-MM-DD [--print]
+    signal-status --workdir <폴더> --model-root <모델 DB> --signal-date YYYY-MM-DD
+             # 장 마감 빌드가 준비됐나. 0 = 준비, 3 = 아직(기다린다), 1 = 다른 이유로 못 쓴다
     ledger-status --workdir <폴더>   # 정지 래치·실행 정지·응답을 잃은 주문과 후보 주문번호
     ledger-bind --workdir <폴더> --intent <의도> --order-no <주문번호> --operator <이름> [--note]
     ledger-reject --workdir <폴더> --intent <의도> --operator <이름> [--note]
@@ -55,6 +57,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     PrepareStatus,
     RepairError,
     RepairStatus,
+    SignalReadStatus,
     WeeklyExecutionService,
     WeeklyRebalanceService,
 )
@@ -77,6 +80,8 @@ FillRecorder = Callable[[Path, time], FillRecording]
 NoticeFactory = Callable[[], NoticeSender]
 # 작업 폴더 → 원장 고치기. 끝나면 원장·연결을 닫는다.
 RepairFactory = Callable[[Path], AbstractContextManager[LedgerRepairService]]
+# `signal-status`가 "아직 빌드가 없다(기다린다)"를 알리는 종료 코드. 예약 스크립트가 읽는다.
+SIGNAL_NOT_READY_EXIT = 3
 
 
 @dataclass(frozen=True)
@@ -113,6 +118,9 @@ def _parser() -> argparse.ArgumentParser:
         "--notify", action="store_true", help="주문지(또는 보류·실패)를 텔레그램으로 보낸다"
     )
     prepare.add_argument("--execute-on", type=date.fromisoformat, help="주문지에 적을 실행일")
+    signal = commands.add_parser("signal-status", help="그 날짜 장 마감 빌드가 준비됐나 본다")
+    signal.add_argument("--model-root", type=Path, required=True)
+    signal.add_argument("--signal-date", type=date.fromisoformat, required=True)
     show = commands.add_parser("show", help="남긴 주문안과 승인 여부를 보인다")
     show.add_argument("--plan", required=True)
     approve = commands.add_parser("approve", help="주문안을 승인한다(한 번만)")
@@ -146,7 +154,7 @@ def _parser() -> argparse.ArgumentParser:
     for command in (bind, reject, clear, resume):
         command.add_argument("--operator", required=True, help="고친 사람(실행 기록에 남는다)")
         command.add_argument("--note", default="")
-    planning = (prepare, show, approve, notify)
+    planning = (prepare, signal, show, approve, notify)
     running = (execute, close, report, export, fills)
     for command in (*planning, *running, status, bind, reject, clear, resume):
         command.add_argument(
@@ -196,6 +204,12 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             if not _send(factories, text):
                 return 1
         return 0 if made else 1
+    if args.command == "signal-status":
+        read = planning.signal_status(args.signal_date)
+        print(f"[{read.status.value}] {read.detail}".rstrip())
+        if read.ok:
+            return 0
+        return SIGNAL_NOT_READY_EXIT if read.status is SignalReadStatus.NOT_READY else 1
     if args.command == "notify-plan":
         record, _ = planning.plan(args.plan)
         if record is None:

@@ -7,7 +7,11 @@ dependencies = [
     "fastapi>=0.141.1",
     "numpy>=1.26",
     "ruamel-yaml>=0.19.1",
+    # 키움 모의 TLS(OS 신뢰 저장소)와 장중 체결 웹소켓. 둘 다 전이로만 들어와 있던 것을 직접 선언한다
+    # (2026-10-22 리뷰 #594·#605). 판은 잠금 파일에 이미 있던 것이다.
+    "truststore>=0.10.4",
     "uvicorn[standard]>=0.52.4",
+    "websockets>=17.1",
 ]
 
 [project.scripts]

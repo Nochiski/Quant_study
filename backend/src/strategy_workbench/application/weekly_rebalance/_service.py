@@ -23,7 +23,11 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.plans import
     SignalRecord,
 )
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal import SignalSource
-from strategy_workbench.domain.rebalance.facade.rebalance import RebalancePolicy, plan_rebalance
+from strategy_workbench.domain.rebalance.facade.rebalance import (
+    RebalancePolicy,
+    plan_rebalance,
+    signal_anomalies,
+)
 
 UNTRADED_REASON = "신호일 거래량 0(거래정지 가능)"
 
@@ -32,6 +36,7 @@ class PrepareStatus(StrEnum):
     OK = "ok"
     EXISTS = "exists"
     SIGNAL_UNAVAILABLE = "signal_unavailable"
+    SIGNAL_SUSPECT = "signal_suspect"  # 직전 빌드와 견줘 데이터 누락이 의심된다. 사람이 확인한다
     ACCOUNT_UNAVAILABLE = "account_unavailable"
     NOT_RECONCILED = "not_reconciled"
     INVALID_INPUT = "invalid_input"
@@ -48,12 +53,14 @@ class ApproveStatus(StrEnum):
     OK = "ok"
     NOT_FOUND = "not_found"
     ALREADY_APPROVED = "already_approved"
+    INVALID = "invalid"
 
 
 @dataclass(frozen=True)
 class ApproveResult:
     status: ApproveStatus
     approval: Approval | None = None
+    detail: str = ""
 
 
 def plan_id_for(signal_date: date) -> str:
@@ -76,8 +83,12 @@ class WeeklyRebalanceService:
         self._now = now
         self._policy = policy or RebalancePolicy()
 
-    def prepare(self, signal_date: date) -> PrepareResult:
-        """그 날짜 신호로 주문안을 만들어 남긴다. 이미 있으면 다시 만들지 않고 그대로 돌려준다."""
+    def prepare(self, signal_date: date, *, accept_anomalies: bool = False) -> PrepareResult:
+        """그 날짜 신호로 주문안을 만들어 남긴다. 이미 있으면 다시 만들지 않고 그대로 돌려준다.
+
+        직전 빌드와 견줘 데이터 누락이 의심되면 만들지 않는다. 사람이 확인하고
+        `accept_anomalies`로 다시 부를 때만 사유를 함께 남기고 만든다.
+        """
         plan_id = plan_id_for(signal_date)
         existing = self._plans.load(plan_id)
         if existing is not None:
@@ -86,6 +97,17 @@ class WeeklyRebalanceService:
         if not read.ok or read.snapshot is None:
             return PrepareResult(PrepareStatus.SIGNAL_UNAVAILABLE, detail=read.detail)
         signal = read.snapshot
+        anomalies = (
+            ()
+            if signal.previous_ranks is None
+            else signal_anomalies(signal.ranks, signal.previous_ranks)
+        )
+        if anomalies and not accept_anomalies:
+            return PrepareResult(
+                PrepareStatus.SIGNAL_SUSPECT,
+                detail=f"{'; '.join(anomalies)} — build_id={signal.build_id} "
+                f"previous={signal.previous_build_id}",
+            )
         try:
             account = self._account.current()
         except AccountUnavailableError as error:
@@ -100,6 +122,7 @@ class WeeklyRebalanceService:
                 prices=signal.closes_krw,
                 cash_krw=account.cash_krw,
                 blocked=dict.fromkeys(signal.untraded, UNTRADED_REASON),
+                previous_ranks=signal.previous_ranks,
             )
         except ValueError as error:
             return PrepareResult(
@@ -116,6 +139,8 @@ class WeeklyRebalanceService:
                 signal.scores_sha256,
                 signal.prices_build_id,
                 tuple(sorted(signal.ranks.items(), key=lambda item: item[1])),
+                signal.previous_build_id,
+                anomalies,
             ),
             account,
             plan,
@@ -128,13 +153,24 @@ class WeeklyRebalanceService:
             return PrepareResult(PrepareStatus.EXISTS, stored, "plan recorded concurrently")
         return PrepareResult(PrepareStatus.OK, record)
 
-    def approve(self, plan_id: str, approver: str, note: str = "") -> ApproveResult:
-        if self._plans.load(plan_id) is None:
+    def approve(
+        self, plan_id: str, approver: str, note: str = "", no_trade: tuple[str, ...] = ()
+    ) -> ApproveResult:
+        """승인을 한 번만 남긴다. `no_trade` 종목은 이번 주 매매에서 뺀다(주문안 종목만)."""
+        record = self._plans.load(plan_id)
+        if record is None:
             return ApproveResult(ApproveStatus.NOT_FOUND)
         existing = self._plans.approval(plan_id)
         if existing is not None:
             return ApproveResult(ApproveStatus.ALREADY_APPROVED, existing)
-        approval = Approval(self._now(), approver, note)
+        planned = {line.symbol for line in record.plan.lines}
+        unknown = sorted(set(no_trade) - planned)
+        if unknown:
+            return ApproveResult(
+                ApproveStatus.INVALID,
+                detail=f"not in the plan — plan_id={plan_id} symbols={unknown}",
+            )
+        approval = Approval(self._now(), approver, note, tuple(sorted(set(no_trade))))
         try:
             self._plans.save_approval(plan_id, approval)
         except PlanExistsError:

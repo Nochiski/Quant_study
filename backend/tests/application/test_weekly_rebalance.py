@@ -154,3 +154,28 @@ def test_approval_is_recorded_once() -> None:
     assert first.status is ApproveStatus.OK and first.approval == Approval(NOW, "동민", "첫 주")
     second = rebalance.approve("weekly-2026-10-23", "다른 사람")
     assert second.status is ApproveStatus.ALREADY_APPROVED and second.approval == first.approval
+
+
+def test_suspected_data_gap_holds_the_plan_until_a_person_accepts_it() -> None:
+    previous = {"000001": 1, "000002": 2, "000003": 3, "000004": 4, "000007": 5, "000008": 6}
+    suspect = snapshot(previous_build_id="e_prev", previous_ranks=previous)  # 000007·000008 사라짐
+    plans = Plans()
+    held = service(Signals(SignalRead(SignalReadStatus.OK, suspect)), plans=plans).prepare(DAY)
+    assert held.status is PrepareStatus.SIGNAL_SUSPECT and plans.records == {}
+    assert "000007" in held.detail and "e_prev" in held.detail
+    accepted = service(Signals(SignalRead(SignalReadStatus.OK, suspect)), plans=plans).prepare(
+        DAY, accept_anomalies=True
+    )
+    assert accepted.status is PrepareStatus.OK and accepted.record is not None
+    assert accepted.record.signal.anomalies and accepted.record.signal.previous_build_id == "e_prev"
+
+
+def test_approval_can_take_symbols_out_of_this_week() -> None:
+    plans = Plans()
+    rebalance = service(plans=plans)
+    rebalance.prepare(DAY)
+    unknown = rebalance.approve("weekly-2026-10-23", "동민", no_trade=("999999",))
+    assert unknown.status is ApproveStatus.INVALID and plans.approvals == {}
+    approved = rebalance.approve("weekly-2026-10-23", "동민", no_trade=("000002", "000002"))
+    assert approved.status is ApproveStatus.OK and approved.approval is not None
+    assert approved.approval.no_trade == ("000002",)

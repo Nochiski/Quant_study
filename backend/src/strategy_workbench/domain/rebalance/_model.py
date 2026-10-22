@@ -9,6 +9,9 @@
 - 종목당 목표 금액 = 총자산 × (1 − 현금 비율) ÷ 자리 수. 새로 사는 종목은 이 금액으로 맞추고,
   남긴 종목은 목표 금액에서 밴드를 넘게 벗어날 때만 맞춘다.
 - 주식 수 = 목표 금액 ÷ (기준가격 × (1 + 수수료율)) 내림.
+- 보유 종목이 신호에서 빠졌으면(순위 없음) 파는 줄로 두되 확인 필요(`review`)로 표시한다. 신호에서
+  빠지는 일은 데이터 누락으로도 생긴다(2026-09-28: 상위 30의 두 종목이 6~7거래일 빠졌다 복귀).
+  사람이 매주 승인하며 그 주 매매에서 뺄 수 있다(10-21 사용자 결정).
 
 금액은 원 단위 정수, 비율은 bp 정수로 계산해 부동소수 반올림이 끼지 않는다.
 """
@@ -72,6 +75,7 @@ class RebalanceLine:
     target_shares: int
     reference_price_krw: int | None
     reason: str
+    review: bool = False
 
     @property
     def delta_shares(self) -> int:
@@ -103,6 +107,7 @@ def plan_rebalance(
     prices: Mapping[str, int],
     cash_krw: int,
     blocked: Mapping[str, str],
+    previous_ranks: Mapping[str, int] | None = None,
 ) -> RebalancePlan:
     """순위(1이 가장 좋다)·보유 주식 수·기준가격(원)·현금(원)·매매가 막힌 종목과 사유로
     목표를 정한다."""
@@ -117,11 +122,14 @@ def plan_rebalance(
         if symbol in blocked or (rank is not None and rank <= policy.keep_rank):
             kept.append(symbol)
             continue
-        reason = (
-            "순위 없음(신호 대상 밖)"
-            if rank is None
-            else f"순위 {rank}위가 {policy.keep_rank}위 밖"
-        )
+        if rank is None:
+            seen = _last_seen(symbol, previous_ranks)
+            reason = f"신호에서 빠짐 — 데이터 누락일 수 있어 확인 필요({seen})"
+            lines.append(
+                _line(symbol, RebalanceAction.SELL, rank, shares, 0, prices, reason, review=True)
+            )
+            continue
+        reason = f"순위 {rank}위가 {policy.keep_rank}위 밖"
         lines.append(_line(symbol, RebalanceAction.SELL, rank, shares, 0, prices, reason))
     # 막힌 종목을 먼저 남기고, 나머지는 순위 순으로 자리 수까지. 넘친 종목은 판다.
     kept.sort(key=lambda symbol: (symbol not in blocked, ranks.get(symbol, 0), symbol))
@@ -180,6 +188,37 @@ def plan_rebalance(
     return RebalancePlan(policy, cash_krw, equity, target_value, tuple(lines))
 
 
+def signal_anomalies(
+    current: Mapping[str, int],
+    previous: Mapping[str, int],
+    *,
+    top: int = 30,
+    max_top_vanished: int = 1,
+    max_count_drop_bp: int = 300,
+) -> tuple[str, ...]:
+    """직전 빌드와 견줘 데이터 누락이 의심되면 사유를 돌려준다. 비어 있으면 정상이다.
+
+    09-01~10-20 빌드 37개에 대면 09-28(상위 30 두 종목이 빠졌다 복귀) 하루만 걸린다. 종목 수 감소는
+    그 기간 최대 0.7%였다.
+    """
+    reasons: list[str] = []
+    vanished = sorted(
+        symbol for symbol, rank in previous.items() if rank <= top and symbol not in current
+    )
+    if len(vanished) > max_top_vanished:
+        reasons.append(f"직전 빌드 상위 {top}위 중 {len(vanished)}종목이 사라짐 {vanished}")
+    if previous and (len(previous) - len(current)) * BP > len(previous) * max_count_drop_bp:
+        reasons.append(f"점수 받은 종목 수가 {len(previous)} → {len(current)}로 줄었음")
+    return tuple(reasons)
+
+
+def _last_seen(symbol: str, previous_ranks: Mapping[str, int] | None) -> str:
+    if previous_ranks is None:
+        return "직전 빌드 정보 없음"
+    rank = previous_ranks.get(symbol)
+    return "직전 빌드에도 없음" if rank is None else f"직전 빌드 {rank}위"
+
+
 def _line(
     symbol: str,
     action: RebalanceAction,
@@ -188,8 +227,12 @@ def _line(
     target: int,
     prices: Mapping[str, int],
     reason: str,
+    *,
+    review: bool = False,
 ) -> RebalanceLine:
-    return RebalanceLine(symbol, action, rank, current, target, prices.get(symbol), reason)
+    return RebalanceLine(
+        symbol, action, rank, current, target, prices.get(symbol), reason, review=review
+    )
 
 
 def _validate(

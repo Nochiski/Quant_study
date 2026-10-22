@@ -59,11 +59,15 @@ def test_cli_prepares_shows_and_approves_once(
     assert shown.count("매수   000") == 3 and "승인: 없음" in shown
 
     plan = ["--plan", "weekly-2026-10-23"]
-    assert run_cli(factories, ["approve", *common, *plan, "--approver", "동민"]) == 0
+    no_trade = ["--approver", "동민", "--no-trade", "00000X"]
+    assert run_cli(factories, ["approve", *common, *plan, *no_trade]) == 1  # 주문안에 없는 종목
+    keep = ["--approver", "동민", "--no-trade", "000002"]
+    assert run_cli(factories, ["approve", *common, *plan, *keep]) == 0
     assert run_cli(factories, ["approve", *common, *plan, "--approver", "동민"]) == 1
     capsys.readouterr()
     assert run_cli(factories, ["show", *common, *plan]) == 0
-    assert "승인: 동민" in capsys.readouterr().out
+    shown = capsys.readouterr().out
+    assert "승인: 동민" in shown and "이번 주 매매에서 뺀 종목: 000002" in shown
     assert run_cli(factories, ["show", *common, "--plan", "weekly-2026-10-30"]) == 1
 
 

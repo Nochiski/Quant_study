@@ -20,7 +20,10 @@ class SignalReadStatus(StrEnum):
 
 @dataclass(frozen=True)
 class SignalSnapshot:
-    """한 빌드의 순위(1이 가장 좋다)와, 점수를 계산한 가격 판의 신호일 종가(원)."""
+    """한 빌드의 순위(1이 가장 좋다)와, 점수를 계산한 가격 판의 신호일 종가(원).
+
+    직전 빌드의 순위는 데이터 누락 점검용이다. 직전 빌드가 없거나 읽지 못하면 None이다.
+    """
 
     model_id: str
     build_id: str
@@ -30,6 +33,8 @@ class SignalSnapshot:
     untraded: frozenset[str]  # 신호일 거래량 0
     scores_sha256: str
     prices_build_id: str
+    previous_build_id: str | None = None
+    previous_ranks: Mapping[str, int] | None = None
 
 
 @dataclass(frozen=True)

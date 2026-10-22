@@ -10,6 +10,7 @@
   없는(거래정지 등) 종목만 그 회차를 건너뛰고 기록한다.
 - 한 종목·방향에는 주문을 하나만 둔다. 의도 ID는 `<주문안>-<종목>-<방향>`, 다시 낸 주문은
   `-c<회차>`이고, 살아 있는 주문을 목표에서 빼고 내므로 다시 돌려도 같은 수량을 두 번 내지 않는다.
+- 승인에서 이번 주 매매에서 뺀 종목(`no_trade`)은 사지도 팔지도 않는다.
 - 장 마감 기록은 신호 기준가 대비 체결 차이와 미체결 기회비용, 그날 총자산을 남긴다.
 """
 
@@ -142,8 +143,10 @@ class WeeklyExecutionService:
         record = self._plans.load(plan_id)
         if record is None:
             return ExecuteResult(ExecuteStatus.NOT_FOUND, detail=f"no plan — plan_id={plan_id}")
-        if self._require_approval and self._plans.approval(plan_id) is None:
+        approval = self._plans.approval(plan_id)
+        if self._require_approval and approval is None:
             return ExecuteResult(ExecuteStatus.NOT_APPROVED, detail=f"plan_id={plan_id}")
+        excluded = frozenset(approval.no_trade if approval is not None else ())
         age = (self._now().date() - date.fromisoformat(record.signal.signal_date)).days
         if not 0 < age <= self._max_stale_days:
             return ExecuteResult(
@@ -160,10 +163,14 @@ class WeeklyExecutionService:
                 self._event(plan_id, phase, "halted", detail=state.detail)
                 return ExecuteResult(ExecuteStatus.HALTED, detail=state.detail)
             lines: list[OrderLine] = []
+            if phase is Phase.OPEN and excluded:
+                self._event(
+                    plan_id, phase, "no_trade", detail=f"이번 주 매매에서 뺌 {sorted(excluded)}"
+                )
             if phase is Phase.CHASE:
                 lines += self._cancel_open(record, state, send=send)
                 state = self._gateway.state()
-            lines += self._place(record, phase, state, send=send)
+            lines += self._place(record, phase, state, excluded, send=send)
         except GatewayError as error:
             self._event(plan_id, phase, "error", detail=str(error))
             return ExecuteResult(ExecuteStatus.UNAVAILABLE, tuple(), str(error))
@@ -228,7 +235,13 @@ class WeeklyExecutionService:
         return False
 
     def _place(
-        self, record: PlanRecord, phase: Phase, state: GatewayState, *, send: bool
+        self,
+        record: PlanRecord,
+        phase: Phase,
+        state: GatewayState,
+        excluded: frozenset[str],
+        *,
+        send: bool,
     ) -> list[OrderLine]:
         existing = {order.intent_id for order in state.orders}
         # 다시 낼 주문이 남은 종목만 낸다. 취소가 확정되지 않은 주문이 살아 있으면 건드리지 않는다.
@@ -237,7 +250,7 @@ class WeeklyExecutionService:
             for order in state.orders
             if order.intent_id.startswith(f"{record.plan_id}-") and not order.terminal
         }
-        deltas = _deltas(record, state)
+        deltas = _deltas(record, state, excluded)
         ranks = {line.symbol: line.rank or 0 for line in record.plan.lines}
         budget = [
             self._policy.max_orders_per_day
@@ -411,10 +424,12 @@ class WeeklyExecutionService:
             (symbol, shares, prices[symbol].last_price_krw)
             for symbol, shares in sorted(state.holdings.items())
         )
+        approval = self._plans.approval(plan_id)
+        excluded = set(approval.no_trade) if approval is not None else set()
         planned = {
             (line.symbol, "buy" if line.delta_shares > 0 else "sell"): abs(line.delta_shares)
             for line in record.plan.lines
-            if line.delta_shares
+            if line.delta_shares and line.symbol not in excluded
         }
         references = {line.symbol: line.reference_price_krw or 0 for line in record.plan.lines}
         orders: list[DayOrder] = []
@@ -501,9 +516,13 @@ class WeeklyExecutionService:
         )
 
 
-def _deltas(record: PlanRecord, state: GatewayState) -> dict[str, int]:
-    """주문안 종목만 본다. 지금 보유와 살아 있는 주문을 목표에서 뺀다."""
-    targets = record.plan.target_shares()
+def _deltas(record: PlanRecord, state: GatewayState, excluded: frozenset[str]) -> dict[str, int]:
+    """주문안 종목만 본다(이번 주 뺀 종목 제외). 지금 보유와 살아 있는 주문을 목표에서 뺀다."""
+    targets = {
+        symbol: shares
+        for symbol, shares in record.plan.target_shares().items()
+        if symbol not in excluded
+    }
     projected: dict[str, int] = dict(state.holdings)
     for order in state.orders:
         sign = 1 if order.side == "buy" else -1

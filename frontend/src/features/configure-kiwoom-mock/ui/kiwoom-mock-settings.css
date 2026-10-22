@@ -1,0 +1,103 @@
+.kiwoom-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(880px, 100%);
+}
+
+.kiwoom-settings__title {
+  margin: 0;
+  font-size: var(--text-size-section-title);
+  font-weight: 700;
+}
+
+.kiwoom-settings__description,
+.kiwoom-settings__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.kiwoom-settings__status,
+.kiwoom-settings__actions,
+.kiwoom-settings__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kiwoom-settings__status {
+  justify-content: space-between;
+}
+
+.kiwoom-settings__confirm p {
+  margin: 0;
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.kiwoom-settings__error {
+  margin: 0;
+  color: var(--status-error);
+  font-size: var(--text-size-small);
+}
+
+.kiwoom-settings__result {
+  margin: 0;
+  font-size: var(--text-size-small);
+}
+
+.kiwoom-settings__result--ok {
+  color: var(--status-ok);
+}
+
+.kiwoom-settings__result--failed {
+  color: var(--status-error);
+}
+
+.kiwoom-settings__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--panel-padding);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+}
+
+.kiwoom-settings__form-title {
+  margin: 0;
+  font-size: var(--text-size-body);
+  font-weight: 600;
+}
+
+.kiwoom-settings__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.kiwoom-settings__row label {
+  font-size: var(--text-size-label);
+  font-weight: 500;
+}
+
+.kiwoom-settings__row input {
+  min-width: 0;
+  height: var(--control-size, var(--control-height));
+  min-height: var(--control-size, var(--control-height));
+  padding: 0 var(--control-padding-inline);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-small);
+  background: var(--surface-canvas);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--text-size-body);
+  line-height: var(--line-height-control);
+}
+
+.kiwoom-settings__form .ui-button {
+  align-self: flex-start;
+}

@@ -1,0 +1,179 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
+import { setupServer } from "msw/node";
+import type { ReactElement } from "react";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from "vitest";
+
+import type {
+  KiwoomMockConnectionBody,
+  KiwoomMockConnectionCheckBody,
+} from "../../../entities/broker";
+import { KiwoomMockSettings } from "../ui/kiwoom-mock-settings";
+
+const API = "http://localhost:8000";
+const PATH = `${API}/api/v1/broker-connections/kiwoom-mock`;
+const APP_KEY = "fake-app-key-0123456789";
+const SECRET = "fake-secret-0123456789";
+const ACCOUNT = "5012345678";
+
+let status: KiwoomMockConnectionBody;
+let saveBodies: Record<string, unknown>[];
+let saveReply: () => Response;
+let verifyReply: KiwoomMockConnectionCheckBody;
+let deleted: number;
+
+const server = setupServer(
+  http.get(PATH, () => HttpResponse.json(status)),
+  http.put(PATH, async ({ request }) => {
+    saveBodies.push((await request.json()) as Record<string, unknown>);
+    return saveReply();
+  }),
+  http.delete(PATH, () => {
+    deleted += 1;
+    status = { saved: false, account_tail: null };
+    return new HttpResponse(null, { status: 204 });
+  }),
+  http.post(`${PATH}/verify`, () => HttpResponse.json(verifyReply)),
+);
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => {
+  cleanup();
+  server.resetHandlers();
+});
+afterAll(() => server.close());
+beforeEach(() => {
+  status = { saved: false, account_tail: null };
+  saveBodies = [];
+  deleted = 0;
+  saveReply = () => {
+    status = { saved: true, account_tail: "5678" };
+    return HttpResponse.json(status);
+  };
+  verifyReply = {
+    outcome: "connected",
+    message: "연결됐습니다. 키움 모의 계좌가 입력한 계좌번호와 같습니다.",
+    account_tail: "5678",
+  };
+});
+
+const renderWithClient = (ui: ReactElement) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
+};
+
+const fill = async (
+  user: ReturnType<typeof userEvent.setup>,
+  account = ACCOUNT,
+) => {
+  await user.type(screen.getByLabelText("App Key"), APP_KEY);
+  await user.type(screen.getByLabelText("App Secret"), SECRET);
+  await user.type(screen.getByLabelText("모의 계좌번호"), account);
+};
+
+describe("KiwoomMockSettings", () => {
+  it("shows nothing saved and keeps the check disabled", async () => {
+    renderWithClient(<KiwoomMockSettings />);
+    expect(await screen.findByText("저장된 키 없음")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "연결 확인" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
+  it("sends the three values once, clears the inputs and shows only the tail", async () => {
+    const user = userEvent.setup();
+    renderWithClient(<KiwoomMockSettings />);
+    await screen.findByText("저장된 키 없음");
+    await fill(user, "5012-3456-78");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    expect(await screen.findByText("저장됨 · 계좌 끝 5678")).toBeTruthy();
+    expect(saveBodies).toEqual([
+      { app_key: APP_KEY, secret_key: SECRET, account_number: "5012-3456-78" },
+    ]);
+    for (const label of ["App Key", "App Secret", "모의 계좌번호"]) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).value).toBe("");
+    }
+    const text = document.body.textContent ?? "";
+    for (const secret of [APP_KEY, SECRET, ACCOUNT])
+      expect(text).not.toContain(secret);
+  });
+
+  it("puts the server's field message next to the rejected field", async () => {
+    saveReply = () =>
+      HttpResponse.json(
+        {
+          detail: {
+            code: "broker.credentials_invalid",
+            message: "계좌번호는 숫자 10자리입니다('-'는 빼도 됩니다).",
+            field: "account_number",
+          },
+        },
+        { status: 422 },
+      );
+    const user = userEvent.setup();
+    renderWithClient(<KiwoomMockSettings />);
+    await screen.findByText("저장된 키 없음");
+    await fill(user, "12");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("숫자 10자리");
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByLabelText("모의 계좌번호"),
+      ),
+    );
+  });
+
+  it("asks for all three fields before calling the server", async () => {
+    const user = userEvent.setup();
+    renderWithClient(<KiwoomMockSettings />);
+    await screen.findByText("저장된 키 없음");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "세 칸을 모두 입력하세요.",
+    );
+    expect(saveBodies).toEqual([]);
+  });
+
+  it("shows the server's connection message as it is", async () => {
+    status = { saved: true, account_tail: "5678" };
+    verifyReply = {
+      outcome: "ip_not_allowed",
+      message: "이 PC의 인터넷 주소(IP)가 키움에 등록되지 않았습니다.",
+      account_tail: "5678",
+    };
+    const user = userEvent.setup();
+    renderWithClient(<KiwoomMockSettings />);
+    await user.click(await screen.findByRole("button", { name: "연결 확인" }));
+    const result = await screen.findByText(
+      "이 PC의 인터넷 주소(IP)가 키움에 등록되지 않았습니다.",
+    );
+    expect(result.getAttribute("data-outcome")).toBe("ip_not_allowed");
+  });
+
+  it("deletes only after the confirmation step", async () => {
+    status = { saved: true, account_tail: "5678" };
+    const user = userEvent.setup();
+    renderWithClient(<KiwoomMockSettings />);
+    await user.click(await screen.findByRole("button", { name: "삭제" }));
+    expect(deleted).toBe(0);
+    await user.click(screen.getByRole("button", { name: "삭제 확인" }));
+    expect(await screen.findByText("저장된 키 없음")).toBeTruthy();
+    expect(deleted).toBe(1);
+  });
+});

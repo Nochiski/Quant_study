@@ -3,6 +3,7 @@ export {
   assistantProviderApi,
   assistantSessionApi,
 } from "./assistant";
+export { BrokerConnectionRequestError, brokerConnectionApi } from "./broker";
 export {
   ASSISTANT_SSE_MAX_RETRY_ATTEMPTS,
   assistantEventEnvelope,
@@ -11,6 +12,10 @@ export {
   type AssistantStreamRejection,
 } from "./assistant-stream";
 export type {
+  ConnectionOutcome,
+  KiwoomMockConnectionBody,
+  KiwoomMockConnectionCheckBody,
+  SaveKiwoomMockConnectionBody,
   LibraryFactorBody,
   LibraryFactorList,
   LibraryFactorMatchBody,

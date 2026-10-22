@@ -1,4 +1,5 @@
 import { AiProviderSettings } from "../../../features/configure-ai-providers";
+import { KiwoomMockSettings } from "../../../features/configure-kiwoom-mock";
 import { t } from "../../../shared/config";
 import { useThemePreference, type ThemePreference } from "../../../shared/lib/theme";
 import "./settings-page.css";
@@ -34,7 +35,7 @@ const ThemeSettings = () => {
   );
 };
 
-/** `/settings` 화면. 화면 테마와 AI 어시스턴트 공급자 섹션이다. */
+/** `/settings` 화면. 화면 테마, AI 어시스턴트 공급자, 키움 모의투자 연결 섹션이다. */
 export const SettingsPage = () => (
   <div className="page settings-page">
     <header className="settings-page__header">
@@ -45,5 +46,6 @@ export const SettingsPage = () => (
     </header>
     <ThemeSettings />
     <AiProviderSettings />
+    <KiwoomMockSettings />
   </div>
 );

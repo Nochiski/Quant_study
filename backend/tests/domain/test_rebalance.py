@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from strategy_workbench.domain.rebalance.facade.rebalance import (
+    LineCause,
     RebalanceAction,
     RebalancePlan,
     RebalancePolicy,
@@ -260,6 +261,32 @@ def test_excluding_a_sale_with_no_new_buy_holds_more_names_than_slots() -> None:
     assert week.dropped_buys == ()
     assert "000005" not in week.targets
     assert all(week.targets[code] == 100 for code in codes[1:4])
+
+
+def test_every_line_carries_a_structured_cause() -> None:
+    # 리뷰 #607 P3: 주문지가 사유 문장을 문자열로 쪼개 다시 판정했다. 원인을 칸으로 넘긴다
+    codes = _codes(7)
+    plan = plan_rebalance(
+        POLICY,
+        ranks={code: rank for rank, code in enumerate(codes, 1) if code != "000005"},
+        holdings={"000002": 100, "000005": 100, "000007": 100},
+        prices=dict.fromkeys(codes, 10_000),
+        cash_krw=0,
+        blocked={"000003": "정지"},
+        previous_ranks={"000005": 4},
+        missing_reasons={"000005": "WISE 추정치 공백"},
+    )
+    causes = {line.symbol: line.cause for line in plan.lines}
+    assert causes == {
+        "000001": LineCause.NEW_TOP,
+        "000002": LineCause.IN_BAND,
+        "000003": LineCause.BLOCKED,
+        "000004": LineCause.FILL_LOWER,
+        "000005": LineCause.SIGNAL_MISSING,
+        "000007": LineCause.OUTSIDE_BUFFER,
+    }
+    [missing] = [line for line in plan.lines if line.symbol == "000005"]
+    assert (missing.missing_why, missing.last_seen) == ("WISE 추정치 공백", "직전 빌드 4위")
 
 
 def test_signal_anomalies_flag_bulk_disappearance_from_the_top() -> None:

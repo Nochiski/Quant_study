@@ -61,7 +61,11 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     WeeklyExecutionService,
     WeeklyRebalanceService,
 )
-from strategy_workbench.domain.rebalance.facade.rebalance import RebalanceAction, RebalanceLine
+from strategy_workbench.domain.rebalance.facade.rebalance import (
+    LineCause,
+    RebalanceAction,
+    RebalanceLine,
+)
 
 ServiceFactory = Callable[[Path, Path | None], WeeklyRebalanceService]
 # (작업 폴더, 보내는가, 승인이 필요한가) → 실행기. 끝나면 원장·연결을 닫는다.
@@ -583,7 +587,7 @@ def render_telegram(record: PlanRecord, execute_on: date) -> str:
             continue
         amount = abs(line.delta_shares) * (line.reference_price_krw or 0)
         item = f"{head} · {abs(line.delta_shares):,}주 · {_won(amount)}"
-        note = _telegram_note(line, plan.policy.keep_rank, plan.policy.slots)
+        note = _telegram_note(line)
         (sells if line.delta_shares < 0 else buys).append(f"{item}\n{note}" if note else item)
     parts = [
         f"<b>S07 주문지</b> · {_day(execute_on)} 실행\n"
@@ -636,14 +640,16 @@ def render_telegram_notice(status: PrepareStatus, signal_date: date, detail: str
     )
 
 
-def _telegram_note(line: RebalanceLine, keep_rank: int, slots: int) -> str:
-    if line.review:
-        return "⚠️ " + _html(line.reason.replace(" — ", " · ", 1))
-    if line.action is RebalanceAction.RESIZE:
+def _telegram_note(line: RebalanceLine) -> str:
+    """주문지 줄 아래 한 줄. 도메인이 넘긴 원인 칸으로 고른다(사유 문장을 쪼개지 않는다,
+    2026-10-22 리뷰 #607). 이 칸이 없는 옛 주문안은 사유 문장을 그대로 싣는다."""
+    if line.cause is LineCause.SIGNAL_MISSING:
+        return f"⚠️ 신호에서 빠짐 · {_html(line.missing_why)} ({_html(line.last_seen)})"
+    if line.cause is LineCause.RESIZED:
         return "비중 조정"
-    if line.action is RebalanceAction.SELL and line.rank is not None and line.rank > keep_rank:
+    if line.cause is LineCause.OUTSIDE_BUFFER:
         return f"순위 {line.rank}위"
-    if line.action is RebalanceAction.BUY and (line.rank or 0) <= slots:
+    if line.cause is LineCause.NEW_TOP:
         return ""
     return _html(line.reason)
 

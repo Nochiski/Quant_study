@@ -7,6 +7,7 @@ from strategy_workbench.domain.rebalance._execution import (
     shortfall_bp,
 )
 from strategy_workbench.domain.rebalance._model import (
+    LineCause,
     RebalanceAction,
     RebalanceLine,
     RebalancePlan,
@@ -19,6 +20,7 @@ from strategy_workbench.domain.rebalance._model import (
 
 __all__ = [
     "ExecutionPolicy",
+    "LineCause",
     "Quote",
     "RebalanceAction",
     "RebalanceLine",

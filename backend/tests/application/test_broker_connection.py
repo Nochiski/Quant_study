@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from strategy_workbench.application.broker_connection.facade.connection import (
@@ -32,13 +34,16 @@ class MemoryStore:
 
 
 class RecordingProbe:
-    def __init__(self, outcome: ConnectionOutcome = ConnectionOutcome.CONNECTED) -> None:
+    def __init__(
+        self, outcome: ConnectionOutcome = ConnectionOutcome.CONNECTED, detail: str = ""
+    ) -> None:
         self.outcome = outcome
+        self.detail = detail
         self.seen: list[BrokerCredentials] = []
 
     def verify(self, credentials: BrokerCredentials) -> ConnectionCheck:
         self.seen.append(credentials)
-        return ConnectionCheck(self.outcome)
+        return ConnectionCheck(self.outcome, self.detail)
 
 
 def service(probe: RecordingProbe | None = None) -> tuple[BrokerConnectionService, MemoryStore]:
@@ -80,6 +85,19 @@ def test_verify_without_saved_keys_does_not_call_kiwoom() -> None:
     result = connections.verify()
     assert result.outcome == ConnectionOutcome.NOT_SAVED
     assert probe.seen == []
+
+
+def test_a_failed_check_logs_why_without_secrets(caplog: pytest.LogCaptureFixture) -> None:
+    # 리뷰 #594 P2: 연결 확인이 실패해도 원인(detail)을 버려 운영자가 단서를 얻지 못했다
+    caplog.set_level(logging.INFO)
+    why = "no response from kiwoom mock — path=/oauth2/token error=URLError reason=SSLError"
+    connections, _ = service(RecordingProbe(ConnectionOutcome.NO_RESPONSE, why))
+    connections.save(APP_KEY, SECRET, "50123456-78")
+    result = connections.verify()
+    assert result.outcome == ConnectionOutcome.NO_RESPONSE and why not in result.message
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "outcome=no_response" in logged and why in logged and "account_tail=5678" in logged
+    assert APP_KEY not in logged and SECRET not in logged and "5012345678" not in logged
 
 
 @pytest.mark.parametrize("outcome", list(ConnectionOutcome))

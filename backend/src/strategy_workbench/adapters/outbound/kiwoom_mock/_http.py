@@ -151,8 +151,11 @@ class UrllibTransport:
                 ) from read_error
             return _decode(path, error.code, _headers(error.headers), payload)
         except (urllib.error.URLError, OSError) as error:
+            # URLError 는 원인(reason)을 감싼다. 인증서 확인 실패 같은 원인을 함께 남긴다.
+            reason = getattr(error, "reason", error)
             raise KiwoomNoResponseError(
-                f"no response from kiwoom mock — path={path} error={type(error).__name__}"
+                f"no response from kiwoom mock — path={path} error={type(error).__name__} "
+                f"reason={type(reason).__name__}: {reason}"
             ) from error
 
 
@@ -384,7 +387,19 @@ class KiwoomClient:
             headers["next-key"] = next_key
         self._pacer.wait(api_id)
         started = self._monotonic()
-        response = self._transport.post(path, headers, body)
+        # 전송 전에 남긴다. 연결 자체가 실패해도(인증서·DNS) 어느 호출이었는지 기록이 남는다.
+        logger.info("kiwoom mock call — api_id=%s path=%s", api_id, path)
+        try:
+            response = self._transport.post(path, headers, body)
+        except BrokerError as error:
+            logger.warning(
+                "kiwoom mock call failed — api_id=%s path=%s elapsed_ms=%d error=%s",
+                api_id,
+                path,
+                round((self._monotonic() - started) * 1000),
+                self._scrub(str(error)),
+            )
+            raise
         logger.info(
             "kiwoom mock call — api_id=%s status=%s return_code=%s error_code=%s "
             "cont=%s elapsed_ms=%d",

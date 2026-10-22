@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
@@ -17,6 +18,8 @@ from strategy_workbench.application.broker_connection.ports.outgoing.broker impo
 )
 
 ACCOUNT_TAIL_DIGITS = 4
+
+logger = logging.getLogger(__name__)
 
 OUTCOME_MESSAGES: dict[ConnectionOutcome, str] = {
     ConnectionOutcome.CONNECTED: "연결됐습니다. 키움 모의 계좌가 입력한 계좌번호와 같습니다.",
@@ -97,9 +100,18 @@ class BrokerConnectionService:
     def verify(self) -> BrokerConnectionResult:
         credentials = self._store.load()
         if credentials is None:
-            outcome = ConnectionOutcome.NOT_SAVED
+            outcome, detail = ConnectionOutcome.NOT_SAVED, ""
         else:
-            outcome = self._probe.verify(credentials).outcome
+            check = self._probe.verify(credentials)
+            outcome, detail = check.outcome, check.detail
+        # 화면에는 정해 둔 문장만 보낸다. 원인(detail)은 운영 로그에만 남긴다(비밀값은 probe 가 지운다).
+        logger.log(
+            logging.INFO if outcome is ConnectionOutcome.CONNECTED else logging.WARNING,
+            "kiwoom mock connection check — outcome=%s account_tail=%s detail=%s",
+            outcome.value,
+            _tail(credentials),
+            detail,
+        )
         return BrokerConnectionResult(outcome, OUTCOME_MESSAGES[outcome], _tail(credentials))
 
 

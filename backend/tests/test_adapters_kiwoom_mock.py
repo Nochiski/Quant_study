@@ -104,6 +104,7 @@ class FakeKiwoom:
         self.after: dict[str, list[Callable[[], None]]] = {}  # 한 번만 돈다
         self.every: dict[str, list[Callable[[], None]]] = {}  # 호출마다 돈다
         self.echo_secret_in_errors = False
+        self.unreachable = False  # 연결 자체가 실패한다(인증서·DNS 등)
         self._next_ord_no = 1
         self._values: dict[str, int] = {}
 
@@ -113,6 +114,8 @@ class FakeKiwoom:
     ) -> KiwoomHttpResponse:
         api_id = headers["api-id"]
         self.calls.append(Call(api_id, dict(body), dict(headers), self.clock.mono))
+        if self.unreachable:
+            raise KiwoomNoResponseError(f"no response from kiwoom mock — path={path} unreachable")
         if api_id in self.rate_limited:
             self.rate_limited.discard(api_id)
             response = self._error("1700", "허용된 API 요청 개수를 초과하였습니다")
@@ -422,6 +425,20 @@ def test_connection_errors_block_before_any_order(
     assert r.service.initialize().status == ExecutionStatus.ERROR
     assert r.broker.submit(buy()).state == OrderState.REJECTED
     assert set(r.fake.api_ids()) == {"au10001"}
+
+
+def test_a_transport_failure_is_logged_with_the_call(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # 리뷰 #594 P2: 호출 로그가 전송 뒤에만 있어 연결 자체가 실패하면 한 줄도 남지 않았다
+    caplog.set_level(logging.INFO)
+    r = rig(tmp_path)
+    r.fake.unreachable = True
+    with pytest.raises(KiwoomNoResponseError):
+        r.broker.snapshot()
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "kiwoom mock call — api_id=au10001 path=/oauth2/token" in logged
+    assert "kiwoom mock call failed — api_id=au10001" in logged and "unreachable" in logged
 
 
 def test_account_mismatch_blocks_before_reading_orders(tmp_path: Path) -> None:

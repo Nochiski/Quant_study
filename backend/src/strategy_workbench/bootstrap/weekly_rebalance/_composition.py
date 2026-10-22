@@ -54,7 +54,10 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     WeeklyExecutionService,
     WeeklyRebalanceService,
 )
-from strategy_workbench.bootstrap.weekly_rebalance._credentials import load_credentials
+from strategy_workbench.bootstrap.weekly_rebalance._credentials import (
+    load_credentials,
+    telegram_notice,
+)
 from strategy_workbench.bootstrap.weekly_rebalance._gateway import OfflineOrderGateway
 
 KST = timezone(timedelta(hours=9))
@@ -184,5 +187,8 @@ def main(argv: list[str] | None = None) -> int:
     # 앞 명령이 같은 TR을 막 불렀으면 1초 한도(1700)에 걸린다. 프로세스 사이 간격을 둔다.
     time.sleep(START_PAUSE_SECONDS)
     return run_cli(
-        CliFactories(build_weekly_rebalance, open_weekly_execution, record_today_fills), argv
+        CliFactories(
+            build_weekly_rebalance, open_weekly_execution, record_today_fills, telegram_notice
+        ),
+        argv,
     )

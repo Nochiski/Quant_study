@@ -27,6 +27,10 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.market impor
     MarketSource,
     PriceInfo,
 )
+from strategy_workbench.application.weekly_rebalance.ports.outgoing.notice import (
+    NoticeError,
+    NoticeSender,
+)
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.orders import (
     GatewayError,
     GatewayState,
@@ -76,6 +80,8 @@ __all__ = [
     "GatewayState",
     "MarketError",
     "MarketSource",
+    "NoticeError",
+    "NoticeSender",
     "OrderGateway",
     "OrderLine",
     "OrderRequest",

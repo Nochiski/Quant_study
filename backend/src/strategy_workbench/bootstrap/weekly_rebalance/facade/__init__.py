@@ -9,6 +9,7 @@ DEPENDS_ON: tuple[str, ...] = (
     "adapters.outbound.rebalance_files",
     "adapters.outbound.scope_signal",
     "adapters.outbound.secrets_local",
+    "adapters.outbound.telegram_notice",
     "bootstrap",
     "domain.order_execution",
 )

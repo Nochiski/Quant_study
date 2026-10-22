@@ -181,8 +181,20 @@ def test_held_name_missing_from_the_signal_is_sold_but_flagged_for_review() -> N
     )
     [line] = [line for line in plan.lines if line.symbol == "000009"]
     assert (line.action, line.target_shares, line.review) == (RebalanceAction.SELL, 0, True)
-    assert "직전 빌드 25위" in line.reason
+    assert line.reason == "신호에서 빠짐 — 이유 미상 (직전 빌드 25위)"
     assert not any(other.review for other in plan.lines if other.symbol != "000009")
+    explained = plan_rebalance(
+        POLICY,
+        ranks={"000001": 1},
+        holdings={"000009": 10},
+        prices={"000001": 10_000, "000009": 10_000},
+        cash_krw=0,
+        blocked={},
+        previous_ranks={"000009": 25},
+        missing_reasons={"000009": "WISE 추정치 공백"},
+    )
+    [line] = [line for line in explained.lines if line.symbol == "000009"]
+    assert line.reason == "신호에서 빠짐 — WISE 추정치 공백 (직전 빌드 25위)"
 
 
 def test_signal_anomalies_flag_bulk_disappearance_from_the_top() -> None:

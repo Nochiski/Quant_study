@@ -127,6 +127,7 @@ def _encode_plan(record: PlanRecord) -> dict[str, object]:
             "ranks": [[symbol, rank] for symbol, rank in signal.ranks],
             "previous_build_id": signal.previous_build_id,
             "anomalies": list(signal.anomalies),
+            "names": dict(signal.names),
         },
         "account": {
             "cash_krw": account.cash_krw,
@@ -178,6 +179,7 @@ def _decode_plan(value: dict[str, object]) -> PlanRecord:
             tuple((str(pair[0]), _int(pair[1], "rank")) for pair in _list(signal, "ranks")),
             None if signal.get("previous_build_id") is None else str(signal["previous_build_id"]),
             _strings(signal.get("anomalies")),
+            _names(signal.get("names")),
         ),
         AccountState(
             _int(account["cash_krw"], "cash_krw"),
@@ -212,6 +214,12 @@ def _line(value: object) -> RebalanceLine:
         str(value["reason"]),
         bool(value.get("review", False)),
     )
+
+
+def _names(value: object) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, dict):
+        return ()
+    return tuple((str(symbol), str(name)) for symbol, name in value.items())
 
 
 def _strings(value: object) -> tuple[str, ...]:

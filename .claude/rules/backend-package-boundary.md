@@ -91,7 +91,9 @@ bootstrap ─> application + adapters
   S05 실행 원장 대사와 키움 모의 조회로 조립한다. 이 유스케이스는 S05·S06 노드를 import하지 않는다.
   주문은 자체 outgoing `OrderGateway`·`MarketSource`·`ExecutionLog`로만 낸다. bootstrap의
   `OfflineOrderGateway`가 S05 `OfflineExecutionService`를 감싸고(새 application → application 화살표
-  없음), `kiwoom_mock`의 `KiwoomMarket`이 주문 어댑터와 같은 접속으로 호가·현재가를 답한다. 상세는
+  없음), `kiwoom_mock`의 `KiwoomMarket`이 주문 어댑터와 같은 접속으로 호가·현재가를 답한다. 주문지
+  알림은 자체 outgoing `NoticeSender`로만 보내고 `adapters/outbound/telegram_notice`(표준 라이브러리,
+  주소는 텔레그램 Bot API 하나)가 구현한다. 상세는
   `docs/planning/research-to-trading/S07-weekly-rebalance.md`다.
 - 완료 run의 계좌 보고서는 `domain/backtest`의 순수 projection·전용
   `facade/account_report.py`가 금액·상태·초기자본 기준 해석을 소유한다.

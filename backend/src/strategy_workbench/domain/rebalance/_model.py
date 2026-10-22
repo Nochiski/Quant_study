@@ -108,6 +108,7 @@ def plan_rebalance(
     cash_krw: int,
     blocked: Mapping[str, str],
     previous_ranks: Mapping[str, int] | None = None,
+    missing_reasons: Mapping[str, str] | None = None,
 ) -> RebalancePlan:
     """순위(1이 가장 좋다)·보유 주식 수·기준가격(원)·현금(원)·매매가 막힌 종목과 사유로
     목표를 정한다."""
@@ -124,7 +125,8 @@ def plan_rebalance(
             continue
         if rank is None:
             seen = _last_seen(symbol, previous_ranks)
-            reason = f"신호에서 빠짐 — 데이터 누락일 수 있어 확인 필요({seen})"
+            why = (missing_reasons or {}).get(symbol, "이유 미상")
+            reason = f"신호에서 빠짐 — {why} ({seen})"
             lines.append(
                 _line(symbol, RebalanceAction.SELL, rank, shares, 0, prices, reason, review=True)
             )

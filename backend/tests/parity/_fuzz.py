@@ -1,8 +1,9 @@
 """L1 평가기 퍼저(columnar-tape T3-05). seed 하나로 그래프와 패널을 함께 만든다.
 
-그래프는 필드·상수에서 시작해 원소·시계열(mean·std 포함)·횡단면·그룹 노드를 무작위로 쌓는다. 패널은
-종목·날짜·그룹 수, 행 공백, 비구성원, 가린 셀, 값 None·생략, 동점·±0·극단 크기 값, 그룹 결측·중복
-셀, 정본이 아닌 행 순서를 섞는다. 같은 seed 는 늘 같은 사례다(`np.random.default_rng`).
+그래프는 필드·상수에서 시작해 원소·채움·시계열(mean·std 포함)·횡단면·그룹 노드를 무작위로
+쌓는다. 패널은 종목·날짜·그룹 수, 행 공백, 비구성원, 가린 셀, 값 None·생략, 동점·±0·극단 크기 값,
+그룹 결측·중복 셀, 정본이 아닌 행 순서를 섞는다. 같은 seed 는 늘 같은 사례다
+(`np.random.default_rng`).
 
 CI 는 `test_parity.py` 가 seed 수백 개를 돌리고, PR 증거용 대량 실행은 이 모듈을 그대로 쓴다.
 """
@@ -26,6 +27,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     FactorComparisonOperator,
     FactorGraph,
     FieldNode,
+    FillNode,
     GroupNode,
     GroupOperator,
     MissingPolicy,
@@ -147,7 +149,19 @@ class _GraphBuilder:
         rng, node_id = self.rng, f"n{index}"
         kind = str(
             rng.choice(
-                ("ts", "ts", "cs", "cs", "group", "group", "unary", "lag", "binary", "condition"),
+                (
+                    "ts",
+                    "ts",
+                    "cs",
+                    "cs",
+                    "group",
+                    "group",
+                    "unary",
+                    "lag",
+                    "binary",
+                    "condition",
+                    "fill",
+                ),
             )
         )
         if kind == "ts":
@@ -167,6 +181,10 @@ class _GraphBuilder:
         elif kind == "group":
             operator = GroupOperator(str(rng.choice([item.value for item in GroupOperator])))
             self.add(GroupNode(node_id, operator, self.pick(), _GROUP_FIELD, "group"))
+        elif kind == "fill":
+            # −0.0 은 부호 있는 0, −1.7e308 은 뒤 노드의 합·중앙값이 넘치는 크기다
+            value = float(rng.choice((0.0, -0.0, 2.5, -1.7e308)))
+            self.add(FillNode(node_id, self.pick(), value, "fill"))
         elif kind == "unary":
             self.add(UnaryNode(node_id, UnaryOperator.NEGATE, self.pick(), "unary"))
         elif kind == "lag":

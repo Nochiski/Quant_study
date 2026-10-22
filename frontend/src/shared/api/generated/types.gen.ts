@@ -3179,6 +3179,7 @@ export type FactorGraph = {
     | GroupNode
     | ComparisonNode
     | ConditionalNode
+    | FillNode
   >;
   /**
    * Output Node Id
@@ -3611,6 +3612,34 @@ export type FieldNode = {
  */
 export type FieldValueType =
   "price" | "amount" | "ratio" | "count" | "category";
+
+/**
+ * FillNode
+ *
+ * 입력의 결측 칸을 상수로 채운다(#608).
+ *
+ * 실행 결측 정책(`RunEnvironment.missing`)과 달리 그래프 안 한 자리에서만 채우고, 원장이 가린 칸은
+ * 채우지 않는다(#298). 있는 것끼리 가중 평균(빈 입력은 가중치에서 뺀다)·"비교값이 없으면 변화 0"
+ * 같은 규칙을 문서에 명시하는 용도다.
+ */
+export type FillNode = {
+  /**
+   * Fill Value
+   */
+  fill_value: number;
+  /**
+   * Input Node Id
+   */
+  input_node_id: string;
+  /**
+   * Kind
+   */
+  kind: "fill";
+  /**
+   * Node Id
+   */
+  node_id: string;
+};
 
 /**
  * FloatParameter

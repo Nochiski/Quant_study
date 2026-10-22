@@ -20,10 +20,10 @@ PR은 GitHub 번호(`#123`)로 적는다.
 
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
-| 김철수 | 12 | 0 | 1 | 0 | 13 |
+| 김철수 | 13 | 0 | 1 | 0 | 14 |
 | 정동민 | 15 | 0 | 0 | 0 | 15 |
 | 한상목 | 16 | 0 | 0 | 1 | 17 |
-| 합계 | 43 | 0 | 1 | 1 | 45 |
+| 합계 | 44 | 0 | 1 | 1 | 46 |
 
 ### 스토리별 추적
 
@@ -42,6 +42,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-CS-11 | 김철수 | 비용을 현실적으로 잡고 운용 금액별 용량을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.validation-reports.spec.ts` :: US-CS-11 용량 확인은 시도 수를 늘리지 않고 금액별 비용과 한계 사유를 보인다 |
 | US-CS-12 | 김철수 | 팩터 회귀로 진짜 알파가 남는지 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.validation-reports.spec.ts` :: US-CS-12 실제 mock의 관측 부족과 별도 합성 회귀 숫자·근거를 구별해 읽는다 |
 | US-CS-13 | 김철수 | 기준을 먼저 적고 홀드아웃을 한 번만 연다 | `예정` | V6-01, V6-02 | V6-02 | — |
+| US-CS-14 | 김철수 | 빈 칸을 정한 값으로 채워 결측 규칙을 팩터 안에 적는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.fill-node.spec.ts` :: US-CS-14 빈 칸은 채운 값으로, 원장이 가린 칸은 채우지 않은 채로 추적에서 본다 |
 | US-DM-01 | 정동민 | AI 공급자를 한 번 연결해 둔다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 설정에서 공급자를 등록하면 활성이 되고 키는 꼬리 4자리만 남는다 |
 | US-DM-02 | 정동민 | 모르는 말을 전략 화면에서 바로 묻는다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 사이드바 질문에 답이 스트리밍되고 새로고침해도 이력과 진행 중 턴이 이어진다 |
 | US-DM-03 | 정동민 | 말로 한 아이디어를 AI가 전략으로 바꿔 주고 바로 백테스트한다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다<br>`frontend/e2e/stories/dm.ai-new-strategy.spec.ts` :: US-DM-03 빈 새 전략에서 AI에게 아이디어를 말해 받은 전략을 적용하고 백테스트한다<br>`frontend/e2e/stories/dm.ai-new-strategy.spec.ts` :: US-DM-03 사이드바와 계약 서랍을 어느 입구로 펼쳐도 머리 줄이 펼친 자리에서 눌린다<br>`frontend/e2e/stories/dm.sidebar-scrollbar.spec.ts` :: US-DM-03 스크롤바가 폭을 차지하는 창에서도 사이드바가 붙었다 떴다 하지 않는다 |

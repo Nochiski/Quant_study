@@ -586,6 +586,37 @@
       ],
       "additionalProperties": false
     },
+    "FillNode": {
+      "type": "object",
+      "x-description-key": "strategy.node.fill",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "fill",
+          "x-description-key": "strategy.field.node.kind"
+        },
+        "node_id": {
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
+        },
+        "input_node_id": {
+          "type": "string",
+          "x-description-key": "strategy.field.node.input_node_id",
+          "x-reference": "node"
+        },
+        "fill_value": {
+          "type": "number",
+          "x-description-key": "strategy.field.node.fill_value"
+        }
+      },
+      "required": [
+        "kind",
+        "node_id",
+        "input_node_id",
+        "fill_value"
+      ],
+      "additionalProperties": false
+    },
     "FactorGraph": {
       "type": "object",
       "x-description-key": "strategy.type.factor_graph",
@@ -623,6 +654,9 @@
               },
               {
                 "$ref": "#/$defs/ConditionalNode"
+              },
+              {
+                "$ref": "#/$defs/FillNode"
               }
             ],
             "discriminator": {

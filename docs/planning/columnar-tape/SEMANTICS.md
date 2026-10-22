@@ -74,6 +74,7 @@
 | binary add/sub/mul/div | IEEE 한 번. 0 나누기(−0.0 포함)는 None(564). 넘침 inf는 유한값 검사가 잡는다 |
 | comparison gt/gte/lt/lte/eq | 숫자 아니면 None, 결과 bool(567-584) |
 | conditional | predicate `is True` → 참, `is False` → 거짓, 그 밖 None(410-416) |
+| fill (#608) | None 칸 → `float(fill_value)`, 숫자 칸 그대로, 그 밖(검증이 막는 bool 입력) None(618-634). 워밍업 칸도 채운다. 가린 칸과 구간이 가린 칸에 닿는 칸은 다른 노드처럼 뒤에서 다시 None(같은 자리 연산이라 입력 구간 그대로) |
 | time_series 공통 | 창 [p−(lag+window−1), p−lag], **정확히 window칸 모두 숫자**일 때만 값(630-633). 시작이 음수면 None |
 | momentum / delta | `last/first − 1`(first == 0이면 None), `last − first`(636-641) |
 | mean / std | `statistics.mean`, `pstdev`(643-646) |

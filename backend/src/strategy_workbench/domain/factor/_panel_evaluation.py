@@ -46,6 +46,7 @@ from ._nodes import (
     FactorComparisonOperator,
     FactorGraph,
     FieldNode,
+    FillNode,
     GroupNode,
     MissingPolicy,
     ParameterNode,
@@ -378,6 +379,16 @@ class _PanelEvaluator:
             return self._map(
                 rows, np.float64, lambda s: np.negative(source.values[s])
             ), source.valid
+        if isinstance(node, FillNode):
+            # `_fill`: 빈 칸은 채우고 bool 칸은 숫자가 아니라 결측이다. 가린 칸은 `evaluate` 가
+            # 뒤에서 비운다
+            source = inputs[0]
+            fill = float(node.fill_value)
+            if source.boolean:
+                return np.full(rows, fill, np.float64), ~source.valid
+            return self._map(
+                rows, np.float64, lambda s: np.where(source.valid[s], source.values[s], fill)
+            ), np.ones(rows, bool)
         if isinstance(node, BinaryNode):
             return self._binary(node.operator, inputs[0], inputs[1], rows)
         if isinstance(node, ComparisonNode):

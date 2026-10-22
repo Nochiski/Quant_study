@@ -75,6 +75,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     FactorComparisonOperator,
     FactorGraph,
     FieldNode,
+    FillNode,
     GroupNode,
     GroupOperator,
     MissingPolicy,
@@ -313,7 +314,8 @@ def _elementwise_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
     """열 평가기 골격(T3-01)이 다루는 원소·lag 노드만 쓰는 조합.
 
     lag 와 섞는 연산의 가림 구간, bool lag·bool 가지 조건, 숫자 predicate, −0.0 분모와 넘침,
-    여러 노드가 넘칠 때 평가 순서상 첫 노드, 상수만 있는 그래프를 덮는다.
+    여러 노드가 넘칠 때 평가 순서상 첫 노드, 상수만 있는 그래프를 덮는다. `fill`(#608)은 가린 칸·
+    숫자 자리의 bool·str 칸, lag 워밍업 칸, ÷0 칸(−0.0 으로 채움), "값이 있으면 1" 지시자를 덮는다.
     """
 
     def lag(node_id: str, source: str, periods: int) -> UnaryNode:
@@ -367,6 +369,16 @@ def _elementwise_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
         (x, y, ratio, square, binary("out", BinaryOperator.ADD, "ratio", "square")),
         (x, y, ratio, square, binary("out", BinaryOperator.SUBTRACT, "square", "ratio")),
         (ConstantNode("out", 1.5, "constant"),),
+        (x, FillNode("out", "x", 0.0, "fill")),
+        (x, lag("l2", "x", 2), FillNode("out", "l2", -1.5, "fill")),
+        (x, y, binary("q", BinaryOperator.DIVIDE, "x", "y"), FillNode("out", "q", -0.0, "fill")),
+        (
+            x,
+            compare("same", FactorComparisonOperator.EQUAL, "x", "x"),
+            ConstantNode("one", 1.0, "constant"),
+            ConditionalNode("p", "same", "one", "one", "conditional"),
+            FillNode("out", "p", 0.0, "fill"),
+        ),
     ]
     return [FactorGraph(graph, "out") for graph in nodes]
 
@@ -491,6 +503,12 @@ def _section_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
             x,
             ts("m", mean, "x", 2),
             cs("out", CrossSectionalOperator.ZSCORE, "m"),
+        ),
+        # `fill` 뒤 횡단면: 채운 칸은 모집단에 들고 가린 칸은 결측 정책 채움 자리로 간다(#608)
+        (
+            x,
+            FillNode("f", "x", 0.0, "fill"),
+            cs("out", CrossSectionalOperator.ZSCORE, "f"),
         ),
     ]
     return [FactorGraph(graph, "out") for graph in nodes]

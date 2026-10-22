@@ -1093,6 +1093,31 @@ export type BlockedTrialAttempt = {
 };
 
 /**
+ * BrokerErrorDetail
+ */
+export type BrokerErrorDetail = {
+  /**
+   * Code
+   */
+  code: "broker.request_invalid" | "broker.credentials_invalid";
+  /**
+   * Field
+   */
+  field?: string | null;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BrokerErrorResponse
+ */
+export type BrokerErrorResponse = {
+  detail: BrokerErrorDetail;
+};
+
+/**
  * CandidateDecision
  */
 export type CandidateDecision = {
@@ -1416,6 +1441,19 @@ export type ConditionalNode = {
    */
   true_node_id: string;
 };
+
+/**
+ * ConnectionOutcome
+ */
+export type ConnectionOutcome =
+  | "connected"
+  | "not_saved"
+  | "mode_mismatch"
+  | "ip_not_allowed"
+  | "auth_failed"
+  | "account_mismatch"
+  | "no_response"
+  | "refused";
 
 /**
  * ConstantNode
@@ -3806,6 +3844,35 @@ export type IntegerParameter = {
 };
 
 /**
+ * KiwoomMockConnectionBody
+ */
+export type KiwoomMockConnectionBody = {
+  /**
+   * Account Tail
+   */
+  account_tail: string | null;
+  /**
+   * Saved
+   */
+  saved: boolean;
+};
+
+/**
+ * KiwoomMockConnectionCheckBody
+ */
+export type KiwoomMockConnectionCheckBody = {
+  /**
+   * Account Tail
+   */
+  account_tail: string | null;
+  /**
+   * Message
+   */
+  message: string;
+  outcome: ConnectionOutcome;
+};
+
+/**
  * LibraryDiagnosticBody
  */
 export type LibraryDiagnosticBody = {
@@ -5979,6 +6046,30 @@ export type SaveDocumentRequest = {
    * Source
    */
   source: string;
+};
+
+/**
+ * SaveKiwoomMockConnectionBody
+ */
+export type SaveKiwoomMockConnectionBody = {
+  /**
+   * Account Number
+   *
+   * 모의 계좌번호 10자리('-' 허용). 요청 전용이며 응답에는 끝 4자리만 실린다.
+   */
+  account_number: string;
+  /**
+   * App Key
+   *
+   * 키움 모의투자 App Key. 요청 전용이며 어떤 응답에도 실리지 않는다.
+   */
+  app_key: string;
+  /**
+   * Secret Key
+   *
+   * 키움 모의투자 App Secret. 요청 전용이며 어떤 응답에도 실리지 않는다.
+   */
+  secret_key: string;
 };
 
 /**
@@ -9616,6 +9707,84 @@ export type GetBacktestValidationReportResponses = {
 
 export type GetBacktestValidationReportResponse =
   GetBacktestValidationReportResponses[keyof GetBacktestValidationReportResponses];
+
+export type DeleteKiwoomMockConnectionData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/broker-connections/kiwoom-mock";
+};
+
+export type DeleteKiwoomMockConnectionResponses = {
+  /**
+   * Successful Response
+   */
+  204: void;
+};
+
+export type DeleteKiwoomMockConnectionResponse =
+  DeleteKiwoomMockConnectionResponses[keyof DeleteKiwoomMockConnectionResponses];
+
+export type GetKiwoomMockConnectionData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/broker-connections/kiwoom-mock";
+};
+
+export type GetKiwoomMockConnectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: KiwoomMockConnectionBody;
+};
+
+export type GetKiwoomMockConnectionResponse =
+  GetKiwoomMockConnectionResponses[keyof GetKiwoomMockConnectionResponses];
+
+export type SaveKiwoomMockConnectionData = {
+  body: SaveKiwoomMockConnectionBody;
+  path?: never;
+  query?: never;
+  url: "/api/v1/broker-connections/kiwoom-mock";
+};
+
+export type SaveKiwoomMockConnectionErrors = {
+  /**
+   * Unprocessable Entity
+   */
+  422: BrokerErrorResponse;
+};
+
+export type SaveKiwoomMockConnectionError =
+  SaveKiwoomMockConnectionErrors[keyof SaveKiwoomMockConnectionErrors];
+
+export type SaveKiwoomMockConnectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: KiwoomMockConnectionBody;
+};
+
+export type SaveKiwoomMockConnectionResponse =
+  SaveKiwoomMockConnectionResponses[keyof SaveKiwoomMockConnectionResponses];
+
+export type VerifyKiwoomMockConnectionData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/broker-connections/kiwoom-mock/verify";
+};
+
+export type VerifyKiwoomMockConnectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: KiwoomMockConnectionCheckBody;
+};
+
+export type VerifyKiwoomMockConnectionResponse =
+  VerifyKiwoomMockConnectionResponses[keyof VerifyKiwoomMockConnectionResponses];
 
 export type GetContinuousAccountData = {
   body?: never;

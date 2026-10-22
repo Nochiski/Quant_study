@@ -44,6 +44,9 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     rejection_code,
 )
 from strategy_workbench.application.backtest_run.facade.validation_report import RunValidationReport
+from strategy_workbench.application.broker_connection.facade.connection import (
+    BrokerConnectionService,
+)
 from strategy_workbench.application.continuous_account.facade.evaluation import (
     ContinuousAccountService,
 )
@@ -161,6 +164,7 @@ from ._backtest_contract import (
     TrialLineageAlreadyMergedResponse,
     TrialLineageMergeRequest,
 )
+from ._broker_routes import register_broker_connection_routes
 from ._continuous_account_routes import register_continuous_account_routes
 from ._execution_error_contract import (
     Portfolio422Response,
@@ -357,6 +361,7 @@ def create_app(
     experiments: ExperimentRunService | None = None,
     continuous_accounts: ContinuousAccountService | None = None,
     factor_library: FactorLibraryService | None = None,
+    broker_connections: BrokerConnectionService | None = None,
     assistant_profiles: ProviderProfileService | None = None,
     assistant_chat: AssistantChatService | None = None,
     assistant_turns: AssistantTurnRunner | None = None,
@@ -498,6 +503,9 @@ def create_app(
         register_continuous_account_routes(app, continuous_accounts)
     if factor_library is not None:
         register_factor_library_routes(app, factor_library)
+    # 키움 모의 연결 설정(S06 ②-2)도 서비스가 올 때만 생긴다.
+    if broker_connections is not None:
+        register_broker_connection_routes(app, broker_connections)
 
     strategy_not_found: dict[int | str, dict[str, Any]] = {
         404: {"model": StrategyNotFoundResponse, "description": "The strategy does not exist"}

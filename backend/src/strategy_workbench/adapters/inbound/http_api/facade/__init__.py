@@ -3,6 +3,7 @@
 DEPENDS_ON: tuple[str, ...] = (
     "application.assistant_chat",
     "application.backtest_run",
+    "application.broker_connection",
     "application.continuous_account",
     "application.equity_workspace",
     "application.experiment_run",

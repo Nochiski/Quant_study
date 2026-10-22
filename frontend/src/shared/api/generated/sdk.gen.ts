@@ -48,6 +48,8 @@ import type {
   DeleteAssistantProviderData,
   DeleteAssistantProviderErrors,
   DeleteAssistantProviderResponses,
+  DeleteKiwoomMockConnectionData,
+  DeleteKiwoomMockConnectionResponses,
   DeleteStrategyDraftData,
   DeleteStrategyDraftErrors,
   DeleteStrategyDraftResponses,
@@ -119,6 +121,8 @@ import type {
   GetFactorCatalogResponses,
   GetHealthData,
   GetHealthResponses,
+  GetKiwoomMockConnectionData,
+  GetKiwoomMockConnectionResponses,
   GetLibraryFactorData,
   GetLibraryFactorErrors,
   GetLibraryFactorResponses,
@@ -216,6 +220,9 @@ import type {
   RunExperimentContinuousAccountData,
   RunExperimentContinuousAccountErrors,
   RunExperimentContinuousAccountResponses,
+  SaveKiwoomMockConnectionData,
+  SaveKiwoomMockConnectionErrors,
+  SaveKiwoomMockConnectionResponses,
   SaveLibraryFactorData,
   SaveLibraryFactorErrors,
   SaveLibraryFactorResponses,
@@ -259,6 +266,8 @@ import type {
   ValidateStrategyData,
   ValidateStrategyErrors,
   ValidateStrategyResponses,
+  VerifyKiwoomMockConnectionData,
+  VerifyKiwoomMockConnectionResponses,
 } from "./types.gen";
 
 export type Options<
@@ -691,6 +700,67 @@ export const getBacktestValidationReport = <
     GetBacktestValidationReportErrors,
     ThrowOnError
   >({ url: "/api/v1/backtests/{run_id}/validation-report", ...options });
+
+/**
+ * Delete Connection
+ */
+export const deleteKiwoomMockConnection = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<DeleteKiwoomMockConnectionData, ThrowOnError>,
+) =>
+  (options?.client ?? client).delete<
+    DeleteKiwoomMockConnectionResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/broker-connections/kiwoom-mock", ...options });
+
+/**
+ * Get Connection
+ */
+export const getKiwoomMockConnection = <ThrowOnError extends boolean = false>(
+  options?: Options<GetKiwoomMockConnectionData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetKiwoomMockConnectionResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/broker-connections/kiwoom-mock", ...options });
+
+/**
+ * Save Connection
+ */
+export const saveKiwoomMockConnection = <ThrowOnError extends boolean = false>(
+  options: Options<SaveKiwoomMockConnectionData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<
+    SaveKiwoomMockConnectionResponses,
+    SaveKiwoomMockConnectionErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/broker-connections/kiwoom-mock",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Verify Connection
+ *
+ * 토큰 발급과 계좌 대조만 한다. 사용자가 누를 때만 키를 쓴다. 주문하지 않는다.
+ */
+export const verifyKiwoomMockConnection = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<VerifyKiwoomMockConnectionData, ThrowOnError>,
+) =>
+  (options?.client ?? client).post<
+    VerifyKiwoomMockConnectionResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/broker-connections/kiwoom-mock/verify", ...options });
 
 /**
  * Get

@@ -1,3 +1,7 @@
+from strategy_workbench.adapters.outbound.secrets_local._broker import (
+    BROKER_ENTRY,
+    LocalFileBrokerCredentialStore,
+)
 from strategy_workbench.adapters.outbound.secrets_local._errors import SecretStoreStorageError
 from strategy_workbench.adapters.outbound.secrets_local._store import (
     ICACLS_OUTPUT_ENCODING,
@@ -14,6 +18,8 @@ from strategy_workbench.adapters.outbound.secrets_local._store import (
 )
 
 __all__ = [
+    "BROKER_ENTRY",
+    "LocalFileBrokerCredentialStore",
     "SECRETS_DIRECTORY_NAME",
     "SECRETS_FILE_NAME",
     "ICACLS_OUTPUT_ENCODING",

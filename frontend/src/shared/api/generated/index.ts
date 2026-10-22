@@ -361,6 +361,7 @@ export type {
   FieldLag,
   FieldNode,
   FieldValueType,
+  FillNode,
   FloatParameter,
   FrozenWindowChoice,
   GetAssistantSessionData,

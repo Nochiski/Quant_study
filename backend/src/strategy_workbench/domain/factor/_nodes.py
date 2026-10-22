@@ -187,6 +187,21 @@ class ComparisonNode:
 
 
 @dataclass(frozen=True)
+class FillNode:
+    """입력의 결측 칸을 상수로 채운다(#608).
+
+    실행 결측 정책(`RunEnvironment.missing`)과 달리 그래프 안 한 자리에서만 채우고, 원장이 가린 칸은
+    채우지 않는다(#298). 있는 것끼리 가중 평균(빈 입력은 가중치에서 뺀다)·"비교값이 없으면 변화 0"
+    같은 규칙을 문서에 명시하는 용도다.
+    """
+
+    node_id: str
+    input_node_id: str = field(metadata=REFERENCE_NODE)
+    fill_value: float
+    kind: Literal["fill"]
+
+
+@dataclass(frozen=True)
 class ConditionalNode:
     node_id: str
     predicate_node_id: str = field(metadata=REFERENCE_NODE)
@@ -206,6 +221,7 @@ ExpressionNode: TypeAlias = (
     | GroupNode
     | ComparisonNode
     | ConditionalNode
+    | FillNode
 )
 # `saved_factor`·`saved_subgraph` 는 schema 1.2 에서 union 을 떠났다(spec D3 S7). 실행 경로가 늘
 # 거부하던 노드라 문법이 받을 이유가 없다. 재사용 팩터 라이브러리(M8)가 되살릴 때 다시 넣는다.

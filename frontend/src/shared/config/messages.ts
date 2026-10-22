@@ -1511,6 +1511,9 @@ const ko = {
   "strategy.node.conditional": "조건 분기",
   "strategy.node.conditional.description":
     "조건이 참일 때와 거짓일 때 다른 값을 냅니다.",
+  "strategy.node.fill": "빈 칸 채우기",
+  "strategy.node.fill.description":
+    "값이 없는 칸을 정한 숫자로 채웁니다. 원장이 가린 칸은 채우지 않습니다.",
   "strategy.field.node.kind": "노드 종류",
   "strategy.field.node.kind.description":
     "이 노드가 무엇을 하는 노드인지 정합니다.",
@@ -1559,6 +1562,9 @@ const ko = {
   "strategy.field.node.false_node_id": "거짓일 때 값",
   "strategy.field.node.false_node_id.description":
     "조건이 거짓인 종목에 쓸 값입니다.",
+  "strategy.field.node.fill_value": "채울 값",
+  "strategy.field.node.fill_value.description":
+    "값이 없는 칸에 넣을 숫자입니다. 입력과 같은 단위로 적습니다.",
   "strategy.type.factor_graph": "팩터 계산 그래프",
   "strategy.type.factor_graph.description":
     "노드를 이어 팩터 값을 만드는 계산식입니다.",
@@ -1771,6 +1777,7 @@ const ko = {
   "strategy.field.node.lower_quantile.summary": "아래 {lower_quantile}",
   "strategy.field.node.upper_quantile.summary": "위 {upper_quantile}",
   "strategy.field.node.group_field_id.summary": "{group_field_id}별",
+  "strategy.field.node.fill_value.summary": "빈 칸은 {fill_value}",
   "recipe.summary.previous": "앞 단계",
   "recipe.summary.advanced": "노드 {count}개 · 고급",
   // 그래프 1수준 캔버스(P4-02, 리드 결정 2026-09-30). 단계 영문 소제목, 카드 문장 틀 `.card`(enum 값 이름 키 →
@@ -4437,6 +4444,9 @@ export const messages = {
     "strategy.node.conditional": "Conditional",
     "strategy.node.conditional.description":
       "Yields one value when the condition holds and another when it does not.",
+    "strategy.node.fill": "Fill missing",
+    "strategy.node.fill.description":
+      "Replaces missing cells with a fixed number. Cells the ledger masks stay missing.",
     "strategy.field.node.kind": "Node kind",
     "strategy.field.node.kind.description": "What kind of node this is.",
     "strategy.field.node.node_id": "Node name",
@@ -4488,6 +4498,9 @@ export const messages = {
     "strategy.field.node.false_node_id": "Value when false",
     "strategy.field.node.false_node_id.description":
       "The value used where the condition does not hold.",
+    "strategy.field.node.fill_value": "Fill value",
+    "strategy.field.node.fill_value.description":
+      "The number written into missing cells, in the input's unit.",
     "strategy.type.factor_graph": "Factor graph",
     "strategy.type.factor_graph.description":
       "The wired nodes that produce the factor value.",
@@ -4710,6 +4723,7 @@ export const messages = {
     "strategy.field.node.lower_quantile.summary": "lower {lower_quantile}",
     "strategy.field.node.upper_quantile.summary": "upper {upper_quantile}",
     "strategy.field.node.group_field_id.summary": "by {group_field_id}",
+    "strategy.field.node.fill_value.summary": "missing → {fill_value}",
     "recipe.summary.previous": "previous step",
     "recipe.summary.advanced": "{count} nodes · advanced",
     // 그래프 1수준 캔버스(P4-02, 리드 결정 2026-09-30). 단계 영문 소제목, 카드 문장 틀 `.card`(enum 값 이름 키 →

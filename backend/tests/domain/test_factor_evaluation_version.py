@@ -21,6 +21,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     FactorComparisonOperator,
     FactorGraph,
     FieldNode,
+    FillNode,
     GroupNode,
     GroupOperator,
     MissingPolicy,
@@ -34,6 +35,12 @@ from strategy_workbench.domain.factor.facade.planning import FACTOR_EVALUATION_V
 _PINNED = (
     "factor-evaluation-v1",
     "9287573ea2d563587ffb52745e02cea6416a2c488fac832db4c23b264b2ba965",
+)
+# `fill`(#608)은 새 노드라 기존 그래프의 수치를 바꾸지 않는다 — 위 digest 는 그대로 두고 따로
+# 고정한다.
+_PINNED_FILL = (
+    "factor-evaluation-v1",
+    "ccaaa44343f49232552284299ef79609f5366831c2a73f7e0f653bf45ebb6667",
 )
 
 
@@ -83,7 +90,30 @@ def _graphs() -> list[FactorGraph]:
     return graphs
 
 
-def _rules_digest() -> str:
+def _fill_graphs() -> list[FactorGraph]:
+    leaf = FieldNode("x", "x", "field")
+    return [
+        FactorGraph((leaf, FillNode("out", "x", -1.0, "fill")), "out"),
+        FactorGraph(
+            (
+                leaf,
+                UnaryNode("lag", UnaryOperator.LAG, "x", "unary", periods=2),
+                FillNode("out", "lag", 0.0, "fill"),
+            ),
+            "out",
+        ),
+        FactorGraph(
+            (
+                leaf,
+                FillNode("f", "x", 0.0, "fill"),
+                CrossSectionalNode("out", CrossSectionalOperator.RANK, "f", "cross_sectional"),
+            ),
+            "out",
+        ),
+    ]
+
+
+def _rules_digest(graphs: list[FactorGraph]) -> str:
     rows = tuple(
         FactorObservation(
             date(2024, 1, 1) + timedelta(days=day),
@@ -108,11 +138,12 @@ def _rules_digest() -> str:
                 asdict(value)
                 for value in evaluate_factor_graph(graph, observations=rows, missing=policy).values
             ]
-            for graph in _graphs()
+            for graph in graphs
             for policy in MissingPolicy
         ]
     )
 
 
 def test_evaluation_rule_changes_bump_the_factor_evaluation_version() -> None:
-    assert (FACTOR_EVALUATION_VERSION, _rules_digest()) == _PINNED
+    assert (FACTOR_EVALUATION_VERSION, _rules_digest(_graphs())) == _PINNED
+    assert (FACTOR_EVALUATION_VERSION, _rules_digest(_fill_graphs())) == _PINNED_FILL

@@ -17,6 +17,7 @@ from ._nodes import (
     FactorGraph,
     FieldMetadata,
     FieldNode,
+    FillNode,
     GroupNode,
     GroupOperator,
     NodeValueType,
@@ -121,7 +122,7 @@ def unavailable_field_message(field_id: str, reason: str) -> str:
 
 
 def node_dependencies(node: ExpressionNode) -> tuple[str, ...]:
-    if isinstance(node, (UnaryNode, TimeSeriesNode, CrossSectionalNode, GroupNode)):
+    if isinstance(node, (UnaryNode, TimeSeriesNode, CrossSectionalNode, GroupNode, FillNode)):
         return (node.input_node_id,)
     if isinstance(node, (BinaryNode, ComparisonNode)):
         return (node.left_node_id, node.right_node_id)

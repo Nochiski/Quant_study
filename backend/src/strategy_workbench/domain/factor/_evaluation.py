@@ -22,6 +22,7 @@ from ._nodes import (
     FactorComparisonOperator,
     FactorGraph,
     FieldNode,
+    FillNode,
     GroupNode,
     GroupOperator,
     MissingPolicy,
@@ -419,6 +420,8 @@ class _NodeEvaluator:
                     zip(*inputs, strict=True), self._checkpoint
                 )
             ]
+        elif isinstance(node, FillNode):
+            values = _fill(node, inputs[0], checkpoint=self._checkpoint)
         elif isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
             values = _lag(
                 inputs[0], self._securities(), node_read_window(node), checkpoint=self._checkpoint
@@ -612,6 +615,25 @@ def _compare(
     return left == right
 
 
+def _fill(
+    node: FillNode,
+    values: list[FactorComputedValue],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> list[FactorComputedValue]:
+    """빈 칸을 `fill_value` 로 채운다(#608). 숫자가 아닌 값(검증이 막는 bool 입력)은 `_unary` 처럼
+    결측이다.
+
+    원장이 가린 칸과 값의 구간에 가린 칸이 드는 칸은 평가기가 이 뒤에 다시 비운다(#298) — 여기서는
+    가림을 보지 않는다.
+    """
+    fill = float(node.fill_value)
+    return [
+        fill if value is None else value if _is_number(value) else None
+        for value in _checkpointed(values, checkpoint)
+    ]
+
+
 def _unary(
     node: UnaryNode,
     values: list[FactorComputedValue],
@@ -770,7 +792,7 @@ def _value_spans(node: ExpressionNode, inputs: list[_Spans]) -> _Spans:
     자체다. 창 연산은 창만큼 넓힌다 — 건너뛰는 세션은 창 밖이라, 창 안 값끼리 견주는 12-1 모멘텀은
     그 세션의 가린 칸과 무관하다. 두 값 이상을 섞는 연산(이항·비교·조건)은 필드마다 두 구간을 덮는
     구간이라, 오늘 값을 k세션 전 값이나 건너뛴 창과 견주면 그 사이의 가린 칸에서 결측이다. 같은 자리
-    연산(부정·횡단면·그룹)은 입력 구간 그대로이고, 상수·파라미터는 구간이 없다.
+    연산(부정·채움·횡단면·그룹)은 입력 구간 그대로이고, 상수·파라미터는 구간이 없다.
     """
     if isinstance(node, FieldNode):
         return {node.field_id: (0, 0)}

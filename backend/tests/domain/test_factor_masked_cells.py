@@ -32,6 +32,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     FactorComparisonOperator,
     FactorGraph,
     FieldNode,
+    FillNode,
     GroupNode,
     GroupOperator,
     MissingPolicy,
@@ -165,14 +166,16 @@ def test_chained_lags_carry_the_boundary() -> None:
         (UnaryNode("x", UnaryOperator.NEGATE, "adj", "unary"),),
         (CrossSectionalNode("x", CrossSectionalOperator.RANK, "adj", "cross_sectional"),),
         (GroupNode("x", GroupOperator.RANK, "adj", _SECTOR, "group"),),
+        (FillNode("x", "adj", 0.0, "fill"),),
     ),
-    ids=("multiply", "negate", "cross_sectional", "group"),
+    ids=("multiply", "negate", "cross_sectional", "group", "fill"),
 )
 def test_a_same_position_operator_carries_the_boundary_to_lag(
     nodes: tuple[ExpressionNode, ...],
 ) -> None:
     """같은 자리의 값 하나를 바꾸는 연산은 입력 구간을 그대로 잇는다 — x 가 `adj × 1`·부정·횡단면
-    순위·섹터 안 순위여도 `adj / lag(x, 20)` 은 `adj / lag(adj, 20)` 과 같은 30~50 이 결측이다.
+    순위·섹터 안 순위·빈 칸 채움이어도 `adj / lag(x, 20)` 은 `adj / lag(adj, 20)` 과 같은 30~50 이
+    결측이다.
 
     x 가 가린 칸의 구간을 놓치면 `lag` 가 적용일을 경계로 보지 못하고 층 앞 값을 층 뒤로 옮겨,
     31~49 에서 층 배수가 정상 값으로 나온다(#311 리뷰 r2 P3-1 · #349 리뷰 P3-1). 횡단면·그룹

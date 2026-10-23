@@ -115,6 +115,7 @@ from tests.equity_fixture import (
     WB_PROFILE_ROWS,
     WB_SESSIONS,
     WB_SPLIT_DATE,
+    WB_WISE_FIELDS,
     build_workbench_root,
     fin_std_table,
     snapshot_id,
@@ -158,6 +159,7 @@ ALL_FIELDS = (
     "flow.pension_net_buy",
     "flow.institution_net_buy",
     "flow.retail_net_buy",
+    "flow.private_fund_net_buy",
     "short.short_sale_volume",
     "short.short_sale_value",
     "short.borrowed_quantity",
@@ -165,6 +167,7 @@ ALL_FIELDS = (
     "event.dividend_per_share",
     "event.buyback_amount",
     "event.insider_net_buy",
+    *WB_WISE_FIELDS,
 )
 
 # 경고 문장이 한글로 완성됐는지 보는 표지(SoT 경고 문장 행, 이슈 #229).
@@ -452,6 +455,9 @@ def test_list_fields_serves_every_declared_field_whose_source_is_built(
     # LATEST 원천의 커버 시작은 첫 공개일이고, 그 전 세션에는 셀이 없다
     assert profiles["financial.book_equity"].coverage.starts_on == WB_SESSIONS[0]
     assert profiles["event.buyback_amount"].coverage.starts_on == date(2023, 12, 27)
+    # 수집일 격자(WISE, #608)는 캘린더 시작이 아니라 첫 수집일부터다
+    assert profiles["wise.consensus_op"].coverage.starts_on == date(2023, 12, 28)
+    assert profiles["price.close"].coverage.starts_on == WB_SESSIONS[0]
     # 설명은 선언표 문장 그대로 소비자에게 간다 — 판정 접두를 붙이지 않는다(#373).
     assert {f: p.description for f, p in profiles.items()} == {
         spec.field_id: spec.description for spec in FIELD_SPECS
@@ -482,6 +488,11 @@ def test_declarations_their_query_does_not_read_are_rejected() -> None:
         _reject_unread_declarations(
             (*SOURCE_SPECS, replace(plain, omitted_is_zero=True)), FIELD_SPECS
         )
+    # 날짜 식은 비매크로 격자 원천의 관계식만 감싼다(#608)
+    macro = next(spec for spec in SOURCE_SPECS if spec.is_macro and spec.mode is SourceMode.GRID)
+    for bad in (replace(latest, date_expr="fetched_date"), replace(macro, date_expr="date")):
+        with pytest.raises(ValueError, match=re.escape(f"sources=['{bad.name}']")):
+            _reject_unread_declarations((*SOURCE_SPECS, bad), FIELD_SPECS)
 
 
 @pytest.mark.parametrize("source_name", ["adj", "credit"])

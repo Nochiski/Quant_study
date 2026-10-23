@@ -95,3 +95,6 @@ YAML 에서 이름이 바뀌는 것은 사모 하나다(`kiwoom.private_fund_net
   `flow.private_fund_net_buy` 로 이름 교체)을 돌렸다. 2026-09-01~10-19 scope 31거래일 상위 10 겹침이 stage 참조판(#609)과
   날마다 같다 — 사모 원천이 stage 키움 단독에서 flow_daily 합집합으로 바뀐 영향은 이 구간에 없다.
 
+- 10-23 `fin_ratio_wise.sql` 숫자 상수 제거(8ca0d213)는 산출 불변이다 — 로컬 stage 사본 `stg_fin_wise` m_20261021T001728 판에서 옛 SQL(62645cb5)과
+  새 SQL 결과가 5,606,964행으로 같고 EXCEPT ALL 양방향 0행, 열 타입도 같다.
+- 10-23 워크벤치 PR #614 머지(01a721dc). 계보 병합 때 할 일은 '열린 것' 3.

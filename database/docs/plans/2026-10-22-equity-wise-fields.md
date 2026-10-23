@@ -84,6 +84,9 @@ YAML 에서 이름이 바뀌는 것은 사모 하나다(`kiwoom.private_fund_net
 
 1. stage WISE 표에 수집 시각(`fetched_at`)을 실으면 D1 대안(행마다 처음 쓸 세션)으로 06:00 수집분을 하루 당길 수 있다.
 2. fi·compat 를 equity 표로 옮기는 B-23 나머지.
+3. **계보 병합 때(이 브랜치 + main #614)**: 워크벤치 어댑터가 S26 표를 읽으므로 `tests/test_equity_s21_workbench.py` 의 `ALL_FIELDS` 에
+   WISE 13필드를 더하고 `LEDGER_PENDING_FIELDS` 를 비운다. backend `tests/equity_fixture.py` 의 `LEDGER_PENDING_FIELDS` 도 비운다
+   — 비우지 않으면 `test_원장_대기_필드는_아직_원장_선언에_없다` 와 S21 의 폴백 등식이 실패해 알려 준다.
 
 ## 기록
 

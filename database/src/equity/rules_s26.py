@@ -11,12 +11,14 @@ TECH_DEBT B-23 의 equity 쪽 첫걸음이다 — fi·compat 가 '한시 예외'
   consensus_annual — 연간 실적(A)·추정(E) 표. 그날 수집분에 당해 12월기 추정이 있는지가 곧 추정치 보유 여부다.
   fin_ratio_wise   — 재무비율(cF4002) 연간 열을 행으로 편 것. PER·PBR·배당수익률의 실적 열은 결산기 말 주가 기준.
 
-**PIT** — stage 가 낸 `available_date = fetched_date`(measured)를 그대로 나르고 랙은 1 세션이다. 기존
-`consensus_daily`·`opinion_daily` WISE 축과 같은 선언이다. 06:00 수집(10-20~)분은 장 시작 전에 받지만 stage 에
-수집 **시각**이 없어 그날 쓸 수 있었는지를 행에서 가를 수 없다 — 날짜 경계를 코드에 박지 않고 하루 보수적으로 둔다
-(플랜 D1, P1).
+**PIT**(플랜 D1, 사용자 10-23 "데이터는 신선도 최대한 좋을 때 써야지") — 가용일은 stage 의 수집 시각
+`fetched_at_utc`(stage 2.9.0)로 행마다 센 '지식 세션'이고 랙은 1 세션이다. 장 시작(09:00 KST = 00:00 UTC) 전에
+받은 값은 직전 세션 마감 뒤 지식이라 그날 바로 쓰고, 그 뒤에 받은 값은 다음 세션부터 쓴다. 수집 시각은 운영 중에
+06:00·18:05·15:52·11:33 으로 바뀌어 왔다 — 날짜 경계를 코드에 박지 않고 시각에서 센다. 수집 시각이 없으면
+수집일(보수), 수집 시각의 날짜가 이 판 달력의 마지막 거래일 뒤면 당기지 않는다(`sql/*.sql` 머리 주석).
 
 테이블 특화 술어(`extra_gates`):
+  세 표 공통(폐기형) — 가용일 독립 재계산 불일치 0 · 가용일 > 수집일 0. 기록형: 수집 시각 없는 행 수.
   EG3_consensus_matrix — 폐기형: lookback 어휘 폐쇄 · lookback_idx ↔ lookback 대응 · fy_rank 가 지난 결산기에만
                          NULL · ticker 폭. 기록형: 수집일 수·종목 수·최신 수집일과 그날 FY1 영업이익 보유 종목 수.
   EG3_consensus_annual — 폐기형: period_kind 어휘(A·E) · period 6자리 · ticker 폭. 기록형: 최신 수집일의 당해
@@ -80,6 +82,24 @@ def _result(name: str, checks: dict[str, int], metrics: dict[str, object],
                       merged)
 
 
+def _pit_checks(ctx: EquityGateContext) -> tuple[dict[str, int], dict[str, object]]:
+    """가용일을 산출 SQL(ASOF 조인)과 다른 식(상관 서브쿼리)으로 다시 세어 대조한다 — 세 `.sql` 이 같은 규칙인지."""
+    v = _q(ctx.out_view)
+    n_mismatch, n_after_fetch, n_no_time = _row(ctx, f"""
+        SELECT
+          count(*) FILTER (WHERE available_date IS DISTINCT FROM (
+              CASE WHEN fetched_at_utc IS NULL THEN fetched_date
+                   WHEN CAST(fetched_at_utc AS DATE) > (SELECT max(date) FROM trading_calendar)
+                        THEN CAST(fetched_at_utc AS DATE)
+                   ELSE (SELECT max(t.date) FROM trading_calendar t WHERE t.date <= CAST(o.fetched_at_utc AS DATE))
+              END)),
+          count(*) FILTER (WHERE available_date > fetched_date),
+          count(*) FILTER (WHERE fetched_at_utc IS NULL)
+        FROM {v} o""")
+    return ({"n_available_recompute_mismatch": _int(n_mismatch), "n_available_after_fetch": _int(n_after_fetch)},
+            {"n_without_fetch_time": _int(n_no_time)})
+
+
 def _latest(ctx: EquityGateContext) -> str:
     """최신 수집일 술어 — 기록형 지표가 '오늘 판' 을 보게 한다."""
     v = _q(ctx.out_view)
@@ -105,6 +125,7 @@ def eg3_consensus_matrix(ctx: EquityGateContext) -> GateResult:
         "n_fy_rank_inconsistent": _int(n_rank),
         "n_ticker_bad_width": _int(n_ticker),
     }
+    pit_checks, pit_metrics = _pit_checks(ctx)
     n_days, n_tickers, latest = _row(ctx, f"""
         SELECT count(DISTINCT fetched_date), count(DISTINCT ticker), max(fetched_date) FROM {v}""")
     n_latest, n_latest_fy1_op = _row(ctx, f"""
@@ -115,9 +136,10 @@ def eg3_consensus_matrix(ctx: EquityGateContext) -> GateResult:
     metrics: dict[str, object] = {
         "n_fetched_dates": _int(n_days), "n_tickers": _int(n_tickers),
         "latest_fetched_date": None if latest is None else str(latest),
-        "n_tickers_latest": _int(n_latest), "n_tickers_latest_fy1_op": _int(n_latest_fy1_op),
+        "n_tickers_latest": _int(n_latest), "n_tickers_latest_fy1_op": _int(n_latest_fy1_op), **pit_metrics,
     }
-    return _result("EG3_consensus_matrix", checks, metrics, "lookback 어휘·대응·fy_rank·폭 성립")
+    return _result("EG3_consensus_matrix", {**checks, **pit_checks}, metrics,
+                   "lookback 어휘·대응·fy_rank·폭·가용일 성립")
 
 
 eg3_consensus_matrix.gate_name = "EG3_consensus_matrix"     # type: ignore[attr-defined]
@@ -145,9 +167,11 @@ def eg3_consensus_annual(ctx: EquityGateContext) -> GateResult:
                                               AND period = strftime(fetched_date, '%Y') || '12'
                                               AND op IS NOT NULL AND ni IS NOT NULL)
         FROM {v} WHERE {_latest(ctx)}""")
+    pit_checks, pit_metrics = _pit_checks(ctx)
     metrics: dict[str, object] = {"n_tickers_latest": _int(n_latest),
-                                  "n_tickers_latest_fy0_estimate": _int(n_fy0)}
-    return _result("EG3_consensus_annual", checks, metrics, "period_kind 어휘·period 폭·ticker 폭 성립")
+                                  "n_tickers_latest_fy0_estimate": _int(n_fy0), **pit_metrics}
+    return _result("EG3_consensus_annual", {**checks, **pit_checks}, metrics,
+                   "period_kind 어휘·period 폭·ticker 폭·가용일 성립")
 
 
 eg3_consensus_annual.gate_name = "EG3_consensus_annual"     # type: ignore[attr-defined]
@@ -162,8 +186,11 @@ def eg3_fin_ratio_wise(ctx: EquityGateContext) -> GateResult:
     n_unparsed, n_latest = _row(ctx, f"""
         SELECT (SELECT count(*) FROM {v} WHERE period IS NULL),
                (SELECT count(DISTINCT ticker) FROM {v} WHERE {_latest(ctx)})""")
-    metrics: dict[str, object] = {"n_period_unparsed": _int(n_unparsed), "n_tickers_latest": _int(n_latest)}
-    return _result("EG3_fin_ratio_wise", {"n_ticker_bad_width": _int(n_ticker)}, metrics, "ticker 폭 성립")
+    pit_checks, pit_metrics = _pit_checks(ctx)
+    metrics: dict[str, object] = {"n_period_unparsed": _int(n_unparsed), "n_tickers_latest": _int(n_latest),
+                                  **pit_metrics}
+    return _result("EG3_fin_ratio_wise", {"n_ticker_bad_width": _int(n_ticker), **pit_checks}, metrics,
+                   "ticker 폭·가용일 성립")
 
 
 eg3_fin_ratio_wise.gate_name = "EG3_fin_ratio_wise"     # type: ignore[attr-defined]
@@ -171,8 +198,8 @@ eg3_fin_ratio_wise.gate_name = "EG3_fin_ratio_wise"     # type: ignore[attr-defi
 
 # ── 필드 프로파일 ─────────────────────────────────────────────────────────────
 
-_DISC = ("WISE 화면 수집일(measured). stage 에 수집 시각이 없어 그날 장중에 쓸 수 있었는지 모른다 → "
-         "익일 지식으로 쓴다(06:00 수집분은 하루 보수적, 플랜 D1)")
+_DISC = ("WISE 화면 수집 시각(measured, stage fetched_at_utc)으로 센 지식 세션 → 다음 세션부터 쓴다. 장 시작(09:00) "
+         "전 수집분은 그날 쓰고 그 뒤 수집분은 다음 세션부터다(플랜 D1)")
 _SINCE = "백필 없음 — 2026-09-01 수집분부터다."
 _MATRIX_NAMES = {"op": "영업이익", "ni": "순이익"}
 _LOOKBACK_NAMES = {"1w": "1주 전", "1m": "1개월 전", "3m": "3개월 전"}
@@ -239,8 +266,9 @@ FIELDS_RATIO: tuple[FieldProfile, ...] = (
 
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
-_AVAILABLE_RULE = ("column:fetched_date — stage available_date = fetched_date(measured)를 그대로 나른다. "
-                   "수집 시각은 stage 에 없다(플랜 D1)")
+_AVAILABLE_RULE = ("derived:fetched_at_utc — 수집 시각의 UTC 날짜(장 시작 09:00 KST 경계) 이하 마지막 거래일. 시각이 "
+                   "없으면 fetched_date(measured), 달력 끝 뒤면 그 날짜 그대로(플랜 D1)")
+_PIT_BASIS = ("measured", "derived")
 
 CONSENSUS_MATRIX = register(EquityTable(
     name="consensus_matrix",
@@ -248,8 +276,8 @@ CONSENSUS_MATRIX = register(EquityTable(
     columns={"ticker": "VARCHAR", "fetched_date": "DATE", "target_period": "VARCHAR",
              "acc_cd": "VARCHAR", "lookback_idx": "VARCHAR", "lookback": "VARCHAR", "acc_nm": "VARCHAR",
              "base_date": "DATE", "value": "DECIMAL(24,6)", "fy_rank": "BIGINT",
-             "available_date": "DATE", "available_basis": "VARCHAR"},
-    inputs=("stg_consensus_matrix",),
+             "fetched_at_utc": "TIMESTAMP", "available_date": "DATE", "available_basis": "VARCHAR"},
+    inputs=("stg_consensus_matrix", "trading_calendar"),
     partition_class="date_axis",
     partition_key_expr="year(fetched_date)",
     available_rule=_AVAILABLE_RULE,
@@ -257,10 +285,11 @@ CONSENSUS_MATRIX = register(EquityTable(
     eg1_rhs_sql="SELECT count(*) FROM stg_consensus_matrix",
     sql_path=SQL_DIR / "consensus_matrix.sql",
     input_columns={"stg_consensus_matrix": ("ticker", "fetched_date", "target_period", "acc_cd", "lookback_idx",
-                                            "lookback", "acc_nm", "base_date", "value",
-                                            "available_date", "available_basis")},
-    available_basis=("measured",),
-    content_date_column="fetched_date",
+                                            "lookback", "acc_nm", "base_date", "value", "fetched_at_utc"),
+                  "trading_calendar": ("date",)},
+    # 가용일이 수집일보다 이를 수 있어(장 전 수집 → 직전 세션) 내용일 하한(EG2-P02)은 걸지 않는다 —
+    # 대신 EG3_* 가 가용일을 다시 세어 대조하고 가용일 ≤ 수집일을 본다.
+    available_basis=_PIT_BASIS,
     reject_reasons=REJECT_REASONS,
     extra_gates=(eg3_consensus_matrix,),
     field_profiles=FIELDS_MATRIX,
@@ -275,8 +304,8 @@ CONSENSUS_ANNUAL = register(EquityTable(
              "ni": "DECIMAL(20,4)", "eps": "DECIMAL(14,4)", "bps": "DECIMAL(14,4)",
              "per": "DECIMAL(12,4)", "pbr": "DECIMAL(12,4)", "roe_pct": "DECIMAL(12,4)",
              "ev_ebitda": "DECIMAL(12,4)",
-             "available_date": "DATE", "available_basis": "VARCHAR"},
-    inputs=("stg_consensus_annual",),
+             "fetched_at_utc": "TIMESTAMP", "available_date": "DATE", "available_basis": "VARCHAR"},
+    inputs=("stg_consensus_annual", "trading_calendar"),
     partition_class="date_axis",
     partition_key_expr="year(fetched_date)",
     available_rule=_AVAILABLE_RULE,
@@ -285,10 +314,11 @@ CONSENSUS_ANNUAL = register(EquityTable(
     sql_path=SQL_DIR / "consensus_annual.sql",
     input_columns={"stg_consensus_annual": ("ticker", "fetched_date", "period_label", "period", "period_kind",
                                             "fs_basis", "revenue", "yoy_pct", "op", "ni", "eps", "bps",
-                                            "per", "pbr", "roe_pct", "ev_ebitda",
-                                            "available_date", "available_basis")},
-    available_basis=("measured",),
-    content_date_column="fetched_date",
+                                            "per", "pbr", "roe_pct", "ev_ebitda", "fetched_at_utc"),
+                  "trading_calendar": ("date",)},
+    # 가용일이 수집일보다 이를 수 있어(장 전 수집 → 직전 세션) 내용일 하한(EG2-P02)은 걸지 않는다 —
+    # 대신 EG3_* 가 가용일을 다시 세어 대조하고 가용일 ≤ 수집일을 본다.
+    available_basis=_PIT_BASIS,
     reject_reasons=REJECT_REASONS,
     extra_gates=(eg3_consensus_annual,),
     field_profiles=FIELDS_ANNUAL,
@@ -301,8 +331,8 @@ FIN_RATIO_WISE = register(EquityTable(
              "accode": "VARCHAR", "acc_nm": "VARCHAR", "unt_typ": "INTEGER",
              "period_label": "VARCHAR", "period": "VARCHAR", "is_estimate": "BOOLEAN",
              "value": "DECIMAL(38,6)",
-             "available_date": "DATE", "available_basis": "VARCHAR"},
-    inputs=("stg_fin_wise",),
+             "fetched_at_utc": "TIMESTAMP", "available_date": "DATE", "available_basis": "VARCHAR"},
+    inputs=("stg_fin_wise", "trading_calendar"),
     partition_class="date_axis",
     partition_key_expr="year(fetched_date)",
     available_rule=_AVAILABLE_RULE,
@@ -311,10 +341,11 @@ FIN_RATIO_WISE = register(EquityTable(
     sql_path=SQL_DIR / "fin_ratio_wise.sql",
     input_columns={"stg_fin_wise": ("ticker", "fetched_date", "ep", "seq", "accode", "acc_nm", "unt_typ",
                                     *(f"period_label_{i}" for i in range(1, 7)),
-                                    *(f"val_{i}" for i in range(1, 7)),
-                                    "available_date", "available_basis")},
-    available_basis=("measured",),
-    content_date_column="fetched_date",
+                                    *(f"val_{i}" for i in range(1, 7)), "fetched_at_utc"),
+                  "trading_calendar": ("date",)},
+    # 가용일이 수집일보다 이를 수 있어(장 전 수집 → 직전 세션) 내용일 하한(EG2-P02)은 걸지 않는다 —
+    # 대신 EG3_* 가 가용일을 다시 세어 대조하고 가용일 ≤ 수집일을 본다.
+    available_basis=_PIT_BASIS,
     reject_reasons=REJECT_REASONS,
     extra_gates=(eg3_fin_ratio_wise,),
     field_profiles=FIELDS_RATIO,

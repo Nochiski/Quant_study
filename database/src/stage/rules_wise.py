@@ -59,6 +59,9 @@ STG_CONSENSUS_MONTHLY = TableRule(
 # ── 공통 조각 ─────────────────────────────────────────────────────────────────────────────────────
 _WS = SourceRef("wise", "ws_raw", "ws_raw")
 _FETCHED_MEASURED = AvailableRule("column", column="fetched_date", basis="measured")
+# 수집 시각(UTC 무표기, 원장 ws_raw.fetched_at) — stage 2.9.0(#608). observed_date 는 이 값의 KST 날짜만 남겨
+# 장 전(06:00) 수집과 장 뒤(18:05) 수집을 가를 수 없었다. equity 가 행마다 가용일을 세는 축이다(S26).
+_FETCHED_AT_UTC = ExtraColumn("fetched_at_utc", 'TRY_CAST(s."fetched_at" AS TIMESTAMP)')
 
 
 def _blob_table(name: str, columns: tuple[ColumnRule, ...], natural_key: tuple[str, ...],
@@ -67,6 +70,7 @@ def _blob_table(name: str, columns: tuple[ColumnRule, ...], natural_key: tuple[s
     """ws_raw blob 언네스트 테이블의 공통 골격 (§1 예외 c). 파티션·시각·가용은 monthly 와 동일.
 
     `fold` = 연속 판 접기(§1 예외 f)와 아침 재사용(묶음 7-3)을 함께 켠다 — 원장 sha256 열을 G0 계약에 더한다.
+    모든 표가 수집 시각 `fetched_at_utc` 를 싣는다(2.9.0) — 접는 표는 그 원문을 처음 본 blob 의 시각이다.
     """
     bs = BlobSource("wise", "ws_raw", eps, parser)
     if fold:
@@ -77,7 +81,7 @@ def _blob_table(name: str, columns: tuple[ColumnRule, ...], natural_key: tuple[s
         partition_class="date_axis", partition_expr="substr(fetched_date, 1, 4)",
         partition_src="fetched_date", observed_src="fetched_at", write_mode="append_only",
         fanout=1, payload_exclude=("fetched_at",), lag_known=True, available=_FETCHED_MEASURED,
-        key_unique=True, extras=extras, blob_source=bs, morning_reuse=fold,
+        key_unique=True, extras=(_FETCHED_AT_UTC, *extras), blob_source=bs, morning_reuse=fold,
     )
 
 

@@ -14,7 +14,9 @@ from datetime import UTC, datetime
 #        파싱 전에 버린다(§1 예외 (f), 묶음 7 N-37). 두 표 fetched_date 뜻이 '그 원문을 처음 본 날'로 바뀐다
 # 2.8.0: stg_flow_postclose_kiwoom 추가 — 장 마감 직후 원장(postclose.db) ka10060, stg_flow_daily_kiwoom 과 같은
 #        열 규칙 + price_valid·collected_at(컷오버 PR-2). G4 골든 물려받기(golden_from). 다른 표 산출 불변
-RULES_VERSION = "2.8.0"
+# 2.9.0: WISE blob 표 7개(`rules_wise._blob_table` — 연간·분기·매트릭스·재무 2·의견 2)에 수집 시각 `fetched_at_utc` 열 추가(#608) — equity S26 이 행마다
+#        가용일(장 전 수집은 그날 쓴다)을 센다. 기존 열·행 산출 불변, 열 하나 추가
+RULES_VERSION = "2.9.0"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 
 # 빌드 basis — 하루 2판 규약 (플랜 v2 §4 Task B.1). 빌드 id 접두어가 판을 구분한다:

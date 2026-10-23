@@ -9,15 +9,35 @@
 -- stage 가 같은 원문을 접어(stage 2.7.0) fetched_date 는 그 원문을 처음 본 날이다 — 다음 판이 올 때까지 값이 이어진다.
 -- WISE 가 종목을 더 보여 주지 않아도 옛 판이 남으므로, 최신값으로 읽는 소비자는 이월을 스스로 정한다(플랜 D2).
 --
--- PIT: stage 가 낸 available_date(= fetched_date)·basis(measured)를 그대로 나른다.
-WITH wide AS (
+-- PIT(플랜 D1, 사용자 10-23 "신선도 최대한"): 가용일 = 수집 시각으로 행마다 센 '지식 세션'이고 랙은 1 세션이다.
+--   장 시작(09:00 KST = 00:00 UTC) 전에 받은 값은 직전 세션 마감 뒤 지식이라 그날 바로 쓰고, 그 뒤에 받은 값은
+--   다음 세션부터 쓴다 — 수집 시각의 UTC 날짜(known_date) 이하 마지막 거래일이 지식 세션이다.
+--   수집 시각이 없으면 수집일(stage measured, 보수). known_date 가 이 판 달력의 마지막 거래일 뒤면(휴장인지 아직
+--   안 들어온 날인지 가를 수 없다) 당기지 않고 known_date 그대로 둔다. 같은 규칙을 EG3 가 독립 재계산으로 대조한다.
+-- 접힌 판의 수집 시각은 그 원문을 처음 본 blob 의 시각이다.
+WITH cal AS (SELECT max(date) AS last_session FROM trading_calendar),
+known AS (
+    SELECT s.*, CAST(s.fetched_at_utc AS DATE) AS known_date FROM stg_fin_wise s
+    WHERE s.ep = 'cF4002'
+),
+pit AS (
+    SELECT k.*,
+           CASE WHEN k.fetched_at_utc IS NULL THEN k.fetched_date
+                WHEN k.known_date > c.last_session THEN k.known_date
+                ELSE coalesce(t.date, k.known_date)
+           END AS pit_date,
+           CASE WHEN k.fetched_at_utc IS NULL THEN 'measured' ELSE 'derived' END AS pit_basis
+    FROM known k
+    CROSS JOIN cal c
+    ASOF LEFT JOIN trading_calendar t ON k.known_date >= t.date
+),
+wide AS (
     SELECT ticker, fetched_date, CAST(seq AS INTEGER) AS seq, accode, acc_nm, unt_typ,
            list_value(period_label_1, period_label_2, period_label_3,
                       period_label_4, period_label_5, period_label_6) AS labels,
            list_value(val_1, val_2, val_3, val_4, val_5, val_6) AS vals,
-           available_date, available_basis
-    FROM stg_fin_wise
-    WHERE ep = 'cF4002'
+           fetched_at_utc, pit_date, pit_basis
+    FROM pit
 ),
 cells AS (
     SELECT w.*, unnest(range(1, len(w.labels) + 1)) AS slot FROM wide w
@@ -34,8 +54,9 @@ SELECT
     nullif(replace(regexp_extract(labels[slot], '^[0-9]{4}/[0-9]{2}'), '/', ''), '') AS period,
     labels[slot] LIKE '%(E)%'                                     AS is_estimate,
     vals[slot]                                                    AS value,
-    available_date,
-    available_basis,
+    fetched_at_utc,
+    pit_date                                                      AS available_date,
+    pit_basis                                                     AS available_basis,
     CAST(NULL AS VARCHAR)                                         AS reject_reason   -- 격리 사유 없음(REJECT_REASONS=())
 FROM cells
 WHERE coalesce(labels[slot], '') <> ''

@@ -12,12 +12,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 import pytest
 
 from strategy_workbench.adapters.outbound.equity_duckdb._source import LEDGER_SYNC
+from strategy_workbench.adapters.outbound.equity_duckdb._specs import SOURCE_BY_NAME
 from strategy_workbench.application.portfolio_design.facade.ports import (
     RawFieldValueType,
     RawObservationQuery,
@@ -93,28 +95,54 @@ def test_WISE_필드는_대장_랙을_읽고_커버_시작은_첫_수집일이�
     }
 
 
-def test_매트릭스는_전_세션_수집분에서_가장_가까운_결산기를_고른다(
+def test_매트릭스는_전_지식_세션_수집분에서_가장_가까운_결산기를_고른다(
     adapter: EquityDuckdbAdapter,
 ) -> None:
     fields = ("wise.consensus_op", "wise.consensus_op_1w_ago", "wise.consensus_ni_3m_ago")
     cells = _cells(adapter, date(2023, 12, 29), date(2024, 1, 8), fields)
 
-    # 12-28 수집분(2023-12) → 2023/12 기, 랙 1 이라 12-29 세션에 보인다
+    # 12-28 장 뒤 수집분(2023-12) → 2023/12 기, 지식 세션 12-28 · 랙 1 이라 12-29 세션에 보인다
     assert cells[(date(2023, 12, 29), SECURITY, "wise.consensus_op")] == (
         wb_wise_matrix_value("121500", "202312", "current", date(2023, 12, 28)),
         date(2023, 12, 28),
         CellKind.OBSERVED,
     )
-    # 01-03 수집분(2024-01) → 2023/12 는 끝난 기라 2024/12 기
-    assert cells[(date(2024, 1, 4), SECURITY, "wise.consensus_op_1w_ago")][0] == (
-        wb_wise_matrix_value("121500", "202412", "1w", date(2024, 1, 3))
+    # 01-03 장 전 수집분은 01-02 지식이라 그날(01-03) 세션에 보인다.
+    # 2023/12 는 끝난 기라 2024/12 기다
+    assert cells[(date(2024, 1, 3), SECURITY, "wise.consensus_op_1w_ago")] == (
+        wb_wise_matrix_value("121500", "202412", "1w", date(2024, 1, 3)),
+        date(2024, 1, 2),
+        CellKind.OBSERVED,
     )
     assert cells[(date(2024, 1, 5), SECURITY, "wise.consensus_ni_3m_ago")][0] == (
         wb_wise_matrix_value("122710", "202412", "3m", date(2024, 1, 4))
     )
-    # 12-29·01-05 에는 수집이 없다 — 다음 세션 셀이 비고, 토요일(01-06) 수집분은 세션이 아니다
-    assert (date(2024, 1, 2), SECURITY, "wise.consensus_op") not in cells
-    assert (date(2024, 1, 8), SECURITY, "wise.consensus_op") not in cells
+    # 01-05(금) 지식 수집분이 둘(토 01-06 · 월 01-08 장 전) — 01-08 세션은 늦은 01-08 수집분
+    assert cells[(date(2024, 1, 8), SECURITY, "wise.consensus_op")][0] == (
+        wb_wise_matrix_value("121500", "202412", "current", date(2024, 1, 8))
+    )
+    # 12-29·01-03 지식 세션에는 판이 통째로 없다 — 직전 판(12-28·01-02 지식)을 잇는다(한도 5 세션)
+    assert cells[(date(2024, 1, 2), SECURITY, "wise.consensus_op")] == (
+        wb_wise_matrix_value("121500", "202312", "current", date(2023, 12, 28)),
+        date(2023, 12, 28),
+        CellKind.OBSERVED,
+    )
+    assert cells[(date(2024, 1, 4), SECURITY, "wise.consensus_op")][1] == date(2024, 1, 2)
+
+
+def test_WISE_판_잇기는_한도_세션까지만이다(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """판이 통째로 없는 세션은 한도 안에서만 직전 판을 잇는다 — 한도 1 이면 두 세션째부터 빈다."""
+    for name in [n for n in SOURCE_BY_NAME if n.startswith("wise_matrix_")]:
+        monkeypatch.setitem(SOURCE_BY_NAME, name, replace(SOURCE_BY_NAME[name], carry_sessions=1))
+    adapter = EquityDuckdbAdapter(build_workbench_root(tmp_path / "equity"))
+    cells = _cells(adapter, date(2024, 1, 8), date(2024, 1, 12), ("wise.consensus_op",))
+
+    # 마지막 판은 01-05(금) 지식 — 01-08 세션은 그 판, 01-09 는 한 세션 이은 판, 01-10 부터는 빈다
+    assert cells[(date(2024, 1, 8), SECURITY, "wise.consensus_op")][1] == date(2024, 1, 5)
+    assert cells[(date(2024, 1, 9), SECURITY, "wise.consensus_op")][1] == date(2024, 1, 5)
+    assert (date(2024, 1, 10), SECURITY, "wise.consensus_op") not in cells
 
 
 def test_연간_추정은_그날_수집분에_없으면_옛_값을_잇지_않는다(
@@ -128,8 +156,11 @@ def test_연간_추정은_그날_수집분에_없으면_옛_값을_잇지_않는
     )
 
     assert cells[(date(2023, 12, 29), SECURITY, "wise.fy0_op_estimate")][0] == 900.0  # 2023/12 E
-    assert cells[(date(2024, 1, 4), SECURITY, "wise.fy0_ni_estimate")][0] == 460.0  # 2024/12 E
-    # 01-04 수집분에는 2024/12 추정이 없다 — 01-03 수집분 값을 잇지 않는다
+    assert (
+        cells[(date(2024, 1, 3), SECURITY, "wise.fy0_ni_estimate")][0] == 460.0
+    )  # 장 전 수집, 그날
+    # 01-04 수집분에는 2024/12 추정이 없다 — 판은 있으니 01-03 수집분 값을 잇지 않는다
+    # (판 단위로만 잇는다)
     assert (date(2024, 1, 5), SECURITY, "wise.fy0_op_estimate") not in cells
 
 

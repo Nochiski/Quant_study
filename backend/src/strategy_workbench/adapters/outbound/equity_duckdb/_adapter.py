@@ -965,7 +965,7 @@ class EquityDuckdbAdapter:
         """필드별 (커버율 %, 시작 세션). 한 번 재고 캐시한다.
 
         `GRID` 는 값이 있는 원천 행 / `universe_daily` 격자 행이고 시작은 캘린더 시작이다(날짜
-        식으로 읽는 수집일 격자는 첫 공개일, #608).
+        식으로 읽는 WISE 지식 세션 격자는 첫 공개일, #608).
         `LATEST` 는 **종목 축 커버율** — 값이 하나라도 있는 축 키 / 유니버스의 축 키 — 이고
         시작은 첫 `available_date`(캘린더 안으로 자른다). 두 뜻이 달라 프로필 evidence 에 적는다.
         """
@@ -1038,7 +1038,7 @@ class EquityDuckdbAdapter:
     ) -> date:
         """`LATEST` 원천의 첫 공개일(캘린더 안으로 자른다). `GRID` 는 캘린더 시작이다.
 
-        날짜 식으로 읽는 격자(WISE 수집일 격자, #608)는 수집을 늦게 시작해 첫 공개일을 잰다.
+        날짜 식으로 읽는 격자(WISE 지식 세션 격자, #608)는 수집을 늦게 시작해 첫 공개일을 잰다.
         """
         if source.mode is SourceMode.GRID and source.date_expr is None:
             return self._sessions[0]
@@ -1781,15 +1781,37 @@ class EquityDuckdbAdapter:
     def _relation(self, source: SourceSpec, as_of: date) -> str:
         """원천을 읽는 duckdb 관계식 — 테이블이면 parquet, 매크로면 as_of 를 넘긴 호출.
 
-        격자 날짜 열이 `date` 가 아닌 표(WISE 수집일 격자, #608)는 그 날짜 식을 `date` 로 붙여
+        격자 날짜 열이 `date` 가 아닌 표(WISE 지식 세션 격자, #608)는 그 날짜 식을 `date` 로 붙여
         감싼다 — 격자 질의(`_grid_sql`)와 커버율이 같은 열 이름을 읽는다.
+
+        판 잇기(`carry_sessions`)가 있으면 판(날짜 식의 값)마다 그 판이 가장 최근 판인 세션들에
+        펼친다. 세션 s 의 판은 s 이하에서 가장 늦은 판이고, s 가 그 판 세션에서 한도보다 멀면
+        펼치지 않는다. 판 세션은 판 날짜 이하 마지막 거래일이다(달력 끝 뒤의 판 날짜도 그렇다).
         """
         if source.is_macro:
             return f"{source.relation}(as_of := {_lit(as_of)})"
         relation = self._source(source.relation)
         if source.date_expr is None:
             return relation
-        return f"(SELECT *, {source.date_expr} AS date FROM {relation})"
+        if source.carry_sessions is None:
+            return f"(SELECT *, {source.date_expr} AS date FROM {relation})"
+        calendar = self._source(CALENDAR_TABLE)
+        return f"""(
+            WITH src AS (SELECT *, {source.date_expr} AS snap_date FROM {relation}),
+            cal AS (SELECT date AS session, row_number() OVER (ORDER BY date) AS n FROM {calendar}),
+            snap AS (
+                SELECT s.snap_date, c.n AS snap_n
+                FROM (SELECT DISTINCT snap_date FROM src) s
+                ASOF JOIN cal c ON s.snap_date >= c.session
+            ),
+            served AS (
+                SELECT c.session, p.snap_date
+                FROM cal c ASOF JOIN snap p ON c.session >= p.snap_date
+                WHERE c.n - p.snap_n <= {source.carry_sessions}
+            )
+            SELECT src.* EXCLUDE (snap_date), served.session AS date
+            FROM src JOIN served USING (snap_date)
+        )"""
 
     def _panel(
         self,

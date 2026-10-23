@@ -960,7 +960,9 @@ WB_LEVEL_SHIFT_BASE = WB_LEVEL_SHIFT * wb_close("035420", WB_HALT_DATE)
 
 # ── WISE 3표(원장 S26, #608) ────────────────────────────────────────────────────
 # 열은 어댑터 선언이 읽는 것만 둔다(실물 표의 일부). 수집이 해를 넘겨(2023-12 → 2024-01) 결산기
-# 고르기(`fy_rank`) 경계가 드러난다. 12-29·01-05 에는 수집이 없고 01-06 은 토요일 수집이다.
+# 고르기(`fy_rank`) 경계가 드러난다. 가용일은 원장처럼 수집 시각으로 센 지식 세션이다
+# (`WB_WISE_KNOWLEDGE`): 장 뒤 수집은 그 세션, 장 전 수집(01-03·01-06 토·01-08)은 직전 세션 —
+# 01-06·01-08 수집은 둘 다 01-05(금) 지식이라 늦은 01-08 수집이 이긴다.
 WB_WISE_FIELDS = (
     *(
         f"wise.consensus_{metric}{suffix}"
@@ -978,7 +980,19 @@ WB_WISE_FIELDS = (
 # `test_equity_field_contract_parity` 의 대기 필드 검사가 실패하니 이 목록을 지우고 전체 대조로
 # 돌아간다(#608).
 LEDGER_PENDING_FIELDS = frozenset({*WB_WISE_FIELDS, "flow.private_fund_net_buy"})
-WB_WISE_MATRIX_FETCHES = (date(2023, 12, 28), date(2024, 1, 3), date(2024, 1, 4), date(2024, 1, 6))
+WB_WISE_MATRIX_FETCHES = (
+    date(2023, 12, 28), date(2024, 1, 3), date(2024, 1, 4), date(2024, 1, 6), date(2024, 1, 8)
+)
+# 수집일 → 지식 세션(원장 S26 `available_date`). 장 뒤(18:05) 수집은 그 세션, 장 전(06:00)
+# 수집은 직전 세션.
+WB_WISE_KNOWLEDGE = {
+    date(2023, 12, 27): date(2023, 12, 27),
+    date(2023, 12, 28): date(2023, 12, 28),
+    date(2024, 1, 3): date(2024, 1, 2),
+    date(2024, 1, 4): date(2024, 1, 4),
+    date(2024, 1, 6): date(2024, 1, 5),
+    date(2024, 1, 8): date(2024, 1, 5),
+}
 WB_WISE_MATRIX_BASE = {"121500": 1000.0, "122710": 500.0}
 WB_WISE_TARGET_OFFSET = {"202312": 0.0, "202412": 100.0}
 WB_WISE_LOOKBACKS = {"1": "current", "2": "1w", "3": "1m", "4": "3m", "5": "1y"}
@@ -1048,8 +1062,8 @@ def wise_matrix_table() -> pa.Table:
                 pa.decimal128(24, 6),
             ),
             "fy_rank": pa.array([_wise_fy_rank(r[0], r[1]) for r in rows], pa.int64()),
-            "available_date": pa.array([r[0] for r in rows], pa.date32()),
-            "available_basis": ["measured"] * len(rows),
+            "available_date": pa.array([WB_WISE_KNOWLEDGE[r[0]] for r in rows], pa.date32()),
+            "available_basis": ["derived"] * len(rows),
         }
     )
 
@@ -1066,8 +1080,8 @@ def wise_annual_table() -> pa.Table:
             "period_kind": [r[2] for r in rows],
             "op": _decimal([r[3] for r in rows], pa.decimal128(20, 4)),
             "ni": _decimal([r[4] for r in rows], pa.decimal128(20, 4)),
-            "available_date": pa.array([r[0] for r in rows], pa.date32()),
-            "available_basis": ["measured"] * len(rows),
+            "available_date": pa.array([WB_WISE_KNOWLEDGE[r[0]] for r in rows], pa.date32()),
+            "available_basis": ["derived"] * len(rows),
         }
     )
 
@@ -1099,8 +1113,8 @@ def wise_ratio_table() -> pa.Table:
                 ],
                 pa.decimal128(38, 6),
             ),
-            "available_date": pa.array([r[0] for r in rows], pa.date32()),
-            "available_basis": ["measured"] * len(rows),
+            "available_date": pa.array([WB_WISE_KNOWLEDGE[r[0]] for r in rows], pa.date32()),
+            "available_basis": ["derived"] * len(rows),
         }
     )
 

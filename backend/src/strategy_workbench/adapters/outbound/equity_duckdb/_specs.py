@@ -114,10 +114,16 @@ class SourceSpec:
     담고, 더 좁힐 때는 그 뒤에 `AND` 로 조건을 잇는다. 그 대조는
     `tests/contract/test_equity_field_contract_parity.py` 가 맡는다(#583).
 
-    `date_expr` 는 격자 날짜 열이 `date` 가 아닌 표의 날짜 식이다(WISE 매트릭스·연간은 수집일
-    `fetched_date`, #608). 어댑터가 관계식을 감싸 그 값을 `date` 로 붙이므로 격자 질의와 커버율이
+    `date_expr` 는 격자 날짜 열이 `date` 가 아닌 표의 날짜 식이다(WISE 매트릭스·연간은 지식 세션
+    `available_date`, #608). 어댑터가 관계식을 감싸 그 값을 `date` 로 붙이므로 격자 질의와 커버율이
     같은 열 이름을 읽는다. 이런 표는 원장 격자 표와 달리 수집을 늦게 시작해, 커버 시작은 캘린더
     시작이 아니라 첫 공개일을 잰다(`_adapter._starts_on`). GRID·비매크로 원천만 쓴다.
+
+    `carry_sessions` 는 날짜 식 격자에서 어떤 세션에 그 세션 판(수집분)이 **통째로** 없을 때
+    이만큼 세션 안의 가장 최근 판을 그 세션 판으로 쓰는 한도다(WISE — 수집 시각이 바뀐 날,
+    수집이 실패한 날).
+    판 단위로만 잇고 종목별로는 잇지 않는다 — 그날 판에 없는 종목은 그대로 결측이다. 어댑터가
+    관계식에서 판을 세션에 펼친다(`_adapter._relation`). `date_expr` 가 있는 원천만 쓴다.
 
     `required_columns` 는 매크로 원천이 선언 밖에서(`row_filter` 등) 읽는 열이다. 매크로는 게시돼
     있어도 옛 카탈로그면 그 열이 없을 수 있어, 어댑터가 부팅 때 확인하고 없으면 이 원천만 뺀다.
@@ -157,6 +163,7 @@ class SourceSpec:
     masked_expr: str | None = None
     omitted_is_zero: bool = False
     date_expr: str | None = None
+    carry_sessions: int | None = None
 
 
 @dataclass(frozen=True)
@@ -233,10 +240,13 @@ _CREDIT_LAG_BASIS = (
 )
 
 _WISE_LAG_BASIS = (
-    "available_date = fetched_date (WISE 화면 수집일, basis measured) — 수집 시각은 원장에 없어 "
-    "그날 장중에 쓸 수 있었는지 모른다 → dataset_profile(S19) 선언과 같은 1 세션(06:00 수집분은 "
-    "하루 보수적)"
+    "available_date = WISE 수집 시각으로 센 지식 세션(원장 S26, basis derived — 장 시작 "
+    "09:00 KST 전 수집분은 직전 세션, 그 뒤 수집분은 그 세션) → dataset_profile(S19) 선언과 "
+    "같은 1 세션이라 장 전 수집분은 그날 쓴다"
 )
+# WISE 판(수집분)이 통째로 빠진 세션에 직전 판을 잇는 한도. 운영 fi 의 추정치 유예 상한
+# (`FI_COVERAGE_GRACE_MAX` 5 거래일, N-47)과 같은 크기 — 그보다 오래 끊기면 값이 아니라 수집 장애다.
+_WISE_SNAPSHOT_CARRY_SESSIONS = 5
 # WISE 컨센서스 매트릭스(c1050001 T4)의 계정 코드와 비교 시점(lookback)
 _WISE_MATRIX_ACCOUNTS = {"op": "121500", "ni": "122710"}
 _WISE_MATRIX_LOOKBACKS = ("current", "1w", "1m", "3m")
@@ -245,9 +255,12 @@ _WISE_RATIO_ACCOUNTS = {"per": "382100", "pbr": "382500", "dividend_yield": "431
 
 
 def _wise_matrix_source(metric: str, lookback: str) -> SourceSpec:
-    """WISE 매트릭스의 (계정, 비교 시점) 하나를 읽는 수집일 격자 원천.
+    """WISE 매트릭스의 (계정, 비교 시점) 하나를 읽는 지식 세션 격자 원천.
 
-    수집일마다 그 수집 달 이후로 끝나는 결산기 가운데 가장 가까운 기(원장 `fy_rank = 1`)를
+    격자 날짜는 원장이 수집 시각으로 센 지식 세션(`available_date`)이다 — 장 전 수집분이 그날 셀에
+    든다. 한 지식 세션에 수집분이 둘이면(토요일·월요일 06:00 수집은 둘 다 금요일 지식) 늦게 받은
+    것을 쓰고, 한 세션에 판이 통째로 없으면 직전 판을 `_WISE_SNAPSHOT_CARRY_SESSIONS` 세션까지
+    잇는다. 수집분마다 그 수집 달 이후로 끝나는 결산기 가운데 가장 가까운 기(원장 `fy_rank = 1`)를
     고른다. 1주·1개월·3개월 전 값은 우리가 이력을 늦춰 만든 값이 아니라 WISE 가 그 수집일에 준
     비교값이다. 행 필터는 원장 필드 선언(`rules_s26`) 그대로다.
     """
@@ -266,12 +279,14 @@ def _wise_matrix_source(metric: str, lookback: str) -> SourceSpec:
             f"acc_cd = '{_WISE_MATRIX_ACCOUNTS[metric]}' AND lookback = '{lookback}' "
             "AND fy_rank = 1"
         ),
-        pick_order=None,  # fy_rank = 1 이 (종목, 수집일) 당 한 행이다
+        # fy_rank = 1 은 수집분당 한 행이다 — 같은 지식 세션이면 늦게 받은 수집분
+        pick_order="fetched_date DESC",
         lag_sessions=1,
         lag_basis=_WISE_LAG_BASIS,
         requires=(CONSENSUS_MATRIX_TABLE,),
         frequency=FieldFrequency.DAILY,
-        date_expr="fetched_date",
+        date_expr="available_date",
+        carry_sessions=_WISE_SNAPSHOT_CARRY_SESSIONS,
     )
 
 
@@ -279,7 +294,8 @@ def _wise_ratio_source(name: str) -> SourceSpec:
     """WISE 재무비율 표(cF4002)의 계정 하나를 읽는 최신값 원천.
 
     원장이 같은 원문을 접어 `fetched_date` 는 그 원문을 처음 본 날이다 — 컷오프 이하 최신 판의
-    값이 다음 판까지 이어진다. 한 판 안에서는 추정이 아닌 12월기 가운데 가장 늦은 기를 고른다.
+    값이 다음 판까지 이어진다. 한 지식 세션에 판이 둘이면 늦게 받은 판, 한 판 안에서는 추정이 아닌
+    12월기 가운데 가장 늦은 기를 고른다.
     """
     return SourceSpec(
         name=f"wise_ratio_{name}",
@@ -295,7 +311,7 @@ def _wise_ratio_source(name: str) -> SourceSpec:
         row_filter=(
             f"accode = '{_WISE_RATIO_ACCOUNTS[name]}' AND NOT is_estimate AND period LIKE '____12'"
         ),
-        pick_order="period DESC, seq",
+        pick_order="fetched_date DESC, period DESC, seq",
         lag_sessions=1,
         lag_basis=_WISE_LAG_BASIS,
         requires=(FIN_RATIO_WISE_TABLE,),
@@ -592,12 +608,13 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         content_expr="fetched_date",
         reduce=Reduce.NONE,
         row_filter="period_kind = 'E' AND period = strftime(fetched_date, '%Y') || '12'",
-        pick_order="period_label",
+        pick_order="fetched_date DESC, period_label",  # 같은 지식 세션이면 늦은 수집분
         lag_sessions=1,
         lag_basis=_WISE_LAG_BASIS,
         requires=(CONSENSUS_ANNUAL_TABLE,),
         frequency=FieldFrequency.DAILY,
-        date_expr="fetched_date",
+        date_expr="available_date",
+        carry_sessions=_WISE_SNAPSHOT_CARRY_SESSIONS,
     ),
     *(_wise_ratio_source(name) for name in _WISE_RATIO_ACCOUNTS),
 )
@@ -625,7 +642,9 @@ _BLANK_NOT_ZERO = "값이 없는 날은 0 이 아니라 빈 값입니다."
 
 # WISE 3표(원장 S26, #608) 필드의 공통 문장
 _WISE_SINCE = "2026-09-01 수집분부터만 값이 있습니다."
-_WISE_DISCLOSURE = "WISE 화면 수집일(측정) — 그날 수집분은 다음 세션부터 쓴다"
+_WISE_DISCLOSURE = (
+    "WISE 화면 수집 시각(측정) — 장 시작 전 수집분은 그날, 그 뒤 수집분은 다음 세션부터 쓴다"
+)
 _WISE_METRIC_NAMES = {"op": "영업이익", "ni": "순이익"}
 _WISE_LOOKBACK_NAMES = {"1w": "1주 전", "1m": "1개월 전", "3m": "3개월 전"}
 
@@ -1314,7 +1333,8 @@ def _reject_unread_declarations(
       MASKED 가 되지 않아 결측 정책이 가린 셀을 다시 채운다(#311 리뷰 P3-3).
     - 원천 생략 0(`SourceSpec.omitted_is_zero`)은 결측 사유 축(`kind_expr`)이 있어야 읽힌다. 없으면
       계약 테스트는 mock 과 선언이 같다고 보는데 어댑터는 그 칸을 MISSING 으로 낸다(#371).
-    - 날짜 식(`SourceSpec.date_expr`)은 비매크로 격자 원천의 관계식만 감싼다(#608).
+    - 날짜 식(`SourceSpec.date_expr`)은 비매크로 격자 원천의 관계식만 감싸고, 판 잇기
+      (`SourceSpec.carry_sessions`)는 날짜 식이 있는 원천에만 양수로 둔다(#608).
     """
     by_name = {spec.name: spec for spec in source_specs}
     misplaced = [
@@ -1354,6 +1374,16 @@ def _reject_unread_declarations(
     ]
     if unread:
         raise ValueError(f"date_expr needs a non-macro GRID source — sources={unread}")
+    # 판 잇기는 날짜 식으로 펼친 판에만 뜻이 있다(#608).
+    unread = [
+        spec.name
+        for spec in source_specs
+        if spec.carry_sessions is not None and (spec.date_expr is None or spec.carry_sessions < 1)
+    ]
+    if unread:
+        raise ValueError(
+            f"carry_sessions needs a date_expr and a positive limit — sources={unread}"
+        )
 
 
 _reject_unread_declarations(SOURCE_SPECS, FIELD_SPECS)

@@ -467,6 +467,7 @@ def flow_table(
     ownership: Sequence[float | None] | None = None,
     exhaustion: Sequence[float | None] | None = None,
     pension: Sequence[float | None] | None = None,
+    samo: Sequence[float | None] | None = None,
 ) -> pa.Table:
     """`flow_daily` 중 어댑터가 읽는 컬럼. grain 은 (date, ticker, **src**) 다 — 같은 셀에 두
     원천이 다 있으면 2행이고 어댑터가 `pick_order` 로 하나를 고른다."""
@@ -488,6 +489,7 @@ def flow_table(
             "pension_net_buy_kiwoom_krw": _decimal(
                 pension if pension is not None else [None] * len(rows), money
             ),
+            "samo_fund_krw": _decimal(samo if samo is not None else [None] * len(rows), money),
             "fill_kind": _fill_kind([r[6] for r in rows]),
             "available_date": pa.array([r[1] for r in rows], type=pa.date32()),
             "available_basis": pa.array(["default"] * len(rows), type=pa.string()),
@@ -899,6 +901,8 @@ WB_FLOW_ROWS: list[FlowRow] = [
     ("000660", WB_SPLIT_DATE, "kis", 500_000, -200_000, -300_000, ("measured", "none")),
     ("000660", date(2024, 1, 9), "kiwoom", None, None, None, ("empty_response", "shard_empty")),
 ]
+# 사모펀드 순매수(`samo_fund_krw`) — `WB_FLOW_ROWS` 순서. KIS 행 값(9,999)은 키움 행에 가려야 한다
+WB_FLOW_SAMO: list[float | None] = [2_000_000, 9_999, None, None, 0.0, -700_000, None]
 WB_SHORT_ROWS: list[ShortRow] = [
     ("005930", WB_SPLIT_DATE, 1_000, 70_000_000, None,
      ("measured", "shard_done"), ("not_collected", "none")),
@@ -954,6 +958,153 @@ def wb_close(ticker: str, session: date) -> float:
 WB_LEVEL_SHIFT_BASE = WB_LEVEL_SHIFT * wb_close("035420", WB_HALT_DATE)
 
 
+# ── WISE 3표(원장 S26, #608) ────────────────────────────────────────────────────
+# 열은 어댑터 선언이 읽는 것만 둔다(실물 표의 일부). 수집이 해를 넘겨(2023-12 → 2024-01) 결산기
+# 고르기(`fy_rank`) 경계가 드러난다. 12-29·01-05 에는 수집이 없고 01-06 은 토요일 수집이다.
+WB_WISE_FIELDS = (
+    *(
+        f"wise.consensus_{metric}{suffix}"
+        for metric in ("op", "ni")
+        for suffix in ("", "_1w_ago", "_1m_ago", "_3m_ago")
+    ),
+    "wise.fy0_op_estimate",
+    "wise.fy0_ni_estimate",
+    "wise.per",
+    "wise.pbr",
+    "wise.dividend_yield",
+)
+# 원장 선언이 아직 main 계보의 `database/src/equity` 에 없는 필드 — 서버 원장 계보(e1.30.0: S26 WISE
+# 3표·사모 순매수 선언)가 main 에 합쳐지기 전까지 원장 선언 대조에서 뺀다. 합쳐지면
+# `test_equity_field_contract_parity` 의 대기 필드 검사가 실패하니 이 목록을 지우고 전체 대조로
+# 돌아간다(#608).
+LEDGER_PENDING_FIELDS = frozenset({*WB_WISE_FIELDS, "flow.private_fund_net_buy"})
+WB_WISE_MATRIX_FETCHES = (date(2023, 12, 28), date(2024, 1, 3), date(2024, 1, 4), date(2024, 1, 6))
+WB_WISE_MATRIX_BASE = {"121500": 1000.0, "122710": 500.0}
+WB_WISE_TARGET_OFFSET = {"202312": 0.0, "202412": 100.0}
+WB_WISE_LOOKBACKS = {"1": "current", "2": "1w", "3": "1m", "4": "3m", "5": "1y"}
+WB_WISE_LOOKBACK_OFFSET = {"current": 0.0, "1w": -1.0, "1m": -2.0, "3m": -3.0, "1y": -4.0}
+
+
+def wb_wise_matrix_value(acc_cd: str, target: str, lookback: str, fetched: date) -> float:
+    """손 픽스처 매트릭스 값 — 계정·결산기·비교 시점·수집 차수에서 정해진다."""
+    return (
+        WB_WISE_MATRIX_BASE[acc_cd]
+        + WB_WISE_TARGET_OFFSET[target]
+        + WB_WISE_LOOKBACK_OFFSET[lookback]
+        + 10.0 * WB_WISE_MATRIX_FETCHES.index(fetched)
+    )
+
+
+# (수집일, 결산기, 구분, 영업이익, 순이익) — 01-04 수집분에는 2024/12 추정이 없다(추정 소멸)
+WB_WISE_ANNUAL_ROWS: list[tuple[date, str, str, float, float]] = [
+    (date(2023, 12, 28), "202212", "A", 800.0, 300.0),
+    (date(2023, 12, 28), "202312", "E", 900.0, 400.0),
+    (date(2023, 12, 28), "202412", "E", 950.0, 450.0),
+    (date(2024, 1, 3), "202412", "E", 960.0, 460.0),
+    (date(2024, 1, 3), "202512", "E", 990.0, 490.0),
+    (date(2024, 1, 4), "202512", "E", 995.0, 495.0),
+]
+# cF4002 판 두 개 — (수집일, 계정, 마지막 실적 12월 값). 추정(E) 열에는 다른 값을 둔다.
+WB_WISE_RATIO_ROWS: list[tuple[date, str, float]] = [
+    (date(2023, 12, 27), "382100", 10.0),
+    (date(2023, 12, 27), "382500", 1.5),
+    (date(2023, 12, 27), "431800", 2.0),
+    (date(2024, 1, 4), "382100", 11.0),
+    (date(2024, 1, 4), "382500", 1.6),
+    (date(2024, 1, 4), "431800", 2.1),
+]
+WB_WISE_ESTIMATE_COLUMN = -99.0
+
+
+def _wise_fy_rank(fetched: date, target: str) -> int | None:
+    month = f"{fetched.year}{fetched.month:02d}"
+    upcoming = sorted(t for t in WB_WISE_TARGET_OFFSET if t >= month)
+    return upcoming.index(target) + 1 if target in upcoming else None
+
+
+def wise_matrix_table() -> pa.Table:
+    """`consensus_matrix`(S26) 중 어댑터가 읽는 열 — 005930 한 종목."""
+    rows = [
+        (fetched, target, acc_cd, idx)
+        for fetched in WB_WISE_MATRIX_FETCHES
+        for target in WB_WISE_TARGET_OFFSET
+        for acc_cd in WB_WISE_MATRIX_BASE
+        for idx in WB_WISE_LOOKBACKS
+    ]
+    return pa.table(
+        {
+            "ticker": ["005930"] * len(rows),
+            "fetched_date": pa.array([r[0] for r in rows], pa.date32()),
+            "target_period": [r[1] for r in rows],
+            "acc_cd": [r[2] for r in rows],
+            "lookback_idx": [r[3] for r in rows],
+            "lookback": [WB_WISE_LOOKBACKS[r[3]] for r in rows],
+            # WISE 기준일 라벨은 수집일 전 거래일이다 — 손 픽스처는 하루 전 달력일로 둔다
+            "base_date": pa.array(
+                [date.fromordinal(r[0].toordinal() - 1) for r in rows], pa.date32()
+            ),
+            "value": _decimal(
+                [wb_wise_matrix_value(r[2], r[1], WB_WISE_LOOKBACKS[r[3]], r[0]) for r in rows],
+                pa.decimal128(24, 6),
+            ),
+            "fy_rank": pa.array([_wise_fy_rank(r[0], r[1]) for r in rows], pa.int64()),
+            "available_date": pa.array([r[0] for r in rows], pa.date32()),
+            "available_basis": ["measured"] * len(rows),
+        }
+    )
+
+
+def wise_annual_table() -> pa.Table:
+    """`consensus_annual`(S26) 중 어댑터가 읽는 열 — 005930 한 종목."""
+    rows = WB_WISE_ANNUAL_ROWS
+    return pa.table(
+        {
+            "ticker": ["005930"] * len(rows),
+            "fetched_date": pa.array([r[0] for r in rows], pa.date32()),
+            "period_label": [f"{r[1][:4]}.{r[1][4:]}({r[2]})" for r in rows],
+            "period": [r[1] for r in rows],
+            "period_kind": [r[2] for r in rows],
+            "op": _decimal([r[3] for r in rows], pa.decimal128(20, 4)),
+            "ni": _decimal([r[4] for r in rows], pa.decimal128(20, 4)),
+            "available_date": pa.array([r[0] for r in rows], pa.date32()),
+            "available_basis": ["measured"] * len(rows),
+        }
+    )
+
+
+def wise_ratio_table() -> pa.Table:
+    """`fin_ratio_wise`(S26) — cF4002 연간 열 6개(과거 5기 + 추정 1기)를 편 행. 005930 한 종목."""
+    years = [*range(2018, 2023), 2023]
+    rows = [
+        (fetched, seq, accode, slot, value)
+        for seq, (fetched, accode, value) in enumerate(WB_WISE_RATIO_ROWS)
+        for slot in range(1, 7)
+    ]
+    return pa.table(
+        {
+            "ticker": ["005930"] * len(rows),
+            "fetched_date": pa.array([r[0] for r in rows], pa.date32()),
+            "seq": pa.array([r[1] for r in rows], pa.int32()),
+            "slot": pa.array([r[3] for r in rows], pa.int32()),
+            "accode": [r[2] for r in rows],
+            "period_label": [
+                f"{years[r[3] - 1]}/12{'(E)' if r[3] == 6 else ''}(IFRS연결)" for r in rows
+            ],
+            "period": [f"{years[r[3] - 1]}12" for r in rows],
+            "is_estimate": [r[3] == 6 for r in rows],
+            "value": _decimal(
+                [
+                    WB_WISE_ESTIMATE_COLUMN if r[3] == 6 else r[4] if r[3] == 5 else 0.0
+                    for r in rows
+                ],
+                pa.decimal128(38, 6),
+            ),
+            "available_date": pa.array([r[0] for r in rows], pa.date32()),
+            "available_basis": ["measured"] * len(rows),
+        }
+    )
+
+
 # `dataset_profile`(S19) 이 확정한 필드별 공개시차 — 서버 실측 모양 그대로다(랙 0 은 장중 가격
 # 축, 신용잔고는 실입수 기준 3세션, 나머지는 1세션). 어댑터는 이 표를 정본으로 읽고, 표가 없을
 # 때만 원천 상수로 폴백한다. 원장 선언과 같은지는 `tests/contract/test_equity_fallback_lag.py` 가
@@ -990,6 +1141,7 @@ WB_PROFILE_FIELDS = (
     "flow.pension_net_buy",
     "flow.institution_net_buy",
     "flow.retail_net_buy",
+    "flow.private_fund_net_buy",
     "short.short_sale_volume",
     "short.short_sale_value",
     "short.borrowed_quantity",
@@ -997,6 +1149,7 @@ WB_PROFILE_FIELDS = (
     "event.dividend_per_share",
     "event.buyback_amount",
     "event.insider_net_buy",
+    *WB_WISE_FIELDS,
 )
 WB_PROFILE_ROWS = [
     (
@@ -1019,6 +1172,7 @@ def build_workbench_root(
     inconsistent_ohlc: tuple[str, date] | None = None,
     profile_rows: Sequence[tuple[str, int | None, str]] | None = None,
     extra_policy_rows: list[PolicyRow] | None = None,
+    wise: bool = True,
 ) -> Path:
     """워크벤치 어댑터 손 픽스처 equity_root 를 만든다.
 
@@ -1038,6 +1192,8 @@ def build_workbench_root(
 
     `profile_rows` 를 주면 `dataset_profile` 을 그 행으로 쓴다(기본 `WB_PROFILE_ROWS`). 일부 필드의
     행만 빠진 대장을 만들 때 쓴다.
+
+    `wise=False` 면 WISE 3표(원장 S26, #608)가 없는 옛 판 루트다.
     """
     prices: list[PriceRow] = []
     universe: list[UniverseRow] = []
@@ -1179,11 +1335,20 @@ def build_workbench_root(
             ownership=[52.79, 99.99, None, None, 0.0, 12.34, None],
             exhaustion=[62.79, 99.99, None, None, 0.0, 22.34, None],
             pension=[-123_000_000, None, None, None, 0.0, None, None],
+            samo=WB_FLOW_SAMO,
         ),
         year_column="date",
     )
     write_equity_table(root, "short_daily", short_table(WB_SHORT_ROWS), year_column="date")
     write_equity_table(root, "credit_daily", credit_table(WB_CREDIT_ROWS), year_column="date")
+    if wise:
+        write_equity_table(
+            root, "consensus_matrix", wise_matrix_table(), year_column="fetched_date"
+        )
+        write_equity_table(
+            root, "consensus_annual", wise_annual_table(), year_column="fetched_date"
+        )
+        write_equity_table(root, "fin_ratio_wise", wise_ratio_table(), year_column="fetched_date")
     if profile:
         write_equity_table(
             root, "dataset_profile", profile_table(profile_rows or WB_PROFILE_ROWS)

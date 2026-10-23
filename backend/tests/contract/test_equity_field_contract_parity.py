@@ -59,6 +59,16 @@ EXPECTED_SHARED = frozenset(
 )
 
 
+def _ledger_pending() -> frozenset[str]:
+    from tests.equity_fixture import LEDGER_PENDING_FIELDS
+
+    return LEDGER_PENDING_FIELDS
+
+
+# 원장 선언과 대조하는 필드 — 원장 선언이 아직 main 계보에 없는 필드(#608)는 뺀다.
+LEDGER_FIELD_IDS = sorted(set(FIELD_BY_ID) - _ledger_pending())
+
+
 # 필드 계약 판에 닿는 dataclass 와 그 판에서 빠지는 문장 칸.
 _PROSE_BY_TYPE: dict[type, set[str]] = {
     FieldSpec: {"label", "description", "disclosure_basis", "evidence", "lag_basis"},
@@ -250,6 +260,7 @@ def _ledger_profiles() -> dict[str, Any]:
 # 않는다. 특히 빈 단위가 항상 score인 것도, report가 항상 분기 보고인 것도 아니다.
 _LEDGER_UNITS = {
     "pct": "pct",
+    "배": "배",
     "KRW": "KRW",
     "억원": "억원",
     "원": "KRW",
@@ -258,10 +269,24 @@ _LEDGER_UNITS = {
 }
 _CONTEXT_UNITS = {("consensus.recommendation", ""): "score"}
 _LEDGER_FREQUENCIES = {"session": "daily", "monthly": "monthly", "event": "event"}
-_CONTEXT_FREQUENCIES = {("fin_std", "report"): "quarterly", ("dividend_event", "report"): "annual"}
+_CONTEXT_FREQUENCIES = {
+    ("fin_std", "report"): "quarterly",
+    ("dividend_event", "report"): "annual",
+    ("fin_ratio_wise", "report"): "annual",
+}
 
 
-@pytest.mark.parametrize("field_id", sorted(FIELD_BY_ID))
+def test_원장_대기_필드는_아직_원장_선언에_없다() -> None:
+    """대기 목록(#608)은 원장 계보가 main 에 합쳐지기 전까지의 한시 예외다.
+
+    원장 선언이 들어오면 이 검사가 실패한다 — 대기 목록을 지워 아래 대조에 다시 넣는다.
+    """
+    pending = _ledger_pending()
+    assert pending <= set(FIELD_BY_ID)
+    assert sorted(pending & set(_ledger_profiles())) == []
+
+
+@pytest.mark.parametrize("field_id", LEDGER_FIELD_IDS)
 def test_지원_필드의_단위가_원장_척도와_같다(field_id: str) -> None:
     _, ledger = _ledger_fields()[field_id]
     expected = _LEDGER_UNITS.get(ledger.unit, _CONTEXT_UNITS.get((field_id, ledger.unit)))
@@ -272,7 +297,7 @@ def test_지원_필드의_단위가_원장_척도와_같다(field_id: str) -> No
     )
 
 
-@pytest.mark.parametrize("field_id", sorted(FIELD_BY_ID))
+@pytest.mark.parametrize("field_id", LEDGER_FIELD_IDS)
 def test_지원_필드의_빈도가_원장_원천의_주기와_같다(field_id: str) -> None:
     table, ledger = _ledger_fields()[field_id]
     expected = _LEDGER_FREQUENCIES.get(
@@ -434,7 +459,7 @@ def test_corp_event_를_거르는_유형은_원장이_싣는_사건_유형이다
     )
 
 
-@pytest.mark.parametrize("field_id", sorted(FIELD_BY_ID))
+@pytest.mark.parametrize("field_id", LEDGER_FIELD_IDS)
 def test_duckdb_선언표의_값_타입이_원장_선언과_같다(field_id: str) -> None:
     """`FIELD_SPECS` 는 원장 스키마를 옮긴 표다. 값 타입이 원장 `dataset_profile` 과 같아야 한다."""
     ledger = _ledger_profiles().get(field_id)

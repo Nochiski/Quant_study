@@ -64,6 +64,10 @@ HOLDER_TABLE = "holder_daily"
 FLOW_TABLE = "flow_daily"
 SHORT_TABLE = "short_daily"
 CREDIT_TABLE = "credit_daily"
+# WISE 컨센서스·재무비율 3표(원장 S26, e1.30.0 — #608). 2026-09-01 수집분부터 있다.
+CONSENSUS_MATRIX_TABLE = "consensus_matrix"
+CONSENSUS_ANNUAL_TABLE = "consensus_annual"
+FIN_RATIO_WISE_TABLE = "fin_ratio_wise"
 
 ADJ_TABLE = "price_adj_daily"
 CONSENSUS_MACRO = "v_consensus"
@@ -110,6 +114,11 @@ class SourceSpec:
     담고, 더 좁힐 때는 그 뒤에 `AND` 로 조건을 잇는다. 그 대조는
     `tests/contract/test_equity_field_contract_parity.py` 가 맡는다(#583).
 
+    `date_expr` 는 격자 날짜 열이 `date` 가 아닌 표의 날짜 식이다(WISE 매트릭스·연간은 수집일
+    `fetched_date`, #608). 어댑터가 관계식을 감싸 그 값을 `date` 로 붙이므로 격자 질의와 커버율이
+    같은 열 이름을 읽는다. 이런 표는 원장 격자 표와 달리 수집을 늦게 시작해, 커버 시작은 캘린더
+    시작이 아니라 첫 공개일을 잰다(`_adapter._starts_on`). GRID·비매크로 원천만 쓴다.
+
     `required_columns` 는 매크로 원천이 선언 밖에서(`row_filter` 등) 읽는 열이다. 매크로는 게시돼
     있어도 옛 카탈로그면 그 열이 없을 수 있어, 어댑터가 부팅 때 확인하고 없으면 이 원천만 뺀다.
 
@@ -147,6 +156,7 @@ class SourceSpec:
     required_columns: tuple[str, ...] = ()
     masked_expr: str | None = None
     omitted_is_zero: bool = False
+    date_expr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -221,6 +231,77 @@ _CREDIT_LAG_BASIS = (
     "(stage lag_known=false, 실입수 observed − date = +3일) → dataset_profile(S19) 선언과 같은 "
     "3 세션(EQUITY_FIELD_MAP DEFECT-E01 정정)"
 )
+
+_WISE_LAG_BASIS = (
+    "available_date = fetched_date (WISE 화면 수집일, basis measured) — 수집 시각은 원장에 없어 "
+    "그날 장중에 쓸 수 있었는지 모른다 → dataset_profile(S19) 선언과 같은 1 세션(06:00 수집분은 "
+    "하루 보수적)"
+)
+# WISE 컨센서스 매트릭스(c1050001 T4)의 계정 코드와 비교 시점(lookback)
+_WISE_MATRIX_ACCOUNTS = {"op": "121500", "ni": "122710"}
+_WISE_MATRIX_LOOKBACKS = ("current", "1w", "1m", "3m")
+# WISE cF4002 연간 비율(PER·PBR·현금배당수익률)의 계정 코드
+_WISE_RATIO_ACCOUNTS = {"per": "382100", "pbr": "382500", "dividend_yield": "431800"}
+
+
+def _wise_matrix_source(metric: str, lookback: str) -> SourceSpec:
+    """WISE 매트릭스의 (계정, 비교 시점) 하나를 읽는 수집일 격자 원천.
+
+    수집일마다 그 수집 달 이후로 끝나는 결산기 가운데 가장 가까운 기(원장 `fy_rank = 1`)를
+    고른다. 1주·1개월·3개월 전 값은 우리가 이력을 늦춰 만든 값이 아니라 WISE 가 그 수집일에 준
+    비교값이다. 행 필터는 원장 필드 선언(`rules_s26`) 그대로다.
+    """
+    return SourceSpec(
+        name=f"wise_matrix_{metric}_{lookback}",
+        dataset_id=CONSENSUS_MATRIX_TABLE,
+        relation=CONSENSUS_MATRIX_TABLE,
+        is_macro=False,
+        mode=SourceMode.GRID,
+        axis=SourceAxis.TICKER,
+        key_column="ticker",
+        available_expr="available_date",
+        content_expr="coalesce(base_date, fetched_date)",
+        reduce=Reduce.NONE,
+        row_filter=(
+            f"acc_cd = '{_WISE_MATRIX_ACCOUNTS[metric]}' AND lookback = '{lookback}' "
+            "AND fy_rank = 1"
+        ),
+        pick_order=None,  # fy_rank = 1 이 (종목, 수집일) 당 한 행이다
+        lag_sessions=1,
+        lag_basis=_WISE_LAG_BASIS,
+        requires=(CONSENSUS_MATRIX_TABLE,),
+        frequency=FieldFrequency.DAILY,
+        date_expr="fetched_date",
+    )
+
+
+def _wise_ratio_source(name: str) -> SourceSpec:
+    """WISE 재무비율 표(cF4002)의 계정 하나를 읽는 최신값 원천.
+
+    원장이 같은 원문을 접어 `fetched_date` 는 그 원문을 처음 본 날이다 — 컷오프 이하 최신 판의
+    값이 다음 판까지 이어진다. 한 판 안에서는 추정이 아닌 12월기 가운데 가장 늦은 기를 고른다.
+    """
+    return SourceSpec(
+        name=f"wise_ratio_{name}",
+        dataset_id=FIN_RATIO_WISE_TABLE,
+        relation=FIN_RATIO_WISE_TABLE,
+        is_macro=False,
+        mode=SourceMode.LATEST,
+        axis=SourceAxis.TICKER,
+        key_column="ticker",
+        available_expr="available_date",
+        content_expr="fetched_date",
+        reduce=Reduce.PICK,
+        row_filter=(
+            f"accode = '{_WISE_RATIO_ACCOUNTS[name]}' AND NOT is_estimate AND period LIKE '____12'"
+        ),
+        pick_order="period DESC, seq",
+        lag_sessions=1,
+        lag_basis=_WISE_LAG_BASIS,
+        requires=(FIN_RATIO_WISE_TABLE,),
+        frequency=FieldFrequency.ANNUAL,
+    )
+
 
 SOURCE_SPECS: tuple[SourceSpec, ...] = (
     SourceSpec(
@@ -491,6 +572,34 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         requires=(HOLDER_TABLE, CORP_TICKER_TABLE),
         frequency=FieldFrequency.EVENT,
     ),
+    # ── WISE 3표(원장 S26, #608) — 2026-09-01 수집분부터 ─────────────────────────
+    *(
+        _wise_matrix_source(metric, lookback)
+        for metric in _WISE_MATRIX_ACCOUNTS
+        for lookback in _WISE_MATRIX_LOOKBACKS
+    ),
+    SourceSpec(
+        name="wise_annual_fy0",
+        dataset_id=CONSENSUS_ANNUAL_TABLE,
+        relation=CONSENSUS_ANNUAL_TABLE,
+        is_macro=False,
+        # 그날 수집분에 당해 12월기 추정이 있는지가 곧 추정치 보유 여부라 격자로 읽는다 — 최신값으로
+        # 읽으면 추정이 사라진 종목도 옛 수집분 값이 이어진다.
+        mode=SourceMode.GRID,
+        axis=SourceAxis.TICKER,
+        key_column="ticker",
+        available_expr="available_date",
+        content_expr="fetched_date",
+        reduce=Reduce.NONE,
+        row_filter="period_kind = 'E' AND period = strftime(fetched_date, '%Y') || '12'",
+        pick_order="period_label",
+        lag_sessions=1,
+        lag_basis=_WISE_LAG_BASIS,
+        requires=(CONSENSUS_ANNUAL_TABLE,),
+        frequency=FieldFrequency.DAILY,
+        date_expr="fetched_date",
+    ),
+    *(_wise_ratio_source(name) for name in _WISE_RATIO_ACCOUNTS),
 )
 
 # ── 필드 ──────────────────────────────────────────────────────────────────────
@@ -513,6 +622,61 @@ _FIN_DISCLOSURE = "DART 정기보고서 접수일(rcept_no 의 rcept_dt) — 정
 # 격자 3테이블(S08~S10) 필드의 빈 셀 문장. 결측 어휘가 셀 종류로 옮겨지는 규칙은
 # `SourceSpec.omitted_is_zero` 와 FIELD_MAP §1 「결측 어휘」가 정본이다.
 _BLANK_NOT_ZERO = "값이 없는 날은 0 이 아니라 빈 값입니다."
+
+# WISE 3표(원장 S26, #608) 필드의 공통 문장
+_WISE_SINCE = "2026-09-01 수집분부터만 값이 있습니다."
+_WISE_DISCLOSURE = "WISE 화면 수집일(측정) — 그날 수집분은 다음 세션부터 쓴다"
+_WISE_METRIC_NAMES = {"op": "영업이익", "ni": "순이익"}
+_WISE_LOOKBACK_NAMES = {"1w": "1주 전", "1m": "1개월 전", "3m": "3개월 전"}
+
+
+def _wise_matrix_field(metric: str, lookback: str) -> FieldSpec:
+    name = _WISE_METRIC_NAMES[metric]
+    if lookback == "current":
+        field_id, when, extra = f"wise.consensus_{metric}", "", ""
+    else:
+        when = _WISE_LOOKBACK_NAMES[lookback]
+        field_id = f"wise.consensus_{metric}_{lookback}_ago"
+        extra = f"WISE 가 그날 함께 준 {when} 시점 값이고 우리 이력을 늦춰 만든 값이 아닙니다. "
+    return FieldSpec(
+        field_id=field_id,
+        source=f"wise_matrix_{metric}_{lookback}",
+        expr="value",
+        label=f"WISE 컨센서스 {name}{f'({when})' if when else ''}(가장 가까운 결산기, 억원)",
+        unit="억원",
+        value_type=FieldValueType.AMOUNT,
+        description=(
+            f"그날 수집 달 이후로 끝나는 가장 가까운 결산기의 {name} 컨센서스(억원)입니다. "
+            + extra
+            + _WISE_SINCE
+        ),
+        disclosure_basis=_WISE_DISCLOSURE,
+        evidence=(
+            f"consensus_matrix.value (acc_cd='{_WISE_MATRIX_ACCOUNTS[metric]}', "
+            f"lookback='{lookback}', fy_rank = 1 — 수집 달 이후 가장 가까운 기, c1050001 T4)"
+        ),
+    )
+
+
+def _wise_ratio_field(name: str, label: str, unit: str, meaning: str) -> FieldSpec:
+    return FieldSpec(
+        field_id=f"wise.{name}",
+        source=f"wise_ratio_{name}",
+        expr="value",
+        label=label,
+        unit=unit,
+        value_type=FieldValueType.RATIO,
+        description=(
+            f"WISE 가 주는 최근 12월 결산 실적 기준 {meaning}입니다. 결산기 말 주가 기준이라 그해 "
+            "안에서는 거의 바뀌지 않고, 다음 판이 올 때까지 값이 이어집니다. " + _WISE_SINCE
+        ),
+        disclosure_basis=_WISE_DISCLOSURE,
+        evidence=(
+            f"fin_ratio_wise.value (accode='{_WISE_RATIO_ACCOUNTS[name]}', 추정이 아닌 12월기 중 "
+            "가장 늦은 기, cF4002)"
+        ),
+    )
+
 
 FIELD_SPECS: tuple[FieldSpec, ...] = (
     # ── price_daily (FIELD_MAP §2 price.*) ──────────────────────────────────
@@ -912,6 +1076,20 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
         evidence="키움 ka10060 penfnd_etc_krw만 선택한 원장 열; KIS 폴백·재환산 금지",
     ),
+    FieldSpec(
+        field_id="flow.private_fund_net_buy",
+        source="flow",
+        expr="samo_fund_krw",
+        label="사모펀드 순매수(대금)",
+        unit="KRW",
+        value_type=FieldValueType.AMOUNT,
+        description=(
+            "사모펀드 순매수 대금(원)입니다. 기관 합계를 이루는 세부 주체 가운데 하나입니다. "
+            + _BLANK_NOT_ZERO
+        ),
+        disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
+        evidence="flow_daily.samo_fund_krw ← 키움 samo_fund_krw ∪ KIS pe_fund_ntby_tr_pbmn_krw",
+    ),
     # ── short_daily (FIELD_MAP §2 short.*) ───────────────────────────────────
     # 원천은 키움(ka10014) 하나로 고정한다 — 표는 두 원천을 나란히 두고, 키움이 커버가
     # 넓다(절단본 18,265 대 KIS 3,891). 폴백 병합은 원천을 섞으므로 하지 않는다(DESIGN §4-3).
@@ -1046,6 +1224,40 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         disclosure_basis="DART 소유보고 접수일(rcept_dt)",
         evidence="holder_daily.qty_change_shr (src='elestock'), 법인→티커는 corp_ticker",
     ),
+    # ── WISE 3표(원장 S26, #608) ──────────────────────────────────────────────
+    *(
+        _wise_matrix_field(metric, lookback)
+        for metric in _WISE_MATRIX_ACCOUNTS
+        for lookback in _WISE_MATRIX_LOOKBACKS
+    ),
+    *(
+        FieldSpec(
+            field_id=f"wise.fy0_{metric}_estimate",
+            source="wise_annual_fy0",
+            expr=metric,
+            label=f"WISE 올해 12월 결산 {_WISE_METRIC_NAMES[metric]} 추정(그날 수집분, 억원)",
+            unit="억원",
+            value_type=FieldValueType.AMOUNT,
+            description=(
+                f"그날 WISE 수집분에 실린 올해 12월 결산 {_WISE_METRIC_NAMES[metric]} 추정"
+                "(억원)입니다. 그날 추정이 없으면 빈 값이라 추정치를 지금 갖고 있는지 가를 때 "
+                "씁니다. " + _WISE_SINCE
+            ),
+            disclosure_basis=_WISE_DISCLOSURE,
+            evidence=(
+                f"consensus_annual.{metric} (period_kind='E', period = 수집 연도 12월, c1050001)"
+            ),
+        )
+        for metric in _WISE_MATRIX_ACCOUNTS
+    ),
+    _wise_ratio_field("per", "WISE PER(최근 12월 결산 실적, 배)", "배", "PER(배)"),
+    _wise_ratio_field("pbr", "WISE PBR(최근 12월 결산 실적, 배)", "배", "PBR(배)"),
+    _wise_ratio_field(
+        "dividend_yield",
+        "WISE 현금배당수익률(최근 12월 결산 실적, %)",
+        "pct",
+        "현금배당수익률(퍼센트)",
+    ),
 )
 
 # 아래 필드의 사용자 대면 사유 문장 — compile 진단과 질의 거절이 싣는다(#316). 원장
@@ -1102,6 +1314,7 @@ def _reject_unread_declarations(
       MASKED 가 되지 않아 결측 정책이 가린 셀을 다시 채운다(#311 리뷰 P3-3).
     - 원천 생략 0(`SourceSpec.omitted_is_zero`)은 결측 사유 축(`kind_expr`)이 있어야 읽힌다. 없으면
       계약 테스트는 mock 과 선언이 같다고 보는데 어댑터는 그 칸을 MISSING 으로 낸다(#371).
+    - 날짜 식(`SourceSpec.date_expr`)은 비매크로 격자 원천의 관계식만 감싼다(#608).
     """
     by_name = {spec.name: spec for spec in source_specs}
     misplaced = [
@@ -1133,6 +1346,14 @@ def _reject_unread_declarations(
     unread = [spec.name for spec in source_specs if spec.omitted_is_zero and spec.kind_expr is None]
     if unread:
         raise ValueError(f"omitted_is_zero needs a kind_expr — sources={unread}")
+    # 날짜 식은 격자 질의만 읽고(LATEST 는 공개일 식으로 고른다), 매크로 호출은 감쌀 수 없다(#608).
+    unread = [
+        spec.name
+        for spec in source_specs
+        if spec.date_expr is not None and (spec.mode is not SourceMode.GRID or spec.is_macro)
+    ]
+    if unread:
+        raise ValueError(f"date_expr needs a non-macro GRID source — sources={unread}")
 
 
 _reject_unread_declarations(SOURCE_SPECS, FIELD_SPECS)

@@ -964,7 +964,8 @@ class EquityDuckdbAdapter:
     def _coverage(self) -> dict[str, tuple[float, date]]:
         """필드별 (커버율 %, 시작 세션). 한 번 재고 캐시한다.
 
-        `GRID` 는 값이 있는 원천 행 / `universe_daily` 격자 행이고 시작은 캘린더 시작이다.
+        `GRID` 는 값이 있는 원천 행 / `universe_daily` 격자 행이고 시작은 캘린더 시작이다(날짜
+        식으로 읽는 수집일 격자는 첫 공개일, #608).
         `LATEST` 는 **종목 축 커버율** — 값이 하나라도 있는 축 키 / 유니버스의 축 키 — 이고
         시작은 첫 `available_date`(캘린더 안으로 자른다). 두 뜻이 달라 프로필 evidence 에 적는다.
         """
@@ -1035,8 +1036,11 @@ class EquityDuckdbAdapter:
     def _starts_on(
         self, con: duckdb.DuckDBPyConnection, source: SourceSpec, relation: str, where: str
     ) -> date:
-        """`LATEST` 원천의 첫 공개일(캘린더 안으로 자른다). `GRID` 는 캘린더 시작이다."""
-        if source.mode is SourceMode.GRID:
+        """`LATEST` 원천의 첫 공개일(캘린더 안으로 자른다). `GRID` 는 캘린더 시작이다.
+
+        날짜 식으로 읽는 격자(WISE 수집일 격자, #608)는 수집을 늦게 시작해 첫 공개일을 잰다.
+        """
+        if source.mode is SourceMode.GRID and source.date_expr is None:
             return self._sessions[0]
         row = con.execute(f"SELECT min({source.available_expr}) FROM {relation} {where}").fetchone()
         first = row[0] if row is not None else None
@@ -1775,10 +1779,17 @@ class EquityDuckdbAdapter:
         return {name: tuple(items) for name, items in grouped.items()}
 
     def _relation(self, source: SourceSpec, as_of: date) -> str:
-        """원천을 읽는 duckdb 관계식 — 테이블이면 parquet, 매크로면 as_of 를 넘긴 호출."""
-        if not source.is_macro:
-            return self._source(source.relation)
-        return f"{source.relation}(as_of := {_lit(as_of)})"
+        """원천을 읽는 duckdb 관계식 — 테이블이면 parquet, 매크로면 as_of 를 넘긴 호출.
+
+        격자 날짜 열이 `date` 가 아닌 표(WISE 수집일 격자, #608)는 그 날짜 식을 `date` 로 붙여
+        감싼다 — 격자 질의(`_grid_sql`)와 커버율이 같은 열 이름을 읽는다.
+        """
+        if source.is_macro:
+            return f"{source.relation}(as_of := {_lit(as_of)})"
+        relation = self._source(source.relation)
+        if source.date_expr is None:
+            return relation
+        return f"(SELECT *, {source.date_expr} AS date FROM {relation})"
 
     def _panel(
         self,

@@ -18,24 +18,24 @@ WITH wide AS (
            available_date, available_basis
     FROM stg_fin_wise
     WHERE ep = 'cF4002'
+),
+cells AS (
+    SELECT w.*, unnest(range(1, len(w.labels) + 1)) AS slot FROM wide w
 )
 SELECT
-    w.ticker,
-    w.fetched_date,
-    w.seq,
-    s.slot,
-    w.accode,
-    w.acc_nm,
-    CAST(w.unt_typ AS INTEGER)                                    AS unt_typ,
-    w.labels[s.slot]                                              AS period_label,
-    CASE WHEN regexp_matches(w.labels[s.slot], '^[0-9]{4}/[0-9]{2}')
-         THEN substr(w.labels[s.slot], 1, 4) || substr(w.labels[s.slot], 6, 2)
-    END                                                           AS period,
-    w.labels[s.slot] LIKE '%(E)%'                                 AS is_estimate,
-    w.vals[s.slot]                                                AS value,
-    w.available_date,
-    w.available_basis,
+    ticker,
+    fetched_date,
+    seq,
+    CAST(slot AS INTEGER)                                         AS slot,
+    accode,
+    acc_nm,
+    CAST(unt_typ AS INTEGER)                                      AS unt_typ,
+    labels[slot]                                                  AS period_label,
+    nullif(replace(regexp_extract(labels[slot], '^[0-9]{4}/[0-9]{2}'), '/', ''), '') AS period,
+    labels[slot] LIKE '%(E)%'                                     AS is_estimate,
+    vals[slot]                                                    AS value,
+    available_date,
+    available_basis,
     CAST(NULL AS VARCHAR)                                         AS reject_reason   -- 격리 사유 없음(REJECT_REASONS=())
-FROM wide w
-CROSS JOIN (SELECT CAST(range AS INTEGER) AS slot FROM range(1, 7)) s
-WHERE coalesce(w.labels[s.slot], '') <> ''
+FROM cells
+WHERE coalesce(labels[slot], '') <> ''

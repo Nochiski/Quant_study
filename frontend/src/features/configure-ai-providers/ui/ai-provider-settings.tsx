@@ -1,22 +1,19 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 import {
   assistantProvidersQuery,
-  useActivateAssistantProvider,
-  useDeleteAssistantProvider,
   type ProviderKindView,
   type ProviderProfileView,
 } from "../../../entities/assistant";
-import {
-  CredentialsFileLocation,
-  refreshCredentialsFile,
-} from "../../../entities/credentials-file";
+import { CredentialsFileLocation } from "../../../entities/credentials-file";
 import { t } from "../../../shared/config";
 import { Badge, Button, EmptyState, Tooltip } from "../../../shared/ui";
 import { providerKindLabel, providerRejection } from "../model/provider-copy";
 import {
+  useActivateProvider,
+  useDeleteProvider,
   useProbeProvider,
   type ProbeOutcome,
 } from "../model/use-provider-commands";
@@ -180,10 +177,9 @@ const ProviderCard = ({
 export const AiProviderSettings = () => {
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
-  const queryClient = useQueryClient();
   const providers = useQuery(assistantProvidersQuery());
-  const activate = useActivateAssistantProvider();
-  const remove = useDeleteAssistantProvider();
+  const activate = useActivateProvider();
+  const remove = useDeleteProvider();
   const { isProbing, probe } = useProbeProvider();
   const [probes, setProbes] = useState<Record<string, ProbeOutcome>>({});
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -207,7 +203,6 @@ export const AiProviderSettings = () => {
   const runActivate = (profileId: string) => {
     setActionError(null);
     activate.mutate(profileId, {
-      onSuccess: () => void refreshCredentialsFile(queryClient),
       onError: (error) => setActionError(providerRejection(error).message),
     });
   };
@@ -225,7 +220,6 @@ export const AiProviderSettings = () => {
       onSuccess: () => {
         flushSync(() => setConfirming(null));
         heading.current?.focus();
-        void refreshCredentialsFile(queryClient);
       },
       onError: (error) => setActionError(providerRejection(error).message),
     });

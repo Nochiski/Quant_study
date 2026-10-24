@@ -413,6 +413,24 @@ export type AssistantSecretMissingDetail = {
 };
 
 /**
+ * AssistantStorageUnavailableDetail
+ *
+ * 공급자 저장 파일(내 문서 `auto_trading/.env`) 자체를 읽거나 쓸 수 없다(3차 리뷰 4).
+ *
+ * 연결 테스트 전에 거절한다. 사용자가 파일을 고치거나 지워야 풀린다. 경로·값은 싣지 않는다.
+ */
+export type AssistantStorageUnavailableDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.storage_unavailable";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * AssistantTurnContextMismatchDetail
  *
  * 턴 요청의 `context`가 세션 모드와 맞지 않는다(결과 설명 spec R5).
@@ -480,6 +498,9 @@ export type AssistantUnprocessableResponse = {
     | ({
         code: "assistant.provider_secret_missing";
       } & AssistantSecretMissingDetail)
+    | ({
+        code: "assistant.storage_unavailable";
+      } & AssistantStorageUnavailableDetail)
     | ({
         code: "assistant.document_ref_invalid";
       } & AssistantDocumentRefInvalidDetail)
@@ -1099,7 +1120,10 @@ export type BrokerErrorDetail = {
   /**
    * Code
    */
-  code: "broker.request_invalid" | "broker.credentials_invalid";
+  code:
+    | "broker.request_invalid"
+    | "broker.credentials_invalid"
+    | "broker.storage_unavailable";
   /**
    * Field
    */
@@ -8821,9 +8845,11 @@ export type DeleteAssistantProviderErrors = {
    */
   404: AssistantNotFoundResponse;
   /**
-   * Validation Error
+   * Response 422 Deleteassistantprovider
+   *
+   * A coded assistant rejection or a malformed request envelope
    */
-  422: HttpValidationError;
+  422: AssistantUnprocessableResponse | RequestValidationResponse;
 };
 
 export type DeleteAssistantProviderError =
@@ -8857,9 +8883,11 @@ export type ActivateAssistantProviderErrors = {
    */
   404: AssistantNotFoundResponse;
   /**
-   * Validation Error
+   * Response 422 Activateassistantprovider
+   *
+   * A coded assistant rejection or a malformed request envelope
    */
-  422: HttpValidationError;
+  422: AssistantUnprocessableResponse | RequestValidationResponse;
 };
 
 export type ActivateAssistantProviderError =
@@ -9761,6 +9789,16 @@ export type DeleteKiwoomMockConnectionData = {
   query?: never;
   url: "/api/v1/broker-connections/kiwoom-mock";
 };
+
+export type DeleteKiwoomMockConnectionErrors = {
+  /**
+   * Unprocessable Entity
+   */
+  422: BrokerErrorResponse;
+};
+
+export type DeleteKiwoomMockConnectionError =
+  DeleteKiwoomMockConnectionErrors[keyof DeleteKiwoomMockConnectionErrors];
 
 export type DeleteKiwoomMockConnectionResponses = {
   /**

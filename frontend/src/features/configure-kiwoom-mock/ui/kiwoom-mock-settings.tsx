@@ -1,17 +1,15 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useId, useRef, useState, type FormEvent } from "react";
 
-import {
-  kiwoomMockConnectionQuery,
-  useDeleteKiwoomMockConnection,
-} from "../../../entities/broker";
+import { kiwoomMockConnectionQuery } from "../../../entities/broker";
 import {
   CredentialsFileLocation,
-  refreshCredentialsFile,
+  credentialsFileQuery,
 } from "../../../entities/credentials-file";
 import { t, tFill } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import {
+  useDeleteKiwoomMock,
   useSaveKiwoomMockConnection,
   useVerifyKiwoomMockConnection,
   type KiwoomField,
@@ -27,11 +25,11 @@ import "./kiwoom-mock-settings.css";
  * 계좌 대조), 결과 문장은 서버가 완성한 것을 그대로 보인다. 이 화면은 주문하지 않는다.
  */
 export const KiwoomMockSettings = () => {
-  const queryClient = useQueryClient();
   const connection = useQuery(kiwoomMockConnectionQuery());
+  const credentialsFile = useQuery(credentialsFileQuery());
   const save = useSaveKiwoomMockConnection();
   const check = useVerifyKiwoomMockConnection();
-  const remove = useDeleteKiwoomMockConnection();
+  const remove = useDeleteKiwoomMock();
   const [rejection, setRejection] = useState<KiwoomRejection | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [removeFailed, setRemoveFailed] = useState(false);
@@ -51,6 +49,12 @@ export const KiwoomMockSettings = () => {
   const saved = connection.data?.saved === true;
   // 저장된 항목이 깨졌다. 확인은 막고, 다시 저장하거나 지울 수 있게 한다(리뷰 #594).
   const unreadable = connection.data?.unreadable === true;
+  // 저장 파일 자체를 못 읽으면 다시 저장해도 고쳐지지 않는다. 파일을 고치거나 지우라고 안내한다
+  // (3차 리뷰 3).
+  const fileUnreadable =
+    credentialsFile.data?.problems.some(
+      (problem) => problem.section === "file",
+    ) === true;
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -106,7 +110,6 @@ export const KiwoomMockSettings = () => {
       onSuccess: () => {
         setConfirming(false);
         check.reset();
-        void refreshCredentialsFile(queryClient);
       },
       onError: () => setRemoveFailed(true),
     });
@@ -141,7 +144,9 @@ export const KiwoomMockSettings = () => {
                   tail: connection.data.account_tail,
                 })
               : unreadable
-                ? t("settings.kiwoom.status.unreadable")
+                ? fileUnreadable
+                  ? t("settings.kiwoom.status.fileUnreadable")
+                  : t("settings.kiwoom.status.unreadable")
                 : t("settings.kiwoom.status.empty")}
           </Badge>
           <div className="kiwoom-settings__actions">

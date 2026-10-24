@@ -138,6 +138,26 @@ describe("KiwoomMockSettings", () => {
     );
   });
 
+  it("asks to fix or delete the file when the whole file is unreadable", async () => {
+    status = { saved: false, account_tail: null, unreadable: true };
+    fileProblems = [
+      {
+        section: "file",
+        reason: "not_utf8",
+        fields: [],
+        message:
+          "저장 파일을 UTF-8로 읽지 못했습니다. 편집기에서 UTF-8로 다시 저장하세요.",
+      },
+    ];
+    renderWithClient(<KiwoomMockSettings />);
+    expect(
+      await screen.findByText(
+        "저장 파일을 읽을 수 없음 — 저장 위치의 파일을 고치거나 지우세요",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/다시 저장하거나 지우세요/)).toBeNull();
+  });
+
   it("shows nothing saved and keeps the check disabled", async () => {
     renderWithClient(<KiwoomMockSettings />);
     expect(await screen.findByText("저장된 키 없음")).toBeTruthy();

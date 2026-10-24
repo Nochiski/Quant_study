@@ -5,6 +5,8 @@ import {
   assistantProviderApi,
   refreshAssistantProviders,
   refreshIfProviderGone,
+  useActivateAssistantProvider,
+  useDeleteAssistantProvider,
   type CreateProviderProfileInput,
 } from "../../../entities/assistant";
 import { refreshCredentialsFile } from "../../../entities/credentials-file";
@@ -99,3 +101,13 @@ export const useProbeProvider = () => {
 
   return { isProbing: (profileId: string) => probingIds.has(profileId), probe };
 };
+
+/**
+ * 활성 전환·삭제 변이. 성공하면 공급자 목록과 저장 파일 문제 목록을 함께 새로 읽는다 — 그 무효화는
+ * 이 파일(설정 명령) 한 곳에만 둔다(3차 SoT 리뷰 경미 3).
+ */
+export const useActivateProvider = () =>
+  useActivateAssistantProvider(refreshCredentialsFile);
+
+export const useDeleteProvider = () =>
+  useDeleteAssistantProvider(refreshCredentialsFile);

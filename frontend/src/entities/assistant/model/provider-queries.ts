@@ -57,23 +57,38 @@ export const refreshIfProviderGone = (
  * `Mutation.state.variables`에 보관하고 그 mutation은 `MutationCache`에 남는다(관찰자가 살아 있는 동안
  * gc도 일어나지 않는다). 키를 싣는 호출은 `features/configure-ai-providers`의 plain async 명령이
  * `assistantProviderApi`를 직접 부르고, 키는 호출 인자로만 흐른다(B-01 리뷰 P1-1).
+ *
+ * `afterSuccess`는 성공 뒤 함께 새로 읽을 다른 조회다. entity끼리는 서로 import하지 않으므로 그 조회를
+ * 아는 feature가 넘긴다(저장 파일 문제 목록, 3차 SoT 리뷰 경미 3).
  */
-export const useActivateAssistantProvider = () => {
+export const useActivateAssistantProvider = (
+  afterSuccess?: (queryClient: QueryClient) => Promise<unknown>,
+) => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (profileId: string) =>
       assistantProviderApi.activateProvider(profileId),
-    onSuccess: () => refreshAssistantProviders(queryClient),
+    onSuccess: () =>
+      Promise.all([
+        refreshAssistantProviders(queryClient),
+        afterSuccess?.(queryClient),
+      ]),
     onError: (error) => refreshIfProviderGone(queryClient, error),
   });
 };
 
-export const useDeleteAssistantProvider = () => {
+export const useDeleteAssistantProvider = (
+  afterSuccess?: (queryClient: QueryClient) => Promise<unknown>,
+) => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (profileId: string) =>
       assistantProviderApi.deleteProvider(profileId),
-    onSuccess: () => refreshAssistantProviders(queryClient),
+    onSuccess: () =>
+      Promise.all([
+        refreshAssistantProviders(queryClient),
+        afterSuccess?.(queryClient),
+      ]),
     onError: (error) => refreshIfProviderGone(queryClient, error),
   });
 };

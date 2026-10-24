@@ -2817,6 +2817,8 @@ const ko = {
   "settings.kiwoom.guide": "처음 연결한다면 저장소의 연결 안내(docs/manual/strategy-workbench/kiwoom-mock-connection.md)를 먼저 보세요. 신청, IP 등록, 키 받기 순서가 있습니다.",
   "settings.kiwoom.status.saved": "저장됨 · 계좌 끝 {tail}",
   "settings.kiwoom.status.empty": "저장된 키 없음",
+  "settings.kiwoom.status.fileUnreadable":
+    "저장 파일을 읽을 수 없음 — 저장 위치의 파일을 고치거나 지우세요",
   "settings.kiwoom.status.unreadable":
     "저장된 키를 읽을 수 없음 — 다시 저장하거나 지우세요",
   "settings.kiwoom.loadError": "연결 설정을 불러오지 못했습니다.",
@@ -2893,6 +2895,8 @@ const ko = {
   "assistant.error.no_active_provider": "활성 공급자가 없습니다.",
   "assistant.error.provider_secret_missing":
     "저장된 키를 찾을 수 없습니다. 이 연결을 지우고 키를 다시 등록하세요.",
+  "assistant.error.storage_unavailable":
+    "연결을 저장하는 파일을 읽거나 쓸 수 없습니다. 설정의 저장 위치에 보이는 파일을 고치거나 지운 뒤 다시 시도하세요.",
   "assistant.error.not_found":
     "이 연결을 찾을 수 없습니다. 목록을 새로 고치세요.",
   "assistant.error.unknown":
@@ -5835,6 +5839,8 @@ export const messages = {
     "settings.kiwoom.guide": "For a first connection, read the repository guide (docs/manual/strategy-workbench/kiwoom-mock-connection.md). It covers the application, IP registration and key download steps.",
     "settings.kiwoom.status.saved": "Saved · account ending {tail}",
     "settings.kiwoom.status.empty": "No key saved",
+    "settings.kiwoom.status.fileUnreadable":
+      "Storage file unreadable — fix or delete the file at the storage location",
     "settings.kiwoom.status.unreadable":
       "Saved key is unreadable — save it again or delete it",
     "settings.kiwoom.loadError": "Could not load the connection settings.",
@@ -5913,6 +5919,8 @@ export const messages = {
     "assistant.error.no_active_provider": "No provider is active.",
     "assistant.error.provider_secret_missing":
       "The stored key is missing. Delete this connection and register the key again.",
+    "assistant.error.storage_unavailable":
+      "The file that stores connections cannot be read or written. Fix or delete the file shown under the storage location in Settings, then try again.",
     "assistant.error.not_found":
       "This connection no longer exists. Refresh the list.",
     "assistant.error.unknown":

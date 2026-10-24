@@ -5,6 +5,7 @@ import {
   BrokerConnectionRequestError,
   brokerConnectionApi,
   refreshKiwoomMockConnection,
+  useDeleteKiwoomMockConnection,
   type ConnectionOutcome,
   type SaveKiwoomMockConnectionBody,
 } from "../../../entities/broker";
@@ -104,3 +105,7 @@ export const useVerifyKiwoomMockConnection = () => {
 
   return { pending, result, verify, reset };
 };
+
+/** 삭제 변이. 성공하면 저장 여부와 저장 파일 문제 목록을 함께 새로 읽는다(무효화는 이 파일 한 곳). */
+export const useDeleteKiwoomMock = () =>
+  useDeleteKiwoomMockConnection(refreshCredentialsFile);

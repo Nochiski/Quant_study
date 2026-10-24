@@ -49,6 +49,7 @@ import type {
   DeleteAssistantProviderErrors,
   DeleteAssistantProviderResponses,
   DeleteKiwoomMockConnectionData,
+  DeleteKiwoomMockConnectionErrors,
   DeleteKiwoomMockConnectionResponses,
   DeleteStrategyDraftData,
   DeleteStrategyDraftErrors,
@@ -713,7 +714,7 @@ export const deleteKiwoomMockConnection = <
 ) =>
   (options?.client ?? client).delete<
     DeleteKiwoomMockConnectionResponses,
-    unknown,
+    DeleteKiwoomMockConnectionErrors,
     ThrowOnError
   >({ url: "/api/v1/broker-connections/kiwoom-mock", ...options });
 

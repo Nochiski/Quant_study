@@ -46,6 +46,7 @@ const REJECTION_MESSAGE: Record<AssistantRejectionCode, MessageKey> = {
   "assistant.provider_secret_missing":
     "assistant.error.provider_secret_missing",
   "assistant.result_unavailable": "assistant.error.result_unavailable",
+  "assistant.storage_unavailable": "assistant.error.storage_unavailable",
   "assistant.session.not_found": "assistant.error.not_found",
   "assistant.turn.not_found": "assistant.error.not_found",
   "assistant.turn_in_progress": "assistant.chat.turnInProgress",

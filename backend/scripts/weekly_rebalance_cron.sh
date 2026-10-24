@@ -5,8 +5,8 @@
 # 설정 파일(비밀값 없음, 기본 ~/s07/s07.env):
 #   S07_BACKEND           배포한 backend 폴더(.venv 포함)
 #   S07_WORKDIR           원장·주문안·기록 폴더
-#   S07_MODEL_DB          모델 DB 폴더(quant-ledger data/model_db)
-#   S07_LEDGER_HOME       quant-ledger 폴더 — 휴장 판정은 그 daily.calendar 한 곳을 읽는다
+#   S07_LEDGER_HOME       quant-ledger 폴더 — 휴장 판정은 그 daily.calendar 한 곳을 읽고, 주말 보강판은
+#                         그 연구 모델 루트(data)에서 읽는다
 #   S07_REQUIRE_APPROVAL  1이면 승인한 주문안만 보낸다(매주 승인, 10-21 사용자 결정), 0이면 승인 없이 보낸다
 #   STRATEGY_WORKBENCH_KIWOOM_ENV_FILE · STRATEGY_WORKBENCH_KIWOOM_KEY_PAIR  키를 읽을 .env와 쌍 번호
 #   STRATEGY_WORKBENCH_TELEGRAM_ENV_FILE · _TOKEN_VAR · _CHAT_ID  주문지를 보낼 봇 토큰(.env의 이름)과 채팅
@@ -128,13 +128,16 @@ case "$PHASE" in
       exit 0
     fi
     hold_lock prepare
+    # 주말 보강판은 quant-ledger 가 연구 모델 루트(data/model)에 쓴다. 모델 DB(data/model_db)에는 장 마감
+    # 판만 있다(2026-10-24 사고: 모델 DB 를 보다가 보강판을 못 찾았다).
+    MODEL_ROOT="$S07_LEDGER_HOME/data"
     # 주말 보강판이 준비된 것을 확인하고 잇는다. 준비 판정은 신호 어댑터 한 곳(signal-status)이 한다:
     # 0 = 준비, 3 = 아직, 그 밖 = 다른 이유로 못 씀(prepare 가 판정해 알린다). 23시까지 1분마다 보고,
     # 그때도 아직이면(보강판 꺼짐·실패) prepare 가 신호를 읽지 못한 것으로 끝나며 실패 알림을 보낸다.
     # 장 마감 빌드로 대신하지 않는다 — 신호일 추정치가 조용히 빠진다.
     while true; do
       READY=0
-      wr signal-status --workdir "$S07_WORKDIR" --model-root "$S07_MODEL_DB" \
+      wr signal-status --workdir "$S07_WORKDIR" --model-root "$MODEL_ROOT" \
         --signal-date "$SIGNAL" --basis supplement >/dev/null || READY=$?
       [ "$READY" -ne 3 ] && break
       if [ "$(TZ=Asia/Seoul date +%H)" -ge 23 ]; then
@@ -144,7 +147,7 @@ case "$PHASE" in
       sleep 60
     done
     NEXT="$(calendar next)"
-    wr prepare --workdir "$S07_WORKDIR" --model-root "$S07_MODEL_DB" --signal-date "$SIGNAL" \
+    wr prepare --workdir "$S07_WORKDIR" --model-root "$MODEL_ROOT" --signal-date "$SIGNAL" \
       --basis supplement --notify --execute-on "$NEXT"
     ;;
   *)

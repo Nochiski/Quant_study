@@ -40,8 +40,10 @@
 
 ### 신호 (`adapters/outbound/scope_signal`)
 
-모델 DB(서버 quant-ledger `data/model_db`)에서 고른 종류(`--basis`: 장 마감 빌드 `evening`이 기본, 주말
-보강판 `supplement`)의 현재 빌드만 읽는다. 서버 예약 실행은 주말 보강판을 쓴다(G절).
+고른 종류(`--basis`: 장 마감 빌드 `evening`이 기본, 주말 보강판 `supplement`)의 현재 빌드만 읽는다.
+두 종류는 서버 quant-ledger 의 다른 루트에 있다. 장 마감 빌드는 모델 DB(`data/model_db`), 주말 보강판은
+아침 확정판과 같은 연구 모델 루트(`data`)이고 배치(`model/`·`factor_inputs/`)는 같다. `--model-root`로
+그 루트를 준다. 서버 예약 실행은 주말 보강판을 쓴다(G절).
 
 1. `model/latest_<basis>.json`의 `status`가 `ok`, `basis`가 고른 종류, `date`가 신호일이어야 한다.
    아니면 `not_ready`.
@@ -334,17 +336,20 @@ scope 순위는 WISE 리비전 등 데이터가 비면 종목이 빠졌다가 �
 사용자 지시: "토요일에 주문지를 만들자. wise 의 추정치 데이터가 금요일분이 토요일에 오니까. 휴장때
 주문지 만들자." WISE 는 그날 분 추정치를 밤사이(금요일 분은 토요일 06:00 전)에 올리고, 장 마감 빌드는
 신호일까지 받은 추정치만 쓴다. 그래서 금요일 15:55 빌드에는 금요일 리비전이 빠진다. quant-ledger 의
-주말 보강판(N-45)은 휴장 첫날 아침 WISE 재수집으로 마지막 거래일 모델을 다시 짓고 `latest_supplement.json`
-에 남긴다(10-22 스위치 켬, 첫 자동 10-24).
+주말 보강판(N-45)은 휴장 첫날 아침 WISE 재수집으로 마지막 거래일 모델을 다시 짓고 연구 모델 루트의
+`data/model/latest_supplement.json`에 남긴다(10-22 스위치 켬, 첫 자동 10-24).
 
 - **언제**: 예약 `prepare`는 매일 09:00 KST에 깨어, 오늘이 휴장 첫날이고 그 전날이 그 주 마지막
   거래일일 때만 돈다. 판정은 quant-ledger 달력의 `supplement_target`(보강판을 짓는 쪽과 같은 판정)에
   "다음 거래일이 다른 주" 조건을 더한 것이다. 보통은 토요일(→ 금요일 순위), 금요일이 공휴일이면 그날
   (→ 목요일 순위). 실행일은 다음 거래일이고 월요일 `open`은 그대로 직전 거래일 주문안을 찾는다.
-- **무엇을**: `signal-status`·`prepare`에 `--basis supplement`를 준다. 주문안에 읽은 빌드 종류
+- **무엇을**: `signal-status`·`prepare`에 `--basis supplement`와 `--model-root $S07_LEDGER_HOME/data`
+  (연구 모델 루트)를 준다. 10-24 첫 배포본은 모델 DB 를 봐서 그날 지은 10-23 보강판을 못 찾았다(주문지는
+  연구 루트로 손으로 만들어 보냄, 재현 테스트 `tests/test_weekly_rebalance_cron.py`). 주문안에 읽은 빌드 종류
   (`signal.basis`)를 남기고(이 칸이 없는 옛 주문안은 장 마감 빌드), 주문지 머리는 "주말 보강 신호"다.
-- **빌드 점검**: 보강판 바로 앞 판은 같은 신호일의 장 마감 판이라, 직전 빌드 대비 누락 점검은 신호일보다
-  앞 날짜의 가장 최근 판(보통 전날 장 마감 판)과 견준다(`scope_signal`의 `_previous`).
+- **빌드 점검**: 연구 루트에서 보강판 바로 앞 판은 같은 신호일의 아침 확정판이라, 직전 빌드 대비 누락
+  점검은 신호일보다 앞 날짜의 가장 최근 판(보통 전 거래일 아침 확정판)과 견준다(`scope_signal`의
+  `_previous`).
 - **보강판이 없을 때**: 스위치가 꺼졌거나 실패하면 23시까지 기다린 뒤 실패 알림을 보낸다. 장 마감 빌드로
   자동으로 대신하지 않는다(신호일 추정치가 조용히 빠진다). 그때는 보강판을 다시 짓거나(quant-ledger
   `scripts/weekend_supplement.sh --date D --wise-asof W`), 사람이 정해 장 마감 빌드로 만든다

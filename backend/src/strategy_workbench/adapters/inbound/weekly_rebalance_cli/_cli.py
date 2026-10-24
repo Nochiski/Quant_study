@@ -1,6 +1,6 @@
 """주간 리밸런싱(S07) 명령줄. 입력 해석과 사람이 읽을 출력만 맡는다.
 
-    prepare  --workdir <폴더> --model-root <모델 DB> --signal-date YYYY-MM-DD
+    prepare  --workdir <폴더> --model-root <모델 루트> --signal-date YYYY-MM-DD
              [--basis evening|supplement] [--accept-anomalies]
     show     --workdir <폴더> --plan weekly-YYYY-MM-DD
     approve  --workdir <폴더> --plan weekly-YYYY-MM-DD --approver <이름> [--note <메모>]
@@ -12,7 +12,7 @@
     export   --workdir <폴더>   # <작업 폴더>/exports 에 분석·복기용 CSV 4개
     record-fills --workdir <폴더> --until HH:MM   # 장중 실시간 체결 알림 기록(한 곳에서만)
     notify-plan --workdir <폴더> --plan weekly-YYYY-MM-DD --execute-on YYYY-MM-DD [--print]
-    signal-status --workdir <폴더> --model-root <모델 DB> --signal-date YYYY-MM-DD
+    signal-status --workdir <폴더> --model-root <모델 루트> --signal-date YYYY-MM-DD
              [--basis evening|supplement]
              # 그 빌드가 준비됐나. 0 = 준비, 3 = 아직(기다린다), 1 = 다른 이유로 못 쓴다
     ledger-status --workdir <폴더>   # 정지 래치·실행 정지·응답을 잃은 주문과 후보 주문번호
@@ -121,7 +121,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="주간 리밸런싱(S07) 주문안·실행·기록")
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare", help="모델 신호로 주문안을 만들어 남긴다")
-    prepare.add_argument("--model-root", type=Path, required=True, help="모델 DB 폴더(model_db)")
+    prepare.add_argument(
+        "--model-root",
+        type=Path,
+        required=True,
+        help="모델 빌드 루트(장 마감 빌드는 quant-ledger data/model_db, 주말 보강판은 data)",
+    )
     prepare.add_argument("--signal-date", type=date.fromisoformat, required=True)
     prepare.add_argument(
         "--basis", type=SignalBasis, choices=list(SignalBasis), default=SignalBasis.EVENING

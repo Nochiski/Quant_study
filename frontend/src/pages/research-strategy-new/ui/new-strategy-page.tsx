@@ -61,7 +61,10 @@ import {
   assistantProvidersQuery,
   hasActiveAssistantProvider,
 } from "../../../entities/assistant";
-import { AssistStrategySidebar } from "../../../features/assist-strategy";
+import {
+  AssistStrategySidebar,
+  useAssistSidebarState,
+} from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
   RunEnvironmentSummary,
@@ -292,16 +295,33 @@ export const NewStrategyPage = () => {
 
   // 안내 오른쪽 칸의 기본 탭: AI 공급자가 연결돼 있으면 AI 도우미, 아니면 문서 미리보기. 공급자 목록이 확정된
   // 첫 순간에 한 번만 정하고(나중에 다시 읽혀도 탭이 저절로 바뀌지 않는다), 확정 전에는 정하지 않는다. URL 에
-  // 적힌 탭은 언제나 이긴다(가이드 리뷰 2).
+  // 적힌 탭은 언제나 이긴다(가이드 리뷰 2). 첫 조회가 실패하면 재시도(기본 3회 백오프)를 기다리지 않고 바로
+  // 미리보기로 정한다 — 공급자를 모르면 AI 를 먼저 보일 근거가 없다(가이드 재리뷰 1).
   const providers = useQuery(assistantProvidersQuery());
   const [defaultPanel, setDefaultPanel] = useState<GuidePanel | null>(null);
-  if (defaultPanel === null && (providers.data !== undefined || providers.isError))
+  if (
+    defaultPanel === null &&
+    (providers.data !== undefined || providers.isError || providers.failureCount > 0)
+  )
     setDefaultPanel(
       providers.data !== undefined && hasActiveAssistantProvider(providers.data)
         ? "assistant"
         : "preview",
     );
   const guidePanel: GuidePanel | null = search.assist ?? defaultPanel;
+
+  // AI 대화·입력칸 상태는 화면이 한 벌 든다. 안내의 AI 탭과 편집기 AI 열이 같은 상태를 그려서, 안내를 닫고
+  // 편집기로 가도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4). 서버 조회는 AI 를 처음 보일 때
+  // 시작한다 — 안내에서 미리보기만 보는 동안에는 대화 목록을 읽지 않는다.
+  const [assistantShown, setAssistantShown] = useState(false);
+  if (!assistantShown && (!search.guide || guidePanel === "assistant")) setAssistantShown(true);
+  const assistantState = useAssistSidebarState({
+    documentRef: strategyAssistant.documentRef,
+    readContext: strategyAssistant.readContext,
+    enabled: assistantShown,
+    // 추천 질문의 맥락은 안내 단계다. 편집기로 가면 고치지 않은 안내 추천 질문은 지워진다.
+    suggestionsKey: search.guide ? (search.step ?? "document") : "editor",
+  });
 
   // 단계별 안내(RD-04-D). 같은 문서·같은 트랜잭션을 쓰고, 편집기는 숨긴 채 살아 있어 되돌리기 이력이 이어진다.
   // 안내를 닫으면 같은 초안을 편집기 그래프 보기로 연다.
@@ -353,7 +373,7 @@ export const NewStrategyPage = () => {
                 onPreviewProposal={strategyAssistant.proposalHandlers.onPreviewProposal}
                 onApplyProposal={strategyAssistant.proposalHandlers.onApplyProposal}
                 suggestions={guideSuggestions(step)}
-                suggestionsKey={step.id}
+                state={assistantState}
                 layout="docked"
               />
             )}
@@ -718,6 +738,7 @@ export const NewStrategyPage = () => {
             // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
             // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
             onClose={close}
+            state={assistantState}
           />
         )}
         debugger={

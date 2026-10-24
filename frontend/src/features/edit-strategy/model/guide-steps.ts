@@ -6,9 +6,9 @@
  * 나누는 규칙: 한 단계(`x-stage`)에 최상위 목록 섹션(`factors`)이 있으면 그 목록이 단계 하나가 되고, 같은
  * 단계의 카드(신호 결합 칸)는 그 뒤 단계가 된다. 다른 목록(`eligibility.rules`)은 자기 단계 안에 남는다.
  */
-import { errorCount, listErrorCount } from "./diagnostic-counts";
+import { errorCount, listErrorCount, sectionErrorCount } from "./diagnostic-counts";
 import type { DocumentDiagnostic } from "./document-state";
-import type { FormField } from "./form-projection";
+import { requiresValue, type FormField, type FormSection } from "./form-projection";
 import type { PipelineCard, PipelineProjection } from "./pipeline-projection";
 import { cardTemplate, pipelineDocumentProperties } from "./pipeline-projection";
 
@@ -116,8 +116,7 @@ const fieldsStatus = (
   fields: readonly FormField[],
   sectionDiagnostics: readonly DocumentDiagnostic[] = [],
 ): GuideStepStatus => {
-  // 스키마 기본값이 있는 필수 칸은 비워 둬도 backend 가 채우므로 충족된 것으로 본다.
-  const required = fields.filter((field) => field.required && !field.hasDefault);
+  const required = fields.filter(requiresValue);
   return {
     errors:
       errorCount(sectionDiagnostics) +
@@ -149,8 +148,25 @@ export const guideStepStatuses = (
   steps.map((step) => {
     if (pipeline === null || step.kind === "review") return EMPTY;
     if (step.kind === "document") {
+      // 어느 단계 카드에도 없는 칸(`schema_version` 같은 const 칸, `parameters` 같은 단계 밖 섹션)의 진단도 문서
+      // 머리 단계가 받는다. 확인 단계는 완료로 세지 않으므로 그곳에 두면 "N / N 단계 완료"가 오류를 숨긴다
+      // (가이드 재리뷰 5). 채움·필수 판정은 화면에 보이는 칸(const 제외)만 본다.
       const root = pipelineDocumentProperties(pipeline);
-      return fieldsStatus(root?.fields ?? [], root?.diagnostics ?? []);
+      const outside = pipeline.unstaged.filter((section) => section.pointer !== "");
+      const constFields = (
+        pipeline.unstaged.find(
+          (section): section is Extract<FormSection, { kind: "object" }> =>
+            section.kind === "object" && section.pointer === "",
+        )?.fields ?? []
+      ).filter((field) => field.control.kind === "const");
+      const shown = fieldsStatus(root?.fields ?? [], root?.diagnostics ?? []);
+      return {
+        ...shown,
+        errors:
+          shown.errors +
+          constFields.reduce((sum, field) => sum + errorCount(field.diagnostics), 0) +
+          outside.reduce((sum, section) => sum + sectionErrorCount(section), 0),
+      };
     }
     const stage = pipeline.stages.find((candidate) => candidate.stage === step.stage);
     const ownsStage =

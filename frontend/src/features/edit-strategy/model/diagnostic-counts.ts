@@ -3,7 +3,7 @@
  * 항목 자신의 진단을 빠뜨리면 단계는 완료인데 카드는 빨간 어긋남이 생긴다.
  */
 import type { DocumentDiagnostic } from "./document-state";
-import type { FormListItem, FormListSection } from "./form-projection";
+import type { FormListItem, FormListSection, FormSection } from "./form-projection";
 
 export const errorCount = (diagnostics: readonly DocumentDiagnostic[]): number =>
   diagnostics.filter((diagnostic) => diagnostic.severity === "error").length;
@@ -17,3 +17,11 @@ export const itemErrorCount = (item: FormListItem): number =>
 export const listErrorCount = (list: FormListSection): number =>
   errorCount(list.diagnostics) +
   list.items.reduce((sum, item) => sum + itemErrorCount(item), 0);
+
+/** 섹션 하나: object 섹션이면 섹션 자신·칸·중첩 목록, 목록 섹션이면 목록 전체. */
+export const sectionErrorCount = (section: FormSection): number =>
+  section.kind === "list"
+    ? listErrorCount(section)
+    : errorCount(section.diagnostics) +
+      section.fields.reduce((sum, field) => sum + errorCount(field.diagnostics), 0) +
+      section.lists.reduce((sum, list) => sum + listErrorCount(list), 0);

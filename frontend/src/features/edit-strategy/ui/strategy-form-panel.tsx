@@ -14,6 +14,7 @@ import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import {
   catalogProfiles,
+  requiresValue,
   type FormControl,
   type FormField,
   type FormListItem,
@@ -835,11 +836,12 @@ const FormFieldRow = ({
       {requirementTags ? (
         <>
           {" "}
+          {/* 기본값이 있거나 지금 꺼진 필수 칸은 채우지 않아도 되므로 "선택"이다(단계 완료 판정과 같은 술어). */}
           <span
             className="strategy-form__requirement"
-            data-required={field.required ? "true" : undefined}
+            data-required={requiresValue(field) ? "true" : undefined}
           >
-            {t(field.required ? "form.field.required" : "form.field.optional")}
+            {t(requiresValue(field) ? "form.field.required" : "form.field.optional")}
           </span>
         </>
       ) : field.required ? (

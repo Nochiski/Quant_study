@@ -50,6 +50,11 @@ export type UseAssistChatOptions = {
    * 422 `assistant.turn_context_mismatch`다(결과 설명 spec R5).
    */
   readContext?: () => TurnContextPayload;
+  /**
+   * 서버 조회(대화 목록·이력·스트림)를 시작할지. 상태를 화면 위쪽이 미리 만들어 두고 패널은 처음 열 때
+   * 보이는 경우(새 전략 안내의 숨은 AI 탭)에, 열기 전에는 조회하지 않게 한다. 기본은 켬이다.
+   */
+  enabled?: boolean;
 };
 
 /** 보내지 못한 질문을 입력칸으로 되돌리는 지시. `nonce`가 바뀔 때만 복원한다. */
@@ -101,6 +106,7 @@ const sessionTitle = (text: string): string => {
 export const useAssistChat = ({
   documentRef,
   readContext,
+  enabled = true,
 }: UseAssistChatOptions): AssistChat => {
   const queryClient = useQueryClient();
   const [selection, setSelection] = useState<Selection>({ kind: "auto" });
@@ -117,7 +123,7 @@ export const useAssistChat = ({
     emptyAssistantChatState,
   );
 
-  const sessions = useQuery(assistantSessionsQuery(documentRef));
+  const sessions = useQuery({ ...assistantSessionsQuery(documentRef), enabled });
   const list = useMemo(() => sessions.data ?? [], [sessions.data]);
   // 목록은 오래된 대화부터 온다 — 문서를 다시 열면 마지막 대화를 이어 본다.
   const sessionId =
@@ -130,7 +136,7 @@ export const useAssistChat = ({
   // 아직 세션이 없으면 조회하지 않는다. 빈 id는 `enabled: false`인 동안 쓰이지 않는 자리 표시다.
   const history = useQuery({
     ...assistantSessionQuery(sessionId ?? ""),
-    enabled: sessionId !== null,
+    enabled: enabled && sessionId !== null,
   });
 
   /**
@@ -205,7 +211,7 @@ export const useAssistChat = ({
   }, []);
 
   const { status: streamStatus, retry: retryStream } = useAssistantEventStream({
-    target: assistantStreamTarget(state),
+    target: enabled ? assistantStreamTarget(state) : null,
     lastSequence: state.lastSequence,
     onEvent,
     onHistory,

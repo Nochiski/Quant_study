@@ -9,7 +9,7 @@ import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import { itemErrorCount } from "../model/diagnostic-counts";
 import type { DocumentDiagnostic } from "../model/document-state";
-import { projectForm } from "../model/form-projection";
+import { projectForm, requiresValue, type FormField } from "../model/form-projection";
 import {
   guideStepState,
   guideStepStatuses,
@@ -91,6 +91,11 @@ describe("guideStepStatuses", () => {
     expect(result.portfolio).toMatchObject({ errors: 0, filled: false });
   });
 
+  it("const 칸(schema_version)과 단계 밖 섹션(parameters) 진단은 문서 머리 단계가 센다(가이드 재리뷰 5)", () => {
+    expect(statuses(NAMED, [error("/schema_version")]).document!.errors).toBe(1);
+    expect(statuses(NAMED, [error("/parameters")]).document!.errors).toBe(1);
+  });
+
   it("경고는 오류로 세지 않는다", () => {
     const result = statuses(NAMED, [{ ...error("/title"), severity: "warning" }]);
     expect(result.document!.errors).toBe(0);
@@ -162,5 +167,24 @@ describe("guideSuggestionKeys", () => {
     expect(steps.length).toBeGreaterThan(2);
     for (const step of steps)
       expect(tOptional(guideSuggestionKeys(step)[0]!), step.id).not.toBeNull();
+  });
+});
+
+describe("requiresValue", () => {
+  const title = (): FormField => {
+    const pipeline = pipelineOf('schema_version: "1.2"\ntitle: ""\n');
+    const root = pipeline.unstaged.find((section) => section.pointer === "");
+    if (root?.kind !== "object") throw new Error("루트 섹션이 없다");
+    return root.fields.find((field) => field.key === "title")!;
+  };
+
+  it("기본값 없는 필수 칸만 채워야 하는 칸이다(가이드 재리뷰 2)", () => {
+    expect(requiresValue(title())).toBe(true);
+    expect(requiresValue({ ...title(), hasDefault: true, defaultValue: "x" })).toBe(false);
+    expect(requiresValue({ ...title(), required: false })).toBe(false);
+  });
+
+  it("지금 설정에서 꺼진(applicable=false) 필수 칸은 채우지 않아도 된다(SoT 재리뷰 경미 2)", () => {
+    expect(requiresValue({ ...title(), applicable: false })).toBe(false);
   });
 });

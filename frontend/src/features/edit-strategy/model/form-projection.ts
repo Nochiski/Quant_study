@@ -84,6 +84,13 @@ export type FormField = {
   diagnostics: DocumentDiagnostic[];
 };
 
+/**
+ * 사용자가 값을 채워야 하는 칸인가: 스키마 필수이고, 기본값이 없고(있으면 backend 가 채운다), 지금 설정에서 꺼지지
+ * 않았다(`x-applicable-when` 이 끈 칸은 쓰이지 않는다). 안내의 "필수" 표식과 단계 완료 판정이 같은 술어를 쓴다.
+ */
+export const requiresValue = (field: FormField): boolean =>
+  field.required && !field.hasDefault && field.applicable !== false;
+
 export type FormListItem = {
   pointer: string;
   /** 항목을 한 줄로 부르는 이름(스키마 `x-authoring-identity` 값 → const가 아닌 첫 문자열 값 → 번호). */

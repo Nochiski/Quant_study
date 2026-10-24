@@ -144,18 +144,26 @@ export const StrategyGuide = ({
   // 사용자가 떠난 단계. 필수 칸이 없는 단계는 지나가면 기본값을 받아들인 것으로 본다(`guideStepState`).
   // 안내 화면의 UI 상태라 문서·URL 에 두지 않는다.
   const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set());
+  // 지금 단계가 바뀌면(버튼·뒤로/앞으로·딥링크·제안 적용 뒤 이동 무엇이든) 떠난 단계를 방문으로 남긴다. 단계는 URL
+  // 이 소유하므로 버튼 처리기가 아니라 렌더 중에 직전 단계와 견준다 — effect 로 미루면 한 프레임 옛 표시가 남는다
+  // (`frontend-react-effects.md`, 가이드 재리뷰 6). 스키마가 오기 전의 임시 단계(문서 머리로 떨어진 것)는 세지 않는다.
+  const [shownStep, setShownStep] = useState<string | null>(null);
+  if (pipeline !== null && current.id !== shownStep) {
+    if (shownStep !== null) setVisited((previous) => new Set(previous).add(shownStep));
+    setShownStep(current.id);
+  }
   const states = steps.map((candidate, position) =>
     guideStepState(candidate, statuses[position]!, visited.has(candidate.id)),
   );
   const done = states.filter(
     (state, position) => steps[position]!.kind !== "review" && state === "done",
   ).length;
-  const go = (id: string) => {
-    if (id !== current.id) setVisited((previous) => new Set(previous).add(current.id));
-    onStep(id);
-  };
   const next = steps[index + 1];
   const changed = useChangedLines(source);
+  // AI 패널은 처음 열 때 마운트하고 그 뒤로는 탭을 바꿔도 유지한다 — 숨은 탭이 대화 조회를 시작하지 않고,
+  // 연 뒤에는 치던 문장·진행 중 답변을 잃지 않는다(가이드 재리뷰 7).
+  const [assistantMounted, setAssistantMounted] = useState(false);
+  if (!assistantMounted && panel === "assistant") setAssistantMounted(true);
   const sideId = useId();
   const preview = <YamlPreview source={source} changed={changed} />;
   return (
@@ -185,7 +193,7 @@ export const StrategyGuide = ({
                   type="button"
                   aria-current={position === index ? "step" : undefined}
                   data-state={state}
-                  onClick={() => go(candidate.id)}
+                  onClick={() => onStep(candidate.id)}
                 >
                   {/* 번호·체크는 목록 순서와 상태 문구가 이미 말한다. 버튼 이름은 단계 이름과 상태다. */}
                   <span className="strategy-guide__step-number" aria-hidden="true">
@@ -269,7 +277,7 @@ export const StrategyGuide = ({
             <Button
               tone="ghost"
               disabled={index === 0}
-              onClick={() => go(steps[index - 1]!.id)}
+              onClick={() => onStep(steps[index - 1]!.id)}
             >
               {t("guide.previous")}
             </Button>
@@ -278,7 +286,7 @@ export const StrategyGuide = ({
                 <span className="strategy-guide__hint" aria-hidden="true">
                   {tFill("guide.nextStep", { name: stepName(next) })}
                 </span>
-                <Button tone="primary" onClick={() => go(next.id)}>
+                <Button tone="primary" onClick={() => onStep(next.id)}>
                   {t("guide.next")}
                 </Button>
               </div>
@@ -321,7 +329,7 @@ export const StrategyGuide = ({
               className="strategy-guide__side-panel strategy-guide__side-panel--assistant"
               hidden={panel !== "assistant"}
             >
-              {assistant(current)}
+              {assistantMounted ? assistant(current) : null}
             </div>
             <div
               role="tabpanel"

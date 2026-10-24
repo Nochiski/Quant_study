@@ -11,7 +11,10 @@ import {
 import { t, type MessageKey } from "../../../shared/config";
 import { Link } from "../../../shared/lib/router";
 import { Button, EmptyState } from "../../../shared/ui";
-import { useAssistChat } from "../model/use-assist-chat";
+import {
+  useAssistSidebarState,
+  type AssistSidebarState,
+} from "../model/use-assist-sidebar";
 import { AssistComposer } from "./assist-composer";
 import { AssistTranscript } from "./assist-transcript";
 import "./assist-strategy-sidebar.css";
@@ -92,78 +95,58 @@ export type AssistStrategySidebarProps = AssistScreenProps & {
    * 오른쪽 탭)로, 대화가 비어 있어도 추천 질문과 입력칸을 칸 바닥에 붙인다.
    */
   layout?: "rail" | "docked";
+  /**
+   * 위쪽에서 만든 대화·입력칸 상태(`useAssistSidebarState`). 주면 사이드바는 그리기만 하고, 이때
+   * `suggestionsKey`는 상태를 만든 쪽이 정한다.
+   */
+  state?: AssistSidebarState;
 };
 
 /**
  * 전략 화면 우측의 AI 채팅 사이드바.
  *
  * 그래프·YAML 어느 탭에서 보든 같은 세션이며, 문서를 바꾸는 것은 제안 카드의 버튼이 부르는 콜백뿐이다
- * (적용 경로는 spec D7에 따라 바깥이 소유한다). 서버 상태는 전부 query cache가 들고, 이 컴포넌트가
- * 소유하는 것은 열린 대화·확인 대화상자 같은 UI 상태다(spec D9).
+ * (적용 경로는 spec D7에 따라 바깥이 소유한다). 서버 상태는 전부 query cache가 들고, 대화·입력칸 상태는
+ * `useAssistSidebarState`가 든다. `state`를 주지 않으면 사이드바가 스스로 만들고, 주면 그 상태를 그린다 —
+ * 같은 문서를 두 자리가 번갈아 보이는 화면이 대화·입력을 잇는 길이다(가이드 재리뷰 4).
  */
-export const AssistStrategySidebar = ({
-  documentRef,
-  readContext,
+export const AssistStrategySidebar = (props: AssistStrategySidebarProps) =>
+  props.state === undefined ? (
+    <OwnedSidebar {...props} />
+  ) : (
+    <SidebarView {...props} state={props.state} />
+  );
+
+const OwnedSidebar = (props: AssistStrategySidebarProps) => {
+  const state = useAssistSidebarState({
+    documentRef: props.documentRef,
+    readContext: props.readContext,
+    suggestionsKey: props.suggestionsKey,
+  });
+  return <SidebarView {...props} state={state} />;
+};
+
+const SidebarView = ({
   copy = "strategy",
   onPreviewProposal,
   onApplyProposal,
   onApplyProposalAndBacktest,
   onClose,
   suggestions = [],
-  suggestionsKey,
   layout = "rail",
-}: AssistStrategySidebarProps) => {
+  state,
+}: AssistStrategySidebarProps & { state: AssistSidebarState }) => {
   const confirmTextId = useId();
   const suggestionsId = useId();
   const providers = useQuery(assistantProvidersQuery());
-  const chat = useAssistChat({ documentRef, readContext });
+  const { chat, draft, setDraft, submitDraft } = state;
   const [closeConfirm, setCloseConfirm] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  // 입력칸 문장은 사이드바가 소유한다. 되돌아온 질문·추천 질문은 여기서 한 번만 소비된다 — 입력칸이 다시
-  // 마운트돼도 옛 문장이 되살아나거나 초점을 빼앗지 않는다(가이드 리뷰 3).
-  const [draft, setDraft] = useState("");
-  const [restoredNonce, setRestoredNonce] = useState<number | null>(null);
-  // 마지막으로 넣은 추천 질문. 입력칸이 아직 그 문장 그대로면 사용자가 쓴 글이 아니다.
-  const [suggested, setSuggested] = useState<string | null>(null);
-  const [seenSuggestionsKey, setSeenSuggestionsKey] = useState(suggestionsKey);
 
-  // 되돌아온 질문을 렌더 중에 입력칸으로 옮긴다. effect로 미루면 빈 칸이 한 프레임 보이고,
-  // 그 사이 타이핑은 다음 렌더에 덮인다(`frontend-react-effects.md`).
-  //
-  // 왕복이 도는 동안 사용자가 이미 다른 문장을 치고 있으면 덮지 않는다 — 되돌려 받는 문장보다
-  // 지금 치고 있는 문장이 새 것이다. 보내지 못한 질문은 배너가 알린다(B-03 2차 리뷰 P3).
-  if (chat.draftRestore !== null && chat.draftRestore.nonce !== restoredNonce) {
-    setRestoredNonce(chat.draftRestore.nonce);
-    if (draft.trim() === "") {
-      setDraft(chat.draftRestore.text);
-      setSuggested(null);
-    }
-  }
-  // 맥락(안내 단계)이 바뀌면 고치지 않은 앞 단계 추천 질문을 지운다. 사용자가 고친 문장은 남긴다(가이드 리뷰 6).
-  if (suggestionsKey !== seenSuggestionsKey) {
-    setSeenSuggestionsKey(suggestionsKey);
-    if (suggested !== null && draft === suggested) setDraft("");
-    setSuggested(null);
-  }
-
-  /**
-   * 추천 질문을 입력칸에 넣는다. 보내지는 않는다. 사용자가 직접 쓴 미전송 문장이 있으면 덮지 않고 줄을 바꿔 뒤에
-   * 잇는다 — 쓴 글을 경고 없이 지우면 되돌릴 길이 없고, 확인 대화상자는 칩 한 번의 가벼운 동작에 비해 무겁다.
-   * 입력칸이 앞서 넣은 추천 질문 그대로이면 사용자의 글이 아니므로 바꿔 넣는다(가이드 리뷰 4).
-   */
   const pickSuggestion = (suggestion: string) => {
-    const userText = draft.trim() !== "" && draft !== suggested;
-    setDraft(userText ? `${draft.trimEnd()}\n${suggestion}` : suggestion);
-    setSuggested(userText ? null : suggestion);
+    state.pickSuggestion(suggestion);
     inputRef.current?.focus();
-  };
-
-  const submitDraft = () => {
-    if (chat.running !== null || chat.busy || draft.trim() === "") return;
-    chat.send(draft);
-    setDraft("");
-    setSuggested(null);
   };
 
   const hasActiveProvider =

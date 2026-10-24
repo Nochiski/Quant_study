@@ -4826,7 +4826,9 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     await user.click(screen.getByRole("button", { name: "Server momentum · 담기" }));
     await waitFor(() => expect(source()).toContain("factor_id: server.momentum"));
     // 공급자가 연결돼 있어 오른쪽 칸은 AI 도우미 탭으로 열려 있다. 미리보기 탭에 바뀐 줄 수가 붙는다.
-    const previewTab = screen.getByRole("tab", { name: /^전략 문서 미리보기 \d+줄 바뀜$/u });
+    // 바뀐 줄 수는 탭 이름이 아니라 설명으로 읽힌다 — 편집마다 탭 이름이 바뀌지 않는다(가이드 재리뷰 8).
+    const previewTab = screen.getByRole("tab", { name: "전략 문서 미리보기" });
+    expect(previewTab).toHaveAccessibleDescription(/^\d+줄 바뀜$/u);
     await user.click(previewTab);
     const preview = screen.getByRole("complementary", { name: "전략 문서 미리보기" });
     await waitFor(() =>
@@ -4933,6 +4935,93 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
       ),
     );
     expect(screen.getByRole("tab", { name: "AI 도우미" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("공급자 조회가 실패하면 기본 재시도를 기다리지 않고 미리보기로 정한다(가이드 재리뷰 1)", async () => {
+    useGuideCatalog();
+    server.use(
+      http.get(`${API}/api/v1/assistant/providers`, () =>
+        HttpResponse.json({ detail: "down" }, { status: 500 }),
+      ),
+    );
+    // 앱 기본값처럼 재시도(3회 백오프)를 켠다 — 그동안 "불러오는 중"에 머물지 않아야 한다.
+    mountWithClient("/research/strategies/new?guide=true", (client) =>
+      client.setDefaultOptions({ queries: { retry: 3 } }),
+    false);
+    await waitFor(
+      () =>
+        expect(screen.getByRole("tab", { name: "전략 문서 미리보기" })).toHaveAttribute(
+          "aria-selected",
+          "true",
+        ),
+      { timeout: 900 },
+    );
+  });
+
+  it("숨은 AI 탭은 처음 열기 전까지 대화 목록을 읽지 않는다(가이드 재리뷰 7)", async () => {
+    useGuideCatalog();
+    let sessionReads = 0;
+    server.use(
+      http.get(`${API}/api/v1/assistant/sessions`, () => {
+        sessionReads += 1;
+        return HttpResponse.json(assistantSessions);
+      }),
+    );
+    const user = userEvent.setup();
+    mountWithClient("/research/strategies/new?guide=true&assist=preview", undefined, false);
+    await within(await screen.findByRole("navigation", { name: "만드는 단계" })).findByRole(
+      "button",
+      { name: /^유니버스/u },
+    );
+    expect(sessionReads).toBe(0);
+    expect(screen.queryByRole("textbox", { name: "어시스턴트에게 보낼 메시지" })).toBeNull();
+
+    await user.click(screen.getByRole("tab", { name: "AI 도우미" }));
+    await screen.findByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });
+    await waitFor(() => expect(sessionReads).toBeGreaterThan(0));
+  });
+
+  it("주소의 단계가 바뀌면(뒤로 가기 포함) 떠난 단계를 지나간 것으로 본다(가이드 재리뷰 6)", async () => {
+    useGuideCatalog();
+    const { history } = mountWithClient(
+      "/research/strategies/new?guide=true&step=eligibility&assist=preview",
+      undefined,
+      false,
+    );
+    await screen.findByRole("navigation", { name: "만드는 단계" });
+    const universe = await within(steps()).findByRole("button", { name: /^유니버스/u });
+    expect(universe).not.toHaveTextContent("(완료)");
+    act(() => history.push("/research/strategies/new?guide=true&step=portfolio&assist=preview"));
+    await waitFor(() => expect(universe).toHaveTextContent("(완료)"));
+    act(() => history.back());
+    const portfolio = within(steps()).getByRole("button", { name: /^포트폴리오 구성/u });
+    await waitFor(() => expect(portfolio).toHaveTextContent("(완료)"));
+  });
+
+  it("안내를 닫고 편집기로 가도 AI 입력칸 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4)", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    mountWithClient("/research/strategies/new?guide=true&assist=assistant", undefined, false);
+    const panel = await screen.findByRole("tabpanel", { name: "AI 도우미" });
+    const input = await within(panel).findByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });
+    await user.type(input, "모멘텀 전략을 만들어 줘");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(assistantStream).not.toBeNull());
+    await user.type(input, "그리고 거래대금도");
+
+    await user.click(screen.getByRole("button", { name: "편집기에서 직접 쓰기" }));
+    const rail = await screen.findByRole("complementary", { name: "AI 어시스턴트" });
+    expect(
+      within(rail).getByRole("textbox", { name: "어시스턴트에게 보낼 메시지" }),
+    ).toHaveValue("그리고 거래대금도");
+    act(() =>
+      assistantStream!.push({
+        sequence: 0,
+        turn_id: "t-1",
+        event: { type: "text_delta", text: "편집기에서도 이어지는 답" },
+      }),
+    );
+    expect(await within(rail).findByText("편집기에서도 이어지는 답")).toBeInTheDocument();
   });
 
   it("URL 에 적힌 탭은 공급자 연결 여부보다 먼저다(가이드 리뷰 2)", async () => {

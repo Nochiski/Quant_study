@@ -78,7 +78,7 @@ from strategy_workbench.domain.assistant.facade.models import (
 # 한쪽으로만 적으면 extra 설치 여부에 따라 타입 검사가 갈린다.
 #
 # `httpx2`를 **타입 검사에서만** 본다. 런타임 import를 두면 이 파일이 extra 없는 구성에서
-# 수집되지 않아 `backend-no-extras` 잡이 깨진다 — 그 잡이 지키려는 것이 바로 이 파일이다.
+# 수집되지 않아 CI의 extra 없는 단계가 깨진다 — 그 단계가 지키려는 것이 바로 이 파일이다.
 # 문자열 별칭은 타입 검사기만 읽고, 주석은 `from __future__ import annotations`로 지연된다.
 AssistantClient: TypeAlias = "TestClient | httpx.Client"
 # 응답 타입도 같이 갈린다 — `TestClient.get(...)`이 돌려주는 것은 그 클라이언트 쪽 `Response`다.

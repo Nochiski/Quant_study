@@ -1,8 +1,20 @@
 name: lang2-plan
 
+# lang2 계획은 닫혔다(CLOSEOUT). 집계 원천·생성기가 바뀔 때만 드리프트를 검사한다.
 on:
   push:
+    branches: [main]
+    paths:
+      - docs/planning/strategy-language-2-0/PLAN.md
+      - docs/planning/strategy-language-2-0/tools/**
+      - tools/quant_study_dev/plan_progress.py
+      - .github/workflows/lang2-plan.yml
   pull_request:
+    paths:
+      - docs/planning/strategy-language-2-0/PLAN.md
+      - docs/planning/strategy-language-2-0/tools/**
+      - tools/quant_study_dev/plan_progress.py
+      - .github/workflows/lang2-plan.yml
 
 permissions:
   contents: read

@@ -129,6 +129,20 @@ UNSELECTED_FIELD_MESSAGE = "아직 필드를 고르지 않았습니다. 목록�
 """
 
 
+def missing_field_message(field_id: str, reason: str | None, unknown: str) -> str:
+    """찾지 못한 필드 참조의 진단 문장 — 필드 id 를 받는 모든 검사가 이 하나로 빈 값 분기를 맞춘다.
+
+    빈 칸(`field_id: ""`)은 `UNSELECTED_FIELD_MESSAGE`, 어댑터가 뺀 필드는 그 사유
+    (`unavailable_field_message`), 그 밖에는 자리마다의 `unknown` 문장 뒤에 `field_id` 원문을
+    붙인다.
+    """
+    if not field_id.strip():
+        return UNSELECTED_FIELD_MESSAGE
+    if reason is None:
+        return f"{unknown}: field_id={field_id!r}"
+    return unavailable_field_message(field_id, reason)
+
+
 def node_dependencies(node: ExpressionNode) -> tuple[str, ...]:
     if isinstance(node, (UnaryNode, TimeSeriesNode, CrossSectionalNode, GroupNode, FillNode)):
         return (node.input_node_id,)
@@ -213,13 +227,11 @@ def validate_factor_graph(
             and (fields or require_field_metadata)
             and node.field_id not in field_by_id
         ):
-            reason = (unavailable_fields or {}).get(node.field_id)
-            if not node.field_id.strip():
-                message = UNSELECTED_FIELD_MESSAGE
-            elif reason is None:
-                message = f"필드 계약을 찾을 수 없습니다: field_id={node.field_id!r}"
-            else:
-                message = unavailable_field_message(node.field_id, reason)
+            message = missing_field_message(
+                node.field_id,
+                (unavailable_fields or {}).get(node.field_id),
+                "필드 계약을 찾을 수 없습니다",
+            )
             issues.append(_issue("factor.graph.field_missing", node.node_id, path, message))
         elif isinstance(node, ParameterNode) and node.parameter_id not in known_parameters:
             issues.append(
@@ -578,7 +590,9 @@ def _infer_contract(
                         "factor.graph.group_field_missing",
                         node.node_id,
                         node.node_id,
-                        f"그룹 필드 계약을 찾을 수 없습니다: field_id={node.group_field_id!r}",
+                        missing_field_message(
+                            node.group_field_id, None, "그룹 필드 계약을 찾을 수 없습니다"
+                        ),
                     )
                 )
             elif group_metadata and group_metadata.value_type is not NodeValueType.GROUP_SERIES:

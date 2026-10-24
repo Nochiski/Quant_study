@@ -276,6 +276,20 @@ def test_a_group_node_compiles_when_the_adapter_provides_a_group_field() -> None
     assert compiled.ok, _errors(compiled)
 
 
+def test_an_unpicked_group_field_asks_to_pick_one_like_every_other_field_slot() -> None:
+    """빈 그룹 필드(`group_field_id: ""`)도 필드 id 를 받는 다른 자리와 같은 문장이다
+    (최종 리뷰 1)."""
+    source = _with_factor(_GROUP_FACTOR.replace("classification.sector", '""'))
+
+    compiled = _compile(source, _Catalog(_CLOSE, _ADJ_CLOSE, _SECTOR_AS_GROUP))
+
+    [diagnostic] = [
+        item for item in compiled.diagnostics if item.code.endswith("group_field_missing")
+    ]
+    assert diagnostic.node_id == "neutral"
+    assert diagnostic.message == "아직 필드를 고르지 않았습니다. 목록에서 필드를 고르세요."
+
+
 def test_without_an_adapter_a_group_node_compiles_as_before() -> None:
     assert _compile(_with_factor(_GROUP_FACTOR), None).ok
 

@@ -1,11 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useRef, useState, type FormEvent } from "react";
 
 import {
   kiwoomMockConnectionQuery,
   useDeleteKiwoomMockConnection,
 } from "../../../entities/broker";
-import { CredentialsFileLocation } from "../../../entities/credentials-file";
+import {
+  CredentialsFileLocation,
+  refreshCredentialsFile,
+} from "../../../entities/credentials-file";
 import { t, tFill } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import {
@@ -24,6 +27,7 @@ import "./kiwoom-mock-settings.css";
  * 계좌 대조), 결과 문장은 서버가 완성한 것을 그대로 보인다. 이 화면은 주문하지 않는다.
  */
 export const KiwoomMockSettings = () => {
+  const queryClient = useQueryClient();
   const connection = useQuery(kiwoomMockConnectionQuery());
   const save = useSaveKiwoomMockConnection();
   const check = useVerifyKiwoomMockConnection();
@@ -102,6 +106,7 @@ export const KiwoomMockSettings = () => {
       onSuccess: () => {
         setConfirming(false);
         check.reset();
+        void refreshCredentialsFile(queryClient);
       },
       onError: () => setRemoveFailed(true),
     });

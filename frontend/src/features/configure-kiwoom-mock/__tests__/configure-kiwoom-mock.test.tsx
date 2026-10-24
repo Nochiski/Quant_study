@@ -32,13 +32,21 @@ let saveReply: () => Response;
 let verifyReply: KiwoomMockConnectionCheckBody;
 let verifyGate: Promise<void>;
 let deleted: number;
+let fileReads = 0;
+let fileProblems: {
+  section: string;
+  reason: string;
+  fields: string[];
+  message: string;
+}[] = [];
 
 const ENV_PATH = "C:\\Users\\me\\OneDrive\\문서\\auto_trading\\.env";
 
 const server = setupServer(
-  http.get(`${API}/api/v1/settings/credentials-file`, () =>
-    HttpResponse.json({ path: ENV_PATH, problems: [] }),
-  ),
+  http.get(`${API}/api/v1/settings/credentials-file`, () => {
+    fileReads += 1;
+    return HttpResponse.json({ path: ENV_PATH, problems: fileProblems });
+  }),
   http.get(PATH, () => HttpResponse.json(status)),
   http.put(PATH, async ({ request }) => {
     saveBodies.push((await request.json()) as Record<string, unknown>);
@@ -63,6 +71,8 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 beforeEach(() => {
+  fileReads = 0;
+  fileProblems = [];
   status = { saved: false, account_tail: null };
   saveBodies = [];
   deleted = 0;
@@ -101,6 +111,31 @@ describe("KiwoomMockSettings", () => {
     renderWithClient(<KiwoomMockSettings />);
     const location = await screen.findByTestId("credentials-file-location");
     expect(location).toHaveTextContent(`저장 위치: ${ENV_PATH}`);
+  });
+
+  it("reads the file problems again after saving keys", async () => {
+    fileProblems = [
+      {
+        section: "kiwoom",
+        reason: "incomplete",
+        fields: ["STRATEGY_WORKBENCH_KIWOOM_MOCK_ACCOUNT"],
+        message:
+          "키움 모의 연결 세 줄 중 빠진 줄이 있습니다: STRATEGY_WORKBENCH_KIWOOM_MOCK_ACCOUNT",
+      },
+    ];
+    const user = userEvent.setup();
+    renderWithClient(<KiwoomMockSettings />);
+    expect(await screen.findByTestId("credentials-file-problems")).toBeTruthy();
+    const before = fileReads;
+
+    fileProblems = [];
+    await fill(user, "5012-3456-78");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(fileReads).toBeGreaterThan(before));
+    await waitFor(() =>
+      expect(screen.queryByTestId("credentials-file-problems")).toBeNull(),
+    );
   });
 
   it("shows nothing saved and keeps the check disabled", async () => {

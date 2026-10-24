@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
@@ -9,7 +9,10 @@ import {
   type ProviderKindView,
   type ProviderProfileView,
 } from "../../../entities/assistant";
-import { CredentialsFileLocation } from "../../../entities/credentials-file";
+import {
+  CredentialsFileLocation,
+  refreshCredentialsFile,
+} from "../../../entities/credentials-file";
 import { t } from "../../../shared/config";
 import { Badge, Button, EmptyState, Tooltip } from "../../../shared/ui";
 import { providerKindLabel, providerRejection } from "../model/provider-copy";
@@ -177,6 +180,7 @@ const ProviderCard = ({
 export const AiProviderSettings = () => {
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
+  const queryClient = useQueryClient();
   const providers = useQuery(assistantProvidersQuery());
   const activate = useActivateAssistantProvider();
   const remove = useDeleteAssistantProvider();
@@ -203,6 +207,7 @@ export const AiProviderSettings = () => {
   const runActivate = (profileId: string) => {
     setActionError(null);
     activate.mutate(profileId, {
+      onSuccess: () => void refreshCredentialsFile(queryClient),
       onError: (error) => setActionError(providerRejection(error).message),
     });
   };
@@ -220,6 +225,7 @@ export const AiProviderSettings = () => {
       onSuccess: () => {
         flushSync(() => setConfirming(null));
         heading.current?.focus();
+        void refreshCredentialsFile(queryClient);
       },
       onError: (error) => setActionError(providerRejection(error).message),
     });
@@ -228,7 +234,12 @@ export const AiProviderSettings = () => {
   return (
     <section className="ai-providers" aria-labelledby={titleId}>
       {/* `tabIndex={-1}`은 탭 순서에 넣지 않고 프로그램 포커스만 허용한다(삭제 성공 후 복귀 지점). */}
-      <h2 className="ai-providers__title" id={titleId} ref={heading} tabIndex={-1}>
+      <h2
+        className="ai-providers__title"
+        id={titleId}
+        ref={heading}
+        tabIndex={-1}
+      >
         {t("settings.assistant.title")}
       </h2>
       <p className="ai-providers__description">

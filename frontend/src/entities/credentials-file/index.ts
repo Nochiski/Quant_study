@@ -2,5 +2,6 @@
 export {
   credentialsFileKey,
   credentialsFileQuery,
+  refreshCredentialsFile,
 } from "./model/credentials-file-query";
 export { CredentialsFileLocation } from "./ui/credentials-file-location";

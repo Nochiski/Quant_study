@@ -8,6 +8,7 @@ import {
   type ConnectionOutcome,
   type SaveKiwoomMockConnectionBody,
 } from "../../../entities/broker";
+import { refreshCredentialsFile } from "../../../entities/credentials-file";
 import { t } from "../../../shared/config";
 
 export type KiwoomField = "app_key" | "secret_key" | "account_number" | "form";
@@ -46,7 +47,10 @@ export const useSaveKiwoomMockConnection = () => {
     setPending(true);
     try {
       await brokerConnectionApi.save(input);
-      await refreshKiwoomMockConnection(queryClient);
+      await Promise.all([
+        refreshKiwoomMockConnection(queryClient),
+        refreshCredentialsFile(queryClient),
+      ]);
       return null;
     } catch (error) {
       return rejection(error);

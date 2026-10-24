@@ -7,6 +7,7 @@ import {
   refreshIfProviderGone,
   type CreateProviderProfileInput,
 } from "../../../entities/assistant";
+import { refreshCredentialsFile } from "../../../entities/credentials-file";
 import { t } from "../../../shared/config";
 import {
   probeFailureMessage,
@@ -40,7 +41,10 @@ export const useCreateProvider = () => {
     setPending(true);
     try {
       await assistantProviderApi.createProvider(input);
-      await refreshAssistantProviders(queryClient);
+      await Promise.all([
+        refreshAssistantProviders(queryClient),
+        refreshCredentialsFile(queryClient),
+      ]);
       return null;
     } catch (error) {
       return providerRejection(error);

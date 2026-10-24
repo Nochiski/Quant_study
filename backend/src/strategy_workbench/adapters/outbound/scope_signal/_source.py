@@ -1,9 +1,10 @@
-"""모델 DB의 장 마감 빌드에서 scope 순위와 신호일 종가를 읽는다(S07).
+"""모델 DB의 빌드에서 scope 순위와 신호일 종가를 읽는다(S07).
 
 모델 DB 배치(서버 quant-ledger의 `data/model_db`):
 
-- `model/latest_evening.json`: 마지막 성공 장 마감 빌드
-  (`build_id`·`date`·`fi_build_id`·모델별 게이트)
+- `model/latest_<basis>.json`: 그 종류의 마지막 성공 빌드
+  (`build_id`·`date`·`fi_build_id`·모델별 게이트). 장 마감 빌드는 `latest_evening.json`,
+  주말 보강판은 `latest_supplement.json`이다.
 - `model/<모델>/MANIFEST.json`: 모델별 현재 빌드(`current_build`)
 - `model/<모델>/v=<build_id>/scores.parquet`: `stock_code`·`rank`·`score_date`
 - `factor_inputs/fi_prices/v=<fi_build_id>/*.parquet`: 점수를 계산한 가격 판
@@ -25,6 +26,7 @@ import pyarrow.parquet as pq
 
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     EarlierClose,
+    SignalBasis,
     SignalRead,
     SignalReadStatus,
     SignalSnapshot,
@@ -45,25 +47,25 @@ class ScopeSignalSource:
         self._root = model_db_root
         self._model_id = model_id
 
-    def read(self, signal_date: date) -> SignalRead:
+    def read(self, signal_date: date, basis: SignalBasis) -> SignalRead:
         try:
-            return self._read(signal_date)
+            return self._read(signal_date, basis)
         except _Unreadable as error:
             return SignalRead(SignalReadStatus.UNREADABLE, detail=str(error))
 
-    def _read(self, signal_date: date) -> SignalRead:
-        latest = _json(self._root / "model" / "latest_evening.json")
+    def _read(self, signal_date: date, basis: SignalBasis) -> SignalRead:
+        latest = _json(self._root / "model" / f"latest_{basis.value}.json")
         identity = f"model_id={self._model_id} signal_date={signal_date.isoformat()}"
-        if latest.get("status") != "ok" or latest.get("basis") != "evening":
+        if latest.get("status") != "ok" or latest.get("basis") != basis.value:
             return SignalRead(
                 SignalReadStatus.NOT_READY,
-                detail=f"latest evening build is not ok — {identity} "
+                detail=f"latest {basis.value} build is not ok — {identity} "
                 f"status={latest.get('status')!r} basis={latest.get('basis')!r}",
             )
         if latest.get("date") != signal_date.isoformat():
             return SignalRead(
                 SignalReadStatus.NOT_READY,
-                detail=f"latest evening build is for another date — {identity} "
+                detail=f"latest {basis.value} build is for another date — {identity} "
                 f"latest_date={latest.get('date')!r}",
             )
         build_id, prices_build_id = _text(latest, "build_id"), _text(latest, "fi_build_id")
@@ -169,31 +171,42 @@ def _ranks(path: Path, signal_date: date) -> dict[str, int]:
 def _previous(
     model_dir: Path, manifest: dict[str, object], build_id: str, signal_date: date
 ) -> tuple[str | None, dict[str, int] | None]:
-    """MANIFEST 빌드 목록에서 현재 빌드 바로 앞 판의 순위. 없거나 읽지 못하면 점검을 건너뛴다."""
+    """MANIFEST 빌드 목록에서 현재 빌드 앞, 신호일보다 앞 날짜의 가장 최근 판 순위.
+
+    같은 신호일을 다시 지은 판(같은 날 재빌드, 장 마감 판 뒤의 주말 보강판)은 건너뛴다 — 하루 사이
+    누락을 보는 점검이라 같은 날 판끼리 견주지 않는다. 그런 판이 없으면 점검을 건너뛰고, 읽지 못한
+    판에서는 그 판 id 와 함께 건너뛴다.
+    """
     builds = manifest.get("builds")
     ids = (
         [b.get("build_id") for b in builds if isinstance(b, dict)]
         if isinstance(builds, list)
         else []
     )
-    if build_id not in ids or ids.index(build_id) == 0:
+    if build_id not in ids:
         return None, None
-    previous = ids[ids.index(build_id) - 1]
-    if not isinstance(previous, str):
-        return None, None
-    try:
-        table = pq.read_table(
-            model_dir / f"v={previous}" / "scores.parquet",
-            columns=["stock_code", "rank", "score_date"],
-        )
-    except (OSError, ValueError, KeyError):
-        return previous, None
-    dates = set(table.column("score_date").to_pylist())
-    if len(dates) != 1 or not str(next(iter(dates))) < signal_date.isoformat():
-        return previous, None
-    return previous, dict(
-        zip(table.column("stock_code").to_pylist(), table.column("rank").to_pylist(), strict=True)
-    )
+    for previous in reversed(ids[: ids.index(build_id)]):
+        if not isinstance(previous, str):
+            return None, None
+        try:
+            table = pq.read_table(
+                model_dir / f"v={previous}" / "scores.parquet",
+                columns=["stock_code", "rank", "score_date"],
+            )
+        except (OSError, ValueError, KeyError):
+            return previous, None
+        dates = set(table.column("score_date").to_pylist())
+        if len(dates) != 1:
+            return previous, None
+        if str(next(iter(dates))) < signal_date.isoformat():
+            return previous, dict(
+                zip(
+                    table.column("stock_code").to_pylist(),
+                    table.column("rank").to_pylist(),
+                    strict=True,
+                )
+            )
+    return None, None
 
 
 # 유니버스 제외 사유 → 사람이 읽는 이유(factor_inputs `EXCLUDE_REASONS`)

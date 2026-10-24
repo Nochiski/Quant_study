@@ -19,6 +19,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     Approval,
     PlanExistsError,
     PlanRecord,
+    SignalBasis,
     SignalRecord,
 )
 from strategy_workbench.domain.rebalance.facade.rebalance import (
@@ -130,6 +131,7 @@ def _encode_plan(record: PlanRecord) -> dict[str, object]:
             "anomalies": list(signal.anomalies),
             "names": dict(signal.names),
             "gap_check_skipped": signal.gap_check_skipped,
+            "basis": signal.basis.value,
         },
         "account": {
             "cash_krw": account.cash_krw,
@@ -186,6 +188,7 @@ def _decode_plan(value: dict[str, object]) -> PlanRecord:
             _strings(signal.get("anomalies")),
             _names(signal.get("names")),
             None if signal.get("gap_check_skipped") is None else str(signal["gap_check_skipped"]),
+            SignalBasis(str(signal.get("basis", SignalBasis.EVENING.value))),
         ),
         AccountState(
             _int(account["cash_krw"], "cash_krw"),

@@ -11,13 +11,16 @@
 #   STRATEGY_WORKBENCH_KIWOOM_ENV_FILE · STRATEGY_WORKBENCH_KIWOOM_KEY_PAIR  키를 읽을 .env와 쌍 번호
 #   STRATEGY_WORKBENCH_TELEGRAM_ENV_FILE · _TOKEN_VAR · _CHAT_ID  주문지를 보낼 봇 토큰(.env의 이름)과 채팅
 #
-# 단계(휴장일에는 아무것도 하지 않는다):
+# 단계(prepare 밖의 단계는 휴장일에 아무것도 하지 않는다):
 #   fills    장중 실시간 체결 알림 기록(두 번째 인자 HH:MM 까지, crontab 이 넣는다)
 #   open     직전 거래일 주문안이 있으면 전 종목을 낸다(매도 먼저)
 #   chase    잔량을 취소하고 그때 2호가로 다시 낸다(마지막 회차 주문은 장 마감까지)
 #   close    장 마감 대사·하루 기록·키움 원본
-#   prepare  그 주 마지막 거래일이면 장 마감 빌드가 준비된 것을 확인한 뒤 주문안을 만들고
-#            텔레그램으로 주문지를 보낸다(만들지 못했으면 보류·실패 알림)
+#   prepare  휴장이 이어지는 첫날(보통 토요일)이고 그 전날이 그 주 마지막 거래일이면, 그날 분 WISE
+#            추정치까지 넣은 주말 보강판이 준비된 것을 확인한 뒤 그 거래일 순위로 주문안을 만들고
+#            텔레그램으로 주문지를 보낸다(만들지 못했으면 보류·실패 알림). 금요일 추정치가 토요일
+#            새벽에 올라와서 토요일에 만든다(2026-10-23 사용자 결정). 휴장 첫날 판정은 quant-ledger
+#            달력의 supplement_target 하나를 쓴다(보강판을 짓는 쪽과 같은 판정)
 # 휴장 판정을 할 수 없으면(연도 파일 부재 등) 휴장으로 위장하지 않고 실패한다.
 # 단계 묶음마다 작업 폴더의 잠금 파일을 잡는다. open·chase 는 같은 잠금이라 겹쳐 돌지 않고, 앞 실행이
 # 아직 돌면 이번 회차는 건너뛴다.
@@ -33,7 +36,7 @@ TODAY="$(TZ=Asia/Seoul date +%F)"
 
 log() { echo "[$(TZ=Asia/Seoul date '+%F %T')] [$PHASE] $*"; }
 
-calendar() {  # calendar trading|week_end|prev|next → stdout
+calendar() {  # calendar trading|week_signal|prev|next → stdout
   (cd "$S07_LEDGER_HOME" && PYTHONPATH=src .venv/bin/python - "$1" "$TODAY" <<'PY'
 import datetime as dt
 import sys
@@ -54,11 +57,13 @@ def next_trading_day(day: dt.date) -> dt.date:
 
 if question == "trading":
     print("yes" if cal.is_trading_day(today) else "no")
-elif question == "week_end":
-    last = cal.is_trading_day(today) and (
-        next_trading_day(today).isocalendar()[:2] != today.isocalendar()[:2]
+elif question == "week_signal":
+    # 오늘이 휴장 첫날이고 그 전날이 그 주 마지막 거래일이면 그 거래일, 아니면 no
+    signal = cal.supplement_target(today)
+    last = signal is not None and (
+        next_trading_day(signal).isocalendar()[:2] != signal.isocalendar()[:2]
     )
-    print("yes" if last else "no")
+    print(signal.isoformat() if last else "no")
 elif question == "prev":
     print(cal.prev_trading_day(today).isoformat())
 elif question == "next":
@@ -82,10 +87,13 @@ hold_lock() {  # hold_lock <묶음> — 같은 묶음 실행이 이미 돌면 �
   fi
 }
 
-TRADING="$(calendar trading)"
-if [ "$TRADING" != "yes" ]; then
-  log "휴장일 — 건너뜀"
-  exit 0
+# prepare 는 휴장일에 돈다(아래 prepare 절이 판정한다).
+if [ "$PHASE" != prepare ]; then
+  TRADING="$(calendar trading)"
+  if [ "$TRADING" != "yes" ]; then
+    log "휴장일 — 건너뜀"
+    exit 0
+  fi
 fi
 
 case "$PHASE" in
@@ -114,29 +122,30 @@ case "$PHASE" in
     ;;
   prepare)
     # 대입문에서 판정해야 실패가 set -e 로 멈춘다. `[ "$(…)" ]` 안의 실패는 빈 값이 되어 건너뜀으로 가려진다.
-    WEEK_END="$(calendar week_end)"
-    if [ "$WEEK_END" != "yes" ]; then
-      log "그 주 마지막 거래일 아님 — 건너뜀"
+    SIGNAL="$(calendar week_signal)"
+    if [ "$SIGNAL" = "no" ]; then
+      log "주 마지막 거래일 다음 휴장 첫날 아님 — 건너뜀"
       exit 0
     fi
     hold_lock prepare
-    # 장 마감 빌드가 준비된 것을 확인하고 잇는다. 준비 판정은 신호 어댑터 한 곳(signal-status)이 한다:
+    # 주말 보강판이 준비된 것을 확인하고 잇는다. 준비 판정은 신호 어댑터 한 곳(signal-status)이 한다:
     # 0 = 준비, 3 = 아직, 그 밖 = 다른 이유로 못 씀(prepare 가 판정해 알린다). 23시까지 1분마다 보고,
-    # 그때도 아직이면 prepare 가 신호를 읽지 못한 것으로 끝나며 실패 알림을 보낸다.
+    # 그때도 아직이면(보강판 꺼짐·실패) prepare 가 신호를 읽지 못한 것으로 끝나며 실패 알림을 보낸다.
+    # 장 마감 빌드로 대신하지 않는다 — 신호일 추정치가 조용히 빠진다.
     while true; do
       READY=0
       wr signal-status --workdir "$S07_WORKDIR" --model-root "$S07_MODEL_DB" \
-        --signal-date "$TODAY" >/dev/null || READY=$?
+        --signal-date "$SIGNAL" --basis supplement >/dev/null || READY=$?
       [ "$READY" -ne 3 ] && break
       if [ "$(TZ=Asia/Seoul date +%H)" -ge 23 ]; then
-        log "오늘 장 마감 빌드가 끝나지 않음"
+        log "주말 보강판($SIGNAL)이 끝나지 않음"
         break
       fi
       sleep 60
     done
     NEXT="$(calendar next)"
-    wr prepare --workdir "$S07_WORKDIR" --model-root "$S07_MODEL_DB" --signal-date "$TODAY" \
-      --notify --execute-on "$NEXT"
+    wr prepare --workdir "$S07_WORKDIR" --model-root "$S07_MODEL_DB" --signal-date "$SIGNAL" \
+      --basis supplement --notify --execute-on "$NEXT"
     ;;
   *)
     log "알 수 없는 단계"

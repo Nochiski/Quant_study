@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Protocol
 
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.account import AccountState
+from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal import SignalBasis
 from strategy_workbench.domain.rebalance.facade.rebalance import RebalancePlan
 
 __all__ = ["Approval", "PlanExistsError", "PlanRecord", "PlanStore", "SignalRecord"]
@@ -34,6 +35,8 @@ class SignalRecord:
     # 직전 빌드와 견주는 점검을 건너뛴 이유. None 이면 점검했다(2026-10-22 리뷰 #606).
     # 이 칸이 생기기 전에 남긴 주문안도 None 으로 읽힌다.
     gap_check_skipped: str | None = None
+    # 읽은 모델 빌드. 이 칸이 생기기 전(2026-10-24)에 남긴 주문안은 장 마감 빌드로 읽힌다.
+    basis: SignalBasis = SignalBasis.EVENING
 
 
 @dataclass(frozen=True)

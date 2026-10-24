@@ -185,8 +185,15 @@ test(
   async ({ page }) => {
     await ensureProvider(page);
     await openEditor(page, "/research/strategies/new");
-    // 처음 연 편집기는 AI 창을 열어 둔다(RD-04-A). 창은 화면 위에 떠 있고 뷰포트 안에 있다.
+    // 처음 연 편집기는 AI 창을 최소화한 채 시작해 버튼을 가리지 않는다(PR #624 결정). 상단 바 토글로 열면 창은 화면
+    // 위에 떠 있고 뷰포트 안에 있다.
     const floating = page.getByRole("complementary", { name: "AI 어시스턴트", exact: true });
+    await expect(floating).toBeHidden();
+    await expect(page.getByRole("button", { name: "AI 어시스턴트", exact: true })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await page.getByRole("button", { name: "AI 어시스턴트", exact: true }).click();
     await expect(floating).toBeVisible();
     const box = await floating.boundingBox();
     const viewport = page.viewportSize()!;

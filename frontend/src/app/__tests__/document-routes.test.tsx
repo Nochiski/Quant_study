@@ -4489,7 +4489,8 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     const user = userEvent.setup();
     mount("/research/strategies/new");
     const view = await editor();
-    // AI 열은 처음부터 열려 있다(RD-04-A).
+    // 편집기의 AI 창은 최소화한 채 시작한다(PR #624 결정). 상단 바 단축키로 연다.
+    fireEvent.keyDown(window, { key: "a", altKey: true });
     const input = await screen.findByRole("textbox", {
       name: "어시스턴트에게 보낼 메시지",
     });
@@ -5404,6 +5405,8 @@ describe("편집기 AI 열의 대화 조회(SoT 3차 경미 1·2)", () => {
     counter: { reads: number },
   ) => {
     const user = userEvent.setup();
+    // 편집기의 AI 창은 최소화한 채 시작한다(PR #624 결정).
+    fireEvent.keyDown(window, { key: "a", altKey: true });
     const input = await within(
       await screen.findByRole("complementary", { name: "AI 어시스턴트" }),
     ).findByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });

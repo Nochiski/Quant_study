@@ -16,7 +16,6 @@ import {
 } from "../../../features/edit-strategy";
 import { ASSISTANT_WINDOW_STORAGE_KEY } from "../../../entities/assistant";
 import { t } from "../../../shared/config";
-import { isSheetViewport } from "../../../shared/lib/floating-geometry";
 import { useMediaQuery } from "../../../shared/lib/media";
 import { useThemePreference } from "../../../shared/lib/theme";
 import {
@@ -129,6 +128,11 @@ export type StrategyIdeProps = {
    * 하나이고 대화를 끝내지 않는다(spec D7). 함수를 넘기면 지금 펼쳤는지(`open`)를 받는다.
    */
   assistant?: ReactNode | ((controls: AssistantSlotControls) => ReactNode);
+  /**
+   * 처음 그릴 때 AI 창을 펼친다 — 다른 화면(새 전략 안내)에서 연 채 넘어온 대화를 이어 보일 때 쓴다. 저장 기록보다
+   * 앞서지만 시작 상태일 뿐이라 사용자 선택으로 저장하지 않는다. 없으면 기록·기본값(최소화)을 따른다.
+   */
+  assistantStartsOpen?: boolean;
 };
 
 /**
@@ -228,18 +232,14 @@ export const StrategyIde = ({
   inspector,
   debugger: debuggerPanel,
   assistant,
+  assistantStartsOpen = false,
 }: StrategyIdeProps) => {
   const narrow = useMediaQuery(NARROW_QUERY);
   const compact = useMediaQuery("(max-width: 767px)");
-  // 좁은 화면(창이 하단 시트가 되는 폭)에서는 열림 기록이 없으면 AI 창을 최소화한 채 시작한다 — 시트가 편집기를
-  // 거의 다 덮는다. 기록이 있으면 기록이 이긴다(`usePanelLayout` 이 저장값을 기본값 위에 덮는다). 이 기본값은
-  // 저장하지 않는다(사용자가 고른 열림만 저장). 판정은 첫 마운트 때 한 번만 한다 — 기본값은 시작 상태일 뿐이라
-  // 창 폭이 바뀌어도 열린 창을 저절로 닫거나 열지 않는다.
-  const { layout, resize, toggle, close } = usePanelLayout({
-    ...DEFAULT_LAYOUT,
-    assistantOpen:
-      DEFAULT_LAYOUT.assistantOpen &&
-      !isSheetViewport({ width: window.innerWidth, height: window.innerHeight }),
+  // AI 창은 사용자가 직접 연 기록이 없으면 화면 폭과 무관하게 최소화한 채 시작한다(`DEFAULT_LAYOUT`, PR #624
+  // 결정). 기록이 있으면 기록이 이긴다(`usePanelLayout` 이 저장값을 기본값 위에 덮는다). 안내에서 연 채 넘어오면 연다.
+  const { layout, resize, toggle, close } = usePanelLayout(DEFAULT_LAYOUT, {
+    assistant: assistantStartsOpen,
   });
   // 창 폭이 줄어 서랍(개요·계약)과 AI 창이 같은 자리를 덮게 되면 서랍을 남기고 AI 창을 접는다 — 펼쳐 둔 서랍이
   // 시트 밑에 깔린 채 초점만 받는 일을 막는다. 덩달아 닫힘이라 사용자 선택으로 저장하지 않고, 진행 중 답변은 이어진다

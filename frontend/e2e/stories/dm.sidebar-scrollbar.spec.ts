@@ -9,7 +9,6 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { collapseAssistant } from "../assistant-helpers";
 
 import { openEditor } from "../workbench-helpers";
 
@@ -30,8 +29,7 @@ test(
     await openEditor(page, "/research/strategies/new");
     // 본문은 창 높이에 제한되므로, 상시 페이지 스크롤바를 쓰는 OS 환경을 fixture에서 명시한다.
     await page.addStyleTag({ content: ":root { overflow-y: scroll; }" });
-    // 전략 구조·계약을 먼저 열고 AI 창을 마지막에 연다 — 처음부터 열린 AI 창을 먼저 접는다(RD-04-A).
-    await collapseAssistant(page);
+    // 전략 구조·계약을 먼저 열고 AI 창을 마지막에 연다(AI 창은 최소화한 채 시작한다, PR #624 결정).
     await page.getByRole("button", { name: "전략 구조", exact: true }).click();
     await page.getByRole("button", { name: "계약", exact: true }).click();
     await page

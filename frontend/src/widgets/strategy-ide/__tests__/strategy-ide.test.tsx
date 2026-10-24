@@ -171,7 +171,8 @@ describe("StrategyIde", () => {
     matchMedia(false);
     const user = userEvent.setup();
     mount({ assistant: <p>AI 대화</p>, debugger: <input aria-label="추적 범위" defaultValue="SEC001" /> });
-    // AI 창은 처음부터 떠 있고, 추적 작업공간으로 가도 닫히지 않는다.
+    // 직접 연 AI 창은 추적 작업공간으로 가도 닫히지 않는다.
+    fireEvent.keyDown(window, { key: "a", altKey: true });
     await user.click(screen.getByRole("button", { name: "중간 결과" }));
     expect(screen.getByRole("region", { name: "중간 결과" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
@@ -598,11 +599,11 @@ describe("StrategyIde", () => {
       symbols: [{ id: "/risk/max_name_weight", pointer: "/risk/max_name_weight", label: "최대 종목 비중", description: "/risk/max_name_weight", keywords: ["비중"] }],
       onSelectSymbol,
     });
-    // AI 창은 처음부터 떠 있다.
+    // AI 창을 직접 연 뒤 명령을 고른다.
+    fireEvent.keyDown(window, { key: "a", altKey: true });
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
     if (width >= 1280) screen.getByRole("textbox", { name: "source" }).focus();
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    // AI 창의 "창 크기" 선택 상자도 combobox 라 팔레트 안에서 찾는다.
     await user.type(within(screen.getByRole("dialog", { name: "전략 명령 팔레트" })).getByRole("combobox"), "최대 종목 비중");
     await user.keyboard("{Enter}");
     expect(onSelectSymbol).toHaveBeenCalledWith("/risk/max_name_weight");

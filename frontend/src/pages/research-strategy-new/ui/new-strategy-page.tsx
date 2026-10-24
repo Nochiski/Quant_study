@@ -376,7 +376,11 @@ export const NewStrategyPage = () => {
     if (document.strategyId !== null) clearGuideVisits(entryGuideDraftId);
   }, [document.strategyId, entryGuideDraftId]);
 
-  const leaveGuide = (next: Partial<typeof search>) =>
+  // 안내에서 AI 창을 연 채 편집기로 넘어가면 편집기도 창을 연 채 시작해 대화를 이어 보인다. 편집기 쪽 기본값은
+  // 최소화라(PR #624 결정) 넘겨주지 않으면 진행 중 답변이 접힌 창 뒤로 숨는다.
+  const [assistantHandoff, setAssistantHandoff] = useState(false);
+  const leaveGuide = (next: Partial<typeof search>) => {
+    setAssistantHandoff(guideWindowOpen === true);
     void navigate({
       to: ROUTE,
       // 숨은 편집기의 커서가 남긴 선택(`path`)은 버린다. 남기면 그 팩터의 노드 편집기가 열린다.
@@ -390,6 +394,7 @@ export const NewStrategyPage = () => {
       },
       resetScroll: false,
     });
+  };
   if (search.guide)
     return (
       <>
@@ -522,6 +527,7 @@ export const NewStrategyPage = () => {
   return (
     <>
       <StrategyIde
+        assistantStartsOpen={assistantHandoff}
         notice={
           <>
             {autosave.recovery ? (

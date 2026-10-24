@@ -35,9 +35,10 @@ export const DEFAULT_LAYOUT: PanelLayout = {
   outlineOpen: false,
   inspectorOpen: false,
   debuggerOpen: false,
-  // 구조·계약은 사용자가 명시해서 연다. AI 창은 처음부터 열어 둔다(RD-04-A, 2026-10-19 결정 3).
-  // 저장된 닫힘 선택은 그대로 존중한다 — 기본값은 저장 기록에 `assistant` 키가 없을 때만 쓰인다.
-  assistantOpen: true,
+  // 구조·계약·AI 창 모두 사용자가 명시해서 연다. AI 창은 화면 위에 떠 있어 편집기의 버튼을 가리므로, 사용자가
+  // 직접 연 기록이 없으면 최소화한 채 시작한다(상단 바 토글·Alt+A 로 연다, PR #624 결정 — RD-04-A 의 "처음부터
+  // 열림"을 대체). 저장된 사용자 선택은 그대로 존중한다 — 기본값은 저장 기록에 `assistant` 키가 없을 때만 쓰인다.
+  assistantOpen: false,
   assistantPreference: null,
 };
 
@@ -175,12 +176,16 @@ const reduce = (state: PanelLayout, action: Action): PanelLayout => {
   }
 };
 
-export const usePanelLayout = (initial: PanelLayout = DEFAULT_LAYOUT) => {
+/**
+ * `startOpen` 은 저장 기록보다 앞서는 시작 열림이다(안내에서 AI 창을 연 채 편집기로 넘어온 경우). 시작 상태일 뿐이라
+ * 사용자 선택으로 저장하지 않는다.
+ */
+export const usePanelLayout = (initial: PanelLayout = DEFAULT_LAYOUT, startOpen?: { assistant?: boolean }) => {
   const [storage] = useState(browserStorage);
-  const [layout, dispatch] = useReducer(reduce, initial, (base) => ({
-    ...base,
-    ...readPanelSizes(storage),
-  }));
+  const [layout, dispatch] = useReducer(reduce, initial, (base) => {
+    const stored = { ...base, ...readPanelSizes(storage) };
+    return startOpen?.assistant ? { ...stored, assistantOpen: true } : stored;
+  });
   useEffect(() => {
     writePanelSizes(storage, layout);
   }, [layout, storage]);

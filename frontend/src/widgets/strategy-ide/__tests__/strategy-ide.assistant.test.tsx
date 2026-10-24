@@ -323,17 +323,22 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(
       screen.getByRole("separator", { name: "전략 구조 크기 조절" }),
     ).toHaveAttribute("aria-valuenow", "300");
-    // 기록에 AI 키가 없으면 새 기본값(열림)을 쓴다(RD-04-A).
-    expect(
-      screen.getByRole("complementary", { name: "AI 어시스턴트" }),
-    ).toBeVisible();
+    // 기록에 AI 키가 없으면 기본값(최소화)을 쓴다(PR #624 결정).
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
   });
 
-  it("처음 연 편집기는 AI 창을 열어 두고, 접어 둔 기록은 그대로 존중한다 — 옛 열 폭 기록은 무시한다", async () => {
+  it("처음 연 편집기는 AI 창을 최소화한 채 시작하고, 사용자가 고른 열림·닫힘은 그대로 존중한다", async () => {
     matchMedia(false);
     localStorage.clear();
     const user = userEvent.setup();
     const first = mount();
+    // 기록이 없으면 떠 있는 창이 편집기 버튼을 가리지 않게 최소화한 채 시작한다(PR #624 결정).
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+    first.unmount();
+    // 직접 연 선택은 다음에도 열린 채로 뜬다.
+    const second = mount();
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
     // AI 는 더 이상 본문 열이 아니다 — 열 폭 조절 손잡이가 없다.
     expect(
@@ -343,7 +348,7 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(
       screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
     ).not.toBeInTheDocument();
-    first.unmount();
+    second.unmount();
 
     mount();
     expect(
@@ -353,21 +358,16 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
   });
 
-  it("좁은 화면(하단 시트 폭)에서는 열림 기록이 없으면 최소화한 채 시작한다", () => {
+  it("좁은 화면(하단 시트 폭)에서도 열림 기록이 없으면 최소화한 채 시작하고 그 기본값은 저장하지 않는다", () => {
     matchMedia(true);
     localStorage.clear();
-    vi.stubGlobal("innerWidth", 390);
-    const first = mount();
+    mount();
     expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
     expect(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false })).toBeVisible();
-    // 좁은 화면의 기본값(닫힘)은 저장하지 않는다 — 넓은 화면에서 다시 열면 기본값(열림)이다(리뷰 2).
+    // 기본값(닫힘)은 사용자 선택이 아니라 저장하지 않는다(리뷰 2).
     expect(
       JSON.parse(localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY) ?? "{}"),
     ).not.toHaveProperty("open");
-    first.unmount();
-    vi.stubGlobal("innerWidth", 1440);
-    mount();
-    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
   });
 
   it("하단 시트 폭에서는 개요 서랍과 AI 시트도 나중에 연 쪽만 남는다(한정 리뷰 3)", async () => {
@@ -419,18 +419,18 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(screen.queryByRole("button", { name: "AI 어시스턴트 열기" })).toBeNull();
   });
 
-  it("판본 1 기록의 열림 값은 사용자 선택으로 보지 않고 기본값(열림)을 쓴다(한정 리뷰 2)", () => {
+  it("판본 1 기록의 열림 값은 사용자 선택으로 보지 않고 기본값(최소화)을 쓴다(한정 리뷰 2)", () => {
     matchMedia(false);
     localStorage.setItem(
       PANEL_LAYOUT_STORAGE_KEY,
       JSON.stringify({
         version: 1,
         sizes: { outlineWidth: 240, inspectorWidth: 320, debuggerHeight: 220 },
-        open: { assistant: false },
+        open: { assistant: true },
       }),
     );
     mount();
-    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
   });
 
   it("다른 조작이 덩달아 접은 AI 창은 선택으로 저장하지 않는다(한정 리뷰 1)", async () => {
@@ -439,7 +439,6 @@ describe("StrategyIde assistant 슬롯", () => {
     const user = userEvent.setup();
     mount();
     // 사용자가 직접 연 상태를 고른다.
-    fireEvent.keyDown(window, { key: "a", altKey: true });
     fireEvent.keyDown(window, { key: "a", altKey: true });
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
     // 좁은 화면에서 계약 서랍을 열면 AI 창이 접히지만 저장된 선택은 "열림" 그대로다.
@@ -455,7 +454,7 @@ describe("StrategyIde assistant 슬롯", () => {
     localStorage.setItem(
       PANEL_LAYOUT_STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: 2,
         sizes: {
           outlineWidth: 240,
           inspectorWidth: 320,
@@ -480,12 +479,10 @@ describe("StrategyIde assistant 슬롯", () => {
       },
     });
     mount();
-    // 기록을 읽지 못하면 기본값이다: AI 창이 열려 있다.
-    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+    // 기록을 읽지 못하면 기본값이다: AI 창은 최소화돼 있고, 토글은 그대로 동작한다.
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
     fireEvent.keyDown(window, { key: "a", altKey: true });
-    expect(
-      screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
   });
 
   it("좁은 폭에서도 AI 는 떠 있는 창이고, Escape 는 창을 닫지 않는다", () => {

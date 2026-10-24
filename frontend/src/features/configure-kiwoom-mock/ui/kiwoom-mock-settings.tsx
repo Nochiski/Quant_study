@@ -2,10 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useId, useRef, useState, type FormEvent } from "react";
 
 import { kiwoomMockConnectionQuery } from "../../../entities/broker";
-import {
-  CredentialsFileLocation,
-  credentialsFileQuery,
-} from "../../../entities/credentials-file";
+import { credentialsFileQuery } from "../../../entities/credentials-file";
 import { t, tFill } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import {
@@ -123,7 +120,6 @@ export const KiwoomMockSettings = () => {
       <p className="kiwoom-settings__description">
         {t("settings.kiwoom.description")}
       </p>
-      <CredentialsFileLocation />
       <p className="kiwoom-settings__description">
         {t("settings.kiwoom.guide")}
       </p>

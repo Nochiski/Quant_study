@@ -107,12 +107,6 @@ const fill = async (
 };
 
 describe("KiwoomMockSettings", () => {
-  it("shows the real file the keys are saved in", async () => {
-    renderWithClient(<KiwoomMockSettings />);
-    const location = await screen.findByTestId("credentials-file-location");
-    expect(location).toHaveTextContent(`저장 위치: ${ENV_PATH}`);
-  });
-
   it("reads the file problems again after saving keys", async () => {
     fileProblems = [
       {
@@ -125,7 +119,8 @@ describe("KiwoomMockSettings", () => {
     ];
     const user = userEvent.setup();
     renderWithClient(<KiwoomMockSettings />);
-    expect(await screen.findByTestId("credentials-file-problems")).toBeTruthy();
+    await screen.findByText("저장된 키 없음");
+    await waitFor(() => expect(fileReads).toBeGreaterThan(0));
     const before = fileReads;
 
     fileProblems = [];
@@ -133,9 +128,6 @@ describe("KiwoomMockSettings", () => {
     await user.click(screen.getByRole("button", { name: "저장" }));
 
     await waitFor(() => expect(fileReads).toBeGreaterThan(before));
-    await waitFor(() =>
-      expect(screen.queryByTestId("credentials-file-problems")).toBeNull(),
-    );
   });
 
   it("asks to fix or delete the file when the whole file is unreadable", async () => {

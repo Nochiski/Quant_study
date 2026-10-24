@@ -19,6 +19,7 @@ import stat
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -204,12 +205,17 @@ def test_profiles_and_keys_round_trip_through_one_group(tmp_path: Path) -> None:
     assert SECRET not in path.read_text(encoding="utf-8")
 
 
-def test_a_second_active_profile_is_refused(tmp_path: Path) -> None:
+def test_a_second_active_profile_is_stored_inactive(tmp_path: Path) -> None:
+    """마지막 리뷰 5: 동시 생성 등으로 활성이 이미 있으면 거절하지 않고 비활성으로 넣는다."""
     store = EnvFileProviderStore(CredentialsEnvFile(tmp_path / ".env"))
     store.add(_profile("p1", active=True))
 
-    with pytest.raises(SecretStoreStorageError, match="already active"):
-        store.add(_profile("p2", active=True))
+    store.add(_profile("p2", active=True))
+
+    assert [(item.profile_id, item.active) for item in store.list()] == [
+        ("p1", True),
+        ("p2", False),
+    ]
 
 
 def test_an_incomplete_hand_edit_is_skipped_reported_and_kept(tmp_path: Path) -> None:
@@ -763,6 +769,7 @@ def test_extra_lines_in_the_kiwoom_group_survive_save_and_delete(tmp_path: Path)
 
 class _FakeMsvcrt:
     LK_LOCK = 1
+    LK_NBLCK = 2
     LK_UNLCK = 0
 
     def __init__(self, errors: list[int]) -> None:
@@ -771,7 +778,8 @@ class _FakeMsvcrt:
 
     def locking(self, descriptor: int, mode: int, size: int) -> None:
         del descriptor, size
-        if mode == self.LK_LOCK:
+        assert mode != self.LK_LOCK, "LK_LOCK은 안에서 10초를 막는다 — LK_NBLCK을 써야 한다"
+        if mode == self.LK_NBLCK:
             self.calls += 1
             if self._errors:
                 code = self._errors.pop(0)
@@ -809,8 +817,14 @@ def test_windows_lock_gives_up_with_the_errno_name(
         _windows_file(tmp_path).replace_group("APP_", "앱 묶음", (("APP_KEY", "v"),))
 
     busy = getattr(errno, "EDEADLOCK", errno.EDEADLK)
-    monkeypatch.setitem(sys.modules, "msvcrt", _FakeMsvcrt([busy] * 100))
-    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    monkeypatch.setitem(sys.modules, "msvcrt", _FakeMsvcrt([busy] * 10_000))
+    clock = [0.0]
+
+    def tick(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr(time, "sleep", tick)
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
     with pytest.raises(SecretStoreStorageError, match="reason=busy"):
         _windows_file(tmp_path).replace_group("APP_", "앱 묶음", (("APP_KEY", "v"),))
 
@@ -1030,3 +1044,145 @@ def test_the_read_cache_expires_even_when_file_times_do_not_move(
     assert file.read() == {"A": "1"}  # 1초 안에는 같은 요청의 캐시
     clock[0] += 1.5
     assert file.read() == {"A": "2"}
+
+
+# -- 마지막 리뷰 고침 ----------------------------------------------------------------------------
+
+
+def test_any_write_side_storage_failure_is_a_port_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """마지막 리뷰 1: 사유 없는 쓰기 실패(교체·권한 등)도 저장 불가 포트 오류로 바뀐다."""
+    from strategy_workbench.adapters.outbound.secrets_local import _env_file
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise SecretStoreStorageError("could not write — operation=replace errno=EIO")
+
+    monkeypatch.setattr(_env_file, "atomic_write_restricted", fail)
+    store = EnvFileProviderStore(CredentialsEnvFile(tmp_path / ".env"))
+
+    with pytest.raises(ProviderStorageUnavailableError):
+        store.add(_profile("p1", active=True))
+
+
+def test_lookups_on_an_unreadable_file_are_storage_errors_not_404(tmp_path: Path) -> None:
+    """마지막 리뷰 3: 파일을 못 읽으면 콕 집는 조회·고치기는 "없음"이 아니라 저장 불가다."""
+    path = tmp_path / ".env"
+    path.write_bytes(b"\xff\xfe\n")
+    store = EnvFileProviderStore(CredentialsEnvFile(path))
+
+    assert store.list() == ()
+    for action in (
+        lambda: store.get("p1"),
+        lambda: store.delete("p1"),
+        lambda: store.set_active("p1"),
+        lambda: store.secrets().put("p1", SECRET),
+        lambda: store.secrets().delete("p1"),
+    ):
+        with pytest.raises(ProviderStorageUnavailableError):
+            action()
+
+
+def test_activating_on_an_unreadable_file_answers_422(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_bytes(b"\xff\xfe\n")
+    app = build_http_app(assistant=_scripted_settings(tmp_path, env_path))
+    with TestClient(app) as client:
+        response = client.post("/api/v1/assistant/providers/p1/activate")
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "assistant.storage_unavailable"
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="POSIX 권한 비트")
+def test_create_is_refused_before_the_probe_when_the_folder_is_not_writable(
+    tmp_path: Path,
+) -> None:
+    """마지막 리뷰 2: 폴더에 쓸 수 없으면 실제로 쓰기 전에, 연결 테스트 전에 거절한다."""
+    folder = tmp_path / "auto_trading"
+    folder.mkdir()
+    env_path = folder / ".env"
+    store = EnvFileProviderStore(CredentialsEnvFile(env_path))
+    folder.chmod(0o500)
+    try:
+        with pytest.raises(ProviderStorageUnavailableError) as raised:
+            store.ensure_writable()
+        assert raised.value.reason == "not_writable"
+    finally:
+        folder.chmod(0o700)
+    assert not env_path.exists()
+
+
+def test_reads_inside_an_update_never_use_the_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """마지막 리뷰 7: 잠금 안의 읽기는 늘 새로 읽어, 캐시가 놓친 손편집을 덮어쓰지 않는다."""
+    path = tmp_path / ".env"
+    path.write_text("NOTE=1\n", encoding="utf-8")
+    file = CredentialsEnvFile(path)
+    monkeypatch.setattr(time, "monotonic", lambda: 1000.0)
+    assert file.read() == {"NOTE": "1"}
+    stat_before = path.stat()
+    with path.open("r+", encoding="utf-8") as stream:
+        stream.write("NOTE=2\n")
+    monkeypatch.setattr(
+        Path,
+        "stat",
+        lambda self, *, follow_symlinks=True: (
+            stat_before if self == path else os.stat(self, follow_symlinks=follow_symlinks)
+        ),
+    )
+    assert file.read() == {"NOTE": "1"}  # 잠금 밖은 1초 캐시
+
+    seen: list[dict[str, str]] = []
+    file.update(lambda: seen.append(file.read()))
+    EnvFileBrokerCredentialStore(file).save(BrokerCredentials("a-0123", "s-0123", "5012345678"))
+
+    assert seen == [{"NOTE": "2"}]
+    assert parse_env_text(path.read_text(encoding="utf-8"))["NOTE"] == "2"
+
+
+def test_a_listing_with_keys_parses_the_file_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """마지막 리뷰 9: 목록과 키마다 조회(summaries)가 같은 스냅숏을 한 번만 파싱한다."""
+    store = EnvFileProviderStore(CredentialsEnvFile(tmp_path / ".env"))
+    store.add(_profile("p1", active=True))
+    store.secrets().put("p1", SECRET)
+    store.add(_profile("p2"))
+    parses = 0
+    original = EnvFileProviderStore._parse  # noqa: SLF001 — reason: 파싱 횟수를 센다
+
+    def counting(self: EnvFileProviderStore, values: Mapping[str, str]) -> object:
+        nonlocal parses
+        parses += 1
+        return original(self, values)
+
+    monkeypatch.setattr(EnvFileProviderStore, "_parse", counting)
+    for profile in store.list():
+        with contextlib.suppress(ProviderSecretMissingError):
+            store.secrets().get(profile.profile_id)
+
+    assert parses == 1
+
+
+def test_an_empty_kiwoom_value_counts_as_missing_everywhere(tmp_path: Path) -> None:
+    """마지막 리뷰 10: 빈 값(`NAME=`)은 문제 목록·읽기에서 똑같이 없는 것으로 친다.
+
+    지우기는 그 줄도 지운다.
+    """
+    path = tmp_path / ".env"
+    path.write_text(
+        "STRATEGY_WORKBENCH_KIWOOM_MOCK_APP_KEY=\n"
+        "STRATEGY_WORKBENCH_KIWOOM_MOCK_SECRET_KEY=s-0123\n"
+        "STRATEGY_WORKBENCH_KIWOOM_MOCK_ACCOUNT=5012345678\n",
+        encoding="utf-8",
+    )
+    store = EnvFileBrokerCredentialStore(CredentialsEnvFile(path))
+
+    assert store.problems() == (
+        EnvProblem("kiwoom", "incomplete", None, ("STRATEGY_WORKBENCH_KIWOOM_MOCK_APP_KEY",)),
+    )
+    with pytest.raises(BrokerCredentialsUnreadableError, match="APP_KEY"):
+        store.load()
+    store.delete()
+    assert parse_env_text(path.read_text(encoding="utf-8")) == {}

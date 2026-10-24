@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
@@ -88,6 +88,9 @@ class EnvFileProviderStore:
 
     def __init__(self, file: CredentialsEnvFile) -> None:
         self._file = file
+        # 같은 스냅숏을 다시 파싱하지 않는다. 목록 + 키마다 조회(summaries)가 한 번 파싱으로 끝난다
+        # (마지막 리뷰 9).
+        self._parsed: tuple[object, _Loaded] | None = None
 
     @property
     def file(self) -> CredentialsEnvFile:
@@ -106,8 +109,11 @@ class EnvFileProviderStore:
     # -- ProviderProfileRepository ------------------------------------------------------------
 
     def ensure_writable(self) -> None:
-        """파일 전체를 못 읽으면 덮어쓰지 않으므로 쓸 수 없다고 미리 알린다(3차 리뷰 4)."""
-        problem = self._file.file_problem()
+        """연결 테스트 전에 부른다. 파일을 읽을 수 없거나 폴더·잠금 파일에 쓸 수 없으면 거절한다.
+
+        실제로 쓰지는 않는다(마지막 리뷰 2).
+        """
+        problem = self._file.writable_problem()
         if problem is not None:
             raise ProviderStorageUnavailableError(problem.reason)
 
@@ -115,10 +121,16 @@ class EnvFileProviderStore:
         return tuple(entry.profile for entry in self._readable_entries())
 
     def get(self, profile_id: str) -> ProviderProfile:
-        return self._find(self._readable_entries(), profile_id).profile
+        """하나를 콕 집는 조회는 파일을 못 읽으면 404가 아니라 저장 불가로 알린다(마지막 리뷰 3)."""
+        return self._find(self._writable_entries(), profile_id).profile
 
     def add(self, profile: ProviderProfile) -> None:
-        """맨 뒤에 붙인다. 이미 활성이 있는데 활성으로 넣으면 거부한다(SQLite 구현과 같은 계약)."""
+        """맨 뒤에 붙인다.
+
+        활성으로 들어왔는데 이미 활성이 있으면(동시 생성 등) 거절하지
+        않고 비활성으로 넣는다 — 서비스는
+        저장소가 실제로 남긴 값을 돌려준다(마지막 리뷰 5).
+        """
 
         def run() -> None:
             loaded = self._load()
@@ -133,10 +145,7 @@ class EnvFileProviderStore:
                 # (재리뷰 2). 사용자는 파일을 고치거나 화면에서 새 항목을 골라 활성으로 바꾼다.
                 incoming = replace(incoming, active=False)
             if incoming.active and any(entry.profile.active for entry in entries):
-                raise SecretStoreStorageError(
-                    "another provider profile is already active — "
-                    f"profile_id={incoming.profile_id!r}"
-                )
+                incoming = replace(incoming, active=False)
             self._write(
                 [*entries, _Entry(incoming, None)],
                 loaded.broken,
@@ -151,8 +160,8 @@ class EnvFileProviderStore:
 
         주인 없는 키를 남기지 않는다.
         """
-        # 없는 항목이면 잠금(폴더 생성) 전에 알린다(리뷰 6).
-        self._find(self._readable_entries(), profile_id)
+        # 없는 항목이면 잠금(폴더 생성) 전에 알린다(리뷰 6). 파일을 못 읽으면 404로 숨기지 않는다.
+        self._find(self._writable_entries(), profile_id)
 
         def run() -> None:
             loaded = self._load()
@@ -167,7 +176,7 @@ class EnvFileProviderStore:
         self._mutate(run)
 
     def set_active(self, profile_id: str) -> None:
-        self._find(self._readable_entries(), profile_id)
+        self._find(self._writable_entries(), profile_id)
 
         def run() -> None:
             loaded = self._load()
@@ -219,7 +228,7 @@ class EnvFileProviderStore:
         raise ProviderSecretMissingError(profile_id)
 
     def put_secret(self, profile_id: str, secret: str) -> None:
-        self._find(self._readable_entries(), profile_id)
+        self._find(self._writable_entries(), profile_id)
 
         def run() -> None:
             loaded = self._load()
@@ -240,7 +249,7 @@ class EnvFileProviderStore:
         """멱등이다. 프로파일이 없거나 키가 없으면 아무것도 하지 않는다(잠금도 잡지 않는다)."""
         if not any(
             item.profile.profile_id == profile_id and item.secret is not None
-            for item in self._readable_entries()
+            for item in self._writable_entries()
         ):
             return
 
@@ -270,13 +279,23 @@ class EnvFileProviderStore:
     # -- 파일 ↔ 값 ----------------------------------------------------------------------------
 
     def _mutate(self, run: Callable[[], None]) -> None:
-        """잠금 안에서 고친다. 파일 자체를 읽거나 쓸 수 없으면 포트 오류로 바꾼다(3차 리뷰 4)."""
+        """잠금 안에서 고친다. 쓰기 쪽 저장 실패(읽기·폴더·임시 파일·권한·교체)는 모두 포트 오류로
+        바꿔 HTTP가 사용자 문장(422)을 보내게 한다(마지막 리뷰 1).
+        """
         try:
             self._file.update(run)
         except SecretStoreStorageError as error:
-            if error.reason is None:
-                raise
-            raise ProviderStorageUnavailableError(error.reason) from error
+            raise ProviderStorageUnavailableError(error.reason or "not_writable") from error
+
+    def _writable_entries(self) -> list[_Entry]:
+        """고치기 전 확인용.
+
+        파일을 못 읽으면 빈 목록으로 숨기지 않고 저장 불가로 알린다(마지막 리뷰 3).
+        """
+        try:
+            return self._load().entries
+        except SecretStoreStorageError as error:
+            raise ProviderStorageUnavailableError(error.reason or "unreadable") from error
 
     def _readable_entries(self) -> list[_Entry]:
         """읽기 전용 조회. 파일 전체를 못 읽으면 공급자가 없는 것처럼 본다(채팅은 "공급자 없음")."""
@@ -286,7 +305,18 @@ class EnvFileProviderStore:
             return []
 
     def _load(self) -> _Loaded:
-        values = self._file.group(AI_ENV_PREFIX)
+        snapshot = self._file.snapshot()
+        cached = self._parsed
+        if cached is not None and cached[0] is snapshot:
+            return cached[1]
+        loaded = self._parse(snapshot.values)
+        self._parsed = (snapshot, loaded)
+        return loaded
+
+    def _parse(self, all_values: Mapping[str, str]) -> _Loaded:
+        values = {
+            name: value for name, value in all_values.items() if name.startswith(AI_ENV_PREFIX)
+        }
         active = values.get(_ACTIVE)
         grouped: dict[str, dict[str, str]] = {}
         loose: list[tuple[str, str]] = []

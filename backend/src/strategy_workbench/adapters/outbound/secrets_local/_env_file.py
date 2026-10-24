@@ -25,7 +25,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
@@ -70,7 +70,8 @@ AUTO_TRADING_ENV_FILE_NAME = ".env"
 _LOCK_SUFFIX = ".lock"
 # 읽기 캐시를 믿는 시간. 같은 초 안의 제자리 수정도 이 시간이 지나면 다시 읽힌다(3차 리뷰 8).
 _READ_CACHE_SECONDS = 1.0
-_WINDOWS_LOCK_ATTEMPTS = 12
+# 윈도우에서 남이 잡은 잠금을 기다리는 총 시간.
+_WINDOWS_LOCK_WAIT_SECONDS = 10.0
 # `msvcrt.locking`이 "남이 잡고 있다"로 실패할 때의 errno. 윈도우의
 # `EDEADLOCK`은 POSIX `EDEADLK`와 같은 값이다.
 _WINDOWS_LOCK_BUSY = frozenset({errno.EACCES, getattr(errno, "EDEADLOCK", errno.EDEADLK)})
@@ -182,6 +183,10 @@ class _Snapshot:
     bom: bool
     newline: str
     read_at: float = 0.0
+    values: Mapping[str, str] = field(default_factory=dict)
+
+
+_EMPTY = _Snapshot(None, "", False, "\n")
 
 
 class CredentialsEnvFile:
@@ -223,8 +228,14 @@ class CredentialsEnvFile:
         """모든 이름과 값. 파일이 없으면 빈 사전.
 
         읽기는 OS 잠금을 잡지 않는다. 쓰기가 임시 파일 → `os.replace`라 반쪽 파일을 볼 일이 없다.
+        `update` 안(잠금을 쥔 동안)의 읽기는 늘 새로 읽는다 — 캐시는 잠금 밖 읽기 전용이다. 그러지
+        않으면 같은 초 안의 손편집을 옛 내용으로 덮어쓴다(마지막 리뷰 7).
         """
-        return parse_env_text(self._read().text)
+        return dict(self.snapshot().values)
+
+    def snapshot(self) -> _Snapshot:
+        """지금 파일 한 벌(파싱한 값 포함). 같은 스냅숏이면 저장소가 파싱 결과를 다시 쓴다."""
+        return self._read(fresh=self._lock.held)
 
     def file_problem(self) -> EnvProblem | None:
         """파일 전체를 읽지 못하면 그 사유. 읽을 수 있으면(없는 파일 포함) None."""
@@ -233,6 +244,43 @@ class CredentialsEnvFile:
         except SecretStoreStorageError as error:
             return EnvProblem("file", error.reason or "unreadable")
         return None
+
+    def writable_problem(self) -> EnvProblem | None:
+        """실제로 쓰지 않고 지금 쓸 수 있는지 본다(마지막 리뷰 2). 쓸 수 있으면 None.
+
+        파일을 읽을 수 있는지, 파일이 놓일 폴더(없으면 만들어질 가장 가까운 조상)에 쓸 수 있는지,
+        폴더가 있으면 잠금 파일을 열고 잠금을 시도할 수 있는지까지 본다. 남이 잠금을 쥐고 있는 것은
+        문제가 아니다(곧 풀린다).
+        """
+        problem = self.file_problem()
+        if problem is not None:
+            return problem
+        existing = self._path.parent
+        while not existing.exists() and existing.parent != existing:
+            existing = existing.parent
+        if not os.access(existing, os.W_OK | os.X_OK):
+            return EnvProblem("file", "not_writable")
+        if self._path.exists() and not os.access(self._path, os.R_OK):
+            return EnvProblem("file", "unreadable")
+        if existing != self._path.parent or self._platform == "win32":
+            return None
+        try:
+            descriptor = os.open(self._lock_path(), os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError:
+            return EnvProblem("file", "not_writable")
+        try:
+            import fcntl
+
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return None
+            except OSError:
+                return EnvProblem("file", "not_writable")
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            return None
+        finally:
+            os.close(descriptor)
 
     def imported(self, name: str) -> bool:
         """예전 위치에서 `name` 묶음을 옮긴 기록이 있나."""
@@ -306,18 +354,17 @@ class CredentialsEnvFile:
     # -- 파일 IO -----------------------------------------------------------------------------
 
     def _read(self, *, fresh: bool = False) -> _Snapshot:
-        """파일 내용.
+        """파일 내용(파싱한 값 포함).
 
-        읽기 전용 조회는 크기·수정 시각·변경 시각·inode가 지난번과
-        같으면 다시 읽지 않는다(리뷰 9). 그
-        값을 믿기 어려운 파일 시스템(inode가 0이거나 수정 시각이 초
-        단위로 거친 경우)에서는 캐시를 쓰지
-        않는다 — 같은 초 안의 제자리 수정을 놓친다(재리뷰 8). 쓰기 경로는 `fresh`로 늘 새로 읽는다.
+        잠금 밖 읽기 전용 조회는 크기·수정 시각·변경 시각·inode가 지난번과 같고 읽은 지 1초가 안
+        됐으면 다시 읽지 않는다(리뷰 9, 3차 리뷰 8). inode가 0이거나 수정 시각이 초 단위로 거친
+        파일 시스템에서는 캐시를 쓰지 않는다. 쓰기 경로와 잠금 안의 읽기는 `fresh`로 늘 새로 읽는다
+        (마지막 리뷰 7).
         """
         try:
             stat = self._path.stat()
         except FileNotFoundError:
-            return _Snapshot(None, "", False, "\n")
+            return _EMPTY
         except OSError as error:
             raise self._unreadable(error) from error
         key = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino)
@@ -334,7 +381,7 @@ class CredentialsEnvFile:
         try:
             raw = self._path.read_bytes()
         except FileNotFoundError:
-            return _Snapshot(None, "", False, "\n")
+            return _EMPTY
         except OSError as error:
             raise self._unreadable(error) from error
         try:
@@ -347,7 +394,14 @@ class CredentialsEnvFile:
                 path=self._path,
                 reason="not_utf8",
             ) from error
-        snapshot = _Snapshot(key, text, bom, "\r\n" if "\r\n" in text else "\n", time.monotonic())
+        snapshot = _Snapshot(
+            key,
+            text,
+            bom,
+            "\r\n" if "\r\n" in text else "\n",
+            time.monotonic(),
+            parse_env_text(text),
+        )
         self._snapshot = snapshot if trusted else None
         return snapshot
 
@@ -381,26 +435,29 @@ class CredentialsEnvFile:
             if self._platform == "win32":
                 import msvcrt
 
-                # 첫 바이트 하나를 잠근다. `LK_LOCK`은 1초씩 10번 재시도
-                # 뒤 `EDEADLOCK`으로 실패한다.
-                # 남이 잡고 있다는 뜻인 그 두 errno만 상한까지 물러나며 다시 부르고, 그 밖의 실패는
-                # 바로 알린다(재리뷰 7).
-                os.lseek(descriptor, 0, os.SEEK_SET)
-                for attempt in range(_WINDOWS_LOCK_ATTEMPTS):
+                # 첫 바이트 하나를 잠근다. `LK_LOCK`은 안에서 1초씩 10번 다시 시도해 한 번에 10초를
+                # 막으므로 즉시 돌아오는 `LK_NBLCK`을 쓰고, 남이 잡고
+                # 있다는 두 errno만 짧게 물러나며
+                # 총 대기 상한까지 다시 부른다. 그 밖의 실패는 바로 알린다(마지막 리뷰 4).
+                deadline = time.monotonic() + _WINDOWS_LOCK_WAIT_SECONDS
+                attempt = 0
+                while True:
+                    os.lseek(descriptor, 0, os.SEEK_SET)
                     try:
-                        msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)  # pyright: ignore[reportAttributeAccessIssue]  # reason: 윈도우 전용 속성
+                        msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)  # pyright: ignore[reportAttributeAccessIssue]  # reason: 윈도우 전용 속성
                         break
                     except OSError as error:
                         if error.errno not in _WINDOWS_LOCK_BUSY:
                             raise self._lock_failure(error) from error
-                        time.sleep(min(0.05 * 2**attempt, 1.0))
-                else:
-                    raise SecretStoreStorageError(
-                        f"could not lock the {_LABEL} — operation=lock "
-                        f"attempts={_WINDOWS_LOCK_ATTEMPTS} reason=busy",
-                        path=self._path,
-                        reason="unreadable",
-                    )
+                    if time.monotonic() >= deadline:
+                        raise SecretStoreStorageError(
+                            f"could not lock the {_LABEL} — operation=lock "
+                            f"waited_seconds={_WINDOWS_LOCK_WAIT_SECONDS:g} reason=busy",
+                            path=self._path,
+                            reason="unreadable",
+                        )
+                    time.sleep(min(0.02 * 2**attempt, 0.25))
+                    attempt += 1
             else:
                 import fcntl
 
@@ -460,6 +517,11 @@ class _FileLock:
             self._thread_lock.release()
             raise
         return self
+
+    @property
+    def held(self) -> bool:
+        """이 스레드든 다른 스레드든 잠금 안에 있는 동안 참. 그동안의 읽기는 캐시를 쓰지 않는다."""
+        return self._depth > 0
 
     def __exit__(self, *_: object) -> None:
         try:

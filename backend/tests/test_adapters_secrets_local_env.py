@@ -34,20 +34,27 @@ def test_reads_only_the_named_values_with_quotes_and_inline_comments(tmp_path: P
 
 
 def test_server_env_keeps_the_old_meaning_quotes_only_no_escapes(tmp_path: Path) -> None:
-    """재리뷰 6: S07 서버 `.env`는 예전처럼 감싼 따옴표만 벗기고 이스케이프를 풀지 않는다.
+    """재리뷰 6·마지막 리뷰 6: S07 서버 `.env`는 예전 의미 그대로 읽는다.
 
-    BOM은 떼어 첫 줄 이름을 알아본다. 줄은 `\\n`·`\\r\\n`으로만 나눈다.
+    감싼 따옴표만 벗기고 이스케이프를 풀지 않는다. 줄은 `str.splitlines`로 나눈다(CR 하나로 끝나는
+    옛 파일도 읽는다). 이름은 원하는 이름과 정확히 같을 때만 받는다. BOM만 새로 뗀다.
     """
     env = tmp_path / ".env"
     env.write_bytes(
         b"\xef\xbb\xbfFAKE_APP_KEY=fake-app-0123\r\n"
         b'FAKE_SECRET="a\\"b"\r\n'
-        b'FAKE_TOKEN="x\\ny"\r\n'
-        b"FAKE_NOTE=one\x0btwo\n"
+        b'FAKE_TOKEN="x\\ny"\r'
+        b"FAKE_NOTE=one\x0bFAKE_OTHER=two\n"
+        b"1BAD-NAME=kept\n"
     )
-    assert read_env_values(env, {"FAKE_APP_KEY", "FAKE_SECRET", "FAKE_TOKEN", "FAKE_NOTE"}) == {
+    assert read_env_values(
+        env,
+        {"FAKE_APP_KEY", "FAKE_SECRET", "FAKE_TOKEN", "FAKE_NOTE", "FAKE_OTHER", "1BAD-NAME"},
+    ) == {
         "FAKE_APP_KEY": "fake-app-0123",
         "FAKE_SECRET": "a\\",
         "FAKE_TOKEN": "x\\ny",
-        "FAKE_NOTE": "one\x0btwo",
+        "FAKE_NOTE": "one",
+        "FAKE_OTHER": "two",
+        "1BAD-NAME": "kept",
     }

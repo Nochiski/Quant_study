@@ -12,6 +12,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+
 from strategy_workbench.application.broker_connection.facade.connection import (
     BrokerCredentials,
     BrokerCredentialsUnreadableError,
@@ -49,14 +52,12 @@ class EnvFileBrokerCredentialStore:
     def problems(self) -> tuple[EnvProblem, ...]:
         """세 줄 중 일부만 있으면 빠진 이름. 파일 전체 문제는 `file_problem`이 따로 말한다."""
         try:
-            values = self._file.group(KIWOOM_MOCK_ENV_PREFIX)
+            presence = _presence(self._file.group(KIWOOM_MOCK_ENV_PREFIX))
         except SecretStoreStorageError:
             return ()
-        present = [name for name in KIWOOM_MOCK_ENV_NAMES if values.get(name)]
-        if not present or len(present) == len(KIWOOM_MOCK_ENV_NAMES):
+        if not presence.partial:
             return ()
-        missing = tuple(name for name in KIWOOM_MOCK_ENV_NAMES if name not in present)
-        return (EnvProblem("kiwoom", "incomplete", None, missing),)
+        return (EnvProblem("kiwoom", "incomplete", None, presence.missing),)
 
     def load(self) -> BrokerCredentials | None:
         try:
@@ -65,14 +66,13 @@ class EnvFileBrokerCredentialStore:
             raise BrokerCredentialsUnreadableError(
                 f"credentials env file is unreadable — error={type(error).__name__}"
             ) from error
-        present = [name for name in KIWOOM_MOCK_ENV_NAMES if values.get(name)]
-        if not present:
+        presence = _presence(values)
+        if presence.none:
             return None
-        if len(present) != len(KIWOOM_MOCK_ENV_NAMES):
-            missing = [name for name in KIWOOM_MOCK_ENV_NAMES if name not in present]
+        if presence.partial:
             # 이름만 싣는다. 값은 싣지 않는다.
             raise BrokerCredentialsUnreadableError(
-                f"stored broker credentials are incomplete — missing={missing}"
+                f"stored broker credentials are incomplete — missing={list(presence.missing)}"
             )
         return BrokerCredentials(values[_APP_KEY], values[_SECRET_KEY], values[_ACCOUNT])
 
@@ -93,6 +93,8 @@ class EnvFileBrokerCredentialStore:
             raise BrokerCredentialsUnwritableError(
                 f"credentials env file is unreadable — reason={error.reason}"
             ) from error
+        # 값이 빈 줄(`NAME=`)도 우리 줄이라 지운다. 세 이름 중 한
+        # 줄도 없을 때만 아무것도 하지 않는다.
         if not any(name in values for name in KIWOOM_MOCK_ENV_NAMES):
             return
         self._replace(())
@@ -118,3 +120,25 @@ class EnvFileBrokerCredentialStore:
             raise BrokerCredentialsUnwritableError(
                 f"credentials env file is not writable — reason={error.reason}"
             ) from error
+
+
+@dataclass(frozen=True)
+class _Presence:
+    """세 이름 중 값이 있는 것. 빈 값(`NAME=`)은 없는 것으로 친다 — 세 곳이 같은 판정을 쓴다."""
+
+    present: tuple[str, ...]
+    missing: tuple[str, ...]
+
+    @property
+    def none(self) -> bool:
+        return not self.present
+
+    @property
+    def partial(self) -> bool:
+        return bool(self.present) and bool(self.missing)
+
+
+def _presence(values: Mapping[str, str]) -> _Presence:
+    present = tuple(name for name in KIWOOM_MOCK_ENV_NAMES if values.get(name))
+    missing = tuple(name for name in KIWOOM_MOCK_ENV_NAMES if name not in present)
+    return _Presence(present, missing)

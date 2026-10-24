@@ -164,7 +164,11 @@ def register_assistant_routes(
             return probe_result_view(profiles.test(profile_id))
         except ProviderProfileNotFoundError as error:
             raise _provider_not_found(error) from error
-        except (ProviderNotInstalledError, ProviderSecretMissingError) as error:
+        except (
+            ProviderNotInstalledError,
+            ProviderSecretMissingError,
+            ProviderStorageUnavailableError,
+        ) as error:
             raise _unprocessable(error) from error
 
     @app.post(

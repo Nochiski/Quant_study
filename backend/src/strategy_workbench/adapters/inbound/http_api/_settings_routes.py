@@ -66,6 +66,8 @@ def _message(issue: CredentialsFileIssue) -> str:
     if issue.section == "file":
         if issue.reason == "not_utf8":
             return "저장 파일을 UTF-8로 읽지 못했습니다. 편집기에서 UTF-8로 다시 저장하세요."
+        if issue.reason == "not_writable":
+            return "저장 폴더에 쓸 수 없습니다. 폴더 권한을 확인하세요."
         return "저장 파일을 열지 못했습니다. 파일 권한을 확인하세요."
     if issue.section == "ai":
         where = f"AI 공급자 {issue.index}번 항목" if issue.index is not None else "AI 공급자 항목"

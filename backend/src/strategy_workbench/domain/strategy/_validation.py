@@ -21,6 +21,7 @@ from strategy_workbench.domain.factor.facade.operators import (
     required_field_value_type,
 )
 from strategy_workbench.domain.factor.facade.validation import (
+    UNSELECTED_FIELD_MESSAGE,
     FactorGraphValidation,
     FactorValidationSeverity,
     node_dependencies,
@@ -429,15 +430,8 @@ def _field_reference_issues(
     for path, field_id in _equity_field_references(spec):
         metadata = by_id.get(field_id)
         if metadata is None and not field_id.strip():
-            # 아직 고르지 않은 빈 칸이다. 재현할 값이 없으므로 field_id·path 원문 없이
-            # 할 일만 알린다(위치는 진단 pointer 가 소유한다).
-            issues.append(
-                semantic_issue(
-                    "strategy.field.missing",
-                    path,
-                    "아직 필드를 고르지 않았습니다. 목록에서 필드를 고르세요.",
-                )
-            )
+            # 아직 고르지 않은 빈 칸이다. 그래프 안 빈 필드 노드와 같은 문장을 쓴다.
+            issues.append(semantic_issue("strategy.field.missing", path, UNSELECTED_FIELD_MESSAGE))
         elif metadata is None:
             reason = unavailable.get(field_id)
             message = (

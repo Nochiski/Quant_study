@@ -121,6 +121,14 @@ def unavailable_field_message(field_id: str, reason: str) -> str:
     return f"연결된 데이터가 이 필드를 주지 않습니다 — {reason}: field_id={field_id!r}"
 
 
+UNSELECTED_FIELD_MESSAGE = "아직 필드를 고르지 않았습니다. 목록에서 필드를 고르세요."
+"""아직 고르지 않은 빈 필드 칸(`field_id: ""`)의 진단 문장.
+
+그래프 안(`factor.graph.field_missing`)과 밖(`strategy.field.missing`)이 같은 문장을 쓴다.
+재현할 값이 없으므로 `field_id`·`path` 원문 없이 할 일만 알린다(위치는 진단 pointer 가 소유한다).
+"""
+
+
 def node_dependencies(node: ExpressionNode) -> tuple[str, ...]:
     if isinstance(node, (UnaryNode, TimeSeriesNode, CrossSectionalNode, GroupNode, FillNode)):
         return (node.input_node_id,)
@@ -206,16 +214,13 @@ def validate_factor_graph(
             and node.field_id not in field_by_id
         ):
             reason = (unavailable_fields or {}).get(node.field_id)
-            issues.append(
-                _issue(
-                    "factor.graph.field_missing",
-                    node.node_id,
-                    path,
-                    f"필드 계약을 찾을 수 없습니다: field_id={node.field_id!r}"
-                    if reason is None
-                    else unavailable_field_message(node.field_id, reason),
-                )
-            )
+            if not node.field_id.strip():
+                message = UNSELECTED_FIELD_MESSAGE
+            elif reason is None:
+                message = f"필드 계약을 찾을 수 없습니다: field_id={node.field_id!r}"
+            else:
+                message = unavailable_field_message(node.field_id, reason)
+            issues.append(_issue("factor.graph.field_missing", node.node_id, path, message))
         elif isinstance(node, ParameterNode) and node.parameter_id not in known_parameters:
             issues.append(
                 _issue(

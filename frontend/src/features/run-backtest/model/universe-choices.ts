@@ -48,8 +48,15 @@ export const universeChoices = (
 export const universeOptionLabel = (item: UniverseDefinition): string =>
   item.label === item.universe_id ? item.label : `${item.label} (${item.universe_id})`;
 
-/** 요약 띠가 쓰는 유니버스 이름. 목록에 있으면 표시명, 없거나 아직 못 받았으면 id 그대로다. */
+/**
+ * 요약 띠가 쓰는 유니버스 이름. 목록에 있으면 드롭다운과 같은 "표시명 (id)", 없거나 아직 못 받았으면 id
+ * 그대로다. id 를 함께 두는 까닭: 요약 띠는 실행 기록·재현에 쓰는 실제 값을 보이는 자리라, 표시명만
+ * 쓰면 어떤 id 로 실행되는지 읽을 수 없다.
+ */
 export const universeDisplayName = (
   universes: readonly UniverseDefinition[] | undefined,
   id: string,
-): string => universes?.find((item) => item.universe_id === id)?.label ?? id;
+): string => {
+  const item = universes?.find((candidate) => candidate.universe_id === id);
+  return item === undefined ? id : universeOptionLabel(item);
+};

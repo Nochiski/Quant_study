@@ -927,13 +927,10 @@ describe("run environment panel", () => {
     await fillPeriodAndUniverse(user);
 
     expect(requestBody()?.environment).toEqual(ENVIRONMENT);
-    // 요약 띠는 유니버스를 id 대신 연결된 시장 데이터가 답한 표시명으로 읽는다.
+    // 요약 띠는 유니버스를 연결된 시장 데이터가 답한 표시명과 실제 id 로 함께 읽는다.
     expect(
       screen.getByRole("region", { name: "실행 설정 요약" }),
-    ).toHaveTextContent("유니버스KRX 보통주");
-    expect(
-      screen.getByRole("region", { name: "실행 설정 요약" }),
-    ).not.toHaveTextContent("krx.common-stock");
+    ).toHaveTextContent("유니버스KRX 보통주 (krx.common-stock)");
 
     const participation = screen.getByRole("spinbutton", { name: /참여율/ });
     await user.clear(participation);

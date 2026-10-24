@@ -876,12 +876,15 @@ describe("professional keyboard workflow (P6-03)", () => {
     const user = userEvent.setup();
     mount("/research/strategies/s1/revisions/2");
     const band = await screen.findByRole("region", { name: "실행 설정 요약" });
-    await waitFor(() => expect(band).toHaveTextContent("유니버스KRX 보통주"));
+    await waitFor(() => expect(band).toHaveTextContent("유니버스KRX 보통주 (krx.common-stock)"));
 
     await user.click(screen.getByLabelText("실행 설정 열기"));
     const select = await screen.findByRole("combobox", { name: "유니버스" });
     await waitFor(() => expect(select).toHaveValue("krx.common-stock"));
-    expect(within(select).getByRole("option", { selected: true })).toHaveTextContent(
+    // 이 테스트는 첫 테스트(명령 검색 → 경로 드러내기) 뒤에 둔다. 앞에 두면 그 테스트가 실패한다(순서 의존,
+    // 원인 미확정 — 같은 리비전 화면을 한동안 열어 둔 앞 테스트의 남은 비동기 작업이 새는 것으로 보인다).
+    expect(select).toBeInstanceOf(HTMLSelectElement);
+    expect((select as HTMLSelectElement).selectedOptions[0]?.textContent).toBe(
       "KRX 보통주 (krx.common-stock)",
     );
     // 열린 패널 상태를 다음 테스트로 넘기지 않는다.

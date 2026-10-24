@@ -70,11 +70,14 @@ export const BacktestRunDetail = ({
   validationReport,
   capacityCheck,
   regression,
+  holdings,
 }: {
   result: BacktestRunResult;
   /** 계좌 보고서 요약. "결과 한눈에"의 최종 평가액 카드가 읽는다. */
   account?: AccountReport["summary"];
   accountReport?: ReactNode;
+  /** 보유 종목과 매매. 월별 수익 뒤, 청산 거래 앞에 둔다. */
+  holdings?: ReactNode;
   /** 용량 확인. 청산 거래 뒤, 전체 지표 표 앞에 둔다(RD-07-E). */
   capacityCheck?: ReactNode;
   /** 팩터 회귀 패널. "종목 선정이 효과가 있었나" 카드 안에 둔다(RD-07-C). */
@@ -140,6 +143,9 @@ export const BacktestRunDetail = ({
         <a href={`#${titleId}-charts`}>{t("backtest.chart.title")}</a>
         <a href={`#${titleId}-axes`}>{t("backtest.axes.title")}</a>
         <a href={`#${titleId}-monthly`}>{t("backtest.monthly.title")}</a>
+        {holdings ? (
+          <a href={`#${titleId}-holdings`}>{t("backtest.holdings.title")}</a>
+        ) : null}
         <a href={`#${titleId}-trades`}>{t("backtest.result.trades")}</a>
         {accountReport ? (
           <a href={`#${titleId}-account`}>{t("backtest.account.title")}</a>
@@ -244,6 +250,17 @@ export const BacktestRunDetail = ({
         id={`${titleId}-monthly`}
         points={result.series.monthly_returns}
       />
+
+      {holdings ? (
+        <section
+          id={`${titleId}-holdings`}
+          className="run-detail__holdings"
+          tabIndex={-1}
+          aria-label={t("backtest.holdings.title")}
+        >
+          {holdings}
+        </section>
+      ) : null}
 
       <section className="trade-panel" id={`${titleId}-trades`} tabIndex={-1}>
         <header>

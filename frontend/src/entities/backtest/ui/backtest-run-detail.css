@@ -116,6 +116,11 @@
   gap: var(--space-3);
 }
 
+/* 결과 패널은 grid 라 칸 안 넓은 표가 패널 폭을 밀지 않게 칸이 내용보다 좁아질 수 있어야 한다. */
+.run-detail .run-detail__holdings {
+  min-width: 0;
+}
+
 .run-detail .monthly-panel,
 .run-detail .raw-metric-panel,
 .run-detail .trade-panel,

@@ -187,6 +187,43 @@ export const useBacktestAccountReport = (runId: string | null, enabled: boolean)
     staleTime: Number.POSITIVE_INFINITY,
   });
 
+/**
+ * 완료 결과의 보유·매매 투영. 결과 파일은 완료 뒤 바뀌지 않으므로 다시 읽지 않는다. 세션·종목 조회는 화면이
+ * 고른 것 하나씩만 읽는다 — 매매한 세션 전부의 보유를 한 번에 받지 않는다.
+ */
+const holdingsQueryOptions = { retry: false, refetchOnReconnect: false, staleTime: Number.POSITIVE_INFINITY } as const;
+
+export const useBacktestHoldings = (runId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: ["backtest", runId, "holdings"],
+    queryFn: () => strategyWorkbenchApi.getBacktestHoldings(runId),
+    enabled,
+    ...holdingsQueryOptions,
+  });
+
+export const useBacktestSessionHoldings = (runId: string, session: string | null) =>
+  useQuery({
+    queryKey: ["backtest", runId, "holdings", "session", session],
+    queryFn:
+      session === null
+        ? skipToken
+        : () => strategyWorkbenchApi.getBacktestSessionHoldings(runId, session),
+    // 다른 날을 고르는 동안 직전 날의 표를 두어 표 높이가 출렁이지 않게 한다.
+    placeholderData: keepPreviousData,
+    ...holdingsQueryOptions,
+  });
+
+export const useBacktestSecurityTrades = (runId: string, securityId: string | null) =>
+  useQuery({
+    queryKey: ["backtest", runId, "holdings", "security", securityId],
+    queryFn:
+      securityId === null
+        ? skipToken
+        : () => strategyWorkbenchApi.getBacktestSecurityTrades(runId, securityId),
+    placeholderData: keepPreviousData,
+    ...holdingsQueryOptions,
+  });
+
 /** 원본 결과와 다른 조회 시점의 원장 값이다. 자동 재조회 없이 명시한 때만 새 근거를 읽는다. */
 export const useBacktestValidationReport = (runId: string | null, enabled: boolean) => {
   const query = useQuery({

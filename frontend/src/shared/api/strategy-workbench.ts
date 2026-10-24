@@ -34,6 +34,9 @@ import {
   getBacktestSummary,
   getBacktestResult,
   getBacktestAccountReport,
+  getBacktestHoldings,
+  getBacktestSecurityTrades,
+  getBacktestSessionHoldings,
   getBacktestValidationReport,
   getBacktestFactorRegression,
   previewCapacitySweep,
@@ -74,6 +77,10 @@ import type {
   AccountReportStatus,
   AccountReportSummary,
   AccountReportProvenance,
+  HoldingChange,
+  HoldingsOverview,
+  SecurityTradesReport,
+  SessionHoldingsReport,
   RunValidationReport,
   ApplicableWhen,
   BacktestRunResult,
@@ -707,6 +714,25 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getBacktestAccountReport");
   },
 
+  async getBacktestHoldings(runId: string): Promise<HoldingsOverview> {
+    return unwrap(await getBacktestHoldings({ path: { run_id: runId } }), "getBacktestHoldings");
+  },
+
+  /** `session` 은 `YYYY-MM-DD`. 계좌 기록이 없는 날은 200 의 `session_not_recorded` 로 답한다. */
+  async getBacktestSessionHoldings(runId: string, session: string): Promise<SessionHoldingsReport> {
+    return unwrap(
+      await getBacktestSessionHoldings({ path: { run_id: runId, session } }),
+      "getBacktestSessionHoldings",
+    );
+  },
+
+  async getBacktestSecurityTrades(runId: string, securityId: string): Promise<SecurityTradesReport> {
+    return unwrap(
+      await getBacktestSecurityTrades({ path: { run_id: runId, security_id: securityId } }),
+      "getBacktestSecurityTrades",
+    );
+  },
+
   /** 현재 원장 통계는 완료 결과 파일과 별도로 조회한다. */
   async getBacktestValidationReport(runId: string): Promise<RunValidationReport> {
     const response = await getBacktestValidationReport({ path: { run_id: runId } });
@@ -1003,6 +1029,10 @@ export type {
   AccountReportStatus,
   AccountReportSummary,
   AccountReportProvenance,
+  HoldingChange,
+  HoldingsOverview,
+  SecurityTradesReport,
+  SessionHoldingsReport,
   ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,

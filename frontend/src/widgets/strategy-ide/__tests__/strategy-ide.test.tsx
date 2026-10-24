@@ -746,7 +746,7 @@ describe("StrategyIde", () => {
     expect(
       JSON.parse(localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY) ?? "null"),
     ).toEqual({
-      version: 1,
+      version: 2,
       sizes: {
         outlineWidth: 256,
         inspectorWidth: 320,

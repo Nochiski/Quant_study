@@ -75,10 +75,35 @@
   outline-offset: 2px;
 }
 
+.floating-window__sizes {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-small);
+}
+
 .floating-window__size {
-  --control-size: var(--control-height-dense);
-  max-width: 7.5rem;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: calc(var(--radius-small) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
   font-size: var(--text-size-small);
+  cursor: pointer;
+}
+
+.floating-window__size[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.floating-window__size:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 1px;
 }
 
 .floating-window__body {
@@ -170,7 +195,15 @@
   cursor: default;
 }
 
-/* 최소화 런처: 우하단에 떠 있는 버튼. */
+/*
+ * 최소화 런처: 우하단에 떠 있는 버튼. 런처가 있는 동안 화면 아래쪽에 런처 높이만큼의 여백 값을 연다 — 런처를 쓰는
+ * 화면(새 전략 안내)은 바닥에 이 값을 더해 주 행동(다음·저장하고 백테스트 준비)이 런처 밑에 깔리지 않게 하고,
+ * 우하단 알림도 이만큼 위로 올린다. 편집기는 상단 바 토글이 입구라 런처를 그리지 않아 여백도 열리지 않는다. 런처를 우하단에 두는 결정은 그대로다(좌하단은 앱 탐색의 설정 링크와, 상단은 툴바와 겹친다).
+ */
+:root:has(.floating-window__launcher) {
+  --floating-launcher-reserve: calc(44px + var(--space-5) * 2);
+}
+
 .floating-window__launcher {
   position: fixed;
   right: var(--space-5);

@@ -210,10 +210,10 @@ test(
     // 경우마다 페이지 맨 위에서 연다. 계약 칸 내용이 본문을 늘려 페이지가 창보다 길다.
     const toTop = () => page.evaluate(() => window.scrollTo(0, 0));
 
-    // 계약을 연 채 창을 연다. 여는 입구 셋(런처·Alt+A·명령 팔레트) 모두 초점이 창으로 가고 제목 줄이 눌린다.
+    // 계약을 연 채 창을 연다. 여는 입구 셋(상단 바 토글·Alt+A·명령 팔레트) 모두 초점이 창으로 가고 제목 줄이 눌린다.
     await contractToggle.click();
     const entrances = [
-      ["런처", () => launcherButton.click()],
+      ["상단 바 토글", () => launcherButton.click()],
       ["Alt+A", () => page.keyboard.press("Alt+A")],
       [
         "명령 팔레트",

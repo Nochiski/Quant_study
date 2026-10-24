@@ -65,7 +65,15 @@ describe("FloatingWindow", () => {
   it("크기 프리셋으로 크기를 바꾸고, 다시 열면 기억한 자리·크기로 연다", async () => {
     const user = userEvent.setup();
     const { unmount } = render(<Harness initiallyOpen />);
-    await user.selectOptions(within(windowBox()).getByRole("combobox", { name: "창 크기" }), "small");
+    const sizes = within(windowBox()).getByRole("group", { name: "창 크기" });
+    await user.click(within(sizes).getByRole("button", { name: "작게" }));
+    expect(windowBox().style.width).toBe("320px");
+    expect(within(sizes).getByRole("button", { name: "작게" })).toHaveAttribute("aria-pressed", "true");
+    // 같은 프리셋을 다시 눌러도 다시 맞춘다(선택 상자처럼 마지막 값에 묶이지 않는다, 한정 리뷰 8).
+    within(windowBox()).getByRole("button", { name: "창 옮기기" }).focus();
+    await user.keyboard("{ArrowLeft}");
+    await user.click(within(sizes).getByRole("button", { name: "크게" }));
+    await user.click(within(sizes).getByRole("button", { name: "작게" }));
     expect(windowBox().style.width).toBe("320px");
     unmount();
     render(<Harness initiallyOpen />);
@@ -75,8 +83,8 @@ describe("FloatingWindow", () => {
   it("제목 줄을 끌어 옮기되 뷰포트 밖으로는 나가지 않는다", () => {
     render(<Harness initiallyOpen />);
     const bar = within(windowBox()).getByRole("heading", { name: "AI 도우미" }).parentElement!;
-    fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 500, clientY: 300 });
-    fireEvent.pointerMove(bar, { pointerId: 1, clientX: -5_000, clientY: -5_000 });
+    fireEvent.pointerDown(bar, { pointerId: 1, button: 0, buttons: 1, clientX: 500, clientY: 300 });
+    fireEvent.pointerMove(bar, { pointerId: 1, buttons: 1, clientX: -5_000, clientY: -5_000 });
     fireEvent.pointerUp(bar, { pointerId: 1, clientX: -5_000, clientY: -5_000 });
     expect(windowBox().style.left).toBe("8px");
     expect(windowBox().style.top).toBe("8px");
@@ -107,7 +115,7 @@ describe("FloatingWindow", () => {
       expect(windowBox().style.width).toBe("390px");
       expect(windowBox().style.left).toBe("0px");
       expect(within(windowBox()).queryByRole("button", { name: "창 옮기기" })).toBeNull();
-      expect(within(windowBox()).queryByRole("combobox", { name: "창 크기" })).toBeNull();
+      expect(within(windowBox()).queryByRole("group", { name: "창 크기" })).toBeNull();
       expect(within(windowBox()).getByRole("button", { name: "AI 도우미 최소화" })).toBeVisible();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: innerWidth });
@@ -130,5 +138,24 @@ describe("FloatingWindow", () => {
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: innerWidth });
     }
+  });
+
+  it("움직이지 않은 클릭은 저장하지 않고, 옮기기 손잡이를 끌어도 옮기며, 포인터를 놓치면 끌기가 끝난다(한정 리뷰 4·5·9)", () => {
+    render(<Harness initiallyOpen />);
+    const bar = within(windowBox()).getByRole("heading", { name: "AI 도우미" }).parentElement!;
+    fireEvent.pointerDown(bar, { pointerId: 1, button: 0, buttons: 1, clientX: 500, clientY: 300 });
+    fireEvent.pointerUp(bar, { pointerId: 1, clientX: 500, clientY: 300 });
+    expect(localStorage.getItem(KEY)).toBeNull();
+
+    const handle = within(windowBox()).getByRole("button", { name: "창 옮기기" });
+    const before = Number.parseFloat(windowBox().style.left);
+    fireEvent.pointerDown(handle, { pointerId: 2, button: 0, buttons: 1, clientX: 500, clientY: 300 });
+    fireEvent.pointerMove(handle, { pointerId: 2, buttons: 1, clientX: 400, clientY: 300 });
+    expect(Number.parseFloat(windowBox().style.left)).toBe(before - 100);
+    // 창 밖에서 놓아 놓기를 못 받았다 — 버튼이 떨어진 이동이 오면 끝낸다.
+    fireEvent.pointerMove(handle, { pointerId: 2, buttons: 0, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(handle, { pointerId: 2, buttons: 1, clientX: 200, clientY: 300 });
+    expect(Number.parseFloat(windowBox().style.left)).toBe(before - 100);
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toMatchObject({ x: before - 100 });
   });
 });

@@ -7,6 +7,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* AI 창 런처가 우하단에 떠 있으면 그 높이만큼 바닥을 비워 문제 목록·편집기 끝이 런처 밑에 깔리지 않게 한다. */
   background: var(--surface-canvas);
 }
 

@@ -417,8 +417,9 @@ const ReviewStep = ({
                   <span className="strategy-guide__hint">{t("guide.review.default")}</span>
                 ) : (
                   <ul>
-                    {values.map((value) => (
-                      <li key={value}>{value}</li>
+                    {/* 조각 문장은 겹칠 수 있어 키로 쓰지 않는다 — 단계와 조각 순서가 키다(한정 리뷰 6). */}
+                    {values.map((value, position) => (
+                      <li key={`${step.id}:${position}`}>{value}</li>
                     ))}
                   </ul>
                 )}

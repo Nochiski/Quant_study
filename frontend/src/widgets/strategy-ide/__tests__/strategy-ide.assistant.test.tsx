@@ -34,7 +34,7 @@ const storeClosedAssistant = () =>
   localStorage.setItem(
     PANEL_LAYOUT_STORAGE_KEY,
     JSON.stringify({
-      version: 1,
+      version: 2,
       sizes: { outlineWidth: 240, inspectorWidth: 320, debuggerHeight: 220 },
       open: { assistant: false },
     }),
@@ -202,7 +202,7 @@ describe("StrategyIde assistant 슬롯", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("떠 있는 창은 최소화 버튼을 그리고, 최소화하면 우하단 런처로 초점이 돌아온다", async () => {
+  it("떠 있는 창은 최소화 버튼을 그리고, 최소화하면 상단 바 토글로 초점이 돌아온다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     mountNodeSlot();
@@ -223,9 +223,11 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(
       screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
     ).not.toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false })).toHaveFocus(),
-    );
+    // 편집기는 우하단 런처를 그리지 않는다. 최소화하면 닫힘 상태를 보이는 상단 바 토글로 초점이 간다(한정 리뷰 7·10).
+    expect(screen.queryByRole("button", { name: "AI 어시스턴트 열기" })).toBeNull();
+    const toggle = screen.getByRole("button", { name: "AI 어시스턴트", expanded: false });
+    await waitFor(() => expect(toggle).toHaveFocus());
+    expect(toggle).toHaveAttribute("aria-keyshortcuts", "Alt+A");
   });
 
   it("펼치면 포커스가 떠 있는 창으로 간다 — 런처는 스스로 사라진다", async () => {
@@ -368,6 +370,86 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
   });
 
+  it("하단 시트 폭에서는 개요 서랍과 AI 시트도 나중에 연 쪽만 남는다(한정 리뷰 3)", async () => {
+    matchMedia(true);
+    const user = userEvent.setup();
+    mount({ outline: <p>개요 항목</p> });
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    expect(screen.getByRole("navigation", { name: "전략 구조" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: "전략 구조" })).toBeNull();
+  });
+
+  it("개요를 펼친 채 시트 폭으로 줄면 AI 창을 접고 그 닫힘은 저장하지 않는다(한정 리뷰 3)", async () => {
+    const media = responsiveMedia(1440);
+    const user = userEvent.setup();
+    mount({ outline: <p>개요 항목</p> });
+    if (screen.queryByRole("complementary", { name: "AI 어시스턴트" }) === null) {
+      fireEvent.keyDown(window, { key: "a", altKey: true });
+    }
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+    // 넓은 화면에서 직접 연 선택은 저장돼 있다. 폭이 줄어 덩달아 닫혀도 그 선택(열림)은 그대로다.
+    const before = localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY);
+    media.resize(360);
+    expect(screen.getByRole("navigation", { name: "전략 구조" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
+    expect(JSON.parse(localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY) ?? "{}").open).toEqual(
+      JSON.parse(before ?? "{}").open,
+    );
+  });
+
+  it("상단 바 AI 토글은 창이 떠 있어도 남아 열림 상태를 보이고 여닫는다(한정 리뷰 10)", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    mount();
+    const toggle = screen.getByRole("button", { name: "AI 어시스턴트", expanded: false });
+    expect(toggle).toHaveAttribute("aria-keyshortcuts", "Alt+A");
+    await user.click(toggle);
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await user.click(toggle);
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // 편집기의 입구는 이 토글 하나다 — 우하단 런처가 화면 바닥을 차지하지 않는다(한정 리뷰 7).
+    expect(screen.queryByRole("button", { name: "AI 어시스턴트 열기" })).toBeNull();
+  });
+
+  it("판본 1 기록의 열림 값은 사용자 선택으로 보지 않고 기본값(열림)을 쓴다(한정 리뷰 2)", () => {
+    matchMedia(false);
+    localStorage.setItem(
+      PANEL_LAYOUT_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        sizes: { outlineWidth: 240, inspectorWidth: 320, debuggerHeight: 220 },
+        open: { assistant: false },
+      }),
+    );
+    mount();
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+  });
+
+  it("다른 조작이 덩달아 접은 AI 창은 선택으로 저장하지 않는다(한정 리뷰 1)", async () => {
+    matchMedia(true);
+    localStorage.clear();
+    const user = userEvent.setup();
+    mount();
+    // 사용자가 직접 연 상태를 고른다.
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+    // 좁은 화면에서 계약 서랍을 열면 AI 창이 접히지만 저장된 선택은 "열림" 그대로다.
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
+    expect(JSON.parse(localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY)!)).toMatchObject({
+      open: { assistant: true },
+    });
+  });
+
   it("옛 판의 AI 열 폭 기록이 있어도 깨지지 않고 열린다", () => {
     matchMedia(false);
     localStorage.setItem(
@@ -449,9 +531,7 @@ describe("StrategyIde assistant 슬롯", () => {
       screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
     ).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
-      ).toHaveFocus(),
+      expect(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false })).toHaveFocus(),
     );
   });
 

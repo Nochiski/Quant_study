@@ -241,6 +241,16 @@ export const StrategyIde = ({
       DEFAULT_LAYOUT.assistantOpen &&
       !isSheetViewport({ width: window.innerWidth, height: window.innerHeight }),
   });
+  // 창 폭이 줄어 서랍(개요·계약)과 AI 창이 같은 자리를 덮게 되면 서랍을 남기고 AI 창을 접는다 — 펼쳐 둔 서랍이
+  // 시트 밑에 깔린 채 초점만 받는 일을 막는다. 덩달아 닫힘이라 사용자 선택으로 저장하지 않고, 진행 중 답변은 이어진다
+  // (한정 리뷰 3). 폭이 바뀌는 순간에만 맞춘다(렌더 중 이전 값 비교) — 같은 폭에서는 `togglePanel` 규칙이 맡는다.
+  const [crowdingWidth, setCrowdingWidth] = useState({ narrow, compact });
+  if (crowdingWidth.narrow !== narrow || crowdingWidth.compact !== compact) {
+    setCrowdingWidth({ narrow, compact });
+    const crowded =
+      (compact && layout.outlineOpen) || ((narrow || layout.debuggerOpen) && layout.inspectorOpen);
+    if (layout.assistantOpen && crowded) close(["assistantOpen"]);
+  }
   const outlineId = useId();
   const inspectorId = useId();
   const debuggerId = useId();
@@ -282,6 +292,10 @@ export const StrategyIde = ({
       const inspectorDrawer = narrow || layout.debuggerOpen;
       if (opening && inspectorDrawer && panel === "inspectorOpen") close(["assistantOpen"]);
       if (opening && inspectorDrawer && panel === "assistantOpen") close(["inspectorOpen"]);
+      // 하단 시트가 되는 좁은 화면에서는 개요 서랍도 같은 자리를 덮는다 — 서랍(개요·계약)과 AI 시트는 나중에 연
+      // 쪽만 남긴다(한정 리뷰 3). 시트를 접어도 진행 중 답변은 이어진다.
+      if (opening && compact && panel === "outlineOpen") close(["assistantOpen"]);
+      if (opening && compact && panel === "assistantOpen") close(["outlineOpen"]);
       toggle(panel);
     },
     [close, compact, layout, narrow, toggle],
@@ -313,7 +327,7 @@ export const StrategyIde = ({
     (): HTMLElement | null => document.getElementById(assistantId),
     [assistantId],
   );
-  /** 창을 닫은 뒤 초점이 돌아갈 자리: 우하단 런처. */
+  /** 창을 닫은 뒤 초점이 돌아갈 자리: 상단 바의 AI 토글(늘 있다). */
   const assistantLauncher = useCallback(
     (): HTMLElement | null => document.getElementById(assistantToggleId),
     [assistantToggleId],
@@ -641,7 +655,8 @@ export const StrategyIde = ({
    * AI 어시스턴트 창. 편집기 view와 무관하게 화면 위에 떠 있어 YAML·Graph 어느 탭에서도 같은 대화가 보인다(spec D7).
    * 열림의 owner 는 이 widget 의 패널 배치(`assistantOpen`)이고, 슬롯 함수가 그 값(`open`)을 받아 닫힌 동안 조회를
    * 멈춘다. 창은 처음 열 때 본문을 마운트하고 최소화해도 유지한다 — 진행 중 턴의 스트림이 끊기지 않는다. 위치·크기는
-   * 새 전략 안내의 AI 창과 같은 보관함 키로 기억한다.
+   * 새 전략 안내의 AI 창과 같은 보관함 키로 기억한다. 다시 여는 입구는 상단 바 토글이라 우하단 런처는 두지 않는다 —
+   * 편집기는 화면 높이를 다 쓰는 작업면이어서 런처 자리를 바닥에 비우면 추적 결과 같은 아래쪽 작업면이 그만큼 준다.
    *
    * 창을 접는 손잡이는 최소화 하나이고 대화를 끝내지 않는 패널 조작이다. 답을 멈추는 일은 대화창 안의 "중지"가
    * 한다(spec D7).
@@ -652,11 +667,12 @@ export const StrategyIde = ({
       title={t("ide.assistant")}
       open={layout.assistantOpen}
       onOpenChange={(open) => {
-        if (open !== layout.assistantOpen) togglePanel("assistantOpen");
+        if (open === layout.assistantOpen) return;
+        togglePanel("assistantOpen");
+        // 런처가 없으니 최소화 뒤 초점은 상단 바 토글로 돌린다(여는 쪽 초점은 창이 직접 옮긴다).
+        if (!open) queueMicrotask(() => assistantLauncher()?.focus(ASSISTANT_FOCUS));
       }}
       storageKey={ASSISTANT_WINDOW_STORAGE_KEY}
-      launcherLabel={t("ide.assistant")}
-      launcherId={assistantToggleId}
       minimizeLabel={t("ide.collapseAssistant")}
     >
       {typeof assistant === "function"
@@ -722,6 +738,26 @@ export const StrategyIde = ({
               aria-expanded={layout.inspectorOpen}
             >
               {t("ide.inspector")}
+            </Button>
+          ) : null}
+          {hasAssistant ? (
+            // AI 창 토글. 창이 떠 있는 동안에도 남아 열림 상태를 보이고 여닫는다(Alt+A 와 같은 명령). 최소화했을 때
+            // 우하단에 뜨는 런처는 같은 일을 하는 두 번째 입구다.
+            <Button
+              id={assistantToggleId}
+              size="small"
+              onClick={() => {
+                const opening = !layout.assistantOpen;
+                togglePanel("assistantOpen");
+                queueMicrotask(() =>
+                  (opening ? assistantFocusTarget() : assistantLauncher())?.focus(ASSISTANT_FOCUS),
+                );
+              }}
+              aria-controls={ids.assistant}
+              aria-expanded={layout.assistantOpen}
+              aria-keyshortcuts="Alt+A"
+            >
+              <span className="ide__label-full">{t("ide.assistant")}</span><span className="ide__label-short" aria-hidden="true">AI</span>
             </Button>
           ) : null}
         <details

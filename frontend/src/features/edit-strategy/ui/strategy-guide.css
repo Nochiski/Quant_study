@@ -4,6 +4,8 @@
  * 영역이 나뉘어 보이게 한다.
  */
 .strategy-guide {
+  /* AI 도우미 런처가 우하단에 떠 있으면 그 높이만큼 바닥 여백을 두어 단계 카드의 "다음"·저장이 깔리지 않게 한다. */
+  padding-bottom: var(--floating-launcher-reserve, 0px);
   display: grid;
   grid-template-columns: minmax(0, calc(var(--space-6) * 7.5)) minmax(0, 1fr);
   gap: var(--space-5);

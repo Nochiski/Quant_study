@@ -10,6 +10,7 @@ import {
 
 import { t } from "../config";
 import { browserStorage } from "../lib/browser-storage";
+import { useCommittedRef } from "../lib/react";
 import {
   fitRect,
   initialRect,
@@ -35,6 +36,7 @@ const DEFAULT_LIMITS: WindowLimits = {
   maxHeight: 960,
 };
 const DEFAULT_SIZE = { width: 400, height: 560 };
+const PRESETS: readonly WindowSizePreset[] = ["small", "medium", "large"];
 /** 화살표 한 번에 옮기는 거리. Shift 를 누르면 네 배다. */
 const NUDGE_STEP = 16;
 
@@ -77,6 +79,8 @@ type Gesture = {
   /** null 이면 옮기기, 아니면 그 가장자리로 크기 조절. */
   edges: ResizeEdges | null;
   last: WindowRect;
+  /** 실제로 움직였는가. 움직이지 않은 클릭은 저장하지 않는다(보정된 표시 자리를 기억으로 굳히지 않는다). */
+  moved: boolean;
 };
 
 const DefaultLauncherIcon = () => (
@@ -94,8 +98,11 @@ export type FloatingWindowProps = {
   onOpenChange: (open: boolean) => void;
   /** 위치·크기를 기억할 보관함 키. 같은 키를 쓰는 화면은 같은 자리에 창을 연다. */
   storageKey: string;
-  /** 최소화했을 때 우하단에 남는 런처 버튼 글자. */
-  launcherLabel: string;
+  /**
+   * 최소화했을 때 우하단에 남는 런처 버튼 글자. 화면에 이미 여닫는 토글이 있으면 생략한다 — 그때는 런처를 그리지
+   * 않고, 최소화 뒤 초점은 바깥이 토글로 돌린다.
+   */
+  launcherLabel?: string;
   /** 런처 버튼 id. 바깥이 닫은 뒤 초점을 돌려줄 자리로 쓴다. */
   launcherId?: string;
   /** 최소화 버튼 접근 이름. */
@@ -141,7 +148,6 @@ export const FloatingWindow = ({
   // 본문은 처음 열 때 마운트하고 그 뒤로는 최소화해도 유지한다.
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
-  const [preset, setPreset] = useState<WindowSizePreset | "">("");
   const [viewport, setViewport] = useState<Viewport>(viewportNow);
   // 좁은 화면에서는 하단 시트다(폭 100%, 높이 상한). 끌어 옮기기·크기 조절은 없고, 넓은 화면의 자리·크기는 그대로
   // 기억해 둔다 — 다시 넓어지면 그 자리로 돌아온다.
@@ -161,10 +167,35 @@ export const FloatingWindow = ({
     writeRect(storageKey, next);
   };
 
+  /** 끌기를 끝낸다. 실제로 움직였을 때만 기억한다. */
+  const finish = () => {
+    const current = gesture.current;
+    if (current === null) return;
+    gesture.current = null;
+    if (current.moved) writeRect(storageKey, current.last);
+  };
+
+  // 포인터를 놓친 경우(창 밖에서 놓기·창 전환·캡처 상실)에도 끌기를 끝낸다. window 리스너는 layout effect 로 단다
+  // (`frontend-react-effects.md`).
+  const finishRef = useCommittedRef(finish);
+  useLayoutEffect(() => {
+    const stop = () => finishRef.current();
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("blur", stop);
+    return () => {
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("blur", stop);
+    };
+  }, [finishRef]);
+
   const begin = (event: PointerEvent<HTMLElement>, edges: ResizeEdges | null) => {
     if (event.button !== 0 || sheet) return;
-    // 제목 줄 안의 버튼·선택 상자는 끌기가 아니라 그 조작이다.
-    if (edges === null && (event.target as HTMLElement).closest("button, select") !== null) return;
+    // 제목 줄 안의 버튼은 끌기가 아니라 그 조작이다. 옮기기 손잡이만은 끌어도 옮긴다(클릭·키보드는 그대로).
+    if (
+      edges === null &&
+      (event.target as HTMLElement).closest("button:not([data-move-handle])") !== null
+    )
+      return;
     event.preventDefault();
     // jsdom 처럼 포인터 캡처가 없는 환경에서도 끌기 자체는 돈다.
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -175,12 +206,18 @@ export const FloatingWindow = ({
       start: shown,
       edges,
       last: shown,
+      moved: false,
     };
   };
 
   const move = (event: PointerEvent<HTMLElement>) => {
     const current = gesture.current;
     if (current === null || current.pointerId !== event.pointerId) return;
+    // 버튼이 모두 떨어졌는데 놓기를 못 받은 경우(창 밖에서 놓음)다 — 여기서 끝낸다.
+    if (event.buttons === 0) {
+      finish();
+      return;
+    }
     const dx = event.clientX - current.startX;
     const dy = event.clientY - current.startY;
     const viewport = viewportNow();
@@ -189,17 +226,16 @@ export const FloatingWindow = ({
         ? moveRect(current.start, dx, dy, viewport, limits)
         : resizeRect(current.start, current.edges, dx, dy, viewport, limits);
     current.last = next;
+    if (dx !== 0 || dy !== 0) current.moved = true;
     setRect(next);
   };
 
   const end = (event: PointerEvent<HTMLElement>) => {
     const current = gesture.current;
     if (current === null || current.pointerId !== event.pointerId) return;
-    gesture.current = null;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
-    writeRect(storageKey, current.last);
-    if (current.edges !== null) setPreset("");
+    finish();
   };
 
   const onMoveKey = (event: KeyboardEvent<HTMLButtonElement>) => {
@@ -245,6 +281,7 @@ export const FloatingWindow = ({
             onPointerMove={move}
             onPointerUp={end}
             onPointerCancel={end}
+            onLostPointerCapture={finish}
           >
             <h2 id={titleId} className="floating-window__title">
               {title}
@@ -255,6 +292,7 @@ export const FloatingWindow = ({
                   <button
                     type="button"
                     className="floating-window__icon"
+                    data-move-handle=""
                     aria-label={t("ui.floating.move")}
                     aria-describedby={moveHintId}
                     onKeyDown={onMoveKey}
@@ -266,23 +304,23 @@ export const FloatingWindow = ({
                   <span id={moveHintId} className="sr-only">
                     {t("ui.floating.move.hint")}
                   </span>
-                  <select
-                    className="floating-window__size ui-select"
-                    aria-label={t("ui.floating.size")}
-                    value={preset}
-                    onChange={(event) => {
-                      const next = event.target.value as WindowSizePreset | "";
-                      setPreset(next);
-                      if (next !== "") commit(presetRect(shown, next, viewportNow(), limits));
-                    }}
-                  >
-                    <option value="" disabled>
-                      {t("ui.floating.size")}
-                    </option>
-                    <option value="small">{t("ui.floating.size.small")}</option>
-                    <option value="medium">{t("ui.floating.size.medium")}</option>
-                    <option value="large">{t("ui.floating.size.large")}</option>
-                  </select>
+                  {/* 크기 프리셋: 누를 때마다 그 크기로 맞춘다. 지금 크기와 같은 것만 눌린 상태다. */}
+                  <div className="floating-window__sizes" role="group" aria-label={t("ui.floating.size")}>
+                    {PRESETS.map((preset) => {
+                      const target = presetRect(shown, preset, viewport, limits);
+                      return (
+                        <button
+                          key={preset}
+                          type="button"
+                          className="floating-window__size"
+                          aria-pressed={target.width === shown.width && target.height === shown.height}
+                          onClick={() => commit(presetRect(shown, preset, viewportNow(), limits))}
+                        >
+                          {t(`ui.floating.size.${preset}`)}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </>
               )}
               <button
@@ -308,11 +346,12 @@ export const FloatingWindow = ({
               onPointerMove={move}
               onPointerUp={end}
               onPointerCancel={end}
+              onLostPointerCapture={finish}
             />
           ))}
         </aside>
       ) : null}
-      {open ? null : (
+      {open || launcherLabel === undefined ? null : (
         <button
           ref={launcherRef}
           id={launcherId}

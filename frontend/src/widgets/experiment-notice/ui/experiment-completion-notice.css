@@ -1,6 +1,7 @@
 .experiment-notice {
   position: fixed;
-  inset-block-end: var(--space-4);
+  /* AI 창 런처가 우하단에 있으면 그 위로 올린다(`--floating-launcher-reserve`, floating-window.css). */
+  inset-block-end: calc(var(--space-4) + var(--floating-launcher-reserve, 0px));
   inset-inline-end: var(--space-4);
   z-index: var(--layer-popover);
   display: grid;

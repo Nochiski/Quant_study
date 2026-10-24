@@ -1,6 +1,7 @@
 import { expect, test, type Locator } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
 
+import { collapseAssistant } from "../assistant-helpers";
 import { GOLDEN, fillRunEnvironment, openEditor, replaceSource } from "../workbench-helpers";
 
 const centerIsVisible = (target: Locator) => target.evaluate((element) => {
@@ -20,6 +21,8 @@ test("US-CS-03 작은 분할 기록과 무관하게 세 화면에서 추적하�
     await openEditor(page, "/research/strategies/new");
     await replaceSource(page, GOLDEN);
     await fillRunEnvironment(page);
+    // AI 창은 화면 위에 떠 있어 추적 폼 끝을 덮을 수 있다. 이 시나리오는 추적 작업만 보므로 창을 접는다.
+    await collapseAssistant(page);
     await page.getByRole("button", { name: "중간 결과", exact: true }).click();
     const panel = page.getByRole("region", { name: "중간 결과", exact: true });
     const form = panel.getByRole("form", { name: "전략 추적 범위" });

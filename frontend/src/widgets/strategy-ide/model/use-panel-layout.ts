@@ -14,10 +14,11 @@ export type PanelLayout = {
   /** AI 어시스턴트 창(떠 있는 창)이 열렸는가. */
   assistantOpen: boolean;
   /**
-   * 사용자가 AI 창 열림을 직접 골랐는가(저장 기록에 있었거나 토글했다). 고른 것만 저장한다 — 좁은 화면에서
-   * 정한 기본값(닫힘)이나 다른 조작이 덩달아 닫은 것은 기록하지 않아, 넓은 화면에 와서도 기본값이 이긴다.
+   * 사용자가 AI 창을 직접 여닫아 고른 값(없으면 null). 저장하는 것은 이 값뿐이다 — 좁은 화면에서 정한
+   * 기본값(닫힘)이나 다른 조작(계약·개요 서랍 열기)이 덩달아 닫은 것은 `assistantOpen` 만 바꾸고 이 값은 그대로라,
+   * 넓은 화면이나 다음 방문에서는 사용자가 고른 값(또는 기본값)이 이긴다.
    */
-  assistantChosen: boolean;
+  assistantPreference: boolean | null;
 };
 
 export const PANEL_BOUNDS = {
@@ -37,7 +38,7 @@ export const DEFAULT_LAYOUT: PanelLayout = {
   // 구조·계약은 사용자가 명시해서 연다. AI 창은 처음부터 열어 둔다(RD-04-A, 2026-10-19 결정 3).
   // 저장된 닫힘 선택은 그대로 존중한다 — 기본값은 저장 기록에 `assistant` 키가 없을 때만 쓰인다.
   assistantOpen: true,
-  assistantChosen: false,
+  assistantPreference: null,
 };
 
 type PanelSizes = Pick<
@@ -45,14 +46,19 @@ type PanelSizes = Pick<
   "outlineWidth" | "inspectorWidth" | "debuggerHeight"
 >;
 /**
- * 복원된 배치. 기존 세 패널 폭은 함께 유효해야 하고, AI 창 열림(`assistantOpen`)은 없으면 기본값으로 둔다 —
- * 이 키를 모르던 v1 기록도 그대로 읽힌다. 옛 AI 열 폭(`sizes.assistantWidth`)은 읽지 않고 무시한다.
+ * 복원된 배치. 기존 세 패널 폭은 함께 유효해야 한다. AI 창 열림은 판본 2 기록의 `open.assistant`(사용자가
+ * 직접 고른 값)만 읽는다 — 판본 1 기록의 `open.assistant` 는 사용자 선택과 자동 기본값을 구분하지 않고 저장됐으므로
+ * 선택으로 보지 않고 버린다(한정 리뷰 2). 옛 AI 열 폭(`sizes.assistantWidth`)도 무시한다.
  */
 export type StoredLayout = PanelSizes &
-  Partial<Pick<PanelLayout, "assistantOpen" | "assistantChosen">>;
+  Partial<Pick<PanelLayout, "assistantOpen" | "assistantPreference">>;
 type LayoutStorage = Pick<Storage, "getItem" | "setItem">;
 
 export const PANEL_LAYOUT_STORAGE_KEY = "quant-workbench.panel-sizes.v1";
+/**
+ * 저장 기록 판본. 2부터 `open.assistant` 는 사용자가 직접 고른 값만 담는다. 1 기록은 폭만 이어받는다.
+ */
+export const PANEL_LAYOUT_VERSION = 2;
 
 const validSize = (
   key: keyof typeof PANEL_BOUNDS,
@@ -78,7 +84,7 @@ export const readPanelSizes = (
       open?: { assistant?: unknown };
     };
     if (
-      record.version !== 1 ||
+      (record.version !== 1 && record.version !== PANEL_LAYOUT_VERSION) ||
       typeof record.sizes !== "object" ||
       record.sizes === null
     )
@@ -90,14 +96,17 @@ export const readPanelSizes = (
       !validSize("debuggerHeight", debuggerHeight)
     )
       return null;
-    const assistantOpen = record.open?.assistant;
+    const assistantOpen =
+      record.version === PANEL_LAYOUT_VERSION ? record.open?.assistant : undefined;
     if (assistantOpen !== undefined && typeof assistantOpen !== "boolean")
       return null;
     return {
       outlineWidth,
       inspectorWidth,
       debuggerHeight,
-      ...(assistantOpen === undefined ? {} : { assistantOpen, assistantChosen: true }),
+      ...(assistantOpen === undefined
+        ? {}
+        : { assistantOpen, assistantPreference: assistantOpen }),
     };
   } catch {
     return null;
@@ -112,14 +121,16 @@ const writePanelSizes = (
     storage?.setItem(
       PANEL_LAYOUT_STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: PANEL_LAYOUT_VERSION,
         sizes: {
           outlineWidth: layout.outlineWidth,
           inspectorWidth: layout.inspectorWidth,
           debuggerHeight: layout.debuggerHeight,
         },
         // 사용자가 직접 고른 AI 창 열림만 복원한다. 나머지는 첫 진입의 주본문 공간을 보장한다.
-        ...(layout.assistantChosen ? { open: { assistant: layout.assistantOpen } } : {}),
+        ...(layout.assistantPreference === null
+          ? {}
+          : { open: { assistant: layout.assistantPreference } }),
       }),
     );
   } catch {
@@ -147,11 +158,14 @@ const reduce = (state: PanelLayout, action: Action): PanelLayout => {
     case "resize":
       return { ...state, [action.panel]: clamp(action.panel, action.value) };
     case "toggle":
-      // AI 창을 사용자가 여닫으면 그 선택을 기록한다. 다른 조작이 덩달아 닫는 `close` 는 기록하지 않는다.
+      // AI 창을 사용자가 여닫으면 그 값을 선택으로 기록한다. 다른 조작이 덩달아 닫는 `close` 는 열림만 바꾸고
+      // 선택은 건드리지 않는다.
       return {
         ...state,
         [action.panel]: !state[action.panel],
-        ...(action.panel === "assistantOpen" ? { assistantChosen: true } : {}),
+        ...(action.panel === "assistantOpen"
+          ? { assistantPreference: !state.assistantOpen }
+          : {}),
       };
     case "close":
       return action.panels.reduce(

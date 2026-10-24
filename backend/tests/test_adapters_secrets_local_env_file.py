@@ -1,4 +1,4 @@
-"""내 문서 `auto_trading/.env` 저장 파일과 AI 공급자 저장 테스트(2026-10-24 사용자 결정).
+"""내 문서 `auto_trading/.env` 저장 파일과 AI 공급자·키움 모의 저장 테스트(2026-10-24 사용자 결정).
 
 고정하는 사실:
 
@@ -27,11 +27,13 @@ from strategy_workbench.adapters.outbound.assistant_sqlite.facade.repository imp
 )
 from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import (
     CredentialsEnvFile,
+    EnvFileBrokerCredentialStore,
     EnvFileProviderStore,
     parse_env_text,
     resolve_documents_directory,
 )
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
+    LocalFileBrokerCredentialStore,
     LocalFileProviderSecretStore,
     SecretStoreStorageError,
 )
@@ -39,8 +41,15 @@ from strategy_workbench.application.assistant_chat.facade.ports import (
     ProviderProfileNotFoundError,
     ProviderSecretMissingError,
 )
+from strategy_workbench.application.broker_connection.facade.connection import (
+    BrokerCredentials,
+    BrokerCredentialsUnreadableError,
+)
 from strategy_workbench.bootstrap._assistant import AssistantSettings
-from strategy_workbench.bootstrap._secrets import migrate_provider_profiles
+from strategy_workbench.bootstrap._secrets import (
+    migrate_kiwoom_credentials,
+    migrate_provider_profiles,
+)
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.assistant.facade.models import ProviderKind, ProviderProfile
 
@@ -286,3 +295,93 @@ def test_a_graph_without_the_env_file_reports_no_path(tmp_path: Path) -> None:
     )
     with TestClient(app) as client:
         assert client.get("/api/v1/settings/credentials-file").json() == {"path": None}
+
+
+# -- 키움 모의 연결 -----------------------------------------------------------------------------
+
+
+def test_kiwoom_credentials_round_trip_as_three_names(tmp_path: Path) -> None:
+    path = tmp_path / ".env"
+    path.write_text(OTHER_TOOL, encoding="utf-8")
+    file = CredentialsEnvFile(path)
+    store = EnvFileBrokerCredentialStore(file)
+    assert store.load() is None
+
+    store.save(BrokerCredentials("app-key-0123", "secret-0123", "5012345678"))
+
+    assert store.load() == BrokerCredentials("app-key-0123", "secret-0123", "5012345678")
+    assert file.group("STRATEGY_WORKBENCH_KIWOOM_MOCK_") == {
+        "STRATEGY_WORKBENCH_KIWOOM_MOCK_APP_KEY": "app-key-0123",
+        "STRATEGY_WORKBENCH_KIWOOM_MOCK_SECRET_KEY": "secret-0123",
+        "STRATEGY_WORKBENCH_KIWOOM_MOCK_ACCOUNT": "5012345678",
+    }
+    # 공급자 묶음과 같은 파일을 나눠 쓴다. 서로의 줄을 지우지 않는다.
+    EnvFileProviderStore(file).add(_profile("p1", active=True))
+    assert store.load() is not None
+
+    store.delete()
+    store.delete()
+    assert store.load() is None
+    assert [item.profile_id for item in EnvFileProviderStore(file).list()] == ["p1"]
+    assert path.read_text(encoding="utf-8").startswith(OTHER_TOOL)
+
+
+def test_partial_kiwoom_names_are_unreadable_without_values(tmp_path: Path) -> None:
+    path = tmp_path / ".env"
+    path.write_text("STRATEGY_WORKBENCH_KIWOOM_MOCK_APP_KEY=app-key-0123\n", encoding="utf-8")
+
+    with pytest.raises(BrokerCredentialsUnreadableError) as raised:
+        EnvFileBrokerCredentialStore(CredentialsEnvFile(path)).load()
+
+    assert "app-key-0123" not in str(raised.value)
+    assert "STRATEGY_WORKBENCH_KIWOOM_MOCK_ACCOUNT" in str(raised.value)
+
+
+def test_legacy_kiwoom_credentials_move_once(tmp_path: Path) -> None:
+    secrets = LocalFileProviderSecretStore(tmp_path / "secrets.json")
+    secrets.put("p-other", SECRET)
+    legacy = LocalFileBrokerCredentialStore(secrets)
+    legacy.save(BrokerCredentials("app-key-0123", "secret-0123", "5012345678"))
+    target = EnvFileBrokerCredentialStore(CredentialsEnvFile(tmp_path / ".env"))
+
+    assert migrate_kiwoom_credentials(legacy, target) is True
+
+    assert target.load() == BrokerCredentials("app-key-0123", "secret-0123", "5012345678")
+    assert legacy.load() is None
+    # 같은 파일의 다른 항목은 그대로다.
+    assert secrets.get("p-other") == SECRET
+    assert migrate_kiwoom_credentials(legacy, target) is False
+
+
+def test_broken_legacy_kiwoom_entry_is_left_in_place(tmp_path: Path) -> None:
+    secrets = LocalFileProviderSecretStore(tmp_path / "secrets.json")
+    secrets.put("broker.kiwoom_mock", "not json")
+    target = EnvFileBrokerCredentialStore(CredentialsEnvFile(tmp_path / ".env"))
+
+    assert migrate_kiwoom_credentials(LocalFileBrokerCredentialStore(secrets), target) is False
+    assert secrets.get("broker.kiwoom_mock") == "not json"
+    assert target.load() is None
+
+
+def test_the_settings_screen_saves_kiwoom_keys_into_the_env_file(tmp_path: Path) -> None:
+    env_path = tmp_path / "Documents" / "auto_trading" / ".env"
+    app = build_http_app(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            credentials_env_path=env_path,
+        )
+    )
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/v1/broker-connections/kiwoom-mock",
+            json={
+                "app_key": "app-key-0123456789",
+                "secret_key": "secret-0123456789",
+                "account_number": "50123456-78",
+            },
+        )
+    assert response.status_code == 200, response.text
+    values = parse_env_text(env_path.read_text(encoding="utf-8"))
+    assert values["STRATEGY_WORKBENCH_KIWOOM_MOCK_APP_KEY"] == "app-key-0123456789"
+    assert not (tmp_path / "secrets.json").exists()

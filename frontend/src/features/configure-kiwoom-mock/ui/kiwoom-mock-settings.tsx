@@ -5,6 +5,7 @@ import {
   kiwoomMockConnectionQuery,
   useDeleteKiwoomMockConnection,
 } from "../../../entities/broker";
+import { CredentialsFileLocation } from "../../../entities/credentials-file";
 import { t, tFill } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import {
@@ -114,6 +115,7 @@ export const KiwoomMockSettings = () => {
       <p className="kiwoom-settings__description">
         {t("settings.kiwoom.description")}
       </p>
+      <CredentialsFileLocation />
       <p className="kiwoom-settings__description">
         {t("settings.kiwoom.guide")}
       </p>

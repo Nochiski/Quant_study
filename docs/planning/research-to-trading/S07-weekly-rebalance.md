@@ -85,7 +85,8 @@ uv run python -m strategy_workbench.bootstrap.weekly_rebalance approve \
   --workdir ~/quant-data/kiwoom-mock/strategy/scope-top10 --plan weekly-2026-10-23 --approver <이름>
 ```
 
-키는 설정 화면이 저장한 `secrets.json`에서 읽는다. 작업 폴더가 저장소 안이면 거부한다.
+키는 설정 화면이 저장한 내 문서 `auto_trading/.env`에서 읽는다(2026-10-24, 예전 `secrets.json`은 열 때 옮긴다).
+작업 폴더가 저장소 안이면 거부한다.
 
 ### 확인
 

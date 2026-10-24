@@ -261,8 +261,8 @@ extra 없이 어시스턴트 계약 테스트와 architecture 테스트를 따�
 | `STRATEGY_WORKBENCH_EQUITY_ADAPTER` | `mock` | `mock` 또는 `duckdb` |
 | `STRATEGY_WORKBENCH_EQUITY_ROOT` | 없음 | duckdb adapter가 읽을 equity 층 루트. `duckdb`면 필수 |
 | `STRATEGY_WORKBENCH_ASSISTANT_DB_PATH` | `.local/assistant.sqlite3` | 어시스턴트 세션 저장소(예전 프로파일 표는 시작할 때 `.env`로 옮긴다) |
-| `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH` | OS 기본 사용자 설정 위치 | 예전 비밀 파일(`secrets.json`). 서버가 시작할 때 여기 남은 공급자를 아래 `.env`로 옮긴다 |
-| `STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH` | 내 문서 `auto_trading/.env` | AI 공급자 연결·API 키 저장 파일. OS "문서" 폴더(윈도우 알려진 폴더, 리눅스 XDG)를 쓰고 다른 도구의 줄은 건드리지 않는다. 테스트·e2e는 반드시 임시 경로로 바꾼다 |
+| `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH` | OS 기본 사용자 설정 위치 | 예전 비밀 파일(`secrets.json`). 서버·S07 명령줄이 열 때 여기 남은 공급자·키움 모의 키를 아래 `.env`로 옮긴다 |
+| `STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH` | 내 문서 `auto_trading/.env` | AI 공급자 연결·API 키와 키움 모의 앱 키·시크릿·계좌번호(`STRATEGY_WORKBENCH_KIWOOM_MOCK_*`) 저장 파일. OS "문서" 폴더(윈도우 알려진 폴더, 리눅스 XDG)를 쓰고 다른 도구의 줄은 건드리지 않는다. 테스트·e2e는 반드시 임시 경로로 바꾼다 |
 | `STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL` | 꺼짐 | 정확히 `1`일 때만 로컬 프록시용 비보안 base URL 허용 |
 | `STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER` | 꺼짐 | 정확히 `1`일 때만 공급자를 대본 adapter(`llm_scripted`)로 바꾼다. 브라우저 e2e 전용 |
 | `STRATEGY_WORKBENCH_BROKER_FAKE_PROBE` | 꺼짐 | 정확히 `1`일 때만 키움 모의 "연결 확인"을 대본 probe로 바꾼다(키움을 부르지 않는다). 브라우저 e2e 전용 |

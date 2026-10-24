@@ -52,9 +52,6 @@ from strategy_workbench.adapters.outbound.run_worker_process.facade.worker impor
     VersionBundle,
     code_fingerprint,
 )
-from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
-    LocalFileBrokerCredentialStore,
-)
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
     SQLiteFactorLibraryRepository,
     SQLiteStrategyDraftRepository,
@@ -147,6 +144,7 @@ from ._assistant import (
     build_assistant_services,
 )
 from ._file_guard import restrict_to_current_user
+from ._secrets import kiwoom_credential_store
 
 logger = logging.getLogger(__name__)
 
@@ -353,7 +351,10 @@ def build_container(
             now=lambda: datetime.now(UTC),
         ),
         broker_connections=BrokerConnectionService(
-            LocalFileBrokerCredentialStore(assistant_services.secrets),
+            kiwoom_credential_store(
+                secrets=assistant_services.secrets,
+                credentials_file=assistant_services.credentials_file,
+            ),
             _broker_probe(fake=broker_fake_probe),
         ),
         assistant_profiles=assistant_services.profiles,

@@ -21,6 +21,10 @@ test(
     await expect(
       section.getByRole("button", { name: "연결 확인" }),
     ).toBeDisabled();
+    // 키가 저장되는 실제 파일. e2e는 격리 런타임의 `auto_trading.env`를 쓴다(`e2e/runtime.ts`).
+    const location = section.getByTestId("credentials-file-location");
+    await expect(location).toContainText("저장 위치:");
+    await expect(location).toContainText(/auto_trading\.env$/);
 
     const save = async (account: string) => {
       await section.getByLabel("App Key").fill(APP_KEY);

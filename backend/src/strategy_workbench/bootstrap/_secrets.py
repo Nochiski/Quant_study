@@ -18,15 +18,21 @@ from strategy_workbench.adapters.outbound.assistant_sqlite.facade.repository imp
 )
 from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import (
     CredentialsEnvFile,
+    EnvFileBrokerCredentialStore,
     EnvFileProviderStore,
     default_auto_trading_env_path,
 )
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
+    LocalFileBrokerCredentialStore,
     LocalFileProviderSecretStore,
     SecretStoreStorageError,
     default_secrets_path,
 )
 from strategy_workbench.application.assistant_chat.facade.ports import ProviderSecretMissingError
+from strategy_workbench.application.broker_connection.facade.connection import (
+    BrokerCredentialStore,
+    BrokerCredentialsUnreadableError,
+)
 from strategy_workbench.domain.assistant.facade.models import ProviderProfile
 
 logger = logging.getLogger(__name__)
@@ -99,3 +105,50 @@ def migrate_provider_profiles(
         legacy_profiles.delete(profile.profile_id)
     logger.info("moved provider profiles to the credentials env file — count=%d", len(profiles))
     return len(profiles)
+
+
+def migrate_kiwoom_credentials(
+    legacy: LocalFileBrokerCredentialStore, target: EnvFileBrokerCredentialStore
+) -> bool:
+    """예전 `secrets.json`의 키움 모의 자격증명을 새 파일로 한 번 옮긴다. 옮겼으면 True.
+
+    새 파일에 이미 있으면 옮기지 않는다. 새 파일에 먼저 쓰고 예전 항목을 지운다.
+    예전 항목이 깨졌으면 아무것도 지우지 않고 건너뛴다(설정 화면에서 다시 저장하면 새 파일에
+    들어간다).
+    """
+    if target.load() is not None:
+        return False
+    try:
+        saved = legacy.load()
+    except BrokerCredentialsUnreadableError as error:
+        logger.warning(
+            "legacy kiwoom mock credentials are unreadable; skipped moving them — error=%s",
+            type(error).__name__,
+        )
+        return False
+    if saved is None:
+        return False
+    target.save(saved)
+    legacy.delete()
+    logger.info("moved kiwoom mock credentials to the credentials env file")
+    return True
+
+
+def kiwoom_credential_store(
+    *,
+    secrets: LocalFileProviderSecretStore,
+    credentials_file: CredentialsEnvFile | None,
+) -> BrokerCredentialStore:
+    """키움 모의 자격증명 저장소.
+
+    `.env`가 있으면 그쪽(예전 것을 옮긴 뒤), 없으면 예전 `secrets.json`이다.
+
+    설정 화면(HTTP), S07 명령줄, 실측 도구가 모두 이 함수로 연다. 어느 입구로 먼저 켜도 같은
+    이전이 일어난다.
+    """
+    legacy = LocalFileBrokerCredentialStore(secrets)
+    if credentials_file is None:
+        return legacy
+    target = EnvFileBrokerCredentialStore(credentials_file)
+    migrate_kiwoom_credentials(legacy, target)
+    return target

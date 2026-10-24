@@ -33,7 +33,12 @@ let verifyReply: KiwoomMockConnectionCheckBody;
 let verifyGate: Promise<void>;
 let deleted: number;
 
+const ENV_PATH = "C:\\Users\\me\\OneDrive\\문서\\auto_trading\\.env";
+
 const server = setupServer(
+  http.get(`${API}/api/v1/settings/credentials-file`, () =>
+    HttpResponse.json({ path: ENV_PATH }),
+  ),
   http.get(PATH, () => HttpResponse.json(status)),
   http.put(PATH, async ({ request }) => {
     saveBodies.push((await request.json()) as Record<string, unknown>);
@@ -92,6 +97,12 @@ const fill = async (
 };
 
 describe("KiwoomMockSettings", () => {
+  it("shows the real file the keys are saved in", async () => {
+    renderWithClient(<KiwoomMockSettings />);
+    const location = await screen.findByTestId("credentials-file-location");
+    expect(location).toHaveTextContent(`저장 위치: ${ENV_PATH}`);
+  });
+
   it("shows nothing saved and keeps the check disabled", async () => {
     renderWithClient(<KiwoomMockSettings />);
     expect(await screen.findByText("저장된 키 없음")).toBeTruthy();

@@ -49,8 +49,9 @@
    아니면 `not_ready`.
 2. 그 빌드의 `specs["scope@2.0"].gates`가 모두 `pass`·`warn`·`skip`이고 `excluded_specs`에 없어야 한다.
    아니면 `gate_failed`.
-3. `model/scope@2.0/MANIFEST.json`의 `current_build`가 같은 빌드여야 한다. `scores.parquet`의
-   `score_date`가 신호일 하나이고 종목·순위가 겹치지 않아야 한다. 아니면 `unreadable`.
+3. 그 빌드가 `model/scope@2.0/MANIFEST.json`의 빌드 목록(`builds`, 커밋된 판)에 있어야 한다.
+   `current_build`는 보지 않는다(G절 보강판 보호). `scores.parquet`의 `score_date`가 신호일 하나이고
+   종목·순위가 겹치지 않아야 한다. 아니면 `unreadable`.
 4. 기준가격은 그 빌드가 점수를 계산한 가격 판(`fi_build_id`의 `factor_inputs/fi_prices`)의 신호일
    종가다. 신호일 거래량 0 종목은 매매가 막힌 것으로 본다.
 
@@ -350,6 +351,12 @@ scope 순위는 WISE 리비전 등 데이터가 비면 종목이 빠졌다가 �
 - **빌드 점검**: 연구 루트에서 보강판 바로 앞 판은 같은 신호일의 아침 확정판이라, 직전 빌드 대비 누락
   점검은 신호일보다 앞 날짜의 가장 최근 판(보통 전 거래일 아침 확정판)과 견준다(`scope_signal`의
   `_previous`).
+- **보강판 보호(2026-10-24 사용자 결정 D2)**: 연구 루트는 아침 확정판과 보강판이 모델 `MANIFEST.json`
+  하나를 쓰고, 원장은 아침판만 다시 지어도 `current_build`를 그 판으로 바꾼다(quant-ledger
+  `src/model/build.py`). 그래서 S07은 `current_build`가 아니라 `latest_supplement.json`의 `build_id`를
+  읽고, 그 판이 MANIFEST 빌드 목록에 있는지만 본다. 포인터가 없거나(`unreadable`) 날짜가 신호일과
+  다르면(`not_ready`) 다른 판으로 넘어가지 않고 실패 알림으로 끝난다(재현 테스트
+  `test_supplement_survives_a_later_morning_rebuild_of_the_same_root`·`test_supplement_never_falls_back_to_another_build`).
 - **보강판이 없을 때**: 스위치가 꺼졌거나 실패하면 23시까지 기다린 뒤 실패 알림을 보낸다. 장 마감 빌드로
   자동으로 대신하지 않는다(신호일 추정치가 조용히 빠진다). 그때는 보강판을 다시 짓거나(quant-ledger
   `scripts/weekend_supplement.sh --date D --wise-asof W`), 사람이 정해 장 마감 빌드로 만든다

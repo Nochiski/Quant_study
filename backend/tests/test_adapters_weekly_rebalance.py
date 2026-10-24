@@ -37,6 +37,7 @@ def model_db(
     *,
     latest: dict[str, object] | None = None,
     manifest_build: str = BUILD,
+    committed: tuple[str, ...] | None = None,
     scores: list[tuple[str, int, str]] | None = None,
     basis: SignalBasis = SignalBasis.EVENING,
 ) -> Path:
@@ -53,8 +54,10 @@ def model_db(
     }
     pointer.update(latest or {})
     (model / f"latest_{basis.value}.json").write_text(json.dumps(pointer))
+    # MANIFEST 빌드 목록 = 커밋된 판. current_build 는 종류와 상관없이 마지막 커밋이다
+    listed = committed if committed is not None else tuple(dict.fromkeys((BUILD, manifest_build)))
     (model / "scope@2.0" / "MANIFEST.json").write_text(
-        json.dumps({"current_build": manifest_build})
+        json.dumps({"current_build": manifest_build, "builds": [{"build_id": b} for b in listed]})
     )
     rows = scores or [("000001", 1, "2026-10-23"), ("000002", 2, "2026-10-23")]
     pq.write_table(
@@ -110,7 +113,7 @@ def test_signal_reads_the_current_build_ranks_and_closes(tmp_path: Path) -> None
             SignalReadStatus.GATE_FAILED,
         ),
         ({"latest": {"excluded_specs": {"scope@2.0": "gate"}}}, SignalReadStatus.GATE_FAILED),
-        ({"manifest_build": "e_older"}, SignalReadStatus.UNREADABLE),
+        ({"committed": ("e_older",), "manifest_build": "e_older"}, SignalReadStatus.UNREADABLE),
         ({"scores": [("000001", 1, "2026-10-22")]}, SignalReadStatus.UNREADABLE),
         (
             {"scores": [("000001", 1, "2026-10-23"), ("000002", 1, "2026-10-23")]},
@@ -141,6 +144,34 @@ def test_signal_reads_the_pointer_of_the_requested_basis(tmp_path: Path) -> None
     # 포인터 안의 종류가 파일 이름과 다르면 쓰지 않는다
     mixed = model_db(tmp_path / "mixed", latest={"basis": "evening"}, basis=SignalBasis.SUPPLEMENT)
     assert ScopeSignalSource(mixed).read(DAY, SignalBasis.SUPPLEMENT).status is (
+        SignalReadStatus.NOT_READY
+    )
+
+
+def test_supplement_survives_a_later_morning_rebuild_of_the_same_root(tmp_path: Path) -> None:
+    # 2026-10-24 사용자 결정 D2: 원장은 아침판만 다시 지어도 MANIFEST current_build 를 그 판으로
+    # 바꾼다(연구 루트는 아침판·보강판이 한 MANIFEST 를 쓴다). 보강판 포인터가 가리키는 판을 읽는다
+    root = model_db(tmp_path, basis=SignalBasis.SUPPLEMENT, manifest_build="m_rebuild")
+    read = ScopeSignalSource(root).read(DAY, SignalBasis.SUPPLEMENT)
+    assert read.ok and read.snapshot is not None, read.detail
+    assert read.snapshot.build_id == BUILD
+
+
+def test_supplement_never_falls_back_to_another_build(tmp_path: Path) -> None:
+    # 보강판 포인터가 없거나 다른 날짜면 MANIFEST 의 현재 판(같은 날 아침판)으로 넘어가지 않는다.
+    # 명령줄은 이 상태를 실패 알림으로 보낸다(test_basis_picks_the_build_and_the_notice_names_it)
+    missing = model_db(tmp_path / "missing", basis=SignalBasis.SUPPLEMENT, manifest_build="m_same")
+    (missing / "model" / "latest_supplement.json").unlink()
+    assert ScopeSignalSource(missing).read(DAY, SignalBasis.SUPPLEMENT).status is (
+        SignalReadStatus.UNREADABLE
+    )
+    stale = model_db(
+        tmp_path / "stale",
+        basis=SignalBasis.SUPPLEMENT,
+        manifest_build="m_same",
+        latest={"date": "2026-10-16"},
+    )
+    assert ScopeSignalSource(stale).read(DAY, SignalBasis.SUPPLEMENT).status is (
         SignalReadStatus.NOT_READY
     )
 

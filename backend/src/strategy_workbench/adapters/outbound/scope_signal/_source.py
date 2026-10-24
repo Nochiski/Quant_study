@@ -6,13 +6,16 @@
 - `model/latest_<basis>.json`: 그 종류의 마지막 성공 빌드
   (`build_id`·`date`·`fi_build_id`·모델별 게이트). 장 마감 빌드는 `latest_evening.json`,
   주말 보강판은 `latest_supplement.json`이다.
-- `model/<모델>/MANIFEST.json`: 모델별 현재 빌드(`current_build`)
+- `model/<모델>/MANIFEST.json`: 모델별 커밋된 빌드 목록(`builds`)과 마지막 커밋(`current_build`)
 - `model/<모델>/v=<build_id>/scores.parquet`: `stock_code`·`rank`·`score_date`
 - `factor_inputs/fi_prices/v=<fi_build_id>/*.parquet`: 점수를 계산한 가격 판
   (`ticker`·`date`·`close`·`volume`). 신호일 행이 없는 종목(거래정지 등)은 같은 판의 그 전 마지막
   종가를 따로 싣는다(보유 종목 평가용).
 
-현재 빌드 포인터가 가리키는 판만 읽는다. 폴더에 남은 옛 판을 훑지 않는다.
+종류별 포인터(`latest_<basis>.json`)가 가리키는 판만 읽고, 그 판은 MANIFEST 빌드 목록에 있어야 한다.
+폴더에 남은 옛 판을 훑지 않는다. `current_build`는 종류와 상관없이 마지막 커밋이라 보지 않는다 —
+연구 모델 루트는 아침 확정판과 주말 보강판이 MANIFEST 하나를 써서, 보강판 뒤에 아침판만 다시 지어도
+`current_build`가 아침판으로 바뀐다(2026-10-24 사용자 결정 D2).
 """
 
 from __future__ import annotations
@@ -94,10 +97,10 @@ class ScopeSignalSource:
             )
         model_dir = self._root / "model" / self._model_id
         manifest = _json(model_dir / "MANIFEST.json")
-        current = _text(manifest, "current_build")
-        if current != build_id:
+        if build_id not in _build_ids(manifest):
             raise _Unreadable(
-                f"model manifest points elsewhere — {identity} latest={build_id} manifest={current}"
+                f"build is not committed in the model manifest — {identity} latest={build_id} "
+                f"current_build={manifest.get('current_build')!r}"
             )
         scores_path = model_dir / f"v={build_id}" / "scores.parquet"
         ranks = _ranks(scores_path, signal_date)
@@ -145,6 +148,14 @@ def _text(value: dict[str, object], key: str) -> str:
     return text
 
 
+def _build_ids(manifest: dict[str, object]) -> list[object]:
+    """MANIFEST 의 커밋된 빌드 id, 커밋 순서대로."""
+    builds = manifest.get("builds")
+    if not isinstance(builds, list):
+        return []
+    return [b.get("build_id") for b in builds if isinstance(b, dict)]
+
+
 def _ranks(path: Path, signal_date: date) -> dict[str, int]:
     try:
         table = pq.read_table(path, columns=["stock_code", "rank", "score_date"])
@@ -178,12 +189,7 @@ def _previous(
     누락을 보는 점검이라 같은 날 판끼리 견주지 않는다. 그런 판이 없으면 점검을 건너뛰고, 읽지 못한
     판에서는 그 판 id 와 함께 건너뛴다.
     """
-    builds = manifest.get("builds")
-    ids = (
-        [b.get("build_id") for b in builds if isinstance(b, dict)]
-        if isinstance(builds, list)
-        else []
-    )
+    ids = _build_ids(manifest)
     if build_id not in ids:
         return None, None
     for previous in reversed(ids[: ids.index(build_id)]):

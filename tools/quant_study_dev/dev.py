@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .backend_env import backend_process_environment, backend_uv_command
 from .rust_core import ensure_core
 from .server import _repo_root
 
@@ -51,7 +52,7 @@ def _servers(root: Path) -> tuple[DevServer, ...]:
     return (
         DevServer(
             "백엔드",
-            (uv, "run", "--no-sync", "--project", str(root / "backend"), "server"),
+            backend_uv_command(uv, root / "backend", "server"),
             root / "backend",
             8000,
             "http://127.0.0.1:8000/api/v1/health",
@@ -92,9 +93,7 @@ def _require_available_port(server: DevServer) -> None:
 
 
 def _start(server: DevServer) -> OwnedServer:
-    environment = os.environ.copy()
-    # 루트 uv 환경을 백엔드 프로젝트 환경으로 오인하지 않게 한다. DB·adapter 설정은 보존한다.
-    environment.pop("VIRTUAL_ENV", None)
+    environment = backend_process_environment(os.environ)
     process = subprocess.Popen(
         server.command,
         cwd=server.cwd,
@@ -194,7 +193,13 @@ def _stop(servers: Sequence[OwnedServer]) -> None:
             )
 
 
-def run(root: Path, *, open_browser: bool, rust_build: bool = True) -> int:
+def run(
+    root: Path,
+    *,
+    open_browser: bool,
+    rust_build: bool = True,
+    retry_rust_build: bool = False,
+) -> int:
     """두 서버의 준비와 생존을 감시하고 이 실행이 시작한 프로세스만 정리한다."""
     owned: list[OwnedServer] = []
     try:
@@ -202,7 +207,10 @@ def run(root: Path, *, open_browser: bool, rust_build: bool = True) -> int:
         for server in servers:
             _require_available_port(server)
         # 포트를 먼저 확인해 이미 떠 있는 서버가 있으면 긴 빌드 없이 바로 거절한다.
-        ensure_core(root, disabled=not rust_build)
+        ensure_core(root, disabled=not rust_build, retry=retry_rust_build)
+        # 빌드하는 동안 다른 프로세스가 포트를 잡았을 수 있어 시작 직전에 다시 확인한다.
+        for server in servers:
+            _require_available_port(server)
         for server in servers:
             print(f"[dev] {server.name} 시작(port={server.port})", flush=True)
             owned.append(_start(server))
@@ -250,6 +258,14 @@ def main() -> None:
             " (환경 변수 QUANT_STUDY_DEV_SKIP_RUST_BUILD=1과 같음)."
         ),
     )
+    parser.add_argument(
+        "--retry-rust-build",
+        action="store_true",
+        help=(
+            "같은 Rust 소스로 실패했던 빌드도 다시 시도합니다"
+            " (환경 변수 QUANT_STUDY_DEV_RETRY_RUST_BUILD=1과 같음)."
+        ),
+    )
     options = parser.parse_args()
     try:
         root = _repo_root()
@@ -259,5 +275,10 @@ def main() -> None:
         )
         raise SystemExit(1) from error
     raise SystemExit(
-        run(root, open_browser=options.open, rust_build=not options.no_rust_build)
+        run(
+            root,
+            open_browser=options.open,
+            rust_build=not options.no_rust_build,
+            retry_rust_build=options.retry_rust_build,
+        )
     )

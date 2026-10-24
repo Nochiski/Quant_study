@@ -195,7 +195,6 @@ class DevTest(unittest.TestCase):
         kill.assert_called_once_with(1234, 1)
 
 
-
 class DevRustBuildTest(unittest.TestCase):
     @patch.object(dev, "_servers", return_value=())
     @patch.object(dev, "ensure_core")
@@ -205,10 +204,10 @@ class DevRustBuildTest(unittest.TestCase):
         self, _running: Mock, _ready: Mock, ensure_core: Mock, _servers: Mock
     ) -> None:
         self.assertEqual(dev.run(CHECKOUT, open_browser=False), 130)
-        ensure_core.assert_called_once_with(CHECKOUT, disabled=False)
+        ensure_core.assert_called_once_with(CHECKOUT, disabled=False, retry=False)
         ensure_core.reset_mock()
-        dev.run(CHECKOUT, open_browser=False, rust_build=False)
-        ensure_core.assert_called_once_with(CHECKOUT, disabled=True)
+        dev.run(CHECKOUT, open_browser=False, rust_build=False, retry_rust_build=True)
+        ensure_core.assert_called_once_with(CHECKOUT, disabled=True, retry=True)
 
     @patch.object(dev, "_servers")
     @patch.object(dev, "_require_available_port", side_effect=RuntimeError("occupied"))
@@ -219,6 +218,20 @@ class DevRustBuildTest(unittest.TestCase):
         servers.return_value = (dev.DevServer("백엔드", ("c",), CHECKOUT, 8000, "u"),)
         self.assertEqual(dev.run(CHECKOUT, open_browser=False), 1)
         ensure_core.assert_not_called()
+
+    @patch.object(dev, "_servers")
+    @patch.object(
+        dev, "_require_available_port", side_effect=[None, RuntimeError("포트 8000")]
+    )
+    @patch.object(dev, "ensure_core")
+    @patch.object(dev, "_start")
+    def test_port_taken_during_build_is_rejected_before_starting(
+        self, start: Mock, _ensure: Mock, _port: Mock, servers: Mock
+    ) -> None:
+        servers.return_value = (dev.DevServer("백엔드", ("c",), CHECKOUT, 8000, "u"),)
+        self.assertEqual(dev.run(CHECKOUT, open_browser=False), 1)
+        start.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

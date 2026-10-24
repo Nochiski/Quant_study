@@ -39,10 +39,13 @@ uv run dev
 거절하며 기존 서버를 종료하지 않는다. 개별 기동은 아래 [실행](#실행) 절을 참고한다.
 
 기본 `Rust` core로 백테스트하려면 Rust 툴체인(<https://rustup.rs>)만 설치해 두면 된다. `uv run dev`가
-시작 전에 확장 설치 여부와 Rust 소스 지문(`backend/.venv/backtest_core.build-stamp`)을 보고 필요할
-때만 빌드한다. 처음 빌드는 몇 분 걸릴 수 있다. cargo를 찾지 못하거나 빌드가 실패하면 경고만 내고
-서버는 그대로 시작하며, 그때는 백테스트 실행 설정에서 `Python reference`를 선택한다. 자동 빌드를
-끄려면 `uv run dev --no-rust-build` 또는 환경 변수 `QUANT_STUDY_DEV_SKIP_RUST_BUILD=1`을 쓴다.
+시작 전에 설치된 확장 파일과 Rust 소스 지문(빌드 기록 `<backend 가상환경>/backtest_core.build-stamp.json`)을
+보고 필요할 때만 빌드한다. 처음 빌드는 몇 분 걸릴 수 있다. cargo를 찾지 못하거나 빌드가 실패해도
+서버는 그대로 시작하며, 그때는 백테스트 실행 설정에서 `Python reference`를 선택한다. 이때 현재
+소스와 다른 낡은 확장이 남아 있으면 낡은 코어로 계산한 결과가 섞이지 않게 그 확장을 지운다. 같은
+소스로 실패한 빌드는 다음 시작에 되풀이하지 않으며, 다시 시도하려면 `uv run dev --retry-rust-build`
+(또는 `QUANT_STUDY_DEV_RETRY_RUST_BUILD=1`)를 쓴다. 자동 빌드를 끄려면 `uv run dev --no-rust-build`
+또는 환경 변수 `QUANT_STUDY_DEV_SKIP_RUST_BUILD=1`을 쓴다.
 `dev`를 거치지 않고 backend만 띄울 때는 다음 명령으로 직접 설치한다.
 
 ```sh

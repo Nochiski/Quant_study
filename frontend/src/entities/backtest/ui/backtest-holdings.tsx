@@ -30,7 +30,7 @@ const DATE_ROW_HEIGHT = 56;
 /** 목록 칸 높이를 아직 재지 못했을 때의 가정(px, 넓은 화면에서 CSS 의 목록 최대 높이). */
 const DATE_LIST_FALLBACK_HEIGHT = 480;
 /** 비중 막대·견본 색 단계 수(`backtest-holdings.css` 의 `holdings-swatch--N`). */
-const SWATCHES = 6;
+const SWATCHES = 5;
 
 /** 완료 결과의 보유 종목과 매매. 값은 backend 투영(`GET …/holdings*`)을 표시만 한다. */
 export const BacktestHoldings = ({ runId, enabled }: { runId: string; enabled: boolean }) => {
@@ -369,6 +369,10 @@ const SessionList = ({
     fallbackViewportHeight: DATE_LIST_FALLBACK_HEIGHT,
   });
   const selectedIsTradeDay = sessions[position]?.session === day;
+  // 날짜 입력 중의 값. 키보드로 연도를 한 자리씩 치는 동안의 덜 찬 값을 고른 날로 되돌리지 않는다.
+  // 고른 날이 바뀌면(목록·화살표·완성된 입력) 그 날을 보인다.
+  const [draft, setDraft] = useState<{ day: string; value: string } | null>(null);
+  const inputValue = draft !== null && draft.day === day ? draft.value : day;
 
   // 고른 날(목록 클릭·화살표·날짜 입력)의 줄이 칸 밖이면 가장 가까운 끝으로 스크롤한다. 칸 안이면 그대로 둔다.
   useLayoutEffect(() => {
@@ -400,6 +404,7 @@ const SessionList = ({
   // 클릭·날짜 입력으로 고르면 초점을 옮기지 않는다(화살표로 고를 때만).
   const pick = (session: string) => {
     focusPending.current = false;
+    setDraft(null);
     onPick(session);
   };
 
@@ -421,6 +426,7 @@ const SessionList = ({
           ? position + 1
           : later;
     if (next < 0 || next >= sessions.length) return;
+    setDraft(null);
     focusPending.current = true;
     onPick(sessions[next].session);
   };
@@ -437,14 +443,15 @@ const SessionList = ({
           <input
             id={dateInputId}
             type="date"
-            value={day}
+            value={inputValue}
             min={first ?? undefined}
             max={last ?? undefined}
             onChange={(event) => {
-              // 키보드로 연도를 한 자리씩 치는 동안의 중간 값(예: 0002-…)은 실행 기간 밖이라 묻지 않는다.
               const value = event.target.value;
+              // 중간 값(예: 0002-…)과 실행 기간 밖의 날은 묻지 않는다. 입력 칸은 친 값을 그대로 둔다.
               if (value.length === 10 && (first === null || value >= first) && (last === null || value <= last))
                 pick(value);
+              else setDraft({ day, value });
             }}
           />
         </label>

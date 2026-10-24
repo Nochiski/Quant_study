@@ -189,6 +189,18 @@ describe("BacktestHoldings", () => {
     ]);
   });
 
+  it("keeps a half-typed date in the field without querying it", async () => {
+    renderHoldings();
+    const input = await screen.findByLabelText<HTMLInputElement>("아무 날의 보유 보기");
+    await screen.findByRole("heading", { name: /2024-02-01 장 마감 보유/ });
+
+    // 연도를 한 자리씩 치는 동안의 값. 실행 기간 밖이라 묻지 않고, 칸은 친 값을 지킨다.
+    fireEvent.change(input, { target: { value: "0002-01-02" } });
+
+    expect(input.value).toBe("0002-01-02");
+    expect(requested).toEqual(["session:2024-02-01"]);
+  });
+
   it("keeps the sign of a short weight that the server reports", async () => {
     server.use(
       http.get(`${BASE}/sessions/:session`, ({ params }) => {

@@ -109,6 +109,18 @@ test(
       }),
     ).toBeVisible();
 
+    // 날짜 칸에 키보드로 연·월·일을 한 자리씩 쳐도(덜 찬 값에서 되돌아가지 않고) 그날 보유가 열린다.
+    const second = overview.trade_sessions[1];
+    const dayInput = holdings.getByLabel("아무 날의 보유 보기");
+    await dayInput.focus();
+    await page.keyboard.type(second.session.replaceAll("-", ""));
+    await expect(dayInput).toHaveValue(second.session);
+    await expect(
+      holdings.getByRole("heading", {
+        name: `${second.session} 장 마감 보유 ${second.holding_count}종목`,
+      }),
+    ).toBeVisible();
+
     // 종목별 보기에서 종목을 고르면 그 종목의 체결 기록이 열린다.
     await holdings.getByRole("tab", { name: "종목별 매매 내역" }).click();
     const first = overview.securities[0];

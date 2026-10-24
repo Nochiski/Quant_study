@@ -428,7 +428,17 @@ def _field_reference_issues(
     issues: list[ValidationIssue] = []
     for path, field_id in _equity_field_references(spec):
         metadata = by_id.get(field_id)
-        if metadata is None:
+        if metadata is None and not field_id.strip():
+            # 아직 고르지 않은 빈 칸이다. 재현할 값이 없으므로 field_id·path 원문 없이
+            # 할 일만 알린다(위치는 진단 pointer 가 소유한다).
+            issues.append(
+                semantic_issue(
+                    "strategy.field.missing",
+                    path,
+                    "아직 필드를 고르지 않았습니다. 목록에서 필드를 고르세요.",
+                )
+            )
+        elif metadata is None:
             reason = unavailable.get(field_id)
             message = (
                 f"연결된 데이터에 없는 필드입니다. 필드 id 를 확인하세요: field_id={field_id!r}"

@@ -402,6 +402,17 @@ def test_an_unknown_field_outside_the_graph_is_a_compile_error(slot: str) -> Non
 
 
 @pytest.mark.parametrize("slot", sorted(_OUTSIDE_GRAPH_REFERENCES))
+def test_an_unpicked_field_outside_the_graph_asks_to_pick_one(slot: str) -> None:
+    """안내에서 막 추가한 빈 행(`field_id: ""`)은 고칠 id 가 없다. 내부 원문(`field_id=''`·
+    `path=`) 없이 필드를 고르라는 문장만 보인다 — 같은 코드·위치로 막는 것은 그대로다."""
+    compiled = _compile(_outside_graph_source(slot, '""'), MockEquityDataAdapter.demo())
+
+    assert _errors(compiled) == [("strategy.field.missing", _OUTSIDE_GRAPH_REFERENCES[slot][1])]
+    [diagnostic] = [item for item in compiled.diagnostics if item.code == "strategy.field.missing"]
+    assert diagnostic.message == "아직 필드를 고르지 않았습니다. 목록에서 필드를 고르세요."
+
+
+@pytest.mark.parametrize("slot", sorted(_OUTSIDE_GRAPH_REFERENCES))
 def test_a_dropped_field_outside_the_graph_says_why_too(slot: str) -> None:
     """#316: 그래프 밖 참조도 어댑터가 뺀 필드면 id 확인 대신 그 사유를 싣는다(같은 문장)."""
     catalog = _Catalog(_ADJ_CLOSE, unavailable={"credit.margin_balance": _DROPPED})

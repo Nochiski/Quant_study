@@ -313,6 +313,11 @@ describe("StrategyFormPanel controls", () => {
     expect(
       section("portfolio").getByText("기본값 long_only"),
     ).toBeInTheDocument();
+    // 값이 없는 기본값(예: description)은 "기본값 null" 대신 비워 둬도 된다는 문장으로 보인다.
+    expect(screen.queryByText("기본값 null")).toBeNull();
+    expect(
+      screen.getAllByText("비워 둬도 돼요. 비우면 문서에 쓰지 않아요.").length,
+    ).toBeGreaterThan(0);
   });
 });
 

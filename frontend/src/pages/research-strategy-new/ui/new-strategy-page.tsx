@@ -75,6 +75,7 @@ import {
   useBacktestRunSettings,
 } from "../../../features/run-backtest";
 import { t, tOptional } from "../../../shared/config";
+import { isSheetViewport } from "../../../shared/lib/floating-geometry";
 import { useNavigate, useSearch } from "../../../shared/lib/router";
 import { Badge, Button } from "../../../shared/ui";
 import {
@@ -310,9 +311,12 @@ export const NewStrategyPage = () => {
         ? false
         : readGuideAssistantOpen(),
   );
+  // 좁은 화면(창이 하단 시트가 되는 폭)에서는 기록이 없으면 최소화한 채 시작한다 — 시트가 단계 카드를 거의 다 덮는다.
   if (guideAssistantOpen === null && (providers.data !== undefined || providers.isError))
     setGuideAssistantOpen(
-      providers.data !== undefined && hasActiveAssistantProvider(providers.data),
+      providers.data !== undefined &&
+        hasActiveAssistantProvider(providers.data) &&
+        !isSheetViewport({ width: window.innerWidth, height: window.innerHeight }),
     );
   const guideWindowOpen: boolean | null =
     guideAssistantOpen ?? (providers.failureCount > 0 ? false : null);
@@ -788,14 +792,13 @@ export const NewStrategyPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
-        assistant={({ close, open }) => (
+        assistant={({ open }) => (
           <AssistStrategySidebar
             documentRef={strategyAssistant.documentRef}
             readContext={strategyAssistant.readContext}
             {...strategyAssistant.proposalHandlers}
-            // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
-            // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
-            onClose={close}
+            // 창을 접는 손잡이는 창의 최소화 하나다 — 최소화는 턴을 끊지 않는다(진행 중 답변은 끝까지 받는다).
+            // 답을 멈추려면 입력칸 옆 "중지"를 쓴다. 사이드바 자신의 닫기(취소 확인)는 두지 않는다.
             // 편집기로 오면 고치지 않은 안내 추천 질문은 입력칸에서 지워진다.
             suggestionsKey="editor"
             visible={open}

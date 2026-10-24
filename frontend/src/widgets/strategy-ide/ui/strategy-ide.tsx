@@ -16,6 +16,7 @@ import {
 } from "../../../features/edit-strategy";
 import { ASSISTANT_WINDOW_STORAGE_KEY } from "../../../entities/assistant";
 import { t } from "../../../shared/config";
+import { isSheetViewport } from "../../../shared/lib/floating-geometry";
 import { useMediaQuery } from "../../../shared/lib/media";
 import { useThemePreference } from "../../../shared/lib/theme";
 import {
@@ -232,7 +233,14 @@ export const StrategyIde = ({
 }: StrategyIdeProps) => {
   const narrow = useMediaQuery(NARROW_QUERY);
   const compact = useMediaQuery("(max-width: 767px)");
-  const { layout, resize, toggle, close } = usePanelLayout(DEFAULT_LAYOUT);
+  // 좁은 화면(창이 하단 시트가 되는 폭)에서는 열림 기록이 없으면 AI 창을 최소화한 채 시작한다 — 시트가 편집기를
+  // 거의 다 덮는다. 기록이 있으면 기록이 이긴다(`usePanelLayout` 이 저장값을 기본값 위에 덮는다).
+  const { layout, resize, toggle, close } = usePanelLayout({
+    ...DEFAULT_LAYOUT,
+    assistantOpen:
+      DEFAULT_LAYOUT.assistantOpen &&
+      !isSheetViewport({ width: window.innerWidth, height: window.innerHeight }),
+  });
   const outlineId = useId();
   const inspectorId = useId();
   const debuggerId = useId();

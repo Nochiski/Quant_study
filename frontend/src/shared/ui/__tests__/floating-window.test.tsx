@@ -89,10 +89,26 @@ describe("FloatingWindow", () => {
     expect(Number.parseFloat(windowBox().style.left)).toBeGreaterThanOrEqual(8);
     const innerWidth = window.innerWidth;
     try {
-      Object.defineProperty(window, "innerWidth", { configurable: true, value: 500 });
+      // 시트가 되지 않는 폭(768 이상)으로 줄인다.
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 900 });
       fireEvent(window, new Event("resize"));
       const right = Number.parseFloat(windowBox().style.left) + Number.parseFloat(windowBox().style.width);
-      expect(right).toBeLessThanOrEqual(500 - 8);
+      expect(right).toBeLessThanOrEqual(900 - 8);
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: innerWidth });
+    }
+  });
+
+  it("좁은 화면에서는 하단 시트(폭 100%)이고 끌어 옮기기·크기 조절이 없다", () => {
+    const innerWidth = window.innerWidth;
+    try {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+      render(<Harness initiallyOpen />);
+      expect(windowBox().style.width).toBe("390px");
+      expect(windowBox().style.left).toBe("0px");
+      expect(within(windowBox()).queryByRole("button", { name: "창 옮기기" })).toBeNull();
+      expect(within(windowBox()).queryByRole("combobox", { name: "창 크기" })).toBeNull();
+      expect(within(windowBox()).getByRole("button", { name: "AI 도우미 최소화" })).toBeVisible();
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: innerWidth });
     }

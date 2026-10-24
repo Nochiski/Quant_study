@@ -160,6 +160,16 @@
   cursor: nwse-resize;
 }
 
+/* 좁은 화면의 하단 시트: 아래 모서리는 화면 끝에 붙고 끌어 옮기지 않는다. */
+.floating-window--sheet {
+  border-bottom: 0;
+  border-radius: var(--radius-large) var(--radius-large) 0 0;
+}
+
+.floating-window--sheet .floating-window__bar {
+  cursor: default;
+}
+
 /* 최소화 런처: 우하단에 떠 있는 버튼. */
 .floating-window__launcher {
   position: fixed;

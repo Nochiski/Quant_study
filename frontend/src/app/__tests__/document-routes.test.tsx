@@ -4505,34 +4505,25 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     expect(assistantTurns[0].context.source_text).toBe(typedAfterSend);
   });
 
-  it("턴이 도는 중 사이드바를 닫으면 취소를 확인하고, 계속 두면 닫히지 않는다", async () => {
+  it("편집기 AI 창의 접는 손잡이는 최소화 하나이고, 최소화해도 턴은 이어지며 멈춤은 \"중지\"로 한다", async () => {
     const user = userEvent.setup();
     mount("/research/strategies/new");
     await editor();
     await askAssistant(user);
+    const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
+    expect(within(panel).queryByRole("button", { name: "사이드바 닫기" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
-    const confirm = await screen.findByRole("alertdialog", {
-      name: "사이드바 닫기",
-    });
+    await user.click(within(panel).getByRole("button", { name: "AI 어시스턴트 접기" }));
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
     expect(cancelledTurns).toHaveLength(0);
 
+    await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
     await user.click(
-      within(confirm).getByRole("button", { name: "계속 두기" }),
-    );
-    expect(
-      screen.getByRole("complementary", { name: "AI 어시스턴트" }),
-    ).toBeInTheDocument();
-    expect(cancelledTurns).toHaveLength(0);
-
-    await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
-    await user.click(
-      await screen.findByRole("button", { name: "취소하고 닫기" }),
+      within(screen.getByRole("complementary", { name: "AI 어시스턴트" })).getByRole("button", {
+        name: "중지",
+      }),
     );
     await waitFor(() => expect(cancelledTurns).toHaveLength(1));
-    expect(
-      screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
-    ).not.toBeInTheDocument();
   });
 
   it("기다리는 동안 문서를 고쳤으면 확인을 거쳐 덮어쓴다", async () => {
@@ -5223,6 +5214,19 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     mountWithClient("/research/strategies/new?guide=true&assist=preview", undefined, false);
     await waitFor(() => expect(launcher()).not.toBeNull());
     expect(screen.queryByRole("complementary", { name: "AI 도우미" })).toBeNull();
+  });
+
+  it("좁은 화면에서는 공급자가 연결돼 있어도 기록이 없으면 AI 창을 최소화한 채 시작한다", async () => {
+    useGuideCatalog();
+    vi.stubGlobal("innerWidth", 390);
+    try {
+      mountWithClient("/research/strategies/new?guide=true", undefined, false);
+      await screen.findByRole("heading", { name: "새 전략 만들기" });
+      await waitFor(() => expect(launcher()).not.toBeNull());
+      expect(screen.queryByRole("complementary", { name: "AI 도우미" })).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("사용자가 마지막으로 최소화했으면 다음 안내도 최소화한 채 연다", async () => {

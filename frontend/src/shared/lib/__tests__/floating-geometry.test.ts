@@ -9,6 +9,8 @@ import {
   parseWindowRect,
   presetRect,
   resizeRect,
+  isSheetViewport,
+  sheetRect,
 } from "../floating-geometry";
 
 const VIEWPORT = { width: 1280, height: 800 };
@@ -89,5 +91,17 @@ describe("floating window geometry", () => {
     expect(parseWindowRect({ ...RECT, width: "400" })).toBeNull();
     expect(parseWindowRect({ ...RECT, height: 0 })).toBeNull();
     expect(parseWindowRect(null)).toBeNull();
+  });
+
+  it("좁은 화면은 하단 시트: 폭 100%, 높이는 뷰포트 75%와 최대 높이 안에서 아래에 붙는다", () => {
+    expect(isSheetViewport({ width: 390, height: 844 })).toBe(true);
+    expect(isSheetViewport({ width: 768, height: 1024 })).toBe(false);
+    expect(sheetRect({ width: 390, height: 844 }, LIMITS)).toEqual({
+      x: 0,
+      y: 844 - 633,
+      width: 390,
+      height: 633,
+    });
+    expect(sheetRect({ width: 600, height: 2000 }, LIMITS).height).toBe(900);
   });
 });

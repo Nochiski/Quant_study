@@ -75,8 +75,8 @@ const assistantHead = (page: Page): DrawerHead => ({
   controls: [
     ["제목", assistant(page).getByRole("heading", { name: "AI 어시스턴트" })],
     [
-      "사이드바 닫기",
-      assistant(page).getByRole("button", { name: "사이드바 닫기" }),
+      "AI 어시스턴트 접기",
+      assistant(page).getByRole("button", { name: "AI 어시스턴트 접기" }),
     ],
   ],
 });

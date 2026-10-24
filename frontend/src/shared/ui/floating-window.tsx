@@ -13,6 +13,8 @@ import { browserStorage } from "../lib/browser-storage";
 import {
   fitRect,
   initialRect,
+  isSheetViewport,
+  sheetRect,
   moveRect,
   nudgeRect,
   parseWindowRect,
@@ -133,11 +135,20 @@ export const FloatingWindow = ({
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
   const [preset, setPreset] = useState<WindowSizePreset | "">("");
+  const [viewport, setViewport] = useState<Viewport>(viewportNow);
+  // 좁은 화면에서는 하단 시트다(폭 100%, 높이 상한). 끌어 옮기기·크기 조절은 없고, 넓은 화면의 자리·크기는 그대로
+  // 기억해 둔다 — 다시 넓어지면 그 자리로 돌아온다.
+  const sheet = isSheetViewport(viewport);
+  const shown = sheet ? sheetRect(viewport, limits) : rect;
 
   // 창(브라우저) 크기가 바뀌면 뷰포트 안으로 보정한다. window 리스너는 layout effect 로 설치한다
   // (`frontend-react-effects.md`).
   useLayoutEffect(() => {
-    const onResize = () => setRect((current) => fitRect(current, viewportNow(), limits));
+    const onResize = () => {
+      const next = viewportNow();
+      setViewport(next);
+      setRect((current) => fitRect(current, next, limits));
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [limits]);
@@ -148,7 +159,7 @@ export const FloatingWindow = ({
   };
 
   const begin = (event: PointerEvent<HTMLElement>, edges: ResizeEdges | null) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || sheet) return;
     // 제목 줄 안의 버튼·선택 상자는 끌기가 아니라 그 조작이다.
     if (edges === null && (event.target as HTMLElement).closest("button, select") !== null) return;
     event.preventDefault();
@@ -219,11 +230,11 @@ export const FloatingWindow = ({
         <aside
           ref={windowRef}
           id={id}
-          className="floating-window"
+          className={sheet ? "floating-window floating-window--sheet" : "floating-window"}
           aria-labelledby={titleId}
           tabIndex={-1}
           hidden={!open}
-          style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+          style={{ left: shown.x, top: shown.y, width: shown.width, height: shown.height }}
         >
           <header
             className="floating-window__bar"
@@ -236,37 +247,41 @@ export const FloatingWindow = ({
               {title}
             </h2>
             <div className="floating-window__actions">
-              <button
-                type="button"
-                className="floating-window__icon"
-                aria-label={t("ui.floating.move")}
-                aria-describedby={moveHintId}
-                onKeyDown={onMoveKey}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                  <path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" />
-                </svg>
-              </button>
-              <span id={moveHintId} className="sr-only">
-                {t("ui.floating.move.hint")}
-              </span>
-              <select
-                className="floating-window__size ui-select"
-                aria-label={t("ui.floating.size")}
-                value={preset}
-                onChange={(event) => {
-                  const next = event.target.value as WindowSizePreset | "";
-                  setPreset(next);
-                  if (next !== "") commit(presetRect(rect, next, viewportNow(), limits));
-                }}
-              >
-                <option value="" disabled>
-                  {t("ui.floating.size")}
-                </option>
-                <option value="small">{t("ui.floating.size.small")}</option>
-                <option value="medium">{t("ui.floating.size.medium")}</option>
-                <option value="large">{t("ui.floating.size.large")}</option>
-              </select>
+              {sheet ? null : (
+                <>
+                  <button
+                    type="button"
+                    className="floating-window__icon"
+                    aria-label={t("ui.floating.move")}
+                    aria-describedby={moveHintId}
+                    onKeyDown={onMoveKey}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" />
+                    </svg>
+                  </button>
+                  <span id={moveHintId} className="sr-only">
+                    {t("ui.floating.move.hint")}
+                  </span>
+                  <select
+                    className="floating-window__size ui-select"
+                    aria-label={t("ui.floating.size")}
+                    value={preset}
+                    onChange={(event) => {
+                      const next = event.target.value as WindowSizePreset | "";
+                      setPreset(next);
+                      if (next !== "") commit(presetRect(rect, next, viewportNow(), limits));
+                    }}
+                  >
+                    <option value="" disabled>
+                      {t("ui.floating.size")}
+                    </option>
+                    <option value="small">{t("ui.floating.size.small")}</option>
+                    <option value="medium">{t("ui.floating.size.medium")}</option>
+                    <option value="large">{t("ui.floating.size.large")}</option>
+                  </select>
+                </>
+              )}
               <button
                 type="button"
                 className="floating-window__icon"
@@ -280,7 +295,7 @@ export const FloatingWindow = ({
             </div>
           </header>
           <div className="floating-window__body">{children}</div>
-          {HANDLES.map((handle) => (
+          {sheet ? null : HANDLES.map((handle) => (
             // 끄는 가장자리는 포인터 전용이다. 키보드 대안은 크기 프리셋이다.
             <div
               key={handle.name}

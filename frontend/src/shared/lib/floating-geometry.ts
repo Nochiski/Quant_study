@@ -181,3 +181,23 @@ export const parseWindowRect = (value: unknown): WindowRect | null => {
   const [x, y, width, height] = numbers as number[];
   return width! > 0 && height! > 0 ? { x: x!, y: y!, width: width!, height: height! } : null;
 };
+
+/**
+ * 이 폭 이하에서는 떠 있는 창의 기본 크기가 뷰포트를 대부분 덮는다. 그런 화면에서는 창을 하단 시트(폭 100%,
+ * 높이 상한)로 보이고, 열림 기록이 없으면 최소화한 채 시작한다.
+ */
+export const SHEET_MAX_VIEWPORT_WIDTH = 767;
+/** 하단 시트 높이 상한(뷰포트 높이에 대한 비율). */
+const SHEET_HEIGHT_RATIO = 0.75;
+
+export const isSheetViewport = (viewport: Viewport): boolean =>
+  viewport.width <= SHEET_MAX_VIEWPORT_WIDTH;
+
+/** 하단 시트: 폭 100%, 높이는 상한(뷰포트의 75%·창 최대 높이) 안에서, 아래에 붙는다. */
+export const sheetRect = (viewport: Viewport, limits: WindowLimits): WindowRect => {
+  const height = Math.max(
+    0,
+    Math.min(limits.maxHeight, Math.round(viewport.height * SHEET_HEIGHT_RATIO)),
+  );
+  return { x: 0, y: viewport.height - height, width: viewport.width, height };
+};

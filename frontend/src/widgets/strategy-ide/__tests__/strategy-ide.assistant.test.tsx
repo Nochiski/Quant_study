@@ -353,6 +353,15 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
   });
 
+  it("좁은 화면(하단 시트 폭)에서는 열림 기록이 없으면 최소화한 채 시작한다", () => {
+    matchMedia(true);
+    localStorage.clear();
+    vi.stubGlobal("innerWidth", 390);
+    mount();
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
+    expect(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false })).toBeVisible();
+  });
+
   it("옛 판의 AI 열 폭 기록이 있어도 깨지지 않고 열린다", () => {
     matchMedia(false);
     localStorage.setItem(

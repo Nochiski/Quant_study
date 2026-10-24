@@ -5,6 +5,7 @@ import { useId, useRef, useState } from "react";
 import {
   BacktestAccountReport,
   BacktestFactorRegression,
+  BacktestHoldings,
   BacktestValidationReport,
   useBacktestAccountReport,
   useBacktestValidationReport,
@@ -198,6 +199,7 @@ export const BacktestRunPage = () => {
               </BacktestValidationReport>
             }
             account={accountReport.data?.summary}
+            holdings={<BacktestHoldings runId={runId} enabled={completed} />}
             regression={
               <BacktestFactorRegression runId={runId} fingerprint={result.data.manifest.run_fingerprint} />
             }

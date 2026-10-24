@@ -75,12 +75,21 @@ import type {
   GetBacktestFactorRegressionData,
   GetBacktestFactorRegressionErrors,
   GetBacktestFactorRegressionResponses,
+  GetBacktestHoldingsData,
+  GetBacktestHoldingsErrors,
+  GetBacktestHoldingsResponses,
   GetBacktestRequestData,
   GetBacktestRequestErrors,
   GetBacktestRequestResponses,
   GetBacktestResultData,
   GetBacktestResultErrors,
   GetBacktestResultResponses,
+  GetBacktestSecurityTradesData,
+  GetBacktestSecurityTradesErrors,
+  GetBacktestSecurityTradesResponses,
+  GetBacktestSessionHoldingsData,
+  GetBacktestSessionHoldingsErrors,
+  GetBacktestSessionHoldingsResponses,
   GetBacktestStatusData,
   GetBacktestStatusErrors,
   GetBacktestStatusResponses,
@@ -608,6 +617,50 @@ export const getBacktestFactorRegression = <
     GetBacktestFactorRegressionErrors,
     ThrowOnError
   >({ url: "/api/v1/backtests/{run_id}/factor-regression", ...options });
+
+/**
+ * Get Backtest Holdings
+ */
+export const getBacktestHoldings = <ThrowOnError extends boolean = false>(
+  options: Options<GetBacktestHoldingsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestHoldingsResponses,
+    GetBacktestHoldingsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/holdings", ...options });
+
+/**
+ * Get Backtest Security Trades
+ */
+export const getBacktestSecurityTrades = <ThrowOnError extends boolean = false>(
+  options: Options<GetBacktestSecurityTradesData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestSecurityTradesResponses,
+    GetBacktestSecurityTradesErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/backtests/{run_id}/holdings/securities/{security_id}",
+    ...options,
+  });
+
+/**
+ * Get Backtest Session Holdings
+ */
+export const getBacktestSessionHoldings = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetBacktestSessionHoldingsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestSessionHoldingsResponses,
+    GetBacktestSessionHoldingsErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/backtests/{run_id}/holdings/sessions/{session}",
+    ...options,
+  });
 
 /**
  * Get Backtest Request

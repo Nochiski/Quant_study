@@ -1379,6 +1379,22 @@ export type ChoiceParameter = {
 };
 
 /**
+ * ClosedHolding
+ */
+export type ClosedHolding = {
+  change: HoldingChange;
+  /**
+   * Previous Quantity
+   */
+  previous_quantity: string;
+  /**
+   * Realized Pnl
+   */
+  realized_pnl: number | null;
+  security: SecurityLabel;
+};
+
+/**
  * ComparisonNode
  */
 export type ComparisonNode = {
@@ -3845,6 +3861,96 @@ export type HttpValidationError = {
    * Detail
    */
   detail?: Array<ValidationError>;
+};
+
+/**
+ * HoldingChange
+ *
+ * 한 세션에서 한 종목의 보유가 어떻게 바뀌었나.
+ */
+export type HoldingChange =
+  "opened" | "added" | "reduced" | "held" | "sold" | "removed";
+
+/**
+ * HoldingPeriod
+ *
+ * 계좌 기록 세션에서 끊김 없이 들고 있던 구간(양끝 포함).
+ */
+export type HoldingPeriod = {
+  /**
+   * End
+   */
+  end: string;
+  /**
+   * Open
+   */
+  open: boolean;
+  /**
+   * Start
+   */
+  start: string;
+};
+
+/**
+ * HoldingRow
+ */
+export type HoldingRow = {
+  change: HoldingChange;
+  /**
+   * Filled Quantity
+   */
+  filled_quantity: string | null;
+  /**
+   * Market Value
+   */
+  market_value: number;
+  /**
+   * Quantity
+   */
+  quantity: string;
+  security: SecurityLabel;
+  /**
+   * Unrealized Return
+   */
+  unrealized_return: number | null;
+  /**
+   * Weight
+   */
+  weight: number | null;
+};
+
+/**
+ * HoldingsOverview
+ */
+export type HoldingsOverview = {
+  /**
+   * Fill Count
+   */
+  fill_count: number;
+  /**
+   * Final Holding Count
+   */
+  final_holding_count: number;
+  /**
+   * First Session
+   */
+  first_session: string | null;
+  /**
+   * Last Session
+   */
+  last_session: string | null;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Securities
+   */
+  securities: Array<SecurityTradeSummary>;
+  /**
+   * Trade Sessions
+   */
+  trade_sessions: Array<TradeSessionSummary>;
 };
 
 /**
@@ -6352,6 +6458,58 @@ export type SearchSpec = {
 };
 
 /**
+ * SecurityFillRow
+ */
+export type SecurityFillRow = {
+  /**
+   * Fee
+   */
+  fee: number;
+  /**
+   * Fill Id
+   */
+  fill_id: string;
+  /**
+   * Notional
+   */
+  notional: number;
+  /**
+   * Price
+   */
+  price: number;
+  /**
+   * Quantity
+   */
+  quantity: string;
+  /**
+   * Sell Tax
+   */
+  sell_tax: number | null;
+  /**
+   * Side
+   */
+  side: string;
+};
+
+/**
+ * SecurityLabel
+ */
+export type SecurityLabel = {
+  /**
+   * Name
+   */
+  name: string | null;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Ticker
+   */
+  ticker: string | null;
+};
+
+/**
  * SecurityRef
  */
 export type SecurityRef = {
@@ -6372,6 +6530,81 @@ export type SecurityRef = {
    */
   venue: string;
 };
+
+/**
+ * SecurityTradeSession
+ */
+export type SecurityTradeSession = {
+  change: HoldingChange;
+  /**
+   * Fills
+   */
+  fills: Array<SecurityFillRow>;
+  /**
+   * Quantity After
+   */
+  quantity_after: string | null;
+  /**
+   * Realized Pnl
+   */
+  realized_pnl: number | null;
+  /**
+   * Session
+   */
+  session: string;
+};
+
+/**
+ * SecurityTradeSummary
+ */
+export type SecurityTradeSummary = {
+  /**
+   * Fill Count
+   */
+  fill_count: number;
+  /**
+   * Final Quantity
+   */
+  final_quantity: string | null;
+  /**
+   * Final Unrealized Return
+   */
+  final_unrealized_return: number | null;
+  /**
+   * Holding Periods
+   */
+  holding_periods: Array<HoldingPeriod>;
+  /**
+   * Realized Pnl
+   */
+  realized_pnl: number | null;
+  security: SecurityLabel;
+};
+
+/**
+ * SecurityTradesReport
+ */
+export type SecurityTradesReport = {
+  /**
+   * Detail
+   */
+  detail: string | null;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  security: SecurityLabel;
+  /**
+   * Sessions
+   */
+  sessions: Array<SecurityTradeSession>;
+  status: SecurityTradesStatus;
+};
+
+/**
+ * SecurityTradesStatus
+ */
+export type SecurityTradesStatus = "available" | "security_not_traded";
 
 /**
  * SelectionMethod
@@ -6439,6 +6672,92 @@ export type SessionHistoryView = {
    */
   turns: Array<TurnView>;
   usage: SessionUsageView;
+};
+
+/**
+ * SessionHoldings
+ */
+export type SessionHoldings = {
+  /**
+   * Cash
+   */
+  cash: number;
+  /**
+   * Cash Weight
+   */
+  cash_weight: number | null;
+  /**
+   * Closed
+   */
+  closed: Array<ClosedHolding>;
+  /**
+   * Equity
+   */
+  equity: number;
+  /**
+   * Holdings
+   */
+  holdings: Array<HoldingRow>;
+  /**
+   * Session
+   */
+  session: string;
+  totals: SessionTradeTotals;
+};
+
+/**
+ * SessionHoldingsReport
+ */
+export type SessionHoldingsReport = {
+  /**
+   * Detail
+   */
+  detail: string | null;
+  holdings: SessionHoldings | null;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Session
+   */
+  session: string;
+  status: SessionHoldingsStatus;
+};
+
+/**
+ * SessionHoldingsStatus
+ */
+export type SessionHoldingsStatus = "available" | "session_not_recorded";
+
+/**
+ * SessionTradeTotals
+ */
+export type SessionTradeTotals = {
+  /**
+   * Buy Count
+   */
+  buy_count: number;
+  /**
+   * Buy Notional
+   */
+  buy_notional: number;
+  /**
+   * Fees
+   */
+  fees: number;
+  /**
+   * Sell Count
+   */
+  sell_count: number;
+  /**
+   * Sell Notional
+   */
+  sell_notional: number;
+  /**
+   * Taxes
+   */
+  taxes: number;
 };
 
 /**
@@ -7953,6 +8272,32 @@ export type TraceValueStatus =
   | "divide_by_zero"
   | "group_missing"
   | "masked";
+
+/**
+ * TradeSessionSummary
+ */
+export type TradeSessionSummary = {
+  /**
+   * Closed Count
+   */
+  closed_count: number;
+  /**
+   * Fill Count
+   */
+  fill_count: number;
+  /**
+   * Holding Count
+   */
+  holding_count: number;
+  /**
+   * Opened Count
+   */
+  opened_count: number;
+  /**
+   * Session
+   */
+  session: string;
+};
 
 /**
  * TrialAttempt
@@ -9523,6 +9868,146 @@ export type GetBacktestFactorRegressionResponses = {
 
 export type GetBacktestFactorRegressionResponse =
   GetBacktestFactorRegressionResponses[keyof GetBacktestFactorRegressionResponses];
+
+export type GetBacktestHoldingsData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/holdings";
+};
+
+export type GetBacktestHoldingsErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestHoldingsError =
+  GetBacktestHoldingsErrors[keyof GetBacktestHoldingsErrors];
+
+export type GetBacktestHoldingsResponses = {
+  /**
+   * Successful Response
+   */
+  200: HoldingsOverview;
+};
+
+export type GetBacktestHoldingsResponse =
+  GetBacktestHoldingsResponses[keyof GetBacktestHoldingsResponses];
+
+export type GetBacktestSecurityTradesData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+    /**
+     * Security Id
+     */
+    security_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/holdings/securities/{security_id}";
+};
+
+export type GetBacktestSecurityTradesErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestSecurityTradesError =
+  GetBacktestSecurityTradesErrors[keyof GetBacktestSecurityTradesErrors];
+
+export type GetBacktestSecurityTradesResponses = {
+  /**
+   * Successful Response
+   */
+  200: SecurityTradesReport;
+};
+
+export type GetBacktestSecurityTradesResponse =
+  GetBacktestSecurityTradesResponses[keyof GetBacktestSecurityTradesResponses];
+
+export type GetBacktestSessionHoldingsData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+    /**
+     * Session
+     */
+    session: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/holdings/sessions/{session}";
+};
+
+export type GetBacktestSessionHoldingsErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestSessionHoldingsError =
+  GetBacktestSessionHoldingsErrors[keyof GetBacktestSessionHoldingsErrors];
+
+export type GetBacktestSessionHoldingsResponses = {
+  /**
+   * Successful Response
+   */
+  200: SessionHoldingsReport;
+};
+
+export type GetBacktestSessionHoldingsResponse =
+  GetBacktestSessionHoldingsResponses[keyof GetBacktestSessionHoldingsResponses];
 
 export type GetBacktestRequestData = {
   body?: never;

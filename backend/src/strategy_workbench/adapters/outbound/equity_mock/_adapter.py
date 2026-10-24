@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import replace
 from datetime import date, timedelta
 
@@ -173,6 +173,16 @@ class MockEquityDataAdapter:
         """
         venue = _MOCK_UNIVERSES.get((market, universe_id))
         return tuple(item.security for item in self._memberships if item.security.venue == venue)
+
+    def describe_securities(self, security_ids: Collection[str]) -> tuple[SecurityRef, ...]:
+        """fixture 구성 종목의 이름·티커. 모르는 id 는 빠지고 이름을 합성하지 않는다."""
+        wanted = set(security_ids)
+        found = {
+            item.security.security_id: item.security
+            for item in self._memberships
+            if item.security.security_id in wanted
+        }
+        return tuple(found[security_id] for security_id in sorted(found))
 
     def load_panel(self, query: ResearchPanelQuery) -> ResearchPanelResult:
         profile_by_id = {profile.field_id: profile for profile in self._profiles}

@@ -20,6 +20,7 @@ export { RUN_STATUS, runStatusLabel, runStageLabel } from "./model/run-status";
 export type BacktestRequestOptions = Omit<import("../../shared/api").BacktestRunSpec, "strategy" | "strategy_source">;
 
 export { BacktestAccountReport } from "./ui/backtest-account-report";
+export { BacktestHoldings } from "./ui/backtest-holdings";
 export { BacktestValidationReport } from "./ui/backtest-validation-report";
 export { useBacktestValidationReport } from "./model/backtest-queries";
 

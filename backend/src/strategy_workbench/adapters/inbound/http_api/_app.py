@@ -6,7 +6,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from threading import Event
 from typing import Annotated, Any, NoReturn, TypeVar
@@ -37,8 +37,11 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunState,
     BacktestRunSummary,
     BacktestStartResponse,
+    HoldingsOverview,
     RetiredRunRequestError,
     RunKind,
+    SecurityTradesReport,
+    SessionHoldingsReport,
     TrialLedger,
     TrialLineageAlreadyMergedError,
     TrialPreview,
@@ -264,6 +267,24 @@ def _backtest_run_not_found_responses() -> dict[int | str, dict[str, Any]]:
             "description": "The backtest run does not exist",
         }
     }
+
+
+def _completed_result_view(read: Callable[[], _T]) -> _T:
+    """완료 결과에서 읽는 조회(보유·매매)가 결과 조회와 같은 404/409/410 을 낸다."""
+    try:
+        return read()
+    except BacktestRunNotFoundError as error:
+        raise _backtest_not_found(error) from error
+    except BacktestResultNotReadyError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "backtest.result.not_ready", "message": str(error)},
+        ) from error
+    except BacktestArtifactUnreadableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"code": "backtest.result.unreadable", "message": str(error)},
+        ) from error
 
 
 def _backtest_result_responses() -> dict[int | str, dict[str, Any]]:
@@ -647,6 +668,30 @@ def create_app(
                 status_code=status.HTTP_410_GONE,
                 detail={"code": "backtest.result.unreadable", "message": str(error)},
             ) from error
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/holdings",
+        operation_id="getBacktestHoldings",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_holdings(run_id: str) -> HoldingsOverview:
+        return _completed_result_view(lambda: backtest_runs.holdings_overview(run_id))
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/holdings/sessions/{session}",
+        operation_id="getBacktestSessionHoldings",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_session_holdings(run_id: str, session: date) -> SessionHoldingsReport:
+        return _completed_result_view(lambda: backtest_runs.session_holdings(run_id, session))
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/holdings/securities/{security_id}",
+        operation_id="getBacktestSecurityTrades",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_security_trades(run_id: str, security_id: str) -> SecurityTradesReport:
+        return _completed_result_view(lambda: backtest_runs.security_trades(run_id, security_id))
 
     @app.get(
         "/api/v1/backtests/{run_id}/summary",

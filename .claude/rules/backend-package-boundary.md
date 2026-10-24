@@ -104,6 +104,11 @@ bootstrap ─> application + adapters
   `GET /api/v1/backtests/{run_id}/account-report`로 제공하며 기존 결과 오류를 보존한다.
   adapter·frontend는 금액을 다시 계산하지 않으며 assistant용 오류→None 포트를 재사용하지 않는다.
   기존 결과 저장·엔진·일반 analytics·시도 원장은 이 조회 책임에 포함하지 않는다.
+- 완료 run의 보유 종목·매매 조회는 계좌 보고서와 같은 길이다: `domain/backtest`의 순수 투영(`_holdings.py`,
+  전용 `facade/holdings.py`)이 보유·매매 구분·비중을 소유하고, `application/backtest_run`이 `self.result(run_id)`를
+  한 번 검증해 읽은 뒤 투영을 부른다. 종목 이름은 이미 있는 `application.backtest_run → application.portfolio_design`
+  화살표로 `SecurityDirectoryPort.describe_securities`를 소비하며(새 application 화살표 없음), bootstrap 이 equity
+  어댑터를 `security_directory`로 주입한다. 주입이 없으면 이름 칸이 비고 id 만 보인다(이름을 지어내지 않는다).
 - 완료 run의 검증 보고서는 같은 `application/backtest_run`이 `self.result(run_id)`를 한 번 검증한 뒤
   manifest의 실행 입력·저장 출처로 기존 `_lineage`·`trial_ledger`를 재사용한다. 인라인 출처는 기존
   `_resolve`와 동등하게 provenance를 None으로 넘겨 명시한 계열을 보존하며, 은퇴 리비전을 재접수

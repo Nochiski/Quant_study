@@ -72,7 +72,7 @@ import json
 import logging
 import re
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
@@ -1131,6 +1131,45 @@ class EquityDuckdbAdapter:
             return ()
         result = self.load_universe(UniverseHistoryQuery(venue=VENUE, start=as_of, end=as_of))
         return next((point.members for point in result.points if point.session == as_of), ())
+
+    def describe_securities(self, security_ids: Collection[str]) -> tuple[SecurityRef, ...]:
+        """종목 id 의 이름·티커. 이름은 `load_universe` 와 같은 종목 마스터 현재 이름이다.
+
+        `security_span` 에 없는 (티커, 구간) 과 형식이 틀린 id 는 빠진다. 종목 마스터가 없거나 그
+        티커 행이 없으면 `load_universe` 처럼 티커를 이름으로 쓴다.
+        """
+        parsed = {
+            security_id: item
+            for security_id in set(security_ids)
+            if (item := _parse_security_id(security_id)) is not None
+        }
+        tickers = sorted({ticker for ticker, _ in parsed.values()})
+        known = {(span.ticker, span.span_seq) for span in self._spans(tickers)}
+        names = self._security_names(tickers)
+        return tuple(
+            SecurityRef(
+                security_id=security_id,
+                ticker=ticker,
+                name=names.get(ticker, ticker),
+                venue=VENUE,
+            )
+            for security_id, (ticker, span_seq) in sorted(parsed.items())
+            if (ticker, span_seq) in known
+        )
+
+    def _security_names(self, tickers: Sequence[str]) -> dict[str, str]:
+        if not tickers or SECURITY_TABLE not in self._tables:
+            return {}
+        con = _open(None)
+        try:
+            rows = con.execute(
+                f"SELECT ticker, name_current FROM {self._source(SECURITY_TABLE)} "
+                f"WHERE ticker IN (SELECT {_KEYS_SQL})",
+                [_keys_param(tickers)],
+            ).fetchall()
+        finally:
+            con.close()
+        return {str(ticker): str(name) for ticker, name in rows if name is not None}
 
     def load_panel(self, query: ResearchPanelQuery) -> ResearchPanelResult:
         unknown = self._unknown_fields(query.field_ids)

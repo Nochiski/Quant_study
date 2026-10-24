@@ -883,10 +883,10 @@ const FormFieldRow = ({
       ) : null}
       {!field.written && field.hasDefault ? (
         <p className="strategy-form__hint">
-          {t("form.field.defaultHint").replace(
-            "{value}",
-            draftOf(field.defaultValue) || "null",
-          )}
+          {/* 값이 없는 기본값(null·빈 문자열)은 "기본값 null" 대신 비워 둬도 된다는 사람 말로 보인다. */}
+          {draftOf(field.defaultValue) === ""
+            ? t("form.field.defaultEmptyHint")
+            : t("form.field.defaultHint").replace("{value}", draftOf(field.defaultValue))}
         </p>
       ) : !field.written && field.defaultFrom !== null && showIdentifiers ? (
         <p className="strategy-form__hint">

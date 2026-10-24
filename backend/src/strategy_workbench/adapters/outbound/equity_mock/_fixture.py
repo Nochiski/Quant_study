@@ -330,7 +330,7 @@ def build_demo_fixture() -> MockEquityFixture:
         _factor_field_profile(
             field_id="classification.sector",
             dataset_id="classification_pit",
-            label="Sector classification",
+            label="업종 분류",
             unit="category",
             value_type=FieldValueType.CATEGORY,
             coverage=full_coverage,
@@ -338,7 +338,7 @@ def build_demo_fixture() -> MockEquityFixture:
         _factor_field_profile(
             field_id="short.short_balance_ratio",
             dataset_id="short_daily",
-            label="Short balance ratio",
+            label="공매도 잔고 비율",
             unit="ratio",
             value_type=FieldValueType.RATIO,
             coverage=full_coverage,
@@ -347,7 +347,7 @@ def build_demo_fixture() -> MockEquityFixture:
             field_id="credit.margin_balance",
             dataset_id="credit_daily",
             # 원장 정본은 신용융자 잔고 주식수 축이다(금액축은 단위 미상이라 나가지 않는다, #207).
-            label="Margin balance (shares)",
+            label="신용융자 잔고(주식수)",
             unit="shares",
             value_type=FieldValueType.COUNT,
             coverage=masked_coverage,
@@ -358,7 +358,7 @@ def build_demo_fixture() -> MockEquityFixture:
             field_id="price.shares_outstanding",
             dataset_id="price_daily",
             # 신용잔고율(잔고 ÷ 상장주식수)의 분모다(#234). 원장 정본과 같은 주식수 축이다.
-            label="Shares outstanding",
+            label="상장주식수",
             unit="shares",
             value_type=FieldValueType.COUNT,
             coverage=full_coverage,
@@ -368,7 +368,7 @@ def build_demo_fixture() -> MockEquityFixture:
         _factor_field_profile(
             field_id="event.earnings_surprise",
             dataset_id="event_pit",
-            label="Earnings surprise",
+            label="실적 서프라이즈",
             unit="ratio",
             value_type=FieldValueType.RATIO,
             coverage=full_coverage,

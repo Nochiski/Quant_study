@@ -19,25 +19,35 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock, get_ident
+from typing import Literal, TypeVar
 
 from ._env import (
     ENV_NAME,
     decode_env_bytes,
     encode_env_value,
     env_assignment,
+    env_lines,
     parse_env_text,
 )
 from ._errors import SecretStoreStorageError
-from ._private_file import atomic_write_restricted, errno_name, prepare_private_directory
-from ._store import CommandRunner, default_windows_account, icacls_command, run_icacls
+from ._private_file import (
+    CommandRunner,
+    atomic_write_restricted,
+    errno_name,
+    prepare_private_directory,
+    restrict_owner_only,
+    run_icacls,
+)
 
 __all__ = [
     "AUTO_TRADING_DIRECTORY_NAME",
@@ -58,6 +68,12 @@ _IMPORTED_HEADER = "Quant Workbench 예전 저장 이전 기록 — 지우면 �
 AUTO_TRADING_ENV_FILE_NAME = ".env"
 
 _LOCK_SUFFIX = ".lock"
+_UPDATE_ATTEMPTS = 5
+_WINDOWS_LOCK_ATTEMPTS = 12
+# `msvcrt.locking`이 "남이 잡고 있다"로 실패할 때의 errno. 윈도우의
+# `EDEADLOCK`은 POSIX `EDEADLK`와 같은 값이다.
+_WINDOWS_LOCK_BUSY = frozenset({errno.EACCES, getattr(errno, "EDEADLOCK", errno.EDEADLK)})
+_T = TypeVar("_T")
 _LABEL = "credentials env file"
 
 # Windows 알려진 폴더 "문서"(FOLDERID_Documents). OneDrive로 옮긴 문서 폴더도 이 값이 가리킨다.
@@ -130,13 +146,13 @@ def _windows_documents() -> str | None:
         raw = UUID(_FOLDERID_DOCUMENTS).bytes_le
         guid = _Guid.from_buffer_copy(raw)
         buffer = ctypes.c_wchar_p()
-        shell32 = ctypes.windll.shell32  # type: ignore[attr-defined]  # reason: 윈도우 전용 속성
+        shell32 = ctypes.windll.shell32  # pyright: ignore[reportAttributeAccessIssue]  # 윈도우 전용 속성
         if shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(buffer)) != 0:
             return None
         try:
             return buffer.value
         finally:
-            ctypes.windll.ole32.CoTaskMemFree(buffer)  # type: ignore[attr-defined]  # reason: 윈도우 전용
+            ctypes.windll.ole32.CoTaskMemFree(buffer)  # pyright: ignore[reportAttributeAccessIssue]  # 윈도우 전용
     except (OSError, AttributeError, ValueError):
         return None
 
@@ -149,7 +165,7 @@ class EnvProblem:
     `unknown_kind`·`bad_time`. `fields`는 빠지거나 틀린 줄 이름이다.
     """
 
-    section: str
+    section: Literal["file", "ai", "kiwoom"]
     reason: str
     index: int | None = None
     fields: tuple[str, ...] = ()
@@ -160,7 +176,7 @@ class EnvProblem:
 
 @dataclass(frozen=True)
 class _Snapshot:
-    key: tuple[int, int, int] | None
+    key: tuple[int, int, int, int] | None
     text: str
     bom: bool
     newline: str
@@ -233,10 +249,13 @@ class CredentialsEnvFile:
 
     def mark_imported(self, name: str) -> None:
         """`name` 묶음을 옮겼다고 기록한다. 다른 기록 줄은 그대로 둔다."""
-        with self._lock:
+
+        def run() -> None:
             records = dict(self.group(IMPORTED_ENV_PREFIX))
             records[f"{IMPORTED_ENV_PREFIX}{name}"] = datetime.now(UTC).date().isoformat()
             self.replace_group(IMPORTED_ENV_PREFIX, _IMPORTED_HEADER, sorted(records.items()))
+
+        self.update(run)
 
     def group(self, prefix: str) -> Mapping[str, str]:
         """`prefix`로 시작하는 이름만."""
@@ -256,61 +275,73 @@ class CredentialsEnvFile:
                 )
         header_line = f"# {header}"
         with self._lock:
-            snapshot = self._read()
-            kept: list[str] = []
-            insert_at: int | None = None
-            for line in snapshot.text.splitlines():
-                parsed = env_assignment(line)
-                ours = line.strip() == header_line or (
-                    parsed is not None and parsed[0].startswith(prefix)
+            while True:
+                # 쓰기 경로는 캐시를 쓰지 않고 늘 새로 읽는다(재리뷰 8).
+                snapshot = self._read(fresh=True)
+                body = _merged(snapshot, prefix, header_line, entries)
+                if body == snapshot.text or (snapshot.key is None and not body):
+                    return
+                if self._lock.ensure_os_lock():
+                    # 폴더가 없어 OS 잠금을 미뤘다가 지금 잡았다. 그 사이
+                    # 다른 프로세스가 먼저 썼을 수
+                    # 있으니 다시 읽어 확인한다(재리뷰 1).
+                    again = self._read(fresh=True)
+                    if (again.key is None) != (snapshot.key is None) or again.text != snapshot.text:
+                        if self._lock.depth > 1:
+                            # 바깥 읽고-고치고-쓰기(`update`)가 옛 내용으로 계산했다. 처음부터 다시.
+                            raise _StaleRead
+                        continue
+                # 원래 파일의 BOM과 줄바꿈(CRLF/LF)을 그대로 둔다(리뷰 5).
+                atomic_write_restricted(
+                    self._path,
+                    ("\ufeff" if snapshot.bom and body else "") + body,
+                    platform=self._platform,
+                    restrict=self._restrict,
+                    label=_LABEL,
+                    temporary_prefix=".env-",
                 )
-                if ours:
-                    if insert_at is None:
-                        insert_at = len(kept)
-                    continue
-                kept.append(line)
-            block = (
-                [header_line, *(f"{name}={encode_env_value(value)}" for name, value in entries)]
-                if entries
-                else []
-            )
-            if insert_at is None:
-                if block and kept and kept[-1].strip():
-                    block = ["", *block]
-                insert_at = len(kept)
-            updated = kept[:insert_at] + block + kept[insert_at:]
-            newline = snapshot.newline
-            body = newline.join(updated) + newline if updated else ""
-            if body == snapshot.text:
+                self._snapshot = None
                 return
-            if snapshot.key is None and not body:
-                return
-            # 원래 파일의 BOM과 줄바꿈(CRLF/LF)을 그대로 둔다(리뷰 5). 윈도우 편집기가 만든 파일을
-            # 다른 도구가 그 형식으로 읽고 있을 수 있다.
-            self._lock.ensure_os_lock()
-            atomic_write_restricted(
-                self._path,
-                ("\ufeff" if snapshot.bom and body else "") + body,
-                platform=self._platform,
-                restrict=self._restrict,
-                label=_LABEL,
-                temporary_prefix=".env-",
-            )
-            self._snapshot = None
+
+    def update(self, operation: Callable[[], _T]) -> _T:
+        """읽고-고치고-쓰기 한 번. 저장소는 여러 줄을 읽어 계산한 뒤 쓰는 일을 이 안에서 한다.
+
+        폴더가 없던 첫 쓰기에서 다른 프로세스가 먼저 쓴 것을 알게 되면 `operation`을 처음부터 다시
+        돌린다(재리뷰 1). 그때는 폴더가 생겨 들어가자마자 OS 잠금을 잡으므로 두 번이면 끝난다.
+        """
+        for _ in range(_UPDATE_ATTEMPTS):
+            try:
+                with self._lock:
+                    return operation()
+            except _StaleRead:
+                continue
+        raise SecretStoreStorageError(
+            f"could not update the {_LABEL} — operation=update attempts={_UPDATE_ATTEMPTS}",
+            path=self._path,
+            reason="unreadable",
+        )
 
     # -- 파일 IO -----------------------------------------------------------------------------
 
-    def _read(self) -> _Snapshot:
-        """파일 내용. 크기·수정 시각·inode가 지난번과 같으면 다시 읽지 않는다(리뷰 9)."""
+    def _read(self, *, fresh: bool = False) -> _Snapshot:
+        """파일 내용.
+
+        읽기 전용 조회는 크기·수정 시각·변경 시각·inode가 지난번과
+        같으면 다시 읽지 않는다(리뷰 9). 그
+        값을 믿기 어려운 파일 시스템(inode가 0이거나 수정 시각이 초
+        단위로 거친 경우)에서는 캐시를 쓰지
+        않는다 — 같은 초 안의 제자리 수정을 놓친다(재리뷰 8). 쓰기 경로는 `fresh`로 늘 새로 읽는다.
+        """
         try:
             stat = self._path.stat()
         except FileNotFoundError:
             return _Snapshot(None, "", False, "\n")
         except OSError as error:
             raise self._unreadable(error) from error
-        key = (stat.st_size, stat.st_mtime_ns, stat.st_ino)
+        key = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino)
+        trusted = stat.st_ino != 0 and stat.st_mtime_ns % 1_000_000_000 != 0
         cached = self._snapshot
-        if cached is not None and cached.key == key:
+        if not fresh and trusted and cached is not None and cached.key == key:
             return cached
         try:
             raw = self._path.read_bytes()
@@ -329,7 +360,7 @@ class CredentialsEnvFile:
                 reason="not_utf8",
             ) from error
         snapshot = _Snapshot(key, text, bom, "\r\n" if "\r\n" in text else "\n")
-        self._snapshot = snapshot
+        self._snapshot = snapshot if trusted else None
         return snapshot
 
     def _unreadable(self, error: OSError) -> SecretStoreStorageError:
@@ -340,11 +371,9 @@ class CredentialsEnvFile:
         )
 
     def _restrict(self, path: Path) -> None:
-        if self._platform == "win32":
-            account = self._account or default_windows_account()
-            self._run_command(icacls_command(path, account=account))
-            return
-        os.chmod(path, 0o600)
+        restrict_owner_only(
+            path, platform=self._platform, run_command=self._run_command, account=self._account
+        )
 
     def _lock_path(self) -> Path:
         return self._path.parent / (self._path.name + _LOCK_SUFFIX)
@@ -367,23 +396,44 @@ class CredentialsEnvFile:
             if self._platform == "win32":
                 import msvcrt
 
-                # 첫 바이트 하나를 잠근다. `LK_LOCK`은 10번 재시도 뒤 실패하므로
-                # 잡을 때까지 다시 부른다.
+                # 첫 바이트 하나를 잠근다. `LK_LOCK`은 1초씩 10번 재시도
+                # 뒤 `EDEADLOCK`으로 실패한다.
+                # 남이 잡고 있다는 뜻인 그 두 errno만 상한까지 물러나며 다시 부르고, 그 밖의 실패는
+                # 바로 알린다(재리뷰 7).
                 os.lseek(descriptor, 0, os.SEEK_SET)
-                while True:
+                for attempt in range(_WINDOWS_LOCK_ATTEMPTS):
                     try:
-                        msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]  # reason: 윈도우 전용
+                        msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)  # pyright: ignore[reportAttributeAccessIssue]  # 윈도우 전용
                         break
-                    except OSError:
-                        continue
+                    except OSError as error:
+                        if error.errno not in _WINDOWS_LOCK_BUSY:
+                            raise self._lock_failure(error) from error
+                        time.sleep(min(0.05 * 2**attempt, 1.0))
+                else:
+                    raise SecretStoreStorageError(
+                        f"could not lock the {_LABEL} — operation=lock "
+                        f"attempts={_WINDOWS_LOCK_ATTEMPTS} reason=busy",
+                        path=self._path,
+                        reason="unreadable",
+                    )
             else:
                 import fcntl
 
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX)
+                except OSError as error:
+                    raise self._lock_failure(error) from error
         except BaseException:
             os.close(descriptor)
             raise
         return descriptor
+
+    def _lock_failure(self, error: OSError) -> SecretStoreStorageError:
+        return SecretStoreStorageError(
+            f"could not lock the {_LABEL} — operation=lock errno={errno_name(error)}",
+            path=self._path,
+            reason="unreadable",
+        )
 
     def _release_os_lock(self, descriptor: int) -> None:
         try:
@@ -392,7 +442,7 @@ class CredentialsEnvFile:
 
                 with suppress(OSError):
                     os.lseek(descriptor, 0, os.SEEK_SET)
-                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]  # reason: 윈도우 전용
+                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)  # pyright: ignore[reportAttributeAccessIssue]  # 윈도우 전용
             else:
                 import fcntl
 
@@ -407,9 +457,9 @@ class _FileLock:
     잠금은 `.env` 옆 `.env.lock` 파일에 건다. `.env` 자체에 걸면 `os.replace`가 파일을 바꿔치기해
     다음 사람이 다른 inode를 잠그게 된다. POSIX는 `fcntl.flock`, 윈도우는 `msvcrt.locking`이다.
 
-    폴더가 아직 없으면 들어갈 때는 OS 잠금을 미루고, 실제로 쓰기 직전(`ensure_os_lock`)에 폴더를
-    만들며 잡는다. 그 뒤 다시 읽어 확인하지는 않는다 — 폴더가 없던 순간에는 다른 프로세스가 쓴
-    내용도 없다.
+    폴더가 아직 없으면 들어갈 때는 OS 잠금을 미루고(고칠 게 없는 호출이 폴더를 만들지 않게),
+    실제로 쓰기 직전(`ensure_os_lock`)에 폴더를 만들며 잡는다. 잡은 뒤에는 `replace_group`이 다시
+    읽어, 그 사이 다른 프로세스가 쓴 것이 있으면 다시 계산한다(재리뷰 1).
     """
 
     def __init__(self, owner: CredentialsEnvFile) -> None:
@@ -431,10 +481,16 @@ class _FileLock:
             raise
         return self
 
-    def ensure_os_lock(self) -> None:
-        """쓰기 직전에 부른다. 아직 OS 잠금이 없으면 폴더를 만들며 잡는다."""
+    @property
+    def depth(self) -> int:
+        return self._depth
+
+    def ensure_os_lock(self) -> bool:
+        """쓰기 직전에 부른다. 아직 OS 잠금이 없으면 폴더를 만들며 잡고 True를 돌려준다."""
         if self._depth > 0 and self._descriptor is None:
             self._descriptor = self._owner._acquire_os_lock(create=True)  # noqa: SLF001 — reason: 짝 클래스
+            return True
+        return False
 
     def __exit__(self, *_: object) -> None:
         try:
@@ -446,3 +502,35 @@ class _FileLock:
                     self._owner._release_os_lock(descriptor)  # noqa: SLF001 — reason: 짝 클래스
         finally:
             self._thread_lock.release()
+
+
+class _StaleRead(Exception):
+    """미뤘던 OS 잠금을 잡고 보니 바깥 계산이 옛 내용에 기대고 있었다. `update`가 다시 돌린다."""
+
+
+def _merged(
+    snapshot: _Snapshot, prefix: str, header_line: str, entries: Sequence[tuple[str, str]]
+) -> str:
+    """`snapshot`에서 `prefix` 묶음만 `entries`로 바꾼 본문(BOM 없이, 원래 줄바꿈으로)."""
+    kept: list[str] = []
+    insert_at: int | None = None
+    for line in env_lines(snapshot.text):
+        parsed = env_assignment(line)
+        ours = line.strip() == header_line or (parsed is not None and parsed[0].startswith(prefix))
+        if ours:
+            if insert_at is None:
+                insert_at = len(kept)
+            continue
+        kept.append(line)
+    block = (
+        [header_line, *(f"{name}={encode_env_value(value)}" for name, value in entries)]
+        if entries
+        else []
+    )
+    if insert_at is None:
+        if block and kept and kept[-1].strip():
+            block = ["", *block]
+        insert_at = len(kept)
+    updated = kept[:insert_at] + block + kept[insert_at:]
+    newline = snapshot.newline
+    return newline.join(updated) + newline if updated else ""

@@ -76,15 +76,29 @@ class EnvFileBrokerCredentialStore:
         return BrokerCredentials(values[_APP_KEY], values[_SECRET_KEY], values[_ACCOUNT])
 
     def save(self, credentials: BrokerCredentials) -> None:
-        self._file.replace_group(
-            KIWOOM_MOCK_ENV_PREFIX,
-            _HEADER,
+        self._replace(
             (
                 (_APP_KEY, credentials.app_key),
                 (_SECRET_KEY, credentials.secret_key),
                 (_ACCOUNT, credentials.account_number),
-            ),
+            )
         )
 
     def delete(self) -> None:
-        self._file.replace_group(KIWOOM_MOCK_ENV_PREFIX, _HEADER, ())
+        self._replace(())
+
+    def _replace(self, ours: tuple[tuple[str, str], ...]) -> None:
+        """세 이름만 바꾼다.
+
+        같은 접두어의 다른 줄(사용자가 붙인 메모 등)은 값 그대로 둔다(재리뷰 5).
+        """
+
+        def run() -> None:
+            extra = [
+                (name, value)
+                for name, value in self._file.group(KIWOOM_MOCK_ENV_PREFIX).items()
+                if name not in KIWOOM_MOCK_ENV_NAMES
+            ]
+            self._file.replace_group(KIWOOM_MOCK_ENV_PREFIX, _HEADER, (*ours, *extra))
+
+        self._file.update(run)

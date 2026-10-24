@@ -67,6 +67,8 @@ class _Loaded:
     problems: tuple[EnvProblem, ...]
     # 번호도 `ACTIVE`도 아닌 우리 접두어 줄. 이름·값 그대로 다시 적는다(SoT 리뷰 M4).
     loose: tuple[tuple[str, str], ...] = ()
+    # `ACTIVE`가 읽지 못한 항목을 가리키면 그 id. 쓸 때 그대로 둔다(재리뷰 2).
+    broken_active: str | None = None
 
 
 AI_IMPORT_NAME = "AI_PROVIDERS"
@@ -108,34 +110,53 @@ class EnvFileProviderStore:
 
     def add(self, profile: ProviderProfile) -> None:
         """맨 뒤에 붙인다. 이미 활성이 있는데 활성으로 넣으면 거부한다(SQLite 구현과 같은 계약)."""
-        with self._file.lock:
+
+        def run() -> None:
             loaded = self._load()
             entries = loaded.entries
-            if any(entry.profile.profile_id == profile.profile_id for entry in entries):
+            incoming = profile
+            if any(entry.profile.profile_id == incoming.profile_id for entry in entries):
                 raise SecretStoreStorageError(
-                    f"provider profile already exists — profile_id={profile.profile_id!r}"
+                    f"provider profile already exists — profile_id={incoming.profile_id!r}"
                 )
-            if profile.active and any(entry.profile.active for entry in entries):
+            if incoming.active and loaded.broken_active is not None:
+                # 활성이 읽지 못한 항목에 있다. 그 표시를 빼앗지 않고 새 항목은 비활성으로 둔다
+                # (재리뷰 2). 사용자는 파일을 고치거나 화면에서 새 항목을 골라 활성으로 바꾼다.
+                incoming = replace(incoming, active=False)
+            if incoming.active and any(entry.profile.active for entry in entries):
                 raise SecretStoreStorageError(
                     "another provider profile is already active — "
-                    f"profile_id={profile.profile_id!r}"
+                    f"profile_id={incoming.profile_id!r}"
                 )
-            self._write([*entries, _Entry(profile, None)], loaded.broken, loaded.loose)
+            self._write(
+                [*entries, _Entry(incoming, None)],
+                loaded.broken,
+                loaded.loose,
+                loaded.broken_active,
+            )
+
+        self._file.update(run)
 
     def delete(self, profile_id: str) -> None:
         """없으면 `ProviderProfileNotFoundError`. 남은 키가 있으면 같이 지운다.
 
         주인 없는 키를 남기지 않는다.
         """
-        with self._file.lock:
+
+        def run() -> None:
             loaded = self._load()
             entry = self._find(loaded.entries, profile_id)
             self._write(
-                [item for item in loaded.entries if item is not entry], loaded.broken, loaded.loose
+                [item for item in loaded.entries if item is not entry],
+                loaded.broken,
+                loaded.loose,
+                loaded.broken_active,
             )
 
+        self._file.update(run)
+
     def set_active(self, profile_id: str) -> None:
-        with self._file.lock:
+        def run() -> None:
             loaded = self._load()
             self._find(loaded.entries, profile_id)
             self._write(
@@ -148,11 +169,15 @@ class EnvFileProviderStore:
                 ],
                 loaded.broken,
                 loaded.loose,
+                None,  # 사용자가 고른 활성이 읽지 못한 항목의 활성을 대신한다.
             )
+
+        self._file.update(run)
 
     def import_profiles(self, entries: Sequence[tuple[ProviderProfile, str | None]]) -> None:
         """예전 저장소에서 옮겨 온 프로파일·키를 한 번의 쓰기로 넣는다. 묶음이 비어 있을 때만."""
-        with self._file.lock:
+
+        def run() -> None:
             loaded = self._load()
             if loaded.entries or loaded.broken:
                 raise SecretStoreStorageError(
@@ -164,6 +189,8 @@ class EnvFileProviderStore:
                     f"more than one incoming provider profile is active — incoming={len(entries)}"
                 )
             self._write([_Entry(profile, secret) for profile, secret in entries], [], loaded.loose)
+
+        self._file.update(run)
 
     def has_any(self) -> bool:
         """읽은 항목이든 읽지 못한 항목이든 하나라도 있나. 파일을 못 읽으면 예외다."""
@@ -179,7 +206,7 @@ class EnvFileProviderStore:
         raise ProviderSecretMissingError(profile_id)
 
     def put_secret(self, profile_id: str, secret: str) -> None:
-        with self._file.lock:
+        def run() -> None:
             loaded = self._load()
             entry = self._find(loaded.entries, profile_id)
             self._write(
@@ -189,11 +216,15 @@ class EnvFileProviderStore:
                 ],
                 loaded.broken,
                 loaded.loose,
+                loaded.broken_active,
             )
+
+        self._file.update(run)
 
     def delete_secret(self, profile_id: str) -> None:
         """멱등이다. 프로파일이 없거나 키가 없으면 아무것도 하지 않는다."""
-        with self._file.lock:
+
+        def run() -> None:
             loaded = self._load()
             if not any(
                 item.profile.profile_id == profile_id and item.secret is not None
@@ -207,7 +238,10 @@ class EnvFileProviderStore:
                 ],
                 loaded.broken,
                 loaded.loose,
+                loaded.broken_active,
             )
+
+        self._file.update(run)
 
     def secrets(self) -> EnvFileProviderSecrets:
         """`ProviderSecretStore` 포트 모양(get·put·delete)으로 본 같은 저장소."""
@@ -267,16 +301,21 @@ class EnvFileProviderStore:
                 continue
             extra = tuple((field, value) for field, value in fields.items() if field not in _FIELDS)
             entries.append(_Entry(profile, fields.get("API_KEY") or None, extra))
-        return _Loaded(entries, broken, tuple(problems), tuple(loose))
+        broken_ids = {fields.get("ID") for fields in broken}
+        broken_active = active if active is not None and active in broken_ids else None
+        return _Loaded(entries, broken, tuple(problems), tuple(loose), broken_active)
 
     def _write(
         self,
         entries: list[_Entry],
         broken: list[dict[str, str]],
         loose: tuple[tuple[str, str], ...] = (),
+        broken_active: str | None = None,
     ) -> None:
         lines: list[tuple[str, str]] = []
-        active = next((entry.profile.profile_id for entry in entries if entry.profile.active), None)
+        active = next(
+            (entry.profile.profile_id for entry in entries if entry.profile.active), broken_active
+        )
         if active is not None:
             lines.append((_ACTIVE, active))
         for index, entry in enumerate(entries, start=1):

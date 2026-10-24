@@ -93,36 +93,42 @@ def migrate_provider_profiles(
     - 새 파일이나 예전 키 파일을 읽지 못하면 아무것도 바꾸지 않고 건너뛴다. 서버는 뜬다(리뷰 1).
     """
     file = target.file
-    profiles: tuple[ProviderProfile, ...] = ()
-    try:
-        with file.lock:
-            if file.imported(AI_IMPORT_NAME):
-                _warn_leftover_providers(legacy_profiles, legacy_secrets)
-                return 0
-            if file.file_problem() is not None:
-                logger.warning("credentials env file is unreadable; skipped moving providers")
-                return 0
-            if target.has_any():
-                file.mark_imported(AI_IMPORT_NAME)
-                return 0
-            profiles = legacy_profiles.list()
-            if not profiles:
-                return 0
-            moved: list[tuple[ProviderProfile, str | None]] = []
-            for profile in profiles:
-                try:
-                    secret: str | None = legacy_secrets.get(profile.profile_id)
-                except ProviderSecretMissingError:
-                    secret = None
-                moved.append((profile, secret))
-            target.import_profiles(moved)
+
+    def run() -> tuple[ProviderProfile, ...]:
+        """옮긴 프로파일. 옮기지 않았으면 빈 튜플."""
+        if file.imported(AI_IMPORT_NAME):
+            _warn_leftover_providers(legacy_profiles, legacy_secrets)
+            return ()
+        if file.file_problem() is not None:
+            logger.warning("credentials env file is unreadable; skipped moving providers")
+            return ()
+        if target.has_any():
             file.mark_imported(AI_IMPORT_NAME)
+            return ()
+        found = legacy_profiles.list()
+        if not found:
+            return ()
+        moved: list[tuple[ProviderProfile, str | None]] = []
+        for profile in found:
+            try:
+                secret: str | None = legacy_secrets.get(profile.profile_id)
+            except ProviderSecretMissingError:
+                secret = None
+            moved.append((profile, secret))
+        target.import_profiles(moved)
+        file.mark_imported(AI_IMPORT_NAME)
+        return found
+
+    try:
+        profiles = file.update(run)
     except SecretStoreStorageError as error:
         logger.warning(
             "could not move legacy providers; left everything in place — error=%s reason=%s",
             type(error).__name__,
             error.reason,
         )
+        return 0
+    if not profiles:
         return 0
     try:
         for profile in profiles:
@@ -174,29 +180,34 @@ def migrate_kiwoom_credentials(
     개수만 경고한다.
     """
     file = target.file
-    try:
-        with file.lock:
-            if file.imported(KIWOOM_IMPORT_NAME):
-                _warn_leftover_kiwoom(legacy)
-                return False
-            if file.file_problem() is not None or target.problems():
-                logger.warning("credentials env file is unreadable; skipped moving kiwoom keys")
-                return False
-            if target.load() is not None:
-                file.mark_imported(KIWOOM_IMPORT_NAME)
-                return False
-            try:
-                saved = legacy.load()
-            except BrokerCredentialsUnreadableError as error:
-                logger.warning(
-                    "legacy kiwoom mock credentials are unreadable; skipped moving them — error=%s",
-                    type(error).__name__,
-                )
-                return False
-            if saved is None:
-                return False
-            target.save(saved)
+
+    def run() -> bool:
+        if file.imported(KIWOOM_IMPORT_NAME):
+            _warn_leftover_kiwoom(legacy)
+            return False
+        if file.file_problem() is not None or target.problems():
+            logger.warning("credentials env file is unreadable; skipped moving kiwoom keys")
+            return False
+        if target.load() is not None:
             file.mark_imported(KIWOOM_IMPORT_NAME)
+            return False
+        try:
+            saved = legacy.load()
+        except BrokerCredentialsUnreadableError as error:
+            logger.warning(
+                "legacy kiwoom mock credentials are unreadable; skipped moving them — error=%s",
+                type(error).__name__,
+            )
+            return False
+        if saved is None:
+            return False
+        target.save(saved)
+        file.mark_imported(KIWOOM_IMPORT_NAME)
+        return True
+
+    try:
+        if not file.update(run):
+            return False
     except (SecretStoreStorageError, BrokerCredentialsUnreadableError) as error:
         logger.warning(
             "could not move legacy kiwoom keys; left everything in place — error=%s",

@@ -20,6 +20,8 @@ from typing import Annotated, Literal
 from fastapi import FastAPI
 from pydantic import Field
 
+from strategy_workbench.domain.assistant.facade.models import ProviderKind
+
 CREDENTIALS_FILE_PATH = "/api/v1/settings/credentials-file"
 
 ProblemSection = Literal["file", "ai", "kiwoom"]
@@ -29,7 +31,7 @@ ProblemSection = Literal["file", "ai", "kiwoom"]
 class CredentialsFileIssue:
     """bootstrap이 저장 어댑터의 문제를 옮겨 담는 값. 사유 이름과 줄 이름만 있다."""
 
-    section: str
+    section: ProblemSection
     reason: str
     index: int | None = None
     fields: tuple[str, ...] = ()
@@ -68,7 +70,8 @@ def _message(issue: CredentialsFileIssue) -> str:
     if issue.section == "ai":
         where = f"AI 공급자 {issue.index}번 항목" if issue.index is not None else "AI 공급자 항목"
         if issue.reason == "unknown_kind":
-            return f"{where}의 종류를 알 수 없습니다. anthropic 또는 openai로 고치세요: {names}"
+            kinds = " 또는 ".join(kind.value for kind in ProviderKind)
+            return f"{where}의 종류를 알 수 없습니다. {kinds}로 고치세요: {names}"
         if issue.reason == "bad_time":
             return f"{where}의 등록 시각을 읽지 못했습니다: {names}"
         return f"{where}에 빠진 줄이 있어 목록에서 뺐습니다: {names}"
@@ -87,7 +90,7 @@ def register_settings_routes(
             path=str(credentials_file_path) if credentials_file_path is not None else None,
             problems=[
                 CredentialsFileProblemBody(
-                    section=issue.section,  # type: ignore[arg-type]  # reason: bootstrap이 세 값만 넣는다
+                    section=issue.section,
                     reason=issue.reason,
                     fields=list(issue.fields),
                     message=_message(issue),

@@ -13,10 +13,12 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import stat
 import sys
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -640,3 +642,177 @@ def test_listing_with_keys_reads_the_file_once(
             store.secrets().get(profile.profile_id)
 
     assert len(reads) <= 1
+
+
+# -- 재리뷰 고침 --------------------------------------------------------------------------------
+
+
+def test_a_first_write_racing_another_process_reruns_and_keeps_both(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """재리뷰 1: 폴더가 없던 첫 쓰기 사이에 다른 프로세스가 먼저 쓰면 다시 계산해 둘 다 남긴다."""
+    path = tmp_path / "auto_trading" / ".env"
+    other = CredentialsEnvFile(path)
+    mine = CredentialsEnvFile(path)
+    lock = mine.lock
+    original = lock.ensure_os_lock
+    raced = False
+
+    def ensure_after_the_other_writer() -> bool:
+        nonlocal raced
+        if not raced:
+            raced = True
+            EnvFileProviderStore(other).add(_profile("p1", active=True))
+        return original()
+
+    monkeypatch.setattr(lock, "ensure_os_lock", ensure_after_the_other_writer)
+    EnvFileProviderStore(mine).add(_profile("p2"))
+
+    assert [item.profile_id for item in EnvFileProviderStore(other).list()] == ["p1", "p2"]
+
+
+def test_an_active_marker_on_a_broken_entry_is_kept(tmp_path: Path) -> None:
+    """재리뷰 2: `ACTIVE`가 읽지 못한 항목을 가리키면 다음 쓰기에도 그대로 남는다.
+
+    새 항목은 비활성으로 들어간다.
+    """
+    path = tmp_path / ".env"
+    path.write_text(
+        "STRATEGY_WORKBENCH_AI_ACTIVE=b1\n"
+        "STRATEGY_WORKBENCH_AI_1_ID=b1\n"
+        "STRATEGY_WORKBENCH_AI_1_KIND=anthropic\n",
+        encoding="utf-8",
+    )
+    store = EnvFileProviderStore(CredentialsEnvFile(path))
+
+    store.add(_profile("p2", active=True))
+
+    values = parse_env_text(path.read_text(encoding="utf-8"))
+    assert values["STRATEGY_WORKBENCH_AI_ACTIVE"] == "b1"
+    assert [item.active for item in store.list()] == [False]
+
+    store.set_active("p2")
+    assert parse_env_text(path.read_text(encoding="utf-8"))["STRATEGY_WORKBENCH_AI_ACTIVE"] == "p2"
+
+
+def test_values_with_unicode_line_breaks_round_trip_on_one_line(tmp_path: Path) -> None:
+    """재리뷰 3: `\\x0b`·`\\x85`·`\\u2028` 같은 글자가 있어도 한 줄로 쓰고 같은 값으로 읽는다."""
+    path = tmp_path / ".env"
+    path.write_text("OTHER=keep\n", encoding="utf-8")
+    file = CredentialsEnvFile(path)
+    value = "a\x0bb\x0cc\x1cd\x85e\u2028f\u2029g"
+
+    file.replace_group("APP_", "앱 묶음", (("APP_NOTE", value),))
+
+    text = path.read_text(encoding="utf-8")
+    assert all(char not in text for char in "\x0b\x0c\x1c\x85\u2028\u2029")
+    assert CredentialsEnvFile(path).read() == {"OTHER": "keep", "APP_NOTE": value}
+
+
+def test_extra_lines_in_the_kiwoom_group_survive_save_and_delete(tmp_path: Path) -> None:
+    """재리뷰 5: 키움 접두어 안의 다른 줄은 저장·삭제에도 값 그대로 남는다."""
+    path = tmp_path / ".env"
+    path.write_text("STRATEGY_WORKBENCH_KIWOOM_MOCK_NOTE=내 모의 계좌\n", encoding="utf-8")
+    store = EnvFileBrokerCredentialStore(CredentialsEnvFile(path))
+
+    store.save(BrokerCredentials("app-key-0123", "secret-0123", "5012345678"))
+    assert (
+        parse_env_text(path.read_text(encoding="utf-8"))["STRATEGY_WORKBENCH_KIWOOM_MOCK_NOTE"]
+        == "내 모의 계좌"
+    )
+
+    store.delete()
+    values = parse_env_text(path.read_text(encoding="utf-8"))
+    assert values == {"STRATEGY_WORKBENCH_KIWOOM_MOCK_NOTE": "내 모의 계좌"}
+    assert store.load() is None
+
+
+class _FakeMsvcrt:
+    LK_LOCK = 1
+    LK_UNLCK = 0
+
+    def __init__(self, errors: list[int]) -> None:
+        self._errors = errors
+        self.calls = 0
+
+    def locking(self, descriptor: int, mode: int, size: int) -> None:
+        del descriptor, size
+        if mode == self.LK_LOCK:
+            self.calls += 1
+            if self._errors:
+                code = self._errors.pop(0)
+                raise OSError(code, os.strerror(code))
+
+
+def _windows_file(tmp_path: Path) -> CredentialsEnvFile:
+    def runner(command: object) -> None:
+        del command
+
+    path = tmp_path / ".env"
+    path.write_text("A=1\n", encoding="utf-8")
+    return CredentialsEnvFile(path, platform="win32", run_command=runner, windows_account="me")
+
+
+def test_windows_lock_retries_only_while_busy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """재리뷰 7: 남이 잡고 있다(EDEADLOCK·EACCES)면 물러나며 다시, 상한이 있다."""
+    busy = getattr(errno, "EDEADLOCK", errno.EDEADLK)
+    fake = _FakeMsvcrt([busy, errno.EACCES])
+    monkeypatch.setitem(sys.modules, "msvcrt", fake)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    _windows_file(tmp_path).replace_group("APP_", "앱 묶음", (("APP_KEY", "v"),))
+
+    assert fake.calls == 3
+
+
+def test_windows_lock_gives_up_with_the_errno_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(sys.modules, "msvcrt", _FakeMsvcrt([errno.EBADF]))
+    with pytest.raises(SecretStoreStorageError, match="errno=EBADF"):
+        _windows_file(tmp_path).replace_group("APP_", "앱 묶음", (("APP_KEY", "v"),))
+
+    busy = getattr(errno, "EDEADLOCK", errno.EDEADLK)
+    monkeypatch.setitem(sys.modules, "msvcrt", _FakeMsvcrt([busy] * 100))
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(SecretStoreStorageError, match="reason=busy"):
+        _windows_file(tmp_path).replace_group("APP_", "앱 묶음", (("APP_KEY", "v"),))
+
+
+def test_an_in_place_edit_on_a_coarse_clock_is_not_missed(tmp_path: Path) -> None:
+    """재리뷰 8: 수정 시각이 초 단위로 거친 파일 시스템에서도 같은 크기 제자리 수정을 놓치지 않는다.
+    """
+    path = tmp_path / ".env"
+    path.write_text("A=1\n", encoding="utf-8")
+    whole_second = 1_700_000_000 * 1_000_000_000
+    os.utime(path, ns=(whole_second, whole_second))
+    file = CredentialsEnvFile(path)
+    assert file.read() == {"A": "1"}
+
+    with path.open("r+", encoding="utf-8") as stream:
+        stream.write("A=2\n")
+    os.utime(path, ns=(whole_second, whole_second))
+
+    assert file.read() == {"A": "2"}
+
+
+def test_unknown_kind_message_lists_the_supported_kinds(tmp_path: Path) -> None:
+    """SoT 4: 고칠 값 목록은 지원하는 공급자 종류에서 만든다."""
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "STRATEGY_WORKBENCH_AI_1_ID=p1\n"
+        "STRATEGY_WORKBENCH_AI_1_KIND=gemini\n"
+        "STRATEGY_WORKBENCH_AI_1_MODEL=m\n"
+        "STRATEGY_WORKBENCH_AI_1_CREATED_AT=2026-10-24T05:00:00+00:00\n",
+        encoding="utf-8",
+    )
+    app = build_http_app(assistant=_settings(tmp_path, env_path))
+    with TestClient(app) as client:
+        body = client.get("/api/v1/settings/credentials-file").json()
+
+    kinds = " 또는 ".join(kind.value for kind in ProviderKind)
+    assert body["problems"][0]["message"].startswith(
+        f"AI 공급자 1번 항목의 종류를 알 수 없습니다. {kinds}로 고치세요"
+    )

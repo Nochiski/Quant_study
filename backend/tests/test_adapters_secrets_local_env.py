@@ -33,11 +33,21 @@ def test_reads_only_the_named_values_with_quotes_and_inline_comments(tmp_path: P
     }
 
 
-def test_one_parser_with_the_credentials_file_strips_bom_and_unescapes(tmp_path: Path) -> None:
-    """코드 리뷰 7: 저장 파일과 같은 파서다. BOM을 떼고, 큰따옴표 안 이스케이프를 푼다."""
+def test_server_env_keeps_the_old_meaning_quotes_only_no_escapes(tmp_path: Path) -> None:
+    """재리뷰 6: S07 서버 `.env`는 예전처럼 감싼 따옴표만 벗기고 이스케이프를 풀지 않는다.
+
+    BOM은 떼어 첫 줄 이름을 알아본다. 줄은 `\\n`·`\\r\\n`으로만 나눈다.
+    """
     env = tmp_path / ".env"
-    env.write_bytes(b'\xef\xbb\xbfFAKE_APP_KEY=fake-app-0123\r\nFAKE_SECRET="a\\"b"\r\n')
-    assert read_env_values(env, {"FAKE_APP_KEY", "FAKE_SECRET"}) == {
+    env.write_bytes(
+        b"\xef\xbb\xbfFAKE_APP_KEY=fake-app-0123\r\n"
+        b'FAKE_SECRET="a\\"b"\r\n'
+        b'FAKE_TOKEN="x\\ny"\r\n'
+        b"FAKE_NOTE=one\x0btwo\n"
+    )
+    assert read_env_values(env, {"FAKE_APP_KEY", "FAKE_SECRET", "FAKE_TOKEN", "FAKE_NOTE"}) == {
         "FAKE_APP_KEY": "fake-app-0123",
-        "FAKE_SECRET": 'a"b',
+        "FAKE_SECRET": "a\\",
+        "FAKE_TOKEN": "x\\ny",
+        "FAKE_NOTE": "one\x0btwo",
     }

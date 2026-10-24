@@ -18,24 +18,32 @@
 
 from __future__ import annotations
 
-import getpass
 import json
 import os
-import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from threading import RLock
-from typing import TypeAlias
 
 from strategy_workbench.application.assistant_chat.facade.ports import (
     ProviderSecretMissingError,
 )
 
 from ._errors import SecretStoreStorageError
-from ._private_file import atomic_write_restricted, errno_name
+from ._private_file import (
+    ICACLS_OUTPUT_ENCODING,
+    CommandRunner,
+    atomic_write_restricted,
+    default_windows_account,
+    errno_name,
+    icacls_command,
+    restrict_owner_only,
+    run_icacls,
+    windows_account_name,
+)
 
 __all__ = [
+    "ICACLS_OUTPUT_ENCODING",
     "CommandRunner",
     "LocalFileProviderSecretStore",
     "SECRETS_DIRECTORY_NAME",
@@ -50,8 +58,6 @@ __all__ = [
 
 SECRETS_DIRECTORY_NAME = "quant-workbench"
 SECRETS_FILE_NAME = "secrets.json"
-
-CommandRunner: TypeAlias = Callable[[Sequence[str]], None]
 
 
 def resolve_default_secrets_path(*, platform: str, appdata: str | None, home: Path) -> Path:
@@ -78,70 +84,6 @@ def default_secrets_path() -> Path:
     return resolve_default_secrets_path(
         platform=sys.platform, appdata=os.environ.get("APPDATA"), home=Path.home()
     )
-
-
-def windows_account_name(*, userdomain: str | None, username: str | None, fallback: str) -> str:
-    """`icacls`에 넘길 계정 이름(순수 함수). 도메인이 있으면 `DOMAIN\\user`로 한정한다.
-
-    도메인 가입 장비에서 계정 이름만 주면 `icacls`가 로컬 계정 중에서 찾다 실패해 `put`이 통째로
-    깨진다. 로컬 계정뿐인 장비에서는 `%USERDOMAIN%`이 장비 이름이라 그대로도 해석된다.
-    """
-    if username and userdomain:
-        return f"{userdomain}\\{username}"
-    return username or fallback
-
-
-def default_windows_account() -> str:
-    """현재 프로세스의 OS 계정 값으로 위 계산을 돌린다."""
-    return windows_account_name(
-        userdomain=os.environ.get("USERDOMAIN"),
-        username=os.environ.get("USERNAME"),
-        fallback=getpass.getuser(),
-    )
-
-
-# `icacls` 는 콘솔 코드 페이지(기본은 시스템 OEM)로 출력한다. 로캘이나 UTF-8 모드로 읽으면 디코딩이
-# 실패해 stderr 가 None 이 되고, 그 뒤 처리의 예외가 원래 권한 오류를 가린다. 콘솔 코드 페이지를
-# 바꾼 환경(`chcp`)에서는 OEM 과 다를 수 있으므로 못 읽는 바이트는 바꿔 넣는다.
-ICACLS_OUTPUT_ENCODING: str | None = "oem" if sys.platform == "win32" else None
-
-
-def icacls_command(path: Path, *, account: str) -> tuple[str, ...]:
-    """상속을 끊고 `account`에만 전체 권한을 주는 `icacls` 인자."""
-    return ("icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:F")
-
-
-def run_icacls(command: Sequence[str]) -> None:
-    """`icacls`를 돌리고 실패하면 저장 오류로 바꾼다.
-
-    권한 설정이 조용히 실패하면 키가 상속된 ACL로 남는다. 실패는 반드시 쓰기 전체를 되돌린다.
-
-    메시지에는 명령 배열도 `stderr`도 싣지 않는다. 둘 다 비밀 파일 경로를 그대로 담는다.
-    """
-    try:
-        # shell을 거치지 않고 고정된 인자 배열만 넘긴다. 경로는 인자라 인용 문제가 없다.
-        completed = subprocess.run(
-            list(command),
-            capture_output=True,
-            text=True,
-            encoding=ICACLS_OUTPUT_ENCODING,
-            errors="replace",
-            check=False,
-        )
-    except OSError as error:
-        raise SecretStoreStorageError(
-            f"could not run the ACL command — operation=icacls errno={_errno_name(error)}"
-        ) from error
-    if completed.returncode != 0:
-        raise SecretStoreStorageError(
-            "could not restrict the secrets file ACL — "
-            f"operation=icacls returncode={completed.returncode} "
-            f"stderr_bytes={len(completed.stderr)}"
-        )
-
-
-# 같은 패키지의 다른 파일이 이 이름으로 불러 쓴다.
-_errno_name = errno_name
 
 
 class LocalFileProviderSecretStore:
@@ -213,7 +155,7 @@ class LocalFileProviderSecretStore:
         except OSError as error:
             raise SecretStoreStorageError(
                 f"could not read the provider secrets file — operation=read "
-                f"errno={_errno_name(error)}",
+                f"errno={errno_name(error)}",
                 path=self._path,
             ) from error
         try:
@@ -252,8 +194,6 @@ class LocalFileProviderSecretStore:
         )
 
     def _restrict(self, path: Path) -> None:
-        if self._platform == "win32":
-            account = self._account or default_windows_account()
-            self._run_command(icacls_command(path, account=account))
-            return
-        os.chmod(path, 0o600)
+        restrict_owner_only(
+            path, platform=self._platform, run_command=self._run_command, account=self._account
+        )

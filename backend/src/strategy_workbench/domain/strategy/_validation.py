@@ -197,10 +197,13 @@ def _eligibility_rule_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
                 f"known={[member.value for member in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS]}"
             )
         if not satisfied:
+            # 사용자 대면 문장이다. 재현 값(지금 값)은 사람 말로 문장 안에 남기고, 어느 규칙인지는
+            # 진단 pointer(`eligibility.rules.<i>.value`)가 짚으므로 field_id 원문을
+            # 덧붙이지 않는다.
             yield semantic_issue(
                 "strategy.eligibility.rule_value",
                 path,
-                f"{expectation}: got={rule.value!r} field_id={rule.field_id!r}",
+                f"{expectation}. 지금 값은 {rule.value:g}입니다.",
             )
 
 

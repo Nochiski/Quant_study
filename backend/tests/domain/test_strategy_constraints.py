@@ -356,6 +356,45 @@ def test_out_of_range_cross_sectional_values_are_a_validation_error(
 
 
 @pytest.mark.parametrize(
+    ("operator", "value", "message"),
+    [
+        (
+            EligibilityOperator.TOP_PERCENT,
+            0.0,
+            "상위 비율은 0보다 크고 1 이하인 비율이어야 합니다(20%는 0.2). 지금 값은 0입니다.",
+        ),
+        (
+            EligibilityOperator.TOP_PERCENT,
+            20.0,
+            "상위 비율은 0보다 크고 1 이하인 비율이어야 합니다(20%는 0.2). 지금 값은 20입니다.",
+        ),
+        (
+            EligibilityOperator.TOP_COUNT,
+            2.5,
+            "상위 개수는 1 이상의 정수여야 합니다. 지금 값은 2.5입니다.",
+        ),
+    ],
+)
+def test_out_of_range_cross_sectional_values_speak_plain_korean(
+    operator: EligibilityOperator, value: float, message: str
+) -> None:
+    """사용자에게 그대로 보이는 문장이다. 지금 값은 사람 말로 남기고 `got=`·`field_id=` 원문은
+    싣지 않는다 — 어느 규칙인지는 진단 pointer 가 짚는다(US-DM-13 마법사 유니버스 단계)."""
+    validation = validate_strategy(
+        replace(
+            _template(),
+            eligibility=EligibilityStep((EligibilityRule("price.turnover", operator, value),)),
+        )
+    )
+
+    [issue] = [
+        issue for issue in validation.issues if issue.code == "strategy.eligibility.rule_value"
+    ]
+    assert issue.message == message
+    assert "got=" not in issue.message and "field_id=" not in issue.message
+
+
+@pytest.mark.parametrize(
     ("operator", "value"),
     [
         (EligibilityOperator.TOP_PERCENT, 0.2),

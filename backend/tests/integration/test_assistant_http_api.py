@@ -846,6 +846,7 @@ _DECLARED_ASSISTANT_CODES = frozenset(
         "assistant.probe_failed",
         "assistant.base_url_rejected",
         "assistant.provider_secret_missing",
+        "assistant.storage_unavailable",
         "assistant.document_ref_invalid",
         "assistant.result_unavailable",
         "assistant.turn_context_mismatch",

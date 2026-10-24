@@ -28,7 +28,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import RLock, get_ident
+from threading import RLock
 from typing import Literal, TypeVar
 
 from ._env import (
@@ -68,7 +68,8 @@ _IMPORTED_HEADER = "Quant Workbench 예전 저장 이전 기록 — 지우면 �
 AUTO_TRADING_ENV_FILE_NAME = ".env"
 
 _LOCK_SUFFIX = ".lock"
-_UPDATE_ATTEMPTS = 5
+# 읽기 캐시를 믿는 시간. 같은 초 안의 제자리 수정도 이 시간이 지나면 다시 읽힌다(3차 리뷰 8).
+_READ_CACHE_SECONDS = 1.0
 _WINDOWS_LOCK_ATTEMPTS = 12
 # `msvcrt.locking`이 "남이 잡고 있다"로 실패할 때의 errno. 윈도우의
 # `EDEADLOCK`은 POSIX `EDEADLK`와 같은 값이다.
@@ -146,13 +147,13 @@ def _windows_documents() -> str | None:
         raw = UUID(_FOLDERID_DOCUMENTS).bytes_le
         guid = _Guid.from_buffer_copy(raw)
         buffer = ctypes.c_wchar_p()
-        shell32 = ctypes.windll.shell32  # pyright: ignore[reportAttributeAccessIssue]  # 윈도우 전용 속성
+        shell32 = ctypes.windll.shell32  # pyright: ignore[reportAttributeAccessIssue]  # reason: 윈도우 전용 속성
         if shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(buffer)) != 0:
             return None
         try:
             return buffer.value
         finally:
-            ctypes.windll.ole32.CoTaskMemFree(buffer)  # pyright: ignore[reportAttributeAccessIssue]  # 윈도우 전용
+            ctypes.windll.ole32.CoTaskMemFree(buffer)  # pyright: ignore[reportAttributeAccessIssue]  # reason: 윈도우 전용 속성
     except (OSError, AttributeError, ValueError):
         return None
 
@@ -180,6 +181,7 @@ class _Snapshot:
     text: str
     bom: bool
     newline: str
+    read_at: float = 0.0
 
 
 class CredentialsEnvFile:
@@ -213,17 +215,6 @@ class CredentialsEnvFile:
     @property
     def path(self) -> Path:
         return self._path
-
-    @property
-    def lock(self) -> _FileLock:
-        """읽고-고치고-쓰는 저장소가 한 번에 잡는 잠금(리뷰 4).
-
-        스레드 잠금과 OS 파일 잠금(옆의 `.env.lock`)을 함께 잡는다. 서버와 S07 명령줄처럼 다른
-        프로세스가 같은 파일을 동시에 고쳐도 한쪽 쓰기가 사라지지 않는다. 같은 스레드는 다시 들어갈
-        수 있고, OS 잠금은 가장 바깥에서 한 번만 잡는다. 폴더가 아직 없으면 실제로 쓸 때 잡는다
-        — 고칠 게 없는 호출이 폴더와 잠금 파일을 만들지 않게(리뷰 6).
-        """
-        return self._lock
 
     def exists(self) -> bool:
         return self._path.exists()
@@ -266,7 +257,8 @@ class CredentialsEnvFile:
         `entries`를 쓴다.
 
         `entries`가 비면 묶음을 통째로 지운다. 묶음이 처음이면 파일 끝에 빈 줄 하나를 두고 붙인다.
-        결과가 지금 파일과 같으면 쓰지 않는다(없는 파일에서 지우기도 아무것도 만들지 않는다).
+        결과가 지금 파일과 같으면 쓰지 않고 잠금도 잡지 않는다 — 없는 파일에서 지우기가 폴더를
+        만들지 않는다(리뷰 6).
         """
         for name, _ in entries:
             if not name.startswith(prefix) or not ENV_NAME.fullmatch(name):
@@ -274,52 +266,42 @@ class CredentialsEnvFile:
                     f"entry name is outside its group — name={name!r} prefix={prefix!r}"
                 )
         header_line = f"# {header}"
-        with self._lock:
-            while True:
-                # 쓰기 경로는 캐시를 쓰지 않고 늘 새로 읽는다(재리뷰 8).
-                snapshot = self._read(fresh=True)
-                body = _merged(snapshot, prefix, header_line, entries)
-                if body == snapshot.text or (snapshot.key is None and not body):
-                    return
-                if self._lock.ensure_os_lock():
-                    # 폴더가 없어 OS 잠금을 미뤘다가 지금 잡았다. 그 사이
-                    # 다른 프로세스가 먼저 썼을 수
-                    # 있으니 다시 읽어 확인한다(재리뷰 1).
-                    again = self._read(fresh=True)
-                    if (again.key is None) != (snapshot.key is None) or again.text != snapshot.text:
-                        if self._lock.depth > 1:
-                            # 바깥 읽고-고치고-쓰기(`update`)가 옛 내용으로 계산했다. 처음부터 다시.
-                            raise _StaleRead
-                        continue
-                # 원래 파일의 BOM과 줄바꿈(CRLF/LF)을 그대로 둔다(리뷰 5).
-                atomic_write_restricted(
-                    self._path,
-                    ("\ufeff" if snapshot.bom and body else "") + body,
-                    platform=self._platform,
-                    restrict=self._restrict,
-                    label=_LABEL,
-                    temporary_prefix=".env-",
-                )
-                self._snapshot = None
+        if self._unchanged(prefix, header_line, entries):
+            return
+
+        def write() -> None:
+            # 잠금 안에서 늘 새로 읽어 다시 계산한다(재리뷰 8).
+            snapshot = self._read(fresh=True)
+            body = _merged(snapshot, prefix, header_line, entries)
+            if body == snapshot.text or (snapshot.key is None and not body):
                 return
+            # 원래 파일의 BOM과 줄바꿈(CRLF/LF)을 그대로 둔다(리뷰 5).
+            atomic_write_restricted(
+                self._path,
+                ("\ufeff" if snapshot.bom and body else "") + body,
+                platform=self._platform,
+                restrict=self._restrict,
+                label=_LABEL,
+                temporary_prefix=".env-",
+            )
+            self._snapshot = None
+
+        self.update(write)
 
     def update(self, operation: Callable[[], _T]) -> _T:
-        """읽고-고치고-쓰기 한 번. 저장소는 여러 줄을 읽어 계산한 뒤 쓰는 일을 이 안에서 한다.
+        """읽고-고치고-쓰기 한 번. 들어가자마자 OS 파일 잠금을 잡는다(없으면 폴더를 만든다).
 
-        폴더가 없던 첫 쓰기에서 다른 프로세스가 먼저 쓴 것을 알게 되면 `operation`을 처음부터 다시
-        돌린다(재리뷰 1). 그때는 폴더가 생겨 들어가자마자 OS 잠금을 잡으므로 두 번이면 끝난다.
+        잠금은 다시 들어갈 수 있어 저장소의 `update` 안에서 `replace_group`을 불러도 된다. 고칠 게
+        없는 호출은 이 함수를 부르지 않는다 — 폴더를 만들지 않으려면
+        부르기 전에 판단한다(3차 리뷰 2).
         """
-        for _ in range(_UPDATE_ATTEMPTS):
-            try:
-                with self._lock:
-                    return operation()
-            except _StaleRead:
-                continue
-        raise SecretStoreStorageError(
-            f"could not update the {_LABEL} — operation=update attempts={_UPDATE_ATTEMPTS}",
-            path=self._path,
-            reason="unreadable",
-        )
+        with self._lock:
+            return operation()
+
+    def _unchanged(self, prefix: str, header_line: str, entries: Sequence[tuple[str, str]]) -> bool:
+        snapshot = self._read(fresh=True)
+        body = _merged(snapshot, prefix, header_line, entries)
+        return body == snapshot.text or (snapshot.key is None and not body)
 
     # -- 파일 IO -----------------------------------------------------------------------------
 
@@ -341,7 +323,13 @@ class CredentialsEnvFile:
         key = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino)
         trusted = stat.st_ino != 0 and stat.st_mtime_ns % 1_000_000_000 != 0
         cached = self._snapshot
-        if not fresh and trusted and cached is not None and cached.key == key:
+        if (
+            not fresh
+            and trusted
+            and cached is not None
+            and cached.key == key
+            and time.monotonic() - cached.read_at < _READ_CACHE_SECONDS
+        ):
             return cached
         try:
             raw = self._path.read_bytes()
@@ -359,7 +347,7 @@ class CredentialsEnvFile:
                 path=self._path,
                 reason="not_utf8",
             ) from error
-        snapshot = _Snapshot(key, text, bom, "\r\n" if "\r\n" in text else "\n")
+        snapshot = _Snapshot(key, text, bom, "\r\n" if "\r\n" in text else "\n", time.monotonic())
         self._snapshot = snapshot if trusted else None
         return snapshot
 
@@ -378,12 +366,9 @@ class CredentialsEnvFile:
     def _lock_path(self) -> Path:
         return self._path.parent / (self._path.name + _LOCK_SUFFIX)
 
-    def _acquire_os_lock(self, *, create: bool) -> int | None:
-        """OS 잠금을 잡고 그 파일 기술자를 돌려준다. 폴더가 없고 `create`가 아니면 None."""
-        if not self._path.parent.exists():
-            if not create:
-                return None
-            prepare_private_directory(self._path, platform=self._platform, label=_LABEL)
+    def _acquire_os_lock(self) -> int:
+        """OS 잠금을 잡고 그 파일 기술자를 돌려준다. 폴더가 없으면 만든다."""
+        prepare_private_directory(self._path, platform=self._platform, label=_LABEL)
         try:
             descriptor = os.open(self._lock_path(), os.O_RDWR | os.O_CREAT, 0o600)
         except OSError as error:
@@ -403,7 +388,7 @@ class CredentialsEnvFile:
                 os.lseek(descriptor, 0, os.SEEK_SET)
                 for attempt in range(_WINDOWS_LOCK_ATTEMPTS):
                     try:
-                        msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)  # pyright: ignore[reportAttributeAccessIssue]  # 윈도우 전용
+                        msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)  # pyright: ignore[reportAttributeAccessIssue]  # reason: 윈도우 전용 속성
                         break
                     except OSError as error:
                         if error.errno not in _WINDOWS_LOCK_BUSY:
@@ -442,7 +427,7 @@ class CredentialsEnvFile:
 
                 with suppress(OSError):
                     os.lseek(descriptor, 0, os.SEEK_SET)
-                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)  # pyright: ignore[reportAttributeAccessIssue]  # 윈도우 전용
+                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)  # pyright: ignore[reportAttributeAccessIssue]  # reason: 윈도우 전용 속성
             else:
                 import fcntl
 
@@ -456,56 +441,34 @@ class _FileLock:
 
     잠금은 `.env` 옆 `.env.lock` 파일에 건다. `.env` 자체에 걸면 `os.replace`가 파일을 바꿔치기해
     다음 사람이 다른 inode를 잠그게 된다. POSIX는 `fcntl.flock`, 윈도우는 `msvcrt.locking`이다.
-
-    폴더가 아직 없으면 들어갈 때는 OS 잠금을 미루고(고칠 게 없는 호출이 폴더를 만들지 않게),
-    실제로 쓰기 직전(`ensure_os_lock`)에 폴더를 만들며 잡는다. 잡은 뒤에는 `replace_group`이 다시
-    읽어, 그 사이 다른 프로세스가 쓴 것이 있으면 다시 계산한다(재리뷰 1).
+    가장 바깥에서 들어갈 때 바로 잡는다(필요하면 폴더를 만든다).
     """
 
     def __init__(self, owner: CredentialsEnvFile) -> None:
         self._owner = owner
         self._thread_lock = RLock()
         self._depth = 0
-        self._holder: int | None = None
         self._descriptor: int | None = None
 
     def __enter__(self) -> _FileLock:
         self._thread_lock.acquire()
         try:
             if self._depth == 0:
-                self._holder = get_ident()
-                self._descriptor = self._owner._acquire_os_lock(create=False)  # noqa: SLF001 — reason: 짝 클래스
+                self._descriptor = self._owner._acquire_os_lock()  # noqa: SLF001 — reason: 짝 클래스
             self._depth += 1
         except BaseException:
             self._thread_lock.release()
             raise
         return self
 
-    @property
-    def depth(self) -> int:
-        return self._depth
-
-    def ensure_os_lock(self) -> bool:
-        """쓰기 직전에 부른다. 아직 OS 잠금이 없으면 폴더를 만들며 잡고 True를 돌려준다."""
-        if self._depth > 0 and self._descriptor is None:
-            self._descriptor = self._owner._acquire_os_lock(create=True)  # noqa: SLF001 — reason: 짝 클래스
-            return True
-        return False
-
     def __exit__(self, *_: object) -> None:
         try:
             self._depth -= 1
-            if self._depth == 0:
-                self._holder = None
-                if self._descriptor is not None:
-                    descriptor, self._descriptor = self._descriptor, None
-                    self._owner._release_os_lock(descriptor)  # noqa: SLF001 — reason: 짝 클래스
+            if self._depth == 0 and self._descriptor is not None:
+                descriptor, self._descriptor = self._descriptor, None
+                self._owner._release_os_lock(descriptor)  # noqa: SLF001 — reason: 짝 클래스
         finally:
             self._thread_lock.release()
-
-
-class _StaleRead(Exception):
-    """미뤘던 OS 잠금을 잡고 보니 바깥 계산이 옛 내용에 기대고 있었다. `update`가 다시 돌린다."""
 
 
 def _merged(

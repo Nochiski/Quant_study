@@ -27,6 +27,7 @@ from fastapi.testclient import TestClient
 
 from strategy_workbench.adapters.outbound.assistant_sqlite.facade.repository import (
     AssistantDatabase,
+    AssistantStorageError,
     SQLiteProviderProfileRepository,
 )
 from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import (
@@ -45,12 +46,16 @@ from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
 from strategy_workbench.application.assistant_chat.facade.ports import (
     ProviderProfileNotFoundError,
     ProviderSecretMissingError,
+    ProviderStorageUnavailableError,
 )
 from strategy_workbench.application.broker_connection.facade.connection import (
     BrokerCredentials,
     BrokerCredentialsUnreadableError,
 )
-from strategy_workbench.bootstrap._assistant import AssistantSettings
+from strategy_workbench.bootstrap._assistant import (
+    AssistantSettings,
+    scripted_provider_factories,
+)
 from strategy_workbench.bootstrap._secrets import (
     migrate_kiwoom_credentials,
     migrate_provider_profiles,
@@ -267,7 +272,7 @@ def test_a_non_utf8_file_reads_as_no_providers_and_refuses_to_overwrite(tmp_path
 
     assert store.list() == ()
     assert file.file_problem() == EnvProblem("file", "not_utf8")
-    with pytest.raises(SecretStoreStorageError):
+    with pytest.raises(ProviderStorageUnavailableError):
         store.add(_profile("p1", active=True))
     assert path.read_bytes() == original
 
@@ -567,10 +572,13 @@ def test_two_writers_on_separate_handles_do_not_lose_each_others_lines(tmp_path:
 
     def write(file: CredentialsEnvFile, prefix: str) -> None:
         for number in range(30):
-            with file.lock:
+
+            def step(number: int = number) -> None:
                 current = dict(file.group(prefix))
                 current[f"{prefix}{number}"] = str(number)
                 file.replace_group(prefix, prefix, sorted(current.items()))
+
+            file.update(step)
 
     threads = [
         threading.Thread(target=write, args=(left, "LEFT_")),
@@ -647,28 +655,54 @@ def test_listing_with_keys_reads_the_file_once(
 # -- 재리뷰 고침 --------------------------------------------------------------------------------
 
 
-def test_a_first_write_racing_another_process_reruns_and_keeps_both(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """재리뷰 1: 폴더가 없던 첫 쓰기 사이에 다른 프로세스가 먼저 쓰면 다시 계산해 둘 다 남긴다."""
+def test_first_writes_racing_on_a_missing_folder_keep_both_profiles(tmp_path: Path) -> None:
+    """3차 리뷰 2: 폴더가 없을 때 동시에 시작한 첫 쓰기끼리도 서로를 지우지 않는다.
+
+    `update`가 들어가자마자 OS 잠금을 잡으므로(필요하면 폴더를 만든다) 두 번째 쓰기는 첫 쓰기가
+    남긴 내용을 읽고 계산한다. 다른 객체 둘은 다른 프로세스와 같은 조건이다.
+    """
+    for attempt in range(10):
+        path = tmp_path / f"run-{attempt}" / "auto_trading" / ".env"
+        stores = [EnvFileProviderStore(CredentialsEnvFile(path)) for _ in range(2)]
+        barrier = threading.Barrier(2)
+
+        def add(
+            store: EnvFileProviderStore,
+            profile_id: str,
+            barrier: threading.Barrier = barrier,
+        ) -> None:
+            barrier.wait()
+            store.add(_profile(profile_id))
+
+        threads = [
+            threading.Thread(target=add, args=(stores[0], "p1")),
+            threading.Thread(target=add, args=(stores[1], "p2")),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        ids = sorted(
+            item.profile_id for item in EnvFileProviderStore(CredentialsEnvFile(path)).list()
+        )
+        assert ids == ["p1", "p2"]
+
+
+def test_nested_updates_share_one_lock_and_see_the_outer_decision(tmp_path: Path) -> None:
+    """3차 리뷰 2: 바깥 `update` 안의 쓰기는 같은 잠금을 다시 들어가 바깥 결정과 어긋나지 않는다."""
     path = tmp_path / "auto_trading" / ".env"
-    other = CredentialsEnvFile(path)
-    mine = CredentialsEnvFile(path)
-    lock = mine.lock
-    original = lock.ensure_os_lock
-    raced = False
+    file = CredentialsEnvFile(path)
+    store = EnvFileProviderStore(file)
 
-    def ensure_after_the_other_writer() -> bool:
-        nonlocal raced
-        if not raced:
-            raced = True
-            EnvFileProviderStore(other).add(_profile("p1", active=True))
-        return original()
+    def outer() -> None:
+        store.add(_profile("p1", active=True))
+        store.secrets().put("p1", SECRET)
+        assert [item.profile_id for item in store.list()] == ["p1"]
 
-    monkeypatch.setattr(lock, "ensure_os_lock", ensure_after_the_other_writer)
-    EnvFileProviderStore(mine).add(_profile("p2"))
+    file.update(outer)
 
-    assert [item.profile_id for item in EnvFileProviderStore(other).list()] == ["p1", "p2"]
+    assert store.secrets().get("p1") == SECRET
 
 
 def test_an_active_marker_on_a_broken_entry_is_kept(tmp_path: Path) -> None:
@@ -782,8 +816,7 @@ def test_windows_lock_gives_up_with_the_errno_name(
 
 
 def test_an_in_place_edit_on_a_coarse_clock_is_not_missed(tmp_path: Path) -> None:
-    """재리뷰 8: 수정 시각이 초 단위로 거친 파일 시스템에서도 같은 크기 제자리 수정을 놓치지 않는다.
-    """
+    """재리뷰 8: 수정 시각이 초 단위로 거친 파일 시스템에서도 제자리 수정을 놓치지 않는다."""
     path = tmp_path / ".env"
     path.write_text("A=1\n", encoding="utf-8")
     whole_second = 1_700_000_000 * 1_000_000_000
@@ -816,3 +849,184 @@ def test_unknown_kind_message_lists_the_supported_kinds(tmp_path: Path) -> None:
     assert body["problems"][0]["message"].startswith(
         f"AI 공급자 1번 항목의 종류를 알 수 없습니다. {kinds}로 고치세요"
     )
+
+
+# -- 3차 리뷰 고침 ------------------------------------------------------------------------------
+
+
+def _scripted_settings(tmp_path: Path, env_path: Path) -> AssistantSettings:
+    return AssistantSettings(
+        db_path=tmp_path / "assistant.sqlite3",
+        secrets_path=tmp_path / "secrets.json",
+        credentials_env_path=env_path,
+        provider_factories=scripted_provider_factories(),
+    )
+
+
+def test_a_broken_legacy_database_does_not_stop_the_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """3차 리뷰 1: 예전 DB·키 파일을 읽다 무엇이 실패해도 이전만 건너뛰고 서버는 뜬다."""
+
+    def broken(self: SQLiteProviderProfileRepository) -> tuple[ProviderProfile, ...]:
+        del self
+        raise AssistantStorageError("stored provider profile has an unknown kind — kind='x'")
+
+    def broken_broker(self: LocalFileBrokerCredentialStore) -> BrokerCredentials | None:
+        del self
+        raise RuntimeError("legacy store exploded")
+
+    monkeypatch.setattr(SQLiteProviderProfileRepository, "list", broken)
+    monkeypatch.setattr(LocalFileBrokerCredentialStore, "load", broken_broker)
+    env_path = tmp_path / "auto_trading" / ".env"
+
+    app = build_http_app(assistant=_settings(tmp_path, env_path))
+    with TestClient(app) as client:
+        assert client.get("/api/v1/assistant/providers").status_code == 200
+        assert client.get("/api/v1/broker-connections/kiwoom-mock").status_code == 200
+
+
+def test_starting_with_nothing_to_move_does_not_create_the_folder(tmp_path: Path) -> None:
+    """옮길 것이 없으면 기동이 문서 폴더에 아무것도 만들지 않는다(리뷰 6 유지)."""
+    env_path = tmp_path / "Documents" / "auto_trading" / ".env"
+
+    app = build_http_app(assistant=_settings(tmp_path, env_path))
+    with TestClient(app) as client:
+        client.get("/api/v1/settings/credentials-file")
+
+    assert not env_path.parent.exists()
+
+
+def test_kiwoom_save_on_an_unreadable_file_says_what_to_do(tmp_path: Path) -> None:
+    """3차 리뷰 3: 파일 전체를 못 읽으면 저장은 500이 아니라 고칠 방법을 말하는 422다."""
+    env_path = tmp_path / ".env"
+    env_path.write_bytes(b"\xff\xfe\n")
+    app = build_http_app(assistant=_settings(tmp_path, env_path))
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/v1/broker-connections/kiwoom-mock",
+            json={
+                "app_key": "app-key-0123456789",
+                "secret_key": "secret-0123456789",
+                "account_number": "5012345678",
+            },
+        )
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "broker.storage_unavailable"
+    assert "파일을 고치거나 지운 뒤" in detail["message"]
+    assert "app-key-0123456789" not in response.text
+    assert env_path.read_bytes() == b"\xff\xfe\n"
+
+
+def test_provider_create_on_an_unreadable_file_is_refused_before_the_probe(
+    tmp_path: Path,
+) -> None:
+    """3차 리뷰 4: 쓸 수 없는 파일이면 연결 테스트 전에 코드 있는 422로 거절한다."""
+    env_path = tmp_path / ".env"
+    env_path.write_bytes(b"\xff\xfe\n")
+    app = build_http_app(assistant=_scripted_settings(tmp_path, env_path))
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/assistant/providers",
+            json={"kind": "anthropic", "label": "내 Claude", "secret": SECRET},
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "assistant.storage_unavailable"
+    assert SECRET not in response.text
+
+
+def test_create_reports_what_was_stored_when_the_active_marker_is_on_a_broken_entry(
+    tmp_path: Path,
+) -> None:
+    """3차 리뷰 5: 저장소가 새 항목을 비활성으로 넣었으면 응답도 비활성이다."""
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "STRATEGY_WORKBENCH_AI_ACTIVE=b1\n"
+        "STRATEGY_WORKBENCH_AI_1_ID=b1\n"
+        "STRATEGY_WORKBENCH_AI_1_KIND=anthropic\n",
+        encoding="utf-8",
+    )
+    app = build_http_app(assistant=_scripted_settings(tmp_path, env_path))
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/assistant/providers",
+            json={"kind": "anthropic", "label": "내 Claude", "secret": SECRET},
+        )
+    assert response.status_code == 201, response.text
+    assert response.json()["active"] is False
+
+
+def test_a_repeated_id_in_another_block_is_reported_and_kept(tmp_path: Path) -> None:
+    """3차 리뷰 6: 번호 블록 사이에 같은 id가 또 나오면 둘째부터 읽지 않고 알리며, 줄은 남긴다."""
+    path = tmp_path / ".env"
+    store = EnvFileProviderStore(CredentialsEnvFile(path))
+    store.add(_profile("p1", active=True))
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "STRATEGY_WORKBENCH_AI_7_ID=p1\n"
+            "STRATEGY_WORKBENCH_AI_7_KIND=openai\n"
+            "STRATEGY_WORKBENCH_AI_7_MODEL=other\n"
+            "STRATEGY_WORKBENCH_AI_7_CREATED_AT=2026-10-24T05:00:00+00:00\n"
+        )
+
+    assert [item.profile_id for item in store.list()] == ["p1"]
+    assert store.problems() == (
+        EnvProblem("ai", "duplicate_id", 7, ("STRATEGY_WORKBENCH_AI_7_ID",)),
+    )
+    store.add(_profile("p2"))
+    values = parse_env_text(path.read_text(encoding="utf-8"))
+    assert values["STRATEGY_WORKBENCH_AI_3_MODEL"] == "other"
+
+
+def test_raw_indexes_stay_apart_and_lowercase_extras_move_with_their_entry(
+    tmp_path: Path,
+) -> None:
+    """3차 리뷰 7: `_01_`과 `_1_`은 다른 항목이고, 소문자·숫자 접미어는 그 항목을 따라 옮겨진다."""
+    path = tmp_path / ".env"
+    lines = []
+    for raw, profile_id in (("1", "p1"), ("01", "p2")):
+        lines += [
+            f"STRATEGY_WORKBENCH_AI_{raw}_ID={profile_id}",
+            f"STRATEGY_WORKBENCH_AI_{raw}_KIND=anthropic",
+            f"STRATEGY_WORKBENCH_AI_{raw}_MODEL=m-{profile_id}",
+            f"STRATEGY_WORKBENCH_AI_{raw}_CREATED_AT=2026-10-24T05:00:00+00:00",
+        ]
+    lines.append("STRATEGY_WORKBENCH_AI_01_note2=두 번째 메모")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    store = EnvFileProviderStore(CredentialsEnvFile(path))
+
+    assert sorted(item.profile_id for item in store.list()) == ["p1", "p2"]
+    store.delete("p1")
+
+    values = parse_env_text(path.read_text(encoding="utf-8"))
+    assert values["STRATEGY_WORKBENCH_AI_1_ID"] == "p2"
+    assert values["STRATEGY_WORKBENCH_AI_1_note2"] == "두 번째 메모"
+
+
+def test_the_read_cache_expires_even_when_file_times_do_not_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """3차 리뷰 8: 시각·크기가 그대로인 제자리 수정도 읽은 지 1초가 지나면 반영된다."""
+    path = tmp_path / ".env"
+    path.write_text("A=1\n", encoding="utf-8")
+    file = CredentialsEnvFile(path)
+    clock = [1000.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    assert file.read() == {"A": "1"}
+    stat_before = path.stat()
+
+    with path.open("r+", encoding="utf-8") as stream:
+        stream.write("A=2\n")
+    os.utime(path, ns=(stat_before.st_atime_ns, stat_before.st_mtime_ns))
+    monkeypatch.setattr(
+        Path,
+        "stat",
+        lambda self, *, follow_symlinks=True: (
+            stat_before if self == path else os.stat(self, follow_symlinks=follow_symlinks)
+        ),
+    )
+
+    assert file.read() == {"A": "1"}  # 1초 안에는 같은 요청의 캐시
+    clock[0] += 1.5
+    assert file.read() == {"A": "2"}

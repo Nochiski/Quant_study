@@ -15,6 +15,7 @@ from __future__ import annotations
 from strategy_workbench.application.broker_connection.facade.connection import (
     BrokerCredentials,
     BrokerCredentialsUnreadableError,
+    BrokerCredentialsUnwritableError,
 )
 
 from ._env_file import CredentialsEnvFile, EnvProblem
@@ -85,6 +86,15 @@ class EnvFileBrokerCredentialStore:
         )
 
     def delete(self) -> None:
+        """지울 게 없으면 아무것도 하지 않는다(잠금·폴더 생성 없음, 리뷰 6)."""
+        try:
+            values = self._file.group(KIWOOM_MOCK_ENV_PREFIX)
+        except SecretStoreStorageError as error:
+            raise BrokerCredentialsUnwritableError(
+                f"credentials env file is unreadable — reason={error.reason}"
+            ) from error
+        if not any(name in values for name in KIWOOM_MOCK_ENV_NAMES):
+            return
         self._replace(())
 
     def _replace(self, ours: tuple[tuple[str, str], ...]) -> None:
@@ -101,4 +111,10 @@ class EnvFileBrokerCredentialStore:
             ]
             self._file.replace_group(KIWOOM_MOCK_ENV_PREFIX, _HEADER, (*ours, *extra))
 
-        self._file.update(run)
+        try:
+            self._file.update(run)
+        except SecretStoreStorageError as error:
+            # 다시 저장해도 고쳐지지 않는다. 파일을 고치거나 지워야 한다(3차 리뷰 3).
+            raise BrokerCredentialsUnwritableError(
+                f"credentials env file is not writable — reason={error.reason}"
+            ) from error

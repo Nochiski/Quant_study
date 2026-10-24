@@ -12,6 +12,7 @@ from typing import Protocol
 __all__ = [
     "BrokerConnectionProbe",
     "BrokerCredentialsUnreadableError",
+    "BrokerCredentialsUnwritableError",
     "BrokerCredentialStore",
     "BrokerCredentials",
     "ConnectionCheck",
@@ -30,6 +31,14 @@ class BrokerCredentials:
 
 class BrokerCredentialsUnreadableError(Exception):
     """저장된 항목이 있으나 읽을 수 없다(깨진 모양). 문장에 값은 싣지 않는다."""
+
+
+class BrokerCredentialsUnwritableError(Exception):
+    """저장 파일 자체를 읽거나 쓸 수 없어 저장·삭제를 하지 못했다(3차 리뷰 3).
+
+    다시 저장해도 고쳐지지 않는다. 사용자가 저장 파일을 고치거나 지워야
+    한다. 문장에 값·경로는 싣지 않는다.
+    """
 
 
 class BrokerCredentialStore(Protocol):

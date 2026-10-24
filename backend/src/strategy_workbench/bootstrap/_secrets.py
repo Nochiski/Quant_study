@@ -28,13 +28,11 @@ from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import 
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
     LocalFileBrokerCredentialStore,
     LocalFileProviderSecretStore,
-    SecretStoreStorageError,
     default_secrets_path,
 )
 from strategy_workbench.application.assistant_chat.facade.ports import ProviderSecretMissingError
 from strategy_workbench.application.broker_connection.facade.connection import (
     BrokerCredentialStore,
-    BrokerCredentialsUnreadableError,
 )
 from strategy_workbench.domain.assistant.facade.models import ProviderProfile
 
@@ -95,12 +93,8 @@ def migrate_provider_profiles(
     file = target.file
 
     def run() -> tuple[ProviderProfile, ...]:
-        """옮긴 프로파일. 옮기지 않았으면 빈 튜플."""
-        if file.imported(AI_IMPORT_NAME):
-            _warn_leftover_providers(legacy_profiles, legacy_secrets)
-            return ()
-        if file.file_problem() is not None:
-            logger.warning("credentials env file is unreadable; skipped moving providers")
+        """잠금 안에서 다시 판단하고 옮긴다. 옮긴 프로파일, 옮기지 않았으면 빈 튜플."""
+        if file.imported(AI_IMPORT_NAME) or file.file_problem() is not None:
             return ()
         if target.has_any():
             file.mark_imported(AI_IMPORT_NAME)
@@ -120,12 +114,20 @@ def migrate_provider_profiles(
         return found
 
     try:
+        # 할 일이 없으면 잠금(폴더 생성)까지 가지 않는다. 매 기동마다 문서 폴더를 만들지 않게 한다.
+        if file.imported(AI_IMPORT_NAME):
+            _warn_leftover_providers(legacy_profiles, legacy_secrets)
+            return 0
+        if file.file_problem() is not None:
+            logger.warning("credentials env file is unreadable; skipped moving providers")
+            return 0
+        if not target.has_any() and not legacy_profiles.list():
+            return 0
         profiles = file.update(run)
-    except SecretStoreStorageError as error:
+    except Exception as error:  # noqa: BLE001 — reason: 이전 실패는 무엇이든 기동을 막지 않는다(3차 리뷰 1)
         logger.warning(
-            "could not move legacy providers; left everything in place — error=%s reason=%s",
+            "could not move legacy providers; left everything in place — error=%s",
             type(error).__name__,
-            error.reason,
         )
         return 0
     if not profiles:
@@ -182,23 +184,15 @@ def migrate_kiwoom_credentials(
     file = target.file
 
     def run() -> bool:
-        if file.imported(KIWOOM_IMPORT_NAME):
-            _warn_leftover_kiwoom(legacy)
+        """잠금 안에서 다시 판단하고 옮긴다. 옮겼으면 True."""
+        if file.imported(KIWOOM_IMPORT_NAME) or file.file_problem() is not None:
             return False
-        if file.file_problem() is not None or target.problems():
-            logger.warning("credentials env file is unreadable; skipped moving kiwoom keys")
+        if target.problems():
             return False
         if target.load() is not None:
             file.mark_imported(KIWOOM_IMPORT_NAME)
             return False
-        try:
-            saved = legacy.load()
-        except BrokerCredentialsUnreadableError as error:
-            logger.warning(
-                "legacy kiwoom mock credentials are unreadable; skipped moving them — error=%s",
-                type(error).__name__,
-            )
-            return False
+        saved = legacy.load()
         if saved is None:
             return False
         target.save(saved)
@@ -206,9 +200,18 @@ def migrate_kiwoom_credentials(
         return True
 
     try:
+        # 할 일이 없으면 잠금(폴더 생성)까지 가지 않는다.
+        if file.imported(KIWOOM_IMPORT_NAME):
+            _warn_leftover_kiwoom(legacy)
+            return False
+        if file.file_problem() is not None or target.problems():
+            logger.warning("credentials env file is unreadable; skipped moving kiwoom keys")
+            return False
+        if target.load() is None and legacy.load() is None:
+            return False
         if not file.update(run):
             return False
-    except (SecretStoreStorageError, BrokerCredentialsUnreadableError) as error:
+    except Exception as error:  # noqa: BLE001 — reason: 이전 실패는 무엇이든 기동을 막지 않는다(3차 리뷰 1)
         logger.warning(
             "could not move legacy kiwoom keys; left everything in place — error=%s",
             type(error).__name__,

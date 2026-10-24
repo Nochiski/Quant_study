@@ -45,6 +45,9 @@ class InMemoryProviderProfileRepository:
     def __init__(self) -> None:
         self._profiles: list[ProviderProfile] = []
 
+    def ensure_writable(self) -> None:
+        """메모리 저장소는 늘 쓸 수 있다."""
+
     def list(self) -> tuple[ProviderProfile, ...]:
         return tuple(self._profiles)
 

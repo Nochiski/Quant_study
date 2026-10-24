@@ -23,13 +23,14 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
 from strategy_workbench.application.assistant_chat.facade.ports import (
     ProviderProfileNotFoundError,
     ProviderSecretMissingError,
+    ProviderStorageUnavailableError,
 )
 from strategy_workbench.domain.assistant.facade.models import ProviderKind, ProviderProfile
 
@@ -41,7 +42,9 @@ __all__ = ["AI_ENV_PREFIX", "AI_IMPORT_NAME", "EnvFileProviderSecrets", "EnvFile
 AI_ENV_PREFIX = "STRATEGY_WORKBENCH_AI_"
 _HEADER = "Quant Workbench AI 공급자 — 앱 설정 화면이 고칩니다"
 _ACTIVE = f"{AI_ENV_PREFIX}ACTIVE"
-_INDEXED = re.compile(rf"{AI_ENV_PREFIX}(\d+)_([A-Z_]+)")
+# 번호는 원문 문자열 그대로 묶는다(`_01_`과 `_1_`은 다른 항목, 3차 리뷰 7). 접미어는 우리가 모르는
+# 소문자·숫자도 그 항목에 붙여 다시 번호를 매길 때 함께 옮긴다.
+_INDEXED = re.compile(rf"{AI_ENV_PREFIX}(\d+)_([A-Za-z0-9_]+)")
 _FIELDS = ("ID", "KIND", "LABEL", "MODEL", "BASE_URL", "CREATED_AT", "API_KEY")
 _REQUIRED = ("ID", "KIND", "MODEL", "CREATED_AT")
 
@@ -102,6 +105,12 @@ class EnvFileProviderStore:
 
     # -- ProviderProfileRepository ------------------------------------------------------------
 
+    def ensure_writable(self) -> None:
+        """파일 전체를 못 읽으면 덮어쓰지 않으므로 쓸 수 없다고 미리 알린다(3차 리뷰 4)."""
+        problem = self._file.file_problem()
+        if problem is not None:
+            raise ProviderStorageUnavailableError(problem.reason)
+
     def list(self) -> tuple[ProviderProfile, ...]:
         return tuple(entry.profile for entry in self._readable_entries())
 
@@ -135,13 +144,15 @@ class EnvFileProviderStore:
                 loaded.broken_active,
             )
 
-        self._file.update(run)
+        self._mutate(run)
 
     def delete(self, profile_id: str) -> None:
         """없으면 `ProviderProfileNotFoundError`. 남은 키가 있으면 같이 지운다.
 
         주인 없는 키를 남기지 않는다.
         """
+        # 없는 항목이면 잠금(폴더 생성) 전에 알린다(리뷰 6).
+        self._find(self._readable_entries(), profile_id)
 
         def run() -> None:
             loaded = self._load()
@@ -153,9 +164,11 @@ class EnvFileProviderStore:
                 loaded.broken_active,
             )
 
-        self._file.update(run)
+        self._mutate(run)
 
     def set_active(self, profile_id: str) -> None:
+        self._find(self._readable_entries(), profile_id)
+
         def run() -> None:
             loaded = self._load()
             self._find(loaded.entries, profile_id)
@@ -172,7 +185,7 @@ class EnvFileProviderStore:
                 None,  # 사용자가 고른 활성이 읽지 못한 항목의 활성을 대신한다.
             )
 
-        self._file.update(run)
+        self._mutate(run)
 
     def import_profiles(self, entries: Sequence[tuple[ProviderProfile, str | None]]) -> None:
         """예전 저장소에서 옮겨 온 프로파일·키를 한 번의 쓰기로 넣는다. 묶음이 비어 있을 때만."""
@@ -190,7 +203,7 @@ class EnvFileProviderStore:
                 )
             self._write([_Entry(profile, secret) for profile, secret in entries], [], loaded.loose)
 
-        self._file.update(run)
+        self._mutate(run)
 
     def has_any(self) -> bool:
         """읽은 항목이든 읽지 못한 항목이든 하나라도 있나. 파일을 못 읽으면 예외다."""
@@ -206,6 +219,8 @@ class EnvFileProviderStore:
         raise ProviderSecretMissingError(profile_id)
 
     def put_secret(self, profile_id: str, secret: str) -> None:
+        self._find(self._readable_entries(), profile_id)
+
         def run() -> None:
             loaded = self._load()
             entry = self._find(loaded.entries, profile_id)
@@ -219,10 +234,15 @@ class EnvFileProviderStore:
                 loaded.broken_active,
             )
 
-        self._file.update(run)
+        self._mutate(run)
 
     def delete_secret(self, profile_id: str) -> None:
-        """멱등이다. 프로파일이 없거나 키가 없으면 아무것도 하지 않는다."""
+        """멱등이다. 프로파일이 없거나 키가 없으면 아무것도 하지 않는다(잠금도 잡지 않는다)."""
+        if not any(
+            item.profile.profile_id == profile_id and item.secret is not None
+            for item in self._readable_entries()
+        ):
+            return
 
         def run() -> None:
             loaded = self._load()
@@ -241,13 +261,22 @@ class EnvFileProviderStore:
                 loaded.broken_active,
             )
 
-        self._file.update(run)
+        self._mutate(run)
 
     def secrets(self) -> EnvFileProviderSecrets:
         """`ProviderSecretStore` 포트 모양(get·put·delete)으로 본 같은 저장소."""
         return EnvFileProviderSecrets(self)
 
     # -- 파일 ↔ 값 ----------------------------------------------------------------------------
+
+    def _mutate(self, run: Callable[[], None]) -> None:
+        """잠금 안에서 고친다. 파일 자체를 읽거나 쓸 수 없으면 포트 오류로 바꾼다(3차 리뷰 4)."""
+        try:
+            self._file.update(run)
+        except SecretStoreStorageError as error:
+            if error.reason is None:
+                raise
+            raise ProviderStorageUnavailableError(error.reason) from error
 
     def _readable_entries(self) -> list[_Entry]:
         """읽기 전용 조회. 파일 전체를 못 읽으면 공급자가 없는 것처럼 본다(채팅은 "공급자 없음")."""
@@ -259,7 +288,7 @@ class EnvFileProviderStore:
     def _load(self) -> _Loaded:
         values = self._file.group(AI_ENV_PREFIX)
         active = values.get(_ACTIVE)
-        grouped: dict[int, dict[str, str]] = {}
+        grouped: dict[str, dict[str, str]] = {}
         loose: list[tuple[str, str]] = []
         for name, value in values.items():
             matched = _INDEXED.fullmatch(name)
@@ -267,12 +296,14 @@ class EnvFileProviderStore:
                 if name != _ACTIVE:
                     loose.append((name, value))
                 continue
-            grouped.setdefault(int(matched.group(1)), {})[matched.group(2)] = value
+            grouped.setdefault(matched.group(1), {})[matched.group(2)] = value
         entries: list[_Entry] = []
         broken: list[dict[str, str]] = []
         problems: list[EnvProblem] = []
-        for index in sorted(grouped):
-            fields = grouped[index]
+        seen: set[str] = set()
+        for raw in sorted(grouped, key=lambda text: (int(text), text)):
+            fields = grouped[raw]
+            index = int(raw)
             missing = tuple(field for field in _REQUIRED if not fields.get(field))
             if missing:
                 broken.append(fields)
@@ -281,8 +312,16 @@ class EnvFileProviderStore:
                         "ai",
                         "incomplete",
                         index,
-                        tuple(f"{AI_ENV_PREFIX}{index}_{field}" for field in missing),
+                        tuple(f"{AI_ENV_PREFIX}{raw}_{field}" for field in missing),
                     )
+                )
+                continue
+            if fields["ID"] in seen:
+                # 같은 id가 두 번이면 둘째부터 읽지 않는다. 어느 쪽을 지울지
+                # 고를 수 없다(3차 리뷰 6).
+                broken.append(fields)
+                problems.append(
+                    EnvProblem("ai", "duplicate_id", index, (f"{AI_ENV_PREFIX}{raw}_ID",))
                 )
                 continue
             try:
@@ -295,14 +334,17 @@ class EnvFileProviderStore:
                         "ai",
                         error.reason or "incomplete",
                         index,
-                        (f"{AI_ENV_PREFIX}{index}_{field}",),
+                        (f"{AI_ENV_PREFIX}{raw}_{field}",),
                     )
                 )
                 continue
+            seen.add(profile.profile_id)
             extra = tuple((field, value) for field, value in fields.items() if field not in _FIELDS)
             entries.append(_Entry(profile, fields.get("API_KEY") or None, extra))
         broken_ids = {fields.get("ID") for fields in broken}
-        broken_active = active if active is not None and active in broken_ids else None
+        broken_active = (
+            active if active is not None and active in broken_ids and active not in seen else None
+        )
         return _Loaded(entries, broken, tuple(problems), tuple(loose), broken_active)
 
     def _write(

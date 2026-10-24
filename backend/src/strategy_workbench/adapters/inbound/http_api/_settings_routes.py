@@ -74,6 +74,8 @@ def _message(issue: CredentialsFileIssue) -> str:
             return f"{where}의 종류를 알 수 없습니다. {kinds}로 고치세요: {names}"
         if issue.reason == "bad_time":
             return f"{where}의 등록 시각을 읽지 못했습니다: {names}"
+        if issue.reason == "duplicate_id":
+            return f"{where}의 ID가 앞 항목과 같아 목록에서 뺐습니다. 한쪽을 지우세요: {names}"
         return f"{where}에 빠진 줄이 있어 목록에서 뺐습니다: {names}"
     return f"키움 모의 연결 세 줄 중 빠진 줄이 있습니다: {names}"
 

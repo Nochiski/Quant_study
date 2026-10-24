@@ -38,6 +38,9 @@ class SQLiteProviderProfileRepository:
     def __init__(self, database: AssistantDatabase) -> None:
         self._database = database
 
+    def ensure_writable(self) -> None:
+        """DB는 쓰기 시점에 실패를 알린다. 미리 볼 것이 없다."""
+
     def list(self) -> tuple[ProviderProfile, ...]:
         with self._database.transaction(write=False) as connection:
             rows = connection.execute(f"{_SELECT} ORDER BY ordinal ASC").fetchall()

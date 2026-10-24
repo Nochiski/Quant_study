@@ -51,12 +51,13 @@ import {
   useSourceTransactions,
   useStrategyDocument,
   clearGuideVisits,
+  readGuideAssistantOpen,
   readGuideVisits,
+  writeGuideAssistantOpen,
   writeGuideVisits,
   useUpgradeDocument,
   type DocumentSource,
   guideSuggestionKeys,
-  type GuidePanel,
   type GuideStep,
   type StrategyView,
 } from "../../../features/edit-strategy";
@@ -74,6 +75,7 @@ import {
   useBacktestRunSettings,
 } from "../../../features/run-backtest";
 import { t, tOptional } from "../../../shared/config";
+import { isSheetViewport } from "../../../shared/lib/floating-geometry";
 import { useNavigate, useSearch } from "../../../shared/lib/router";
 import { Badge, Button } from "../../../shared/ui";
 import {
@@ -296,25 +298,44 @@ export const NewStrategyPage = () => {
     });
   }, [leaving, document.strategyId, document.baseRevision, navigate]);
 
-  // 안내 오른쪽 칸의 기본 탭: AI 공급자가 연결돼 있으면 AI 도우미, 아니면 문서 미리보기. 공급자 목록이 확정된
-  // 첫 순간에 한 번만 정하고(나중에 다시 읽혀도 탭이 저절로 바뀌지 않는다), 확정 전에는 정하지 않는다. URL 에
-  // 적힌 탭은 언제나 이긴다(가이드 리뷰 2). 조회가 실패하면 미리보기로 정한다 — 공급자를 모르면 AI 를 먼저 보일
-  // 근거가 없다(가이드 재리뷰 1).
-  // 공용 조회 옵션(재시도)은 건드리지 않는다 — 같은 키를 설정 화면·사이드바도 읽는다(5차 리뷰 4). 판정은 조회가
-  // 확정될 때(어느 시도든 성공해 목록이 오거나, 재시도까지 모두 실패) 한 번 한다. 재시도가 도는 동안(첫 실패 뒤)은
-  // 잠정으로 미리보기를 보일 뿐 결정하지 않는다 — 그 사이 사용자가 탭을 고르면(URL) 그것이 이기고, 고르지 않았다면
-  // 재시도 성공 뒤 공급자가 있으면 AI 도우미로 간다. 잠정 표시는 "확정해 보인 미리보기"가 아니므로 1회 결정 원칙과
-  // 충돌하지 않는다.
+  // 안내의 AI 도우미 창은 화면 위에 떠 있고 열림 상태는 UI 로컬이다. 처음 값의 우선순위: 주소의 옛 탭 값(`assist`,
+  // 하위호환 — `assistant`면 열고 `preview`면 닫는다) → 사용자가 마지막으로 열거나 최소화한 기록 → 공급자 연결
+  // 여부(연결돼 있으면 연다). 공급자 판정은 조회가 확정될 때(어느 시도든 성공해 목록이 오거나 재시도까지 모두 실패)
+  // 한 번 한다. 재시도가 도는 동안(첫 실패 뒤)은 잠정으로 런처만 보이고 결정하지 않는다 — 그 사이 사용자가 창을
+  // 열면 그것이 이긴다. 공용 조회 옵션(재시도)은 건드리지 않는다(같은 키를 설정 화면·사이드바도 읽는다).
   const providers = useQuery(assistantProvidersQuery());
-  const [defaultPanel, setDefaultPanel] = useState<GuidePanel | null>(null);
-  if (defaultPanel === null && (providers.data !== undefined || providers.isError))
-    setDefaultPanel(
-      providers.data !== undefined && hasActiveAssistantProvider(providers.data)
-        ? "assistant"
-        : "preview",
+  const [guideAssistantOpen, setGuideAssistantOpen] = useState<boolean | null>(() =>
+    search.assist === "assistant"
+      ? true
+      : search.assist === "preview"
+        ? false
+        : readGuideAssistantOpen(),
+  );
+  // 좁은 화면(창이 하단 시트가 되는 폭)에서는 기록이 없으면 최소화한 채 시작한다 — 시트가 단계 카드를 거의 다 덮는다.
+  // 판정은 이 결정 순간 한 번이다. 시작 상태일 뿐이라 창 폭이 바뀌어도 열린 창을 저절로 닫거나 열지 않는다.
+  if (guideAssistantOpen === null && (providers.data !== undefined || providers.isError))
+    setGuideAssistantOpen(
+      providers.data !== undefined &&
+        hasActiveAssistantProvider(providers.data) &&
+        !isSheetViewport({ width: window.innerWidth, height: window.innerHeight }),
     );
-  const guidePanel: GuidePanel | null =
-    search.assist ?? defaultPanel ?? (providers.failureCount > 0 ? "preview" : null);
+  const guideWindowOpen: boolean | null =
+    guideAssistantOpen ?? (providers.failureCount > 0 ? false : null);
+  const changeGuideAssistantOpen = (open: boolean) => {
+    setGuideAssistantOpen(open);
+    writeGuideAssistantOpen(open);
+  };
+  // 옛 주소 값 `assist` 는 처음 한 번만 반영하고 주소에서 지운다 — 남겨 두면 새로고침·뒤로 가기마다 사용자가 마지막에
+  // 고른 열림 기록을 덮는다(리뷰 9). 처음 값은 위 `useState` 초기화가 이미 읽었다.
+  useEffect(() => {
+    if (search.assist === undefined) return;
+    void navigate({
+      to: ROUTE,
+      search: (prev) => ({ ...prev, assist: undefined }),
+      replace: true,
+      resetScroll: false,
+    });
+  }, [navigate, search.assist]);
 
   // AI 대화·입력칸 상태는 화면이 한 벌 든다. 안내의 AI 탭과 편집기 AI 열이 같은 상태를 그려서, 안내를 닫고
   // 편집기로 가도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4). 서버 조회는 사이드바가 보이는 동안만 돈다 —
@@ -355,7 +376,11 @@ export const NewStrategyPage = () => {
     if (document.strategyId !== null) clearGuideVisits(entryGuideDraftId);
   }, [document.strategyId, entryGuideDraftId]);
 
-  const leaveGuide = (next: Partial<typeof search>) =>
+  // 안내에서 AI 창을 연 채 편집기로 넘어가면 편집기도 창을 연 채 시작해 대화를 이어 보인다. 편집기 쪽 기본값은
+  // 최소화라(PR #624 결정) 넘겨주지 않으면 진행 중 답변이 접힌 창 뒤로 숨는다.
+  const [assistantHandoff, setAssistantHandoff] = useState(false);
+  const leaveGuide = (next: Partial<typeof search>) => {
+    setAssistantHandoff(guideWindowOpen === true);
     void navigate({
       to: ROUTE,
       // 숨은 편집기의 커서가 남긴 선택(`path`)은 버린다. 남기면 그 팩터의 노드 편집기가 열린다.
@@ -369,6 +394,7 @@ export const NewStrategyPage = () => {
       },
       resetScroll: false,
     });
+  };
   if (search.guide)
     return (
       <>
@@ -386,15 +412,8 @@ export const NewStrategyPage = () => {
             visited={guideVisits.visited}
             onVisit={visitGuideStep}
             status={<ServerDraftBanner sync={serverDraft} />}
-            panel={guidePanel}
-            onPanel={(assist) =>
-              void navigate({
-                to: ROUTE,
-                search: { ...search, assist },
-                replace: true,
-                resetScroll: false,
-              })
-            }
+            assistantOpen={guideWindowOpen}
+            onAssistantOpenChange={changeGuideAssistantOpen}
             assistant={(step) => (
               <AssistStrategySidebar
                 copy="guide"
@@ -406,7 +425,7 @@ export const NewStrategyPage = () => {
                 suggestions={guideSuggestions(step)}
                 // 안내가 해석한 지금 단계(모르는 URL 값이면 첫 단계)가 추천 질문의 맥락이다(최종 리뷰 4).
                 suggestionsKey={step.id}
-                visible={guidePanel === "assistant"}
+                visible={guideAssistantOpen === true}
                 state={assistantState}
                 layout="docked"
               />
@@ -435,34 +454,57 @@ export const NewStrategyPage = () => {
             }
             onUndo={history.undo}
             canUndo={history.depth.undo > 0}
-            review={
+            review={[
+              {
+                id: "problems",
+                title: t("guide.review.problems"),
+                content: (
+                  <DiagnosticsPanel
+                    diagnostics={problems.diagnostics}
+                    stale={problems.stale}
+                    onSelect={(diagnostic) =>
+                      leaveGuide({
+                        view: "yaml",
+                        path: diagnostic.pointer === "" ? undefined : diagnostic.pointer,
+                      })
+                    }
+                  />
+                ),
+              },
+              {
+                // 선정 미리보기는 실행 설정 위에서 돈다. 안내에는 편집기 툴바가 없으므로 실행 설정 요약과 패널을
+                // 미리보기 바로 위에 둔다 — "실행 설정을 먼저 채우세요"가 이 화면 안에서 바로 고칠 수 있는 안내가 된다.
+                id: "preview",
+                title: t("guide.review.preview"),
+                content: (
+                  <>
+                    <RunEnvironmentSummary controller={runSettings} />
+                    <BacktestRunSettings
+                      controller={runSettings}
+                      disabled={backtest.status.kind === "starting"}
+                      request={backtest.request}
+                    />
+                    <StrategyPreviewPanel
+                      document={document}
+                      executionPlans={executionPlans}
+                      environment={runSettings.environment}
+                    />
+                  </>
+                ),
+              },
+            ]}
+            reviewActions={
               <>
-                <DiagnosticsPanel
-                  diagnostics={problems.diagnostics}
-                  stale={problems.stale}
-                  onSelect={(diagnostic) =>
-                    leaveGuide({
-                      view: "yaml",
-                      path: diagnostic.pointer === "" ? undefined : diagnostic.pointer,
-                    })
-                  }
-                />
-                <StrategyPreviewPanel
-                  document={document}
-                  executionPlans={executionPlans}
-                  environment={runSettings.environment}
-                />
-                <div className="strategy-guide__review-actions">
-                  <Button tone="primary" onClick={save} disabled={!canSave}>
-                    {t("guide.saveAndPrepare")}
-                  </Button>
-                  <Button tone="secondary" onClick={() => leaveGuide({ view: "graph" })}>
-                    {t("guide.openInEditor")}
-                  </Button>
-                  <span role="status">
-                    {canSave ? saveStatusText(document, status) : t("guide.saveBlocked")}
-                  </span>
-                </div>
+                {/* 저장 상태는 문장이 아니라 배지로 둔다. 막혔으면 막힌 이유가 저장 버튼의 설명이다. */}
+                <Badge tone={canSave ? saveStatusTone(document, status) : "warn"} role="status">
+                  {canSave ? saveStatusText(document, status) : t("guide.saveBlocked")}
+                </Badge>
+                <Button tone="secondary" onClick={() => leaveGuide({ view: "graph" })}>
+                  {t("guide.openInEditor")}
+                </Button>
+                <Button tone="primary" onClick={save} disabled={!canSave}>
+                  {t("guide.saveAndPrepare")}
+                </Button>
               </>
             }
           />
@@ -485,6 +527,7 @@ export const NewStrategyPage = () => {
   return (
     <>
       <StrategyIde
+        assistantStartsOpen={assistantHandoff}
         notice={
           <>
             {autosave.recovery ? (
@@ -767,18 +810,19 @@ export const NewStrategyPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
-        assistant={({ close, open }) => (
+        assistant={({ open }) => (
           <AssistStrategySidebar
             documentRef={strategyAssistant.documentRef}
             readContext={strategyAssistant.readContext}
             {...strategyAssistant.proposalHandlers}
-            // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
-            // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
-            onClose={close}
+            // 창을 접는 손잡이는 창의 최소화 하나다 — 최소화는 턴을 끊지 않는다(진행 중 답변은 끝까지 받는다).
+            // 답을 멈추려면 입력칸 옆 "중지"를 쓴다. 사이드바 자신의 닫기(취소 확인)는 두지 않는다.
             // 편집기로 오면 고치지 않은 안내 추천 질문은 입력칸에서 지워진다.
             suggestionsKey="editor"
             visible={open}
             state={assistantState}
+            // 떠 있는 창 안이라 대화가 비어 있어도 입력칸을 창 바닥에 붙인다.
+            layout="docked"
           />
         )}
         debugger={

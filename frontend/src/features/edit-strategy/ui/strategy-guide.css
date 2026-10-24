@@ -4,6 +4,8 @@
  * 영역이 나뉘어 보이게 한다.
  */
 .strategy-guide {
+  /* AI 도우미 런처가 우하단에 떠 있으면 그 높이만큼 바닥 여백을 두어 단계 카드의 "다음"·저장이 깔리지 않게 한다. */
+  padding-bottom: var(--floating-launcher-reserve, 0px);
   display: grid;
   grid-template-columns: minmax(0, calc(var(--space-6) * 7.5)) minmax(0, 1fr);
   gap: var(--space-5);
@@ -216,10 +218,6 @@
   font-size: var(--text-size-small);
 }
 
-.strategy-guide__summary {
-  margin: 0;
-}
-
 .strategy-guide__more > summary {
   font-weight: var(--font-weight-heading);
 }
@@ -293,9 +291,45 @@
   margin-top: var(--space-2);
 }
 
-/* 컨트롤 사이 한국어 문장이 낱자로 끊기지 않게 어절 단위로 줄을 바꾼다("종 / 목만"). */
+/*
+ * 문장형 행: 글자 조각과 칸을 한 줄에 흘리다가 폭이 모자라면 조각 단위로 줄을 바꾼다. 조각과 입력칸은 같은 기준선에
+ * 서고, 칸 도움말은 입력칸 아래 보조 문구다. 컨트롤 사이 한국어 문장이 낱자로 끊기지 않게 어절 단위로 줄을 바꾼다.
+ */
 .strategy-guide .pipeline__sentence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-2);
+  line-height: var(--line-height-control, 1.4);
   word-break: keep-all;
+}
+
+.strategy-guide .pipeline__sentence > .pipeline__text {
+  white-space: normal;
+}
+
+.strategy-guide .pipeline__field {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/*
+ * 연산 이름("값이 큰 쪽 상위 비율 안에 드는")처럼 긴 선택값이 잘리지 않게 고른 값 길이에 맞춰 카드 폭까지는 늘어난다.
+ * `field-sizing` 을 모르는 브라우저는 가장 긴 선택지 폭을 쓰는 native 크기로 남는다.
+ */
+.strategy-guide .pipeline__field select {
+  max-width: 100%;
+  field-sizing: content;
+}
+
+.strategy-guide .pipeline__field--with-help {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.strategy-guide .pipeline__field--with-help .pipeline__field-help {
+  margin-left: 0;
 }
 
 .strategy-guide .pipeline__card-head {
@@ -424,7 +458,7 @@
   margin-left: auto;
 }
 
-/* 오른쪽 칸: 탭(AI 도우미 | 문서 미리보기)과 두 패널. 둘 다 마운트를 유지하고 보이는 것만 바꾼다. */
+/* 오른쪽 칸: 문서 미리보기. AI 도우미는 화면 위에 떠 있는 창(FloatingWindow)이다. */
 .strategy-guide__side {
   position: sticky;
   top: var(--space-4);
@@ -435,31 +469,6 @@
   border-radius: var(--radius-large);
   background: var(--surface-panel);
   box-shadow: var(--shadow-card);
-}
-
-.strategy-guide__side-tabs {
-  gap: 0;
-  background: var(--surface-raised);
-}
-
-.strategy-guide__side-tabs .ui-tab {
-  flex: 1 1 0;
-  min-height: 44px;
-}
-
-.strategy-guide__side-tabs .ui-tab[aria-selected="true"] {
-  background: var(--surface-panel);
-}
-
-.strategy-guide__side-panel--assistant {
-  display: flex;
-  flex-direction: column;
-  height: min(72vh, calc(var(--space-6) * 22));
-  min-height: 0;
-}
-
-.strategy-guide__side-panel[hidden] {
-  display: none;
 }
 
 .strategy-guide__preview {
@@ -487,7 +496,7 @@
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-@media (max-width: 1279px) {
+@media (max-width: 1439px) {
   .strategy-guide__body {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -526,20 +535,6 @@
   }
 }
 
-.strategy-guide__review-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.strategy-guide__side-pending {
-  margin: 0;
-  padding: var(--space-4);
-  color: var(--text-muted);
-  font-size: var(--text-size-small);
-}
-
 /* 안내에 고칠 자리가 없는 칸(schema_version·parameters)의 오류: 이름 단계 몸통 위에서 오류 톤으로 알린다. */
 .strategy-guide__outside {
   display: grid;
@@ -561,4 +556,78 @@
   gap: var(--space-1);
   margin: 0;
   padding-left: var(--space-4);
+}
+
+/* 방금 한 일의 알림 줄: 단계 머리 바로 아래. 알림이 없으면 자리를 차지하지 않는다. */
+.strategy-guide__notices {
+  display: grid;
+  gap: var(--space-1);
+  padding: 0 var(--space-5);
+}
+
+.strategy-guide__notices:not(:empty) {
+  padding-top: var(--space-3);
+}
+
+/* 확인 단계: 요약·문제·미리보기를 제목 붙은 하위 카드로 나눈다. */
+.strategy-guide__review-card {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+}
+
+.strategy-guide__review-card > h4 {
+  margin: 0;
+  font-size: var(--text-size-subsection);
+}
+
+.strategy-guide__review-list {
+  display: grid;
+  margin: 0;
+}
+
+.strategy-guide__review-row {
+  display: grid;
+  grid-template-columns: minmax(0, 9rem) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border);
+}
+
+.strategy-guide__review-row:first-child {
+  border-top: 0;
+}
+
+.strategy-guide__review-row dt {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.strategy-guide__review-row dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.strategy-guide__review-row ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (max-width: 600px) {
+  .strategy-guide__review-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .strategy-guide__review-row dd:not(.strategy-guide__review-edit) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
 }

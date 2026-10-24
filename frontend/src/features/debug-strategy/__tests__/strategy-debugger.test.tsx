@@ -394,7 +394,7 @@ const renderDebugger = (ui: ReactElement) => {
 // 문서가 없습니다."가 함께 뜨면 문서가 문제라고 오진한다.
 describe("StrategyDebugger unavailable reasons", () => {
   it.each([
-    ["environment", "추적은 실행 설정 위에서 돕니다."],
+    ["environment", "미리보기와 추적에는 실행 설정(기간·유니버스)이 필요해요."],
     ["preparing", "현재 문서의 실행 계획과 데이터 계약을 확인하고 있습니다."],
     ["no-factors", "추적할 팩터가 없습니다."],
     ["execution-plan", "현재 FactorGraph 실행 계획을 확정할 수 없어"],
@@ -1185,7 +1185,7 @@ describe("StrategyDebugger", () => {
     renderDebugger(<StrategyDebugger {...props(null)} />);
     expect(screen.getByRole("button", { name: "추적 실행" })).toBeDisabled();
     expect(
-      screen.getByText(/현재 문서가 아직 실행 가능한 StrategySpec이 아닙니다/),
+      screen.getByText(/문서에 고칠 문제가 있어 아직 미리보거나 추적할 수 없어요/),
     ).toBeInTheDocument();
     expect(requests).toHaveLength(0);
   });
@@ -1636,5 +1636,33 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
       await waiting;
     });
     expect(screen.queryByText("팩터 상위 종목")).not.toBeInTheDocument();
+  });
+});
+
+describe("선정 미리보기 조작 안내(확인 단계 UI)", () => {
+  it("미리볼 수 없으면 꺼진 새로고침이 그 이유를 설명으로 읽고, 팩터가 없으면 빈 선택 상자 대신 그 사실을 보인다", () => {
+    renderDebugger(<StrategyPreview context={null} unavailableReason="environment" />);
+    const refresh = screen.getByRole("button", { name: "미리보기 새로고침" });
+    expect(refresh).toBeDisabled();
+    expect(refresh).toHaveAccessibleDescription(
+      "미리보기와 추적에는 실행 설정(기간·유니버스)이 필요해요. 실행 설정을 먼저 채우세요.",
+    );
+    // 문맥이 없으면 "팩터 없음"이 아니라 지금 고를 수 없다고 말한다(리뷰 7).
+    const factor = screen.getByRole("combobox", { name: "팩터" });
+    expect(factor).toBeDisabled();
+    expect(factor).toHaveDisplayValue("지금은 고를 수 없어요");
+  });
+
+  it("기준일 칸은 비워 두면 마지막 리밸런싱일로 본다는 안내를 설명으로 읽는다", () => {
+    renderDebugger(<StrategyPreview context={context()} unavailableReason={null} />);
+    expect(screen.getByLabelText("기준일 (선택)")).toHaveAccessibleDescription(
+      "비워 두면 마지막 리밸런싱일로 봅니다.",
+    );
+    expect(screen.getByRole("button", { name: "미리보기 새로고침" })).toBeEnabled();
+  });
+
+  it("문맥이 있고 팩터가 비었을 때만 \"담은 팩터가 없어요\"라고 말한다(리뷰 7)", () => {
+    renderDebugger(<StrategyPreview context={{ ...context(), factors: [] }} unavailableReason={null} />);
+    expect(screen.getByRole("combobox", { name: "팩터" })).toHaveDisplayValue("담은 팩터가 없어요");
   });
 });

@@ -60,8 +60,10 @@ test(
       "step",
     );
     await expect(page.getByRole("button", { name: "편집기에서 직접 쓰기" })).toBeVisible();
-    // 오른쪽 칸은 AI 도우미와 문서 미리보기 탭이다. 공급자 연결 여부와 상관없이 미리보기를 연다.
-    await page.getByRole("tab", { name: /^전략 문서 미리보기/u }).click();
+    // 오른쪽 칸은 늘 문서 미리보기다(AI 도우미는 화면 위에 떠 있는 창이다).
+    // 다른 시나리오가 공급자를 연결해 두었으면 AI 창이 떠 있다. 이 시나리오는 단계 조작만 보므로 최소화한다.
+    const minimize = page.getByRole("button", { name: "AI 도우미 최소화" });
+    if (await minimize.isVisible()) await minimize.click();
     const preview = page.getByRole("complementary", { name: "전략 문서 미리보기" });
 
     // 1단계: 이름을 적으면 오른쪽 문서에 바로 들어간다.
@@ -149,10 +151,9 @@ test(
     await ensureProvider(page);
     await page.goto("/research/strategies/new?guide=true");
 
-    // 공급자가 연결돼 있으면 오른쪽 칸은 AI 도우미 탭으로 열리고, 단계에 맞는 추천 질문이 보인다.
-    const tab = page.getByRole("tab", { name: "AI 도우미" });
-    await expect(tab).toHaveAttribute("aria-selected", "true");
-    const panel = page.getByRole("tabpanel", { name: "AI 도우미" });
+    // 공급자가 연결돼 있으면 AI 도우미는 화면 위에 떠 있는 창으로 열린다.
+    const panel = page.getByRole("complementary", { name: "AI 도우미" });
+    await expect(panel).toBeVisible();
     const input = panel.getByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });
     await panel
       .getByRole("group", { name: "이 단계에서 자주 묻는 것" })

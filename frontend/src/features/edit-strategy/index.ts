@@ -74,7 +74,8 @@ export { useWholeDocumentReplacement } from "./model/replace-whole-document";
 
 export { useEditorHandle } from "./model/use-editor-handle";
 export { DocumentResearchActions } from "./ui/document-research-actions";
-export { StrategyGuide, type GuidePanel } from "./ui/strategy-guide";
+export { StrategyGuide } from "./ui/strategy-guide";
+export { readGuideAssistantOpen, writeGuideAssistantOpen } from "./model/guide-assistant-open";
 export { guideSuggestionKeys, type GuideStep } from "./model/guide-steps";
 export { clearGuideVisits, readGuideVisits, writeGuideVisits } from "./model/guide-visits";
 export { LibraryUpdateNotice } from "./ui/library-update-notice";

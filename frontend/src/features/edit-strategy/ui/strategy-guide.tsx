@@ -9,7 +9,8 @@ import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { FactorDefinition } from "../../../shared/api";
 import { t, tCode, tDescription, tFill, tName, tOptional } from "../../../shared/config";
 import { useCommittedRef } from "../../../shared/lib/react";
-import { Badge, Button, panelId, tabId, Tabs } from "../../../shared/ui";
+import { ASSISTANT_WINDOW_STORAGE_KEY } from "../../../entities/assistant";
+import { Badge, Button, FloatingWindow } from "../../../shared/ui";
 import { buildCanonicalSnippetCatalog, type SnippetCatalogSource } from "../model/canonical-snippets";
 import {
   catalogProfiles,
@@ -27,10 +28,11 @@ import {
   type GuideStep,
 } from "../model/guide-steps";
 import {
+  type StageSummaryParts,
   pipelineDocumentProperties,
   pipelineNames,
   projectPipeline,
-  strategySummary,
+  strategySummaryParts,
   type CatalogNames,
   type PipelineCard,
   type PipelineProjection,
@@ -50,8 +52,7 @@ import "./strategy-guide.css";
 /** 안내의 feedback owner. 캔버스·Form·Graph와 슬롯을 나눈다. */
 const GUIDE_OWNER = "guide";
 
-/** 오른쪽 칸의 탭: AI 도우미와 문서 미리보기. 어느 탭인지는 화면(URL)이 소유한다. */
-export type GuidePanel = "assistant" | "preview";
+
 
 const stepName = (step: GuideStep): string => {
   if (step.kind === "document") return t("guide.step.document");
@@ -71,8 +72,8 @@ export const StrategyGuide = ({
   onStep,
   status,
   assistant,
-  panel = "preview",
-  onPanel,
+  assistantOpen = null,
+  onAssistantOpenChange,
   onOpenGraph,
   onOpenEditor,
   onOpenSourceAt,
@@ -81,6 +82,7 @@ export const StrategyGuide = ({
   onUndo,
   canUndo,
   review,
+  reviewActions,
 }: {
   form: FormProjectionState;
   schema: JsonSchema | null;
@@ -107,18 +109,23 @@ export const StrategyGuide = ({
   onOpenSourceAt?: (pointer: string) => void;
   onUndo: () => void;
   canUndo: boolean;
-  /** 확인 단계에 붙는 화면 몫(진단·선정 미리보기·저장). */
-  review: ReactNode;
+  /**
+   * 확인 단계 본문의 하위 카드들(문제 목록·실행 설정과 선정 미리보기 등). 화면이 내용을 만들고 안내가 제목 붙은
+   * 카드로 나란히 그린다.
+   */
+  review: readonly { id: string; title: string; content: ReactNode }[];
+  /** 확인 단계 카드 바닥의 행동(편집기에서 열기·저장)과 저장 상태. 다른 단계의 "다음" 자리에 놓인다. */
+  reviewActions?: ReactNode;
   /** 머리 띠 오른쪽의 초안 저장 상태(서버 초안 동기화 문장). */
   status?: ReactNode;
   /**
-   * 오른쪽 칸의 AI 도우미. 지금 단계를 받아 그 단계에 맞는 추천 질문을 고른다. 없으면 오른쪽 칸은 문서
-   * 미리보기 하나다. AI 패널은 탭을 바꿔도 마운트를 유지한다 — 치던 문장·진행 중 답변을 잃지 않는다.
+   * 화면 위에 떠 있는 AI 도우미 창의 본문. 지금 단계를 받아 그 단계에 맞는 추천 질문을 고른다. 창은 처음 열 때
+   * 본문을 마운트하고 최소화해도 유지한다 — 치던 문장·진행 중 답변을 잃지 않는다. 오른쪽 칸은 문서 미리보기다.
    */
   assistant?: (step: GuideStep) => ReactNode;
-  /** 열린 탭. null 이면 아직 정하지 못했다(공급자 연결 여부를 기다리는 중) — 오른쪽 칸은 불러오는 중이다. */
-  panel?: GuidePanel | null;
-  onPanel?: (panel: GuidePanel) => void;
+  /** 창이 열렸는가. null 이면 아직 정하지 못했다(공급자 연결 여부를 기다리는 중) — 창도 런처도 그리지 않는다. */
+  assistantOpen?: boolean | null;
+  onAssistantOpenChange?: (open: boolean) => void;
 }) => {
   const titleId = useId();
   const pipeline: PipelineProjection | null = useMemo(
@@ -195,12 +202,7 @@ export const StrategyGuide = ({
   ).length;
   const next = steps[index + 1];
   const changed = useChangedLines(source);
-  // AI 패널은 처음 열 때 마운트하고 그 뒤로는 탭을 바꿔도 유지한다 — 숨은 탭이 대화 조회를 시작하지 않고,
-  // 연 뒤에는 치던 문장·진행 중 답변을 잃지 않는다(가이드 재리뷰 7).
-  const [assistantMounted, setAssistantMounted] = useState(false);
-  if (!assistantMounted && panel === "assistant") setAssistantMounted(true);
-  const sideId = useId();
-  const preview = <YamlPreview source={source} changed={changed} />;
+
   return (
     <section className="strategy-guide" aria-labelledby={titleId}>
       <header className="strategy-guide__header">
@@ -280,6 +282,21 @@ export const StrategyGuide = ({
               <Badge tone="warn">{t(`form.disabled.${disabled}`)}</Badge>
             ) : null}
           </header>
+          {/* 방금 한 일의 알림("전략 이름 반영됨")은 어느 단계든 머리 바로 아래 같은 줄에 둔다. */}
+          <div className="strategy-guide__notices">
+            <TransactionFeedbackNote
+              feedback={transactions.feedbackFor(GUIDE_OWNER)}
+              owner={GUIDE_OWNER}
+            />
+            <TransactionFeedbackNote
+              feedback={transactions.feedbackFor("pipeline")}
+              owner="pipeline"
+            />
+            <TransactionFeedbackNote
+              feedback={transactions.feedbackFor("library")}
+              owner="library"
+            />
+          </div>
           <div className="strategy-guide__step-body">
             {context === null || pipeline === null ? (
               <p className="strategy-guide__hint" role="status">
@@ -302,26 +319,13 @@ export const StrategyGuide = ({
                 projection={form.projection}
               />
             ) : (
-              <>
-                <p className="strategy-guide__summary">
-                  <strong>{t("graph.pipeline.summary")}</strong>{" "}
-                  {strategySummary(pipeline, catalogName)}
-                </p>
-                {review}
-              </>
+              <ReviewStep
+                steps={steps}
+                parts={strategySummaryParts(pipeline, catalogName)}
+                sections={review}
+                onStep={onStep}
+              />
             )}
-            <TransactionFeedbackNote
-              feedback={transactions.feedbackFor(GUIDE_OWNER)}
-              owner={GUIDE_OWNER}
-            />
-            <TransactionFeedbackNote
-              feedback={transactions.feedbackFor("pipeline")}
-              owner="pipeline"
-            />
-            <TransactionFeedbackNote
-              feedback={transactions.feedbackFor("library")}
-              owner="library"
-            />
           </div>
           <footer className="strategy-guide__footer">
             <Button
@@ -331,7 +335,11 @@ export const StrategyGuide = ({
             >
               {t("guide.previous")}
             </Button>
-            {next === undefined ? null : (
+            {next === undefined ? (
+              current.kind === "review" && reviewActions !== undefined ? (
+                <div className="strategy-guide__next">{reviewActions}</div>
+              ) : null
+            ) : (
               <div className="strategy-guide__next">
                 <span className="strategy-guide__hint" aria-hidden="true">
                   {tFill("guide.nextStep", { name: stepName(next) })}
@@ -343,56 +351,22 @@ export const StrategyGuide = ({
             )}
           </footer>
         </section>
-        {assistant === undefined ? (
-          <div className="strategy-guide__side">{preview}</div>
-        ) : panel === null ? (
-          // 기본 탭은 공급자 연결 여부가 정한다. 정해지기 전에 한쪽을 보였다가 바꾸면 화면이 뛴다.
-          <div className="strategy-guide__side">
-            <p className="strategy-guide__side-pending" role="status">
-              {t("page.loading")}
-            </p>
-          </div>
-        ) : (
-          <div className="strategy-guide__side">
-            <Tabs
-              className="strategy-guide__side-tabs"
-              label={t("guide.side")}
-              idBase={sideId}
-              value={panel}
-              onChange={(nextPanel) => onPanel?.(nextPanel)}
-              items={[
-                { id: "assistant", label: t("guide.side.assistant") },
-                {
-                  id: "preview",
-                  label: t("guide.preview"),
-                  badge:
-                    changed.size === 0
-                      ? undefined
-                      : tFill("guide.preview.changedCount", { count: changed.size }),
-                },
-              ]}
-            />
-            <div
-              role="tabpanel"
-              id={panelId(sideId, "assistant")}
-              aria-labelledby={tabId(sideId, "assistant")}
-              className="strategy-guide__side-panel strategy-guide__side-panel--assistant"
-              hidden={panel !== "assistant"}
-            >
-              {assistantMounted ? assistant(current) : null}
-            </div>
-            <div
-              role="tabpanel"
-              id={panelId(sideId, "preview")}
-              aria-labelledby={tabId(sideId, "preview")}
-              className="strategy-guide__side-panel"
-              hidden={panel !== "preview"}
-            >
-              {preview}
-            </div>
-          </div>
-        )}
+        <div className="strategy-guide__side">
+          <YamlPreview source={source} changed={changed} />
+        </div>
       </div>
+      {assistant === undefined || assistantOpen === null ? null : (
+        <FloatingWindow
+          title={t("guide.side.assistant")}
+          open={assistantOpen}
+          onOpenChange={(open) => onAssistantOpenChange?.(open)}
+          storageKey={ASSISTANT_WINDOW_STORAGE_KEY}
+          launcherLabel={t("guide.assistant.open")}
+          minimizeLabel={t("guide.assistant.minimize")}
+        >
+          {assistant(current)}
+        </FloatingWindow>
+      )}
     </section>
   );
 };
@@ -402,6 +376,81 @@ const CheckIcon = () => (
     <path d="M5 12l5 5L20 7" />
   </svg>
 );
+
+/**
+ * 확인 단계: 단계마다 문서에 들어간 내용을 라벨-값 목록으로 보이고 그 단계로 가는 길을 둔다. 값은 한 문장 요약과
+ * 같은 조각(`strategySummaryParts`)이라 뜻을 다시 조립하지 않는다. 그 아래 화면이 준 하위 카드(문제·미리보기)를 둔다.
+ */
+const ReviewStep = ({
+  steps,
+  parts,
+  sections,
+  onStep,
+}: {
+  steps: readonly GuideStep[];
+  parts: readonly StageSummaryParts[];
+  sections: readonly { id: string; title: string; content: ReactNode }[];
+  onStep: (id: string) => void;
+}) => {
+  const summaryId = useId();
+  const rows = steps.flatMap((step) => {
+    if (step.kind !== "stage") return [];
+    const stage = parts.find((candidate) => candidate.stage === step.stage);
+    const values = [
+      ...(stage?.lists ?? [])
+        .filter((list) => step.listPointers.includes(list.pointer))
+        .flatMap((list) => list.parts),
+      ...(step.listOnly ? [] : (stage?.cards ?? [])),
+    ];
+    return [{ step, values }];
+  });
+  return (
+    <>
+      <section className="strategy-guide__review-card" aria-labelledby={summaryId}>
+        <h4 id={summaryId}>{t("guide.review.summary")}</h4>
+        <dl className="strategy-guide__review-list">
+          {rows.map(({ step, values }) => (
+            <div key={step.id} className="strategy-guide__review-row">
+              <dt>{stepName(step)}</dt>
+              <dd>
+                {values.length === 0 ? (
+                  <span className="strategy-guide__hint">{t("guide.review.default")}</span>
+                ) : (
+                  <ul>
+                    {/* 조각 문장은 겹칠 수 있어 키로 쓰지 않는다 — 단계와 조각 순서가 키다(한정 리뷰 6). */}
+                    {values.map((value, position) => (
+                      <li key={`${step.id}:${position}`}>{value}</li>
+                    ))}
+                  </ul>
+                )}
+              </dd>
+              <dd className="strategy-guide__review-edit">
+                <Button
+                  size="small"
+                  tone="ghost"
+                  aria-label={tFill("guide.review.edit.named", { name: stepName(step) })}
+                  onClick={() => onStep(step.id)}
+                >
+                  {t("guide.review.edit")}
+                </Button>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+      {sections.map((section) => (
+        <section
+          key={section.id}
+          className="strategy-guide__review-card"
+          aria-labelledby={`${summaryId}-${section.id}`}
+        >
+          <h4 id={`${summaryId}-${section.id}`}>{section.title}</h4>
+          {section.content}
+        </section>
+      ))}
+    </>
+  );
+};
 
 const DocumentStep = ({
   pipeline,

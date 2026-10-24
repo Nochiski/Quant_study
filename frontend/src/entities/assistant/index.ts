@@ -89,3 +89,4 @@ export type {
   TurnView,
   UsageView,
 } from "../../shared/api";
+export { ASSISTANT_WINDOW_STORAGE_KEY } from "./model/assistant-window";

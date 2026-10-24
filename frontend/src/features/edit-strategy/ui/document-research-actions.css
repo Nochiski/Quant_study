@@ -10,7 +10,7 @@
 }
 .document-research__content {
   position: absolute;
-  z-index: 21;
+  z-index: var(--layer-menu);
   inset-block-start: 100%;
   inset-inline-start: var(--space-4);
   width: min(var(--content-width-form), calc(100% - var(--space-6)));

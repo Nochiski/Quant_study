@@ -1,0 +1,224 @@
+/* 화면 위에 떠 있는 비모달 창(FloatingWindow). 위치·크기는 인라인 연속값이고 나머지는 토큰이다. */
+.floating-window {
+  position: fixed;
+  z-index: var(--layer-floating);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-popover);
+}
+
+.floating-window[hidden] {
+  display: none;
+}
+
+.floating-window:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 2px;
+}
+
+.floating-window__bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+.floating-window__title {
+  overflow: hidden;
+  margin: 0;
+  font-size: var(--text-size-subsection);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.floating-window__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: default;
+}
+
+.floating-window__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.floating-window__icon:hover {
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+
+.floating-window__icon:focus-visible,
+.floating-window__launcher:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 2px;
+}
+
+.floating-window__sizes {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-small);
+}
+
+.floating-window__size {
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: calc(var(--radius-small) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-size-small);
+  cursor: pointer;
+}
+
+.floating-window__size[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.floating-window__size:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 1px;
+}
+
+.floating-window__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 끄는 가장자리: 변은 6px 띠, 모서리는 12px 정사각형. 보이지 않고 커서만 바뀐다. */
+.floating-window__resize {
+  position: absolute;
+  z-index: 1;
+  touch-action: none;
+}
+
+.floating-window__resize--n,
+.floating-window__resize--s {
+  left: 12px;
+  right: 12px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.floating-window__resize--n {
+  top: 0;
+}
+
+.floating-window__resize--s {
+  bottom: 0;
+}
+
+.floating-window__resize--e,
+.floating-window__resize--w {
+  top: 12px;
+  bottom: 12px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.floating-window__resize--e {
+  right: 0;
+}
+
+.floating-window__resize--w {
+  left: 0;
+}
+
+.floating-window__resize--ne,
+.floating-window__resize--nw,
+.floating-window__resize--se,
+.floating-window__resize--sw {
+  width: 12px;
+  height: 12px;
+}
+
+.floating-window__resize--ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.floating-window__resize--sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.floating-window__resize--nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.floating-window__resize--se {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+/* 좁은 화면의 하단 시트: 아래 모서리는 화면 끝에 붙고 끌어 옮기지 않는다. */
+.floating-window--sheet {
+  border-bottom: 0;
+  border-radius: var(--radius-large) var(--radius-large) 0 0;
+}
+
+.floating-window--sheet .floating-window__bar {
+  cursor: default;
+}
+
+/*
+ * 최소화 런처: 우하단에 떠 있는 버튼. 런처가 있는 동안 화면 아래쪽에 런처 높이만큼의 여백 값을 연다 — 런처를 쓰는
+ * 화면(새 전략 안내)은 바닥에 이 값을 더해 주 행동(다음·저장하고 백테스트 준비)이 런처 밑에 깔리지 않게 하고,
+ * 우하단 알림도 이만큼 위로 올린다. 편집기는 상단 바 토글이 입구라 런처를 그리지 않아 여백도 열리지 않는다. 런처를 우하단에 두는 결정은 그대로다(좌하단은 앱 탐색의 설정 링크와, 상단은 툴바와 겹친다).
+ */
+:root:has(.floating-window__launcher) {
+  --floating-launcher-reserve: calc(44px + var(--space-5) * 2);
+}
+
+.floating-window__launcher {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: var(--layer-floating);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  box-shadow: var(--shadow-popover);
+}
+
+@media (max-width: 720px) {
+  .floating-window__launcher {
+    right: var(--space-4);
+    bottom: var(--space-4);
+  }
+}

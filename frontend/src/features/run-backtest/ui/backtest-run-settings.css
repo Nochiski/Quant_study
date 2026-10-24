@@ -26,7 +26,7 @@
 .backtest-settings__popover {
   --control-size: var(--control-height);
   position: absolute;
-  z-index: 20;
+  z-index: var(--layer-popover);
   top: calc(100% + var(--space-2));
   left: 0;
   right: auto;
@@ -243,7 +243,7 @@
   .backtest-settings__popover {
     position: fixed;
     inset: var(--space-4);
-    z-index: 40;
+    z-index: var(--layer-dialog);
     width: auto;
     max-height: none;
   }

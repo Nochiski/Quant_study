@@ -61,6 +61,16 @@ logger.warning(
 - 정상 설정 안내인 `strategy.risk.risk_factor_excluded`·`strategy.portfolio.tie_breaker_factor_excluded`는
   그래프의 식별자 비노출 계약에 따라 `팩터=<label>`을 문장에 넣는다. 정확한 위치는 기존 진단 pointer가
   소유하며, 오류 진단의 재현 컨텍스트나 소비자의 문장 재조립 규칙은 바꾸지 않는다.
+- 예외(위치는 pointer 가 소유): compile 진단은 진단 pointer 가 위치를 소유하므로, **pointer 가 짚는 대상의
+  식별자**(`field_id` 등)는 사용자 문장에서 뺄 수 있다. 이때도 **지금 값**은 문장에 원문으로 남긴다 — 표기는
+  `repr` 그대로이고, 정수인 실수(`20.0`)만 문서에 적은 모양(`20`)으로 `.0` 을 뗀다(`inf`·`nan`·`2.5`·`-1e-07` 은
+  그대로). 값이 비었으면(빈 칸) 재현할 값이 없으므로 "값 없음"에 해당하는 할 일 문장만 둔다.
+  - 전례: 빈 필드 칸(`field_id: ""`)은 `UNSELECTED_FIELD_MESSAGE` "아직 필드를 고르지 않았습니다. 목록에서 필드를
+    고르세요."로 `field_id=''`·`path=` 원문 없이 알린다(#617, `strategy.field.missing`·`factor.graph.field_missing`·
+    그룹 필드 공통 `missing_field_message`).
+  - 전례: 상위 비율·개수 규칙 값(`strategy.eligibility.rule_value`)은 "…(20%는 0.2). 지금 값은 0입니다."로
+    `field_id=` 를 뺀다(pointer `eligibility.rules.<i>.value`). 표기 helper 는 `_plain_number` 하나다.
+  - 이 예외 밖(오타 필드처럼 사용자가 고칠 식별자 자체가 재현 정보인 경우)은 위 규칙대로 `key=value` 를 남긴다.
 - 진단 코드의 네임스페이스(`strategy.*`·`structure.*`·codec 코드, 팩터 그래프 `factor.graph.*`를
   `strategy.expression.*`로 옮기는 규칙)도 같은 SoT의 "authoring 진단 코드" 행이 소유한다. 레지스트리에
   없는 코드를 호출 지점에서 새로 만들지 않는다.

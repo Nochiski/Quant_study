@@ -231,6 +231,40 @@ export const sentencePieces = (template: string): SentencePiece[] => {
   return pieces;
 };
 
+/** 카드 문장 조각을 그릴 단위: 글자, 또는 칸과 그 칸 바로 뒤 괄호 도움말(있으면). */
+export type SentenceItem =
+  | { text: string }
+  | { key: string; slider: boolean; hint: string | null };
+
+const PARENTHETICAL = /^\s*\(([^()]+)\)\s*$/u;
+
+/**
+ * 칸 바로 뒤에 괄호 하나로만 된 글자 조각("(0.2가 20%)")은 그 칸의 도움말로 묶는다. 화면은 도움말을 입력칸 아래
+ * 보조 문구로 두고, 입력칸 설명(`aria-describedby`)으로도 잇는다. 문구는 틀 그대로이고 뜻을 바꾸지 않는다.
+ */
+export const sentenceItems = (
+  pieces: readonly SentencePiece[],
+  /** 그 자리에 칸이 실제로 그려지는가. 그려지지 않는 자리의 괄호 조각은 도움말로 묶지 않고 글자로 남긴다. */
+  rendered: (key: string) => boolean = () => true,
+): SentenceItem[] => {
+  const items: SentenceItem[] = [];
+  for (let index = 0; index < pieces.length; index += 1) {
+    const piece = pieces[index]!;
+    if ("text" in piece) {
+      items.push(piece);
+      continue;
+    }
+    const next = pieces[index + 1];
+    const hint =
+      next !== undefined && "text" in next && rendered(piece.key)
+        ? PARENTHETICAL.exec(next.text)
+        : null;
+    items.push({ ...piece, hint: hint === null ? null : hint[1]!.trim() });
+    if (hint !== null) index += 1;
+  }
+  return items;
+};
+
 /**
  * 카드 문장 틀(WORKFLOW P4-02 결정): 필드 순서로 enum 필드가 고른 값의 이름 키 아래 `.card` 를 먼저 찾고, 없으면
  * `fallbackKey`(필드 카드는 앵커 설명 키, 목록 항목은 목록 설명 키) 아래 `.card` 다. 틀이 없으면 null — 카드는
@@ -373,10 +407,21 @@ export const placeName = (
  * 자기 틀(`<목록 설명 키>.summary`)이 항목을 먼저 묶는다. 팩터는 방향을 붙인 이름("낮은 PBR")으로 보이고
  * 백분율 몫(합성 분모)은 계산하지 않는다(리드 결정 4, #367 리뷰 P2-1 로 방향까지 넓힘).
  */
-export const strategySummary = (
+/** 단계 하나의 요약 조각: 목록마다의 조각과 카드 조각. 문장 틀에 넣기 전의 같은 조각이다. */
+export type StageSummaryParts = {
+  stage: string;
+  lists: { pointer: string; parts: string[] }[];
+  cards: string[];
+};
+
+/**
+ * 단계마다의 요약 조각. 한 문장 요약(`strategySummary`)과 확인 단계의 항목별 요약이 같은 조각을 쓴다 — 확인 단계는
+ * 조각을 다시 조립하지 않고 단계별로 나눠 보일 뿐이다.
+ */
+export const strategySummaryParts = (
   pipeline: PipelineProjection,
   catalog: CatalogNames,
-): string => {
+): StageSummaryParts[] => {
   const names = pipelineNames(pipeline, catalog);
   const cardPart = (
     card: readonly FormField[],
@@ -424,13 +469,25 @@ export const strategySummary = (
     if (parts.length === 0 || frame === null) return parts;
     return [frame.replace("{items}", parts.join("·"))];
   };
-  const clauses = pipeline.stages.flatMap((stage) => {
-    const parts = [
-      ...stage.lists.flatMap(listParts),
-      ...stage.cards
-        .map((card) => cardPart(card.rows.map((row) => row.field)))
-        .filter((part) => part !== ""),
-    ];
+  return pipeline.stages.map((stage) => ({
+    stage: stage.stage,
+    lists: stage.lists.map((list) => ({ pointer: list.pointer, parts: listParts(list) })),
+    cards: stage.cards
+      .map((card) => cardPart(card.rows.map((row) => row.field)))
+      .filter((part) => part !== ""),
+  }));
+};
+
+/**
+ * 전략 한 문장 요약. 단계마다의 조각(`strategySummaryParts`)을 단계 틀 `strategy.summary.stage.<단계>`에 넣고 문장
+ * 틀 `strategy.summary.sentence`로 닫는다. 조각을 만드는 규칙은 `strategySummaryParts` 하나다.
+ */
+export const strategySummary = (
+  pipeline: PipelineProjection,
+  catalog: CatalogNames,
+): string => {
+  const clauses = strategySummaryParts(pipeline, catalog).flatMap((stage) => {
+    const parts = [...stage.lists.flatMap((list) => list.parts), ...stage.cards];
     const frame = tOptional(`strategy.summary.stage.${stage.stage}`);
     return parts.length === 0 || frame === null
       ? []

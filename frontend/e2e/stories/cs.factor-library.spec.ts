@@ -68,7 +68,7 @@ test(
     await expect(page.getByRole("heading", { name: label })).toBeVisible();
 
     // 3. 다른 새 전략의 안내에서 내 팩터를 꺼내 쓴다.
-    // 오른쪽 칸은 문서 미리보기 탭으로 연다(공급자가 연결돼 있으면 기본은 AI 도우미다).
+    // AI 도우미 창은 닫은 채 연다(옛 주소 값 `assist=preview` 하위호환) — 떠 있는 창이 목록을 가리지 않는다.
     await page.goto("/research/strategies/new?guide=true&step=signal.factors&assist=preview");
     await page.getByRole("button", { name: "내 팩터", exact: true }).click();
     await page.getByRole("button", { name: `${label} · 담기` }).click();

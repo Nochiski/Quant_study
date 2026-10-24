@@ -34,7 +34,8 @@ export const progress = (page: Page) =>
  * 그래서 버튼이 있을 때만 누른다.
  */
 /**
- * AI 열은 처음부터 열려 있다(RD-04-A). 접힌 상태에서 여는 흐름을 보려는 시나리오는 이것으로 먼저 접는다.
+ * AI 창이 떠 있으면 접는다. 편집기는 최소화한 채 시작하지만(PR #624 결정) 직접 연 기록이 남은 시나리오가 접힌
+ * 상태에서 여는 흐름을 보려면 이것으로 먼저 접는다.
  */
 export const collapseAssistant = async (page: Page) => {
   const panel = assistant(page);
@@ -49,7 +50,9 @@ export const openAssistant = async (page: Page) => {
     name: "AI 어시스턴트",
     exact: true,
   });
-  if ((await toggle.count()) > 0) await toggle.click();
+  // 상단 바 토글은 창이 떠 있어도 남는다(aria-expanded 로 열림을 보인다). 닫혀 있을 때만 누른다.
+  if ((await toggle.count()) > 0 && (await toggle.getAttribute("aria-expanded")) === "false")
+    await toggle.click();
   await expect(
     assistant(page).getByRole("heading", { name: "AI 어시스턴트" }),
   ).toBeVisible();

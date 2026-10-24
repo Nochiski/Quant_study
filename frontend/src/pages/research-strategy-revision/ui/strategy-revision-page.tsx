@@ -658,16 +658,17 @@ export const StrategyRevisionPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
-        assistant={({ close, open }) => (
+        assistant={({ open }) => (
           <AssistStrategySidebar
             documentRef={strategyAssistant.documentRef}
             readContext={strategyAssistant.readContext}
             {...strategyAssistant.proposalHandlers}
-            // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
-            // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
-            onClose={close}
+            // 창을 접는 손잡이는 창의 최소화 하나다 — 최소화는 턴을 끊지 않는다(진행 중 답변은 끝까지 받는다).
+            // 답을 멈추려면 입력칸 옆 "중지"를 쓴다. 사이드바 자신의 닫기(취소 확인)는 두지 않는다.
             visible={open}
             state={assistantState}
+            // 떠 있는 창 안이라 대화가 비어 있어도 입력칸을 창 바닥에 붙인다.
+            layout="docked"
           />
         )}
         debugger={

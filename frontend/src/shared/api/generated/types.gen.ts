@@ -6577,7 +6577,7 @@ export type SecurityTradeSummary = {
   /**
    * Realized Pnl
    */
-  realized_pnl: number;
+  realized_pnl: number | null;
   security: SecurityLabel;
 };
 

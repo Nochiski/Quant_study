@@ -138,7 +138,8 @@ class SecurityTradeSummary:
     security: SecurityLabel
     holding_periods: tuple[HoldingPeriod, ...]
     fill_count: int
-    realized_pnl: float
+    # 청산 거래(`trades`)의 비용 후 손익 합. 청산 거래가 없으면(보유 중·체결 없이 빠짐) None.
+    realized_pnl: float | None
     final_quantity: str | None
     final_unrealized_return: float | None
 
@@ -195,6 +196,21 @@ class SecurityTradesReport:
                 f"run_id={self.run_id} security_id={self.security.security_id} "
                 f"status={self.status!r} sessions={len(self.sessions)} detail={self.detail!r}"
             )
+
+
+def session_security_ids(result: BacktestRunResult, session: date) -> frozenset[str]:
+    """한 세션 보유 조회가 이름을 찾을 종목: 그 세션·앞 세션 보유와 그 세션 체결 종목."""
+    artifacts = result.artifacts
+    sessions = [item.session for item in artifacts.snapshots]
+    previous = max((item for item in sessions if item < session), default=None)
+    return frozenset(
+        [
+            item.security_id
+            for item in artifacts.positions
+            if item.session == session or item.session == previous
+        ]
+        + [item.security_id for item in artifacts.fills if item.session == session]
+    )
 
 
 def result_security_ids(result: BacktestRunResult) -> frozenset[str]:
@@ -254,6 +270,20 @@ class _Ledger:
     def previous(self, session: date) -> dict[str, RawPosition]:
         index = self.index[session]
         return {} if index == 0 else self.positions.get(self.sessions[index - 1], {})
+
+    def removed(self, session: date, security_id: str) -> bool:
+        """체결 없이 그 세션 끝 장부에서 빠졌다(병합 내림·상장폐지 정산 등)."""
+        return (
+            security_id in self.previous(session)
+            and security_id not in self.positions.get(session, {})
+            and security_id not in self.fills.get(session, {})
+        )
+
+    def eventful(self, session: date) -> bool:
+        """매매한 날 목록에 드는 세션: 체결이 있거나 체결 없이 빠진 종목이 있다."""
+        return session in self.fills or any(
+            self.removed(session, security_id) for security_id in self.previous(session)
+        )
 
     def realized_pnl(self, session: date, security_id: str) -> float | None:
         key = (session, security_id)
@@ -394,10 +424,10 @@ def project_holdings_overview(
                 for security_id in ledger.previous(session)
                 if security_id not in ledger.positions.get(session, {})
             ),
-            fill_count=sum(len(items) for items in ledger.fills[session].values()),
+            fill_count=sum(len(items) for items in ledger.fills.get(session, {}).values()),
         )
         for session in ledger.sessions
-        if session in ledger.fills
+        if ledger.eventful(session)
     )
     held: dict[str, list[int]] = defaultdict(list)
     for session, positions in ledger.positions.items():
@@ -408,9 +438,9 @@ def project_holdings_overview(
     for fill in result.artifacts.fills:
         fill_counts[fill.security_id] += 1
         first_seen.setdefault(fill.security_id, fill.session)
-    realized: dict[str, float] = defaultdict(float)
+    realized: dict[str, float] = {}
     for trade in result.artifacts.trades:
-        realized[trade.security_id] += trade.pnl
+        realized[trade.security_id] = realized.get(trade.security_id, 0.0) + trade.pnl
     last = ledger.sessions[-1] if ledger.sessions else None
     final = ledger.positions.get(last, {}) if last is not None else {}
     security_ids = set(held) | set(fill_counts)
@@ -419,7 +449,7 @@ def project_holdings_overview(
             security=ledger.label(security_id),
             holding_periods=_periods(sorted(held.get(security_id, [])), ledger.sessions),
             fill_count=fill_counts.get(security_id, 0),
-            realized_pnl=realized.get(security_id, 0.0),
+            realized_pnl=realized.get(security_id),
             final_quantity=final[security_id].quantity if security_id in final else None,
             final_unrealized_return=(
                 _ratio(
@@ -490,12 +520,12 @@ def project_security_trades(
                     fee=fill.fee,
                     sell_tax=fill.sell_tax,
                 )
-                for fill in ledger.fills[session][security_id]
+                for fill in ledger.fills.get(session, {}).get(security_id, [])
             ),
             realized_pnl=ledger.realized_pnl(session, security_id),
         )
         for session in ledger.sessions
-        if security_id in ledger.fills.get(session, {})
+        if security_id in ledger.fills.get(session, {}) or ledger.removed(session, security_id)
     )
     if not sessions:
         return SecurityTradesReport(

@@ -44,7 +44,10 @@ def test_describe_securities_matches_universe_names_and_drops_unknown_ids(
     assert members, "계약 fixture 유니버스가 비었다"
 
     requested = [item.security_id for item in reversed(members)]
-    described = adapter.describe_securities([*requested, "000000:9", "not-an-id", requested[0]])
+    ticker, _, _ = requested[0].partition(":")
+    # 모르는 종목, 형식이 틀린 id, 티커는 맞지만 없는 상장 구간은 지어내지 않고 뺀다.
+    unknown = ["000000:9", "not-an-id", f"{ticker}:999"]
+    described = adapter.describe_securities([*requested, *unknown, requested[0]])
 
     assert described == tuple(sorted(members, key=lambda item: item.security_id))
     assert adapter.describe_securities([]) == ()

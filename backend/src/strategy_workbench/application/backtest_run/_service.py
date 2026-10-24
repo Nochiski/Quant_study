@@ -51,6 +51,7 @@ from strategy_workbench.domain.backtest.facade.holdings import (
     project_security_trades,
     project_session_holdings,
     result_security_ids,
+    session_security_ids,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     AdmissionRejectionCode,
@@ -699,7 +700,7 @@ class BacktestRunService:
         """한 세션 끝 보유와 그 세션 매매. 계좌 기록이 없는 날은 보고서의 사유로 답한다."""
         result = self.result(run_id)
         return project_session_holdings(
-            result, session, self._security_names(result_security_ids(result))
+            result, session, self._security_names(session_security_ids(result, session))
         )
 
     def security_trades(self, run_id: str, security_id: str) -> SecurityTradesReport:

@@ -20,6 +20,7 @@ from strategy_workbench.domain.backtest._holdings import (
     project_security_trades,
     project_session_holdings,
     result_security_ids,
+    session_security_ids,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "project_security_trades",
     "project_session_holdings",
     "result_security_ids",
+    "session_security_ids",
 ]

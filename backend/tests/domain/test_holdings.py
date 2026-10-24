@@ -7,6 +7,7 @@
 - 5일: A 체결 없이 장부에서 빠짐, D 4주 신규.
 - 8일: B 2주 다시 진입, D 10주 매도해 숏 6주로 방향 전환(청산 거래 +8).
 - 9일: 체결 없음.
+- 10일: 아무 체결 없이 B 가 장부에서 빠진다(다른 종목 체결도 없는 날).
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from strategy_workbench.domain.backtest.facade.holdings import (
     project_security_trades,
     project_session_holdings,
     result_security_ids,
+    session_security_ids,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
@@ -83,6 +85,7 @@ SNAPSHOTS = (
     RawSnapshot(_day(5), 1900.0, 2300.0, 1.0, 1.0),
     RawSnapshot(_day(8), 2000.0, 0.0, 1.0, 1.0),
     RawSnapshot(_day(9), 2000.0, 2100.0, 1.0, 1.0),
+    RawSnapshot(_day(10), 2300.0, 1720.0, 1.0, 1.0),
 )
 POSITIONS = (
     _position(2, "A", 10, 1000.0),
@@ -95,6 +98,7 @@ POSITIONS = (
     _position(8, "D", -6, -600.0),
     _position(9, "B", 2, 320.0, pnl=20.0),
     _position(9, "D", -6, -580.0, pnl=20.0),
+    _position(10, "D", -6, -580.0, pnl=20.0),
 )
 FILLS = (
     _fill(2, "A", "buy", 10, 100.0),
@@ -131,10 +135,7 @@ def _result() -> BacktestRunResult:
         warnings=(),
         factor_evaluation_version=None,
     )
-    costs = (
-        RawCost(_day(3), "sell_tax", "B", 0.5),
-        RawCost(_day(3), "fee", "B", 1.0),
-    )
+    costs = (RawCost(_day(3), "sell_tax", "B", 0.5),)
     return BacktestRunResult(
         manifest,
         (),
@@ -214,21 +215,26 @@ def test_overview_lists_trade_sessions_and_holding_periods_with_gaps() -> None:
         _day(4),
         _day(5),
         _day(8),
+        _day(10),
     ]
     by_session = {item.session: item for item in overview.trade_sessions}
     assert (by_session[_day(5)].opened_count, by_session[_day(5)].closed_count) == (1, 1)
     assert (by_session[_day(8)].opened_count, by_session[_day(8)].fill_count) == (2, 2)
+    # 체결이 하나도 없던 날도 종목이 빠졌으면 매매한 날 목록에 든다.
+    assert (by_session[_day(10)].closed_count, by_session[_day(10)].fill_count) == (1, 0)
 
     securities = {item.security.security_id: item for item in overview.securities}
     assert [item.security.security_id for item in overview.securities] == ["A", "B", "D"]
     assert securities["B"].holding_periods == (
         HoldingPeriod(_day(2), _day(3), open=False),
-        HoldingPeriod(_day(8), _day(9), open=True),
+        HoldingPeriod(_day(8), _day(9), open=False),
     )
     assert securities["B"].realized_pnl == 20.0
-    assert securities["B"].final_quantity == "2"
-    assert securities["A"].final_quantity is None
-    assert (overview.fill_count, overview.final_holding_count) == (8, 2)
+    assert securities["B"].final_quantity is None
+    # 청산 거래가 없는 종목은 실현 손익 0 이 아니라 없음이다.
+    assert (securities["A"].realized_pnl, securities["A"].final_quantity) == (None, None)
+    assert securities["D"].final_quantity == "-6"
+    assert (overview.fill_count, overview.final_holding_count) == (8, 1)
     assert securities["D"].security.name is None
     assert securities["A"].security.name == "에이"
 
@@ -244,6 +250,7 @@ def test_security_trades_group_fills_by_session_with_realized_pnl_only_when_clos
         (_day(3), HoldingChange.REDUCED, "3", 30.0, 1),
         (_day(4), HoldingChange.SOLD, None, -10.0, 1),
         (_day(8), HoldingChange.OPENED, "2", None, 1),
+        (_day(10), HoldingChange.REMOVED, None, None, 0),
     ]
     assert report.sessions[1].fills[0].notional == 300.0
 
@@ -252,5 +259,7 @@ def test_security_trades_group_fills_by_session_with_realized_pnl_only_when_clos
     assert missing.sessions == ()
 
 
-def test_result_security_ids_cover_positions_and_fills() -> None:
+def test_security_ids_for_names_cover_what_each_view_shows() -> None:
     assert result_security_ids(_result()) == {"A", "B", "D"}
+    # 5일 보기: 앞 세션(4일) 보유 A, 그날 보유·체결 D. 2일에만 있던 B 는 묻지 않는다.
+    assert session_security_ids(_result(), _day(5)) == {"A", "D"}

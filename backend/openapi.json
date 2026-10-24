@@ -10592,8 +10592,15 @@
             "type": "array"
           },
           "realized_pnl": {
-            "title": "Realized Pnl",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Pnl"
           },
           "security": {
             "$ref": "#/components/schemas/SecurityLabel"

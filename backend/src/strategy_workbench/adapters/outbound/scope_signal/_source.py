@@ -1,6 +1,7 @@
-"""모델 DB의 빌드에서 scope 순위와 신호일 종가를 읽는다(S07).
+"""모델 빌드에서 scope 순위와 신호일 종가를 읽는다(S07).
 
-모델 DB 배치(서버 quant-ledger의 `data/model_db`):
+모델 빌드 루트 배치. 장 마감 빌드는 서버 quant-ledger 의 모델 DB(`data/model_db`), 주말 보강판은
+연구 모델 루트(`data`)에 있고 배치는 같다:
 
 - `model/latest_<basis>.json`: 그 종류의 마지막 성공 빌드
   (`build_id`·`date`·`fi_build_id`·모델별 게이트). 장 마감 빌드는 `latest_evening.json`,

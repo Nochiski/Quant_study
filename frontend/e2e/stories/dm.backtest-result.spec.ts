@@ -60,7 +60,7 @@ test(
     await debuggerRegion.getByText("입력 도움말", { exact: true }).click();
     await expect(debuggerRegion.locator(".strategy-debugger__scope-help")).toHaveAttribute("open", "");
     await expect(debuggerRegion).toContainText(
-      "추적은 실행 설정 위에서 돕니다.",
+      "미리보기와 추적에는 실행 설정(기간·유니버스)이 필요해요.",
     );
     await expect(
       debuggerRegion.getByText("현재 실행 가능한 문서가 없습니다."),

@@ -433,34 +433,57 @@ export const NewStrategyPage = () => {
             }
             onUndo={history.undo}
             canUndo={history.depth.undo > 0}
-            review={
+            review={[
+              {
+                id: "problems",
+                title: t("guide.review.problems"),
+                content: (
+                  <DiagnosticsPanel
+                    diagnostics={problems.diagnostics}
+                    stale={problems.stale}
+                    onSelect={(diagnostic) =>
+                      leaveGuide({
+                        view: "yaml",
+                        path: diagnostic.pointer === "" ? undefined : diagnostic.pointer,
+                      })
+                    }
+                  />
+                ),
+              },
+              {
+                // 선정 미리보기는 실행 설정 위에서 돈다. 안내에는 편집기 툴바가 없으므로 실행 설정 요약과 패널을
+                // 미리보기 바로 위에 둔다 — "실행 설정을 먼저 채우세요"가 이 화면 안에서 바로 고칠 수 있는 안내가 된다.
+                id: "preview",
+                title: t("guide.review.preview"),
+                content: (
+                  <>
+                    <RunEnvironmentSummary controller={runSettings} />
+                    <BacktestRunSettings
+                      controller={runSettings}
+                      disabled={backtest.status.kind === "starting"}
+                      request={backtest.request}
+                    />
+                    <StrategyPreviewPanel
+                      document={document}
+                      executionPlans={executionPlans}
+                      environment={runSettings.environment}
+                    />
+                  </>
+                ),
+              },
+            ]}
+            reviewActions={
               <>
-                <DiagnosticsPanel
-                  diagnostics={problems.diagnostics}
-                  stale={problems.stale}
-                  onSelect={(diagnostic) =>
-                    leaveGuide({
-                      view: "yaml",
-                      path: diagnostic.pointer === "" ? undefined : diagnostic.pointer,
-                    })
-                  }
-                />
-                <StrategyPreviewPanel
-                  document={document}
-                  executionPlans={executionPlans}
-                  environment={runSettings.environment}
-                />
-                <div className="strategy-guide__review-actions">
-                  <Button tone="primary" onClick={save} disabled={!canSave}>
-                    {t("guide.saveAndPrepare")}
-                  </Button>
-                  <Button tone="secondary" onClick={() => leaveGuide({ view: "graph" })}>
-                    {t("guide.openInEditor")}
-                  </Button>
-                  <span role="status">
-                    {canSave ? saveStatusText(document, status) : t("guide.saveBlocked")}
-                  </span>
-                </div>
+                {/* 저장 상태는 문장이 아니라 배지로 둔다. 막혔으면 막힌 이유가 저장 버튼의 설명이다. */}
+                <Badge tone={canSave ? saveStatusTone(document, status) : "warn"} role="status">
+                  {canSave ? saveStatusText(document, status) : t("guide.saveBlocked")}
+                </Badge>
+                <Button tone="secondary" onClick={() => leaveGuide({ view: "graph" })}>
+                  {t("guide.openInEditor")}
+                </Button>
+                <Button tone="primary" onClick={save} disabled={!canSave}>
+                  {t("guide.saveAndPrepare")}
+                </Button>
               </>
             }
           />

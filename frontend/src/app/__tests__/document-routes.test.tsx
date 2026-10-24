@@ -5258,6 +5258,34 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     expect(input).toHaveValue("거르기 규칙에 쓸 수 있는 필드를 설명해 주세요 특히 거래대금");
   });
 
+  it("확인 단계는 단계별 요약과 고치기 길, 문제·미리보기 하위 카드, 바닥의 저장 행동으로 나뉜다", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    const { history } = mountWithClient(
+      "/research/strategies/new?guide=true&step=review&assist=preview",
+      undefined,
+      false,
+    );
+    const summary = await screen.findByRole("region", { name: "전략 요약" });
+    // 고르지 않은 단계는 기본값이라고 말한다.
+    expect(within(summary).getAllByText("고르지 않음 · 기본값").length).toBeGreaterThan(0);
+    expect(screen.getByRole("region", { name: "문제" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "실행 설정과 선정 미리보기" })).toBeInTheDocument();
+    // 저장 행동은 카드 바닥에 있고, 저장할 수 없으면 그 이유가 상태 배지다.
+    expect(screen.getByRole("button", { name: "저장하고 백테스트 준비" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "편집기에서 열기" })).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("status").some((node) => node.textContent?.includes("저장하려면 문제를 먼저 고치세요.")),
+    ).toBe(true);
+
+    await user.click(within(summary).getByRole("button", { name: "유니버스 고치기" }));
+    await waitFor(() => expect(history.location.search).toContain("step=eligibility"));
+    expect(within(steps()).getByRole("button", { name: "유니버스" })).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+  });
+
   it("필수 칸이 없는 단계는 한 번 지나가면 완료로 보이고, 거르기 규칙 안내는 스키마 설명을 쓴다(가이드 리뷰 5·SoT F2)", async () => {
     useGuideCatalog();
     const user = userEvent.setup();

@@ -23,6 +23,7 @@ import {
   sentenceItems,
   sentencePieces,
   strategySummary,
+  strategySummaryParts,
   unstagedNames,
   type PipelineProjection,
 } from "../model/pipeline-projection";
@@ -502,5 +503,20 @@ describe("sentenceItems", () => {
       { text: "(참고) " },
       { key: "value", slider: false, hint: null },
     ]);
+  });
+});
+
+describe("strategySummaryParts", () => {
+  it("한 문장 요약과 같은 조각을 단계별로 나눠 준다 — 확인 단계가 뜻을 다시 조립하지 않는다", () => {
+    const pipeline = pipelineOf(idea("low_pbr_high_roe"));
+    const parts = strategySummaryParts(pipeline, fieldNames);
+    const sentence = strategySummary(pipeline, fieldNames);
+    const fragments = parts.flatMap((stage) => [
+      ...stage.lists.flatMap((list) => list.parts),
+      ...stage.cards,
+    ]);
+    expect(fragments.length).toBeGreaterThan(0);
+    for (const fragment of fragments) expect(sentence).toContain(fragment);
+    expect(parts.map((stage) => stage.stage)).toEqual(pipeline.stages.map((stage) => stage.stage));
   });
 });

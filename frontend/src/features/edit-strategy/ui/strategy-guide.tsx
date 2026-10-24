@@ -28,10 +28,11 @@ import {
   type GuideStep,
 } from "../model/guide-steps";
 import {
+  type StageSummaryParts,
   pipelineDocumentProperties,
   pipelineNames,
   projectPipeline,
-  strategySummary,
+  strategySummaryParts,
   type CatalogNames,
   type PipelineCard,
   type PipelineProjection,
@@ -81,6 +82,7 @@ export const StrategyGuide = ({
   onUndo,
   canUndo,
   review,
+  reviewActions,
 }: {
   form: FormProjectionState;
   schema: JsonSchema | null;
@@ -107,8 +109,13 @@ export const StrategyGuide = ({
   onOpenSourceAt?: (pointer: string) => void;
   onUndo: () => void;
   canUndo: boolean;
-  /** 확인 단계에 붙는 화면 몫(진단·선정 미리보기·저장). */
-  review: ReactNode;
+  /**
+   * 확인 단계 본문의 하위 카드들(문제 목록·실행 설정과 선정 미리보기 등). 화면이 내용을 만들고 안내가 제목 붙은
+   * 카드로 나란히 그린다.
+   */
+  review: readonly { id: string; title: string; content: ReactNode }[];
+  /** 확인 단계 카드 바닥의 행동(편집기에서 열기·저장)과 저장 상태. 다른 단계의 "다음" 자리에 놓인다. */
+  reviewActions?: ReactNode;
   /** 머리 띠 오른쪽의 초안 저장 상태(서버 초안 동기화 문장). */
   status?: ReactNode;
   /**
@@ -275,6 +282,21 @@ export const StrategyGuide = ({
               <Badge tone="warn">{t(`form.disabled.${disabled}`)}</Badge>
             ) : null}
           </header>
+          {/* 방금 한 일의 알림("전략 이름 반영됨")은 어느 단계든 머리 바로 아래 같은 줄에 둔다. */}
+          <div className="strategy-guide__notices">
+            <TransactionFeedbackNote
+              feedback={transactions.feedbackFor(GUIDE_OWNER)}
+              owner={GUIDE_OWNER}
+            />
+            <TransactionFeedbackNote
+              feedback={transactions.feedbackFor("pipeline")}
+              owner="pipeline"
+            />
+            <TransactionFeedbackNote
+              feedback={transactions.feedbackFor("library")}
+              owner="library"
+            />
+          </div>
           <div className="strategy-guide__step-body">
             {context === null || pipeline === null ? (
               <p className="strategy-guide__hint" role="status">
@@ -297,26 +319,13 @@ export const StrategyGuide = ({
                 projection={form.projection}
               />
             ) : (
-              <>
-                <p className="strategy-guide__summary">
-                  <strong>{t("graph.pipeline.summary")}</strong>{" "}
-                  {strategySummary(pipeline, catalogName)}
-                </p>
-                {review}
-              </>
+              <ReviewStep
+                steps={steps}
+                parts={strategySummaryParts(pipeline, catalogName)}
+                sections={review}
+                onStep={onStep}
+              />
             )}
-            <TransactionFeedbackNote
-              feedback={transactions.feedbackFor(GUIDE_OWNER)}
-              owner={GUIDE_OWNER}
-            />
-            <TransactionFeedbackNote
-              feedback={transactions.feedbackFor("pipeline")}
-              owner="pipeline"
-            />
-            <TransactionFeedbackNote
-              feedback={transactions.feedbackFor("library")}
-              owner="library"
-            />
           </div>
           <footer className="strategy-guide__footer">
             <Button
@@ -326,7 +335,11 @@ export const StrategyGuide = ({
             >
               {t("guide.previous")}
             </Button>
-            {next === undefined ? null : (
+            {next === undefined ? (
+              current.kind === "review" && reviewActions !== undefined ? (
+                <div className="strategy-guide__next">{reviewActions}</div>
+              ) : null
+            ) : (
               <div className="strategy-guide__next">
                 <span className="strategy-guide__hint" aria-hidden="true">
                   {tFill("guide.nextStep", { name: stepName(next) })}
@@ -363,6 +376,80 @@ const CheckIcon = () => (
     <path d="M5 12l5 5L20 7" />
   </svg>
 );
+
+/**
+ * 확인 단계: 단계마다 문서에 들어간 내용을 라벨-값 목록으로 보이고 그 단계로 가는 길을 둔다. 값은 한 문장 요약과
+ * 같은 조각(`strategySummaryParts`)이라 뜻을 다시 조립하지 않는다. 그 아래 화면이 준 하위 카드(문제·미리보기)를 둔다.
+ */
+const ReviewStep = ({
+  steps,
+  parts,
+  sections,
+  onStep,
+}: {
+  steps: readonly GuideStep[];
+  parts: readonly StageSummaryParts[];
+  sections: readonly { id: string; title: string; content: ReactNode }[];
+  onStep: (id: string) => void;
+}) => {
+  const summaryId = useId();
+  const rows = steps.flatMap((step) => {
+    if (step.kind !== "stage") return [];
+    const stage = parts.find((candidate) => candidate.stage === step.stage);
+    const values = [
+      ...(stage?.lists ?? [])
+        .filter((list) => step.listPointers.includes(list.pointer))
+        .flatMap((list) => list.parts),
+      ...(step.listOnly ? [] : (stage?.cards ?? [])),
+    ];
+    return [{ step, values }];
+  });
+  return (
+    <>
+      <section className="strategy-guide__review-card" aria-labelledby={summaryId}>
+        <h4 id={summaryId}>{t("guide.review.summary")}</h4>
+        <dl className="strategy-guide__review-list">
+          {rows.map(({ step, values }) => (
+            <div key={step.id} className="strategy-guide__review-row">
+              <dt>{stepName(step)}</dt>
+              <dd>
+                {values.length === 0 ? (
+                  <span className="strategy-guide__hint">{t("guide.review.default")}</span>
+                ) : (
+                  <ul>
+                    {values.map((value) => (
+                      <li key={value}>{value}</li>
+                    ))}
+                  </ul>
+                )}
+              </dd>
+              <dd className="strategy-guide__review-edit">
+                <Button
+                  size="small"
+                  tone="ghost"
+                  aria-label={tFill("guide.review.edit.named", { name: stepName(step) })}
+                  onClick={() => onStep(step.id)}
+                >
+                  {t("guide.review.edit")}
+                </Button>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+      {sections.map((section) => (
+        <section
+          key={section.id}
+          className="strategy-guide__review-card"
+          aria-labelledby={`${summaryId}-${section.id}`}
+        >
+          <h4 id={`${summaryId}-${section.id}`}>{section.title}</h4>
+          {section.content}
+        </section>
+      ))}
+    </>
+  );
+};
 
 const DocumentStep = ({
   pipeline,

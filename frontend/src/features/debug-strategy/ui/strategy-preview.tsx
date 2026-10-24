@@ -42,6 +42,20 @@ export const StrategyPreview = ({
       ? state.response
       : null;
   const summary = response?.summary;
+  const factors = context?.factors ?? [];
+  const reasonId = `${titleId}-reason`;
+  const dateHintId = `${titleId}-date-hint`;
+  // 새로고침이 꺼진 이유: 미리볼 수 없는 사유(실행 설정 등)나 막힌 입력(기준일·팩터). 꺼진 버튼이 그 문장을 설명으로
+  // 읽어, 비활성인 까닭을 따로 찾지 않아도 된다.
+  const blockedReason =
+    unavailableReason !== null
+      ? t(`debugger.unavailable.${unavailableReason}`)
+      : state.kind === "blocked" && state.reason === "date"
+        ? t("debugger.blocked.date")
+        : state.kind === "blocked" && state.reason === "factor"
+          ? t("debugger.blocked.factor")
+          : null;
+  const refreshDisabled = prepared.kind !== "ready" || state.kind === "loading";
   return (
     <section className="strategy-preview" aria-labelledby={titleId}>
       <header className="strategy-preview__controls">
@@ -53,9 +67,14 @@ export const StrategyPreview = ({
           {t("strategy.preview.factor")}
           <select className="ui-select"
             value={selectedFactorId}
+            disabled={factors.length === 0}
             onChange={(event) => setFactorId(event.target.value)}
           >
-            {context?.factors.map((factor) => (
+            {/* 팩터가 없으면 빈 선택 상자 대신 그 사실을 보인다. */}
+            {factors.length === 0 ? (
+              <option value="">{t("strategy.preview.factor.none")}</option>
+            ) : null}
+            {factors.map((factor) => (
               <option key={factor.factorId} value={factor.factorId}>
                 {factor.label}
               </option>
@@ -69,11 +88,13 @@ export const StrategyPreview = ({
             value={asOf}
             min={context?.environment.start}
             max={context?.environment.end}
+            aria-describedby={dateHintId}
             onChange={(event) => setAsOf(event.target.value)}
           />
         </label>
         <Button
-          disabled={prepared.kind !== "ready" || state.kind === "loading"}
+          disabled={refreshDisabled}
+          aria-describedby={refreshDisabled && blockedReason !== null ? reasonId : undefined}
           onClick={() => {
             setRequestedOwner(owner);
             void run();
@@ -85,21 +106,20 @@ export const StrategyPreview = ({
           <Button onClick={cancel}>{t("strategy.preview.cancel")}</Button>
         ) : null}
       </header>
-      <p>{t("strategy.preview.description")}</p>
-      {unavailableReason !== null ? (
-        <p>{t(`debugger.unavailable.${unavailableReason}`)}</p>
-      ) : null}
-      {state.kind === "blocked" && state.reason === "date" ? (
-        <p>{t("debugger.blocked.date")}</p>
-      ) : null}
+      <p id={dateHintId} className="strategy-preview__hint">
+        {t("strategy.preview.date.hint")}
+      </p>
+      <p className="strategy-preview__hint">{t("strategy.preview.description")}</p>
+      {blockedReason === null ? null : (
+        <p id={reasonId} className="strategy-preview__reason">
+          {blockedReason}
+        </p>
+      )}
       {state.kind === "loading" ? (
         <p role="status">{t("strategy.preview.loading")}</p>
       ) : null}
       {state.kind === "cancelled" ? (
         <p role="status">{t("debugger.state.cancelled")}</p>
-      ) : null}
-      {state.kind === "blocked" && state.reason === "factor" ? (
-        <p>{t("debugger.blocked.factor")}</p>
       ) : null}
       {state.kind === "error" ? (
         <FailureNotice message={state.message} reason={state.reason} />

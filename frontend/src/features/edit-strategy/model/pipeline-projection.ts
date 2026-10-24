@@ -400,10 +400,21 @@ export const placeName = (
  * 자기 틀(`<목록 설명 키>.summary`)이 항목을 먼저 묶는다. 팩터는 방향을 붙인 이름("낮은 PBR")으로 보이고
  * 백분율 몫(합성 분모)은 계산하지 않는다(리드 결정 4, #367 리뷰 P2-1 로 방향까지 넓힘).
  */
-export const strategySummary = (
+/** 단계 하나의 요약 조각: 목록마다의 조각과 카드 조각. 문장 틀에 넣기 전의 같은 조각이다. */
+export type StageSummaryParts = {
+  stage: string;
+  lists: { pointer: string; parts: string[] }[];
+  cards: string[];
+};
+
+/**
+ * 단계마다의 요약 조각. 한 문장 요약(`strategySummary`)과 확인 단계의 항목별 요약이 같은 조각을 쓴다 — 확인 단계는
+ * 조각을 다시 조립하지 않고 단계별로 나눠 보일 뿐이다.
+ */
+export const strategySummaryParts = (
   pipeline: PipelineProjection,
   catalog: CatalogNames,
-): string => {
+): StageSummaryParts[] => {
   const names = pipelineNames(pipeline, catalog);
   const cardPart = (
     card: readonly FormField[],
@@ -451,13 +462,25 @@ export const strategySummary = (
     if (parts.length === 0 || frame === null) return parts;
     return [frame.replace("{items}", parts.join("·"))];
   };
-  const clauses = pipeline.stages.flatMap((stage) => {
-    const parts = [
-      ...stage.lists.flatMap(listParts),
-      ...stage.cards
-        .map((card) => cardPart(card.rows.map((row) => row.field)))
-        .filter((part) => part !== ""),
-    ];
+  return pipeline.stages.map((stage) => ({
+    stage: stage.stage,
+    lists: stage.lists.map((list) => ({ pointer: list.pointer, parts: listParts(list) })),
+    cards: stage.cards
+      .map((card) => cardPart(card.rows.map((row) => row.field)))
+      .filter((part) => part !== ""),
+  }));
+};
+
+/**
+ * 전략 한 문장 요약. 단계마다의 조각(`strategySummaryParts`)을 단계 틀 `strategy.summary.stage.<단계>`에 넣고 문장
+ * 틀 `strategy.summary.sentence`로 닫는다. 조각을 만드는 규칙은 `strategySummaryParts` 하나다.
+ */
+export const strategySummary = (
+  pipeline: PipelineProjection,
+  catalog: CatalogNames,
+): string => {
+  const clauses = strategySummaryParts(pipeline, catalog).flatMap((stage) => {
+    const parts = [...stage.lists.flatMap((list) => list.parts), ...stage.cards];
     const frame = tOptional(`strategy.summary.stage.${stage.stage}`);
     return parts.length === 0 || frame === null
       ? []

@@ -231,7 +231,9 @@ const ko = {
   "strategy.preview.date": "기준일 (선택)",
   "strategy.preview.refresh": "미리보기 새로고침",
   "strategy.preview.description":
-    "현재 실행 가능한 문서를 명시적으로 조회합니다. 기준일을 비우면 서버가 마지막 리밸런싱 기준일을 선택합니다.",
+    "지금 문서로 어떤 종목이 뽑히는지 미리 봅니다. 문서를 바꾼 뒤에는 \"미리보기 새로고침\"을 눌러 다시 조회하세요.",
+  "strategy.preview.date.hint": "비워 두면 마지막 리밸런싱일로 봅니다.",
+  "strategy.preview.factor.none": "담은 팩터가 없어요",
   "strategy.preview.loading": "미리보기를 불러오는 중입니다.",
   "strategy.preview.discarded":
     "문서 또는 실행 설정과 맞지 않는 응답입니다. 다시 조회하세요.",
@@ -360,6 +362,12 @@ const ko = {
   "guide.openInEditor": "편집기에서 열기",
   "guide.saveAndPrepare": "저장하고 백테스트 준비",
   "guide.saveBlocked": "저장하려면 문제를 먼저 고치세요.",
+  "guide.review.summary": "전략 요약",
+  "guide.review.default": "고르지 않음 · 기본값",
+  "guide.review.edit": "고치기",
+  "guide.review.edit.named": "{name} 고치기",
+  "guide.review.problems": "문제",
+  "guide.review.preview": "실행 설정과 선정 미리보기",
   "guide.preview": "전략 문서 미리보기",
   "guide.preview.description": "안내에서 고른 값이 이 문서에 바로 들어가요. 방금 바뀐 줄을 표시해요.",
   "guide.preview.source": "전략 문서 YAML",
@@ -1005,7 +1013,7 @@ const ko = {
   "debugger.tab.node": "선택 노드",
   "debugger.tab.plan": "실행 계획",
   "debugger.unavailable.document":
-    "현재 문서가 아직 실행 가능한 StrategySpec이 아닙니다. 유효한 현재 문서만 추적합니다.",
+    "문서에 고칠 문제가 있어 아직 미리보거나 추적할 수 없어요. 문제 목록을 먼저 확인하세요.",
   "debugger.unavailable.preparing":
     "현재 문서의 실행 계획과 데이터 계약을 확인하고 있습니다.",
   "debugger.unavailable.no-factors": "추적할 팩터가 없습니다.",
@@ -1027,7 +1035,7 @@ const ko = {
   "debugger.unavailable.execution-plan":
     "현재 FactorGraph 실행 계획을 확정할 수 없어 추적을 차단했습니다.",
   "debugger.unavailable.environment":
-    "추적은 실행 설정 위에서 돕니다. 위 실행 설정 요약 띠가 고칠 칸을 알려 줍니다.",
+    "미리보기와 추적에는 실행 설정(기간·유니버스)이 필요해요. 실행 설정을 먼저 채우세요.",
   "debugger.blocked.date": "유효한 기준일을 선택하세요.",
   "debugger.blocked.security": "종목 ID를 1개 이상, 최대 100개 입력하세요.",
   "debugger.blocked.factor": "추적할 팩터를 선택하세요.",
@@ -3251,7 +3259,9 @@ export const messages = {
     "strategy.preview.date": "As-of date (optional)",
     "strategy.preview.refresh": "Refresh preview",
     "strategy.preview.description":
-      "Refresh the current executable document explicitly. Leave the date blank for the server to choose the last rebalance frame.",
+      "See which stocks the current document picks. After changing the document, press \"Refresh preview\" to look again.",
+    "strategy.preview.date.hint": "Leave blank to use the last rebalance date.",
+    "strategy.preview.factor.none": "No factors added yet",
     "strategy.preview.loading": "Loading preview.",
     "strategy.preview.discarded":
       "The response does not match the document or run settings. Refresh again.",
@@ -3378,6 +3388,12 @@ export const messages = {
     "guide.openInEditor": "Open in editor",
     "guide.saveAndPrepare": "Save and prepare backtest",
     "guide.saveBlocked": "Fix the problems before saving.",
+    "guide.review.summary": "Strategy summary",
+    "guide.review.default": "Not chosen · defaults",
+    "guide.review.edit": "Edit",
+    "guide.review.edit.named": "Edit {name}",
+    "guide.review.problems": "Problems",
+    "guide.review.preview": "Run settings and selection preview",
     "guide.preview": "Strategy document preview",
     "guide.preview.description": "Your choices go straight into this document. Recently changed lines are marked.",
     "guide.preview.source": "Strategy document YAML",
@@ -4017,7 +4033,7 @@ export const messages = {
     "debugger.tab.node": "Selected node",
     "debugger.tab.plan": "Execution plan",
     "debugger.unavailable.document":
-      "The current document is not an executable StrategySpec yet. Only the valid current document can be traced.",
+      "The document has problems to fix, so it cannot be previewed or traced yet. Check the problem list first.",
     "debugger.unavailable.preparing":
       "Checking the current document's execution plan and data contract.",
     "debugger.unavailable.no-factors": "There is no factor to trace.",
@@ -4039,7 +4055,7 @@ export const messages = {
     "debugger.unavailable.execution-plan":
       "Trace is blocked because the current FactorGraph execution plan cannot be pinned.",
     "debugger.unavailable.environment":
-      "A trace runs on the run settings. The run settings summary above names the field to fix.",
+      "Preview and trace need run settings (period and universe). Fill in the run settings first.",
     "debugger.blocked.date": "Select a valid as-of date.",
     "debugger.blocked.security": "Enter between 1 and 100 security IDs.",
     "debugger.blocked.factor": "Select a factor to trace.",

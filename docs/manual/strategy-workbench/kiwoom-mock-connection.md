@@ -52,8 +52,13 @@ PC의 **내 문서 `auto_trading` 폴더의 `.env` 파일**에만 저장되고, 
   `STRATEGY_WORKBENCH_KIWOOM_MOCK_APP_KEY`·`STRATEGY_WORKBENCH_KIWOOM_MOCK_SECRET_KEY`·
   `STRATEGY_WORKBENCH_KIWOOM_MOCK_ACCOUNT` 세 줄입니다. 같은 파일에 다른 도구의 줄이 있어도 워크벤치는 이 세
   줄만 고칩니다.
-- 예전 버전이 사용자 설정 폴더(`secrets.json`)에 저장한 키는 서버를 처음 켤 때 이 파일로 옮겨지고 예전
-  자리에서는 지워집니다.
+- 예전 버전이 사용자 설정 폴더(`secrets.json`)에 저장한 키는 서버를 처음 켤 때 이 파일로 한 번 옮겨지고
+  예전 자리에서는 지워집니다. 옮긴 기록(`STRATEGY_WORKBENCH_IMPORTED_*` 줄)이 남아 있는 동안은 예전 자리를
+  다시 읽지 않습니다.
+- 문서 폴더가 OneDrive·iCloud로 동기화되면 이 파일(평문 키)도 함께 올라갈 수 있습니다. 원치 않으면 서버를 켤
+  때 `STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH`로 동기화되지 않는 다른 위치를 지정하세요.
+- 파일을 손으로 고치다 줄이 빠지거나 UTF-8이 아니게 되어도 워크벤치는 켜지고, 설정 화면의 저장 위치 아래에
+  무엇이 문제인지(값 없이 줄 이름만) 보입니다.
 - 지우려면 설정의 **삭제**를 누릅니다.
 - 키움 이용안내에 따르면 **3개월 동안 실서버에 접속하지 않으면 API 서비스가 자동 해지**되고, 모의 서버만 써도
   해지될 수 있습니다. 해지되면 다시 신청해야 합니다.

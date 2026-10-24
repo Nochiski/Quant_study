@@ -1906,6 +1906,34 @@ export type CredentialsFileBody = {
    * AI 공급자·키움 모의 연결을 저장하는 `.env`의 절대 경로. 예전 저장(사용자 설정 폴더)을 쓰는 서버는 null이다.
    */
   path: string | null;
+  /**
+   * Problems
+   */
+  problems: Array<CredentialsFileProblemBody>;
+};
+
+/**
+ * CredentialsFileProblemBody
+ */
+export type CredentialsFileProblemBody = {
+  /**
+   * Fields
+   */
+  fields: Array<string>;
+  /**
+   * Message
+   *
+   * 사용자에게 그대로 보일 한글 문장. 값은 담지 않는다.
+   */
+  message: string;
+  /**
+   * Reason
+   */
+  reason: string;
+  /**
+   * Section
+   */
+  section: "file" | "ai" | "kiwoom";
 };
 
 /**

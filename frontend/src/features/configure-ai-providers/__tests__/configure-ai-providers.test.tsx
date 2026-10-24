@@ -54,7 +54,7 @@ const ENV_PATH = "/Users/me/Documents/auto_trading/.env";
 
 const server = setupServer(
   http.get(`${API}/api/v1/settings/credentials-file`, () =>
-    HttpResponse.json({ path: ENV_PATH }),
+    HttpResponse.json({ path: ENV_PATH, problems: [] }),
   ),
   http.get(`${API}/api/v1/assistant/providers`, () => HttpResponse.json(view)),
   http.post(`${API}/api/v1/assistant/providers`, async ({ request }) => {
@@ -167,6 +167,36 @@ describe("AI 공급자 설정 섹션", () => {
 
     const location = await screen.findByTestId("credentials-file-location");
     expect(location).toHaveTextContent(`저장 위치: ${ENV_PATH}`);
+    expect(
+      screen.getByText(
+        /OneDrive·iCloud로 동기화되면 키도 함께 올라갈 수 있어요/,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("credentials-file-problems")).toBeNull();
+  });
+
+  it("저장 파일을 읽지 못한 사유를 서버 문장 그대로 보여 준다", async () => {
+    server.use(
+      http.get(`${API}/api/v1/settings/credentials-file`, () =>
+        HttpResponse.json({
+          path: ENV_PATH,
+          problems: [
+            {
+              section: "file",
+              reason: "not_utf8",
+              fields: [],
+              message:
+                "저장 파일을 UTF-8로 읽지 못했습니다. 편집기에서 UTF-8로 다시 저장하세요.",
+            },
+          ],
+        }),
+      ),
+    );
+    renderSettings(<AiProviderSettings />);
+
+    const problems = await screen.findByTestId("credentials-file-problems");
+    expect(problems).toHaveTextContent("저장 파일을 UTF-8로 읽지 못했습니다.");
+    expect(problems.getAttribute("role")).toBe("alert");
   });
 
   it("프로파일 카드에 모델·키 꼬리·활성 배지를 그린다", async () => {

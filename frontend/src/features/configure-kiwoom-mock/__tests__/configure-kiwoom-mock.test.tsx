@@ -37,7 +37,7 @@ const ENV_PATH = "C:\\Users\\me\\OneDrive\\문서\\auto_trading\\.env";
 
 const server = setupServer(
   http.get(`${API}/api/v1/settings/credentials-file`, () =>
-    HttpResponse.json({ path: ENV_PATH }),
+    HttpResponse.json({ path: ENV_PATH, problems: [] }),
   ),
   http.get(PATH, () => HttpResponse.json(status)),
   http.put(PATH, async ({ request }) => {

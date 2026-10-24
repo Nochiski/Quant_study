@@ -2805,7 +2805,11 @@ const ko = {
   "settings.assistant.title": "AI 어시스턴트 공급자",
   "settings.assistant.description":
     "Claude·Codex 연결을 등록하고 어느 연결을 쓸지 고릅니다. 연결과 API 키는 이 PC의 아래 파일에만 저장되고 화면에는 꼬리 4자리만 보입니다.",
-  "settings.credentialsFile.location": "저장 위치: {path}",
+  "settings.credentialsFile.label": "저장 위치:",
+  "settings.credentialsFile.syncNotice":
+    "문서 폴더가 OneDrive·iCloud로 동기화되면 키도 함께 올라갈 수 있어요. 원치 않으면 STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH로 다른 위치를 지정하세요.",
+  "settings.credentialsFile.problemsTitle":
+    "저장 파일 일부를 읽지 못했습니다. 아래를 고치면 바로 반영됩니다.",
   "settings.credentialsFile.legacy": "저장 위치: 이 PC의 사용자 설정 폴더",
   "settings.credentialsFile.unavailable": "저장 위치를 불러오지 못했습니다. 서버를 다시 켜 보세요.",
   "settings.kiwoom.title": "키움 모의투자 연결",
@@ -5819,7 +5823,11 @@ export const messages = {
     "settings.assistant.title": "AI assistant providers",
     "settings.assistant.description":
       "Register Claude and Codex connections and choose which one to use. Connections and API keys are stored only in the file below on this PC; only the last four characters are shown.",
-    "settings.credentialsFile.location": "Stored in: {path}",
+    "settings.credentialsFile.label": "Stored in:",
+    "settings.credentialsFile.syncNotice":
+      "If your Documents folder syncs to OneDrive or iCloud, the keys may be uploaded too. To avoid that, set STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH to another location.",
+    "settings.credentialsFile.problemsTitle":
+      "Part of the storage file could not be read. Fix the lines below and the change takes effect right away.",
     "settings.credentialsFile.legacy": "Stored in: this PC's user settings folder",
     "settings.credentialsFile.unavailable": "Could not load the storage location. Try restarting the server.",
     "settings.kiwoom.title": "Kiwoom mock trading connection",

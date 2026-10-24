@@ -255,6 +255,7 @@ export type {
   CreateStrategyResponse,
   CreateStrategyResponses,
   CredentialsFileBody,
+  CredentialsFileProblemBody,
   CrossSectionalNode,
   CrossSectionalOperator,
   DataFrequency,

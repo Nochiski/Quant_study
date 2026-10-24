@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .rust_core import ensure_core
 from .server import _repo_root
 
 FRONTEND_URL = "http://localhost:5173"
@@ -193,13 +194,15 @@ def _stop(servers: Sequence[OwnedServer]) -> None:
             )
 
 
-def run(root: Path, *, open_browser: bool) -> int:
+def run(root: Path, *, open_browser: bool, rust_build: bool = True) -> int:
     """두 서버의 준비와 생존을 감시하고 이 실행이 시작한 프로세스만 정리한다."""
     owned: list[OwnedServer] = []
     try:
         servers = _servers(root)
         for server in servers:
             _require_available_port(server)
+        # 포트를 먼저 확인해 이미 떠 있는 서버가 있으면 긴 빌드 없이 바로 거절한다.
+        ensure_core(root, disabled=not rust_build)
         for server in servers:
             print(f"[dev] {server.name} 시작(port={server.port})", flush=True)
             owned.append(_start(server))
@@ -239,6 +242,14 @@ def main() -> None:
     parser.add_argument(
         "--open", action="store_true", help="두 서버가 준비되면 브라우저를 엽니다."
     )
+    parser.add_argument(
+        "--no-rust-build",
+        action="store_true",
+        help=(
+            "시작 전 Rust 백테스트 코어 자동 빌드를 건너뜁니다"
+            " (환경 변수 QUANT_STUDY_DEV_SKIP_RUST_BUILD=1과 같음)."
+        ),
+    )
     options = parser.parse_args()
     try:
         root = _repo_root()
@@ -247,4 +258,6 @@ def main() -> None:
             f"[dev] 저장소 안에서 uv run dev를 실행해 주세요: {error}", file=sys.stderr
         )
         raise SystemExit(1) from error
-    raise SystemExit(run(root, open_browser=options.open))
+    raise SystemExit(
+        run(root, open_browser=options.open, rust_build=not options.no_rust_build)
+    )

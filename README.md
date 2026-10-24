@@ -27,7 +27,8 @@ uv run dev --open
 
 브라우저를 자동으로 열지 않으려면 다음 명령을 쓴다. 종료할 때 `Ctrl+C`를 누르면 두 서버가 함께
 종료된다. `dev`는 backend·frontend 의존성을 자동 설치하거나 동기화하지 않으며 설치한 extra와
-Rust 확장을 유지한다.
+Rust 확장을 유지한다. 단 서버를 시작하기 전에 Rust 백테스트 코어(`backtest_core`)가 없거나 Rust
+소스가 마지막 빌드 뒤에 바뀌었으면, 이미 설치된 backend 환경 안에서 그 확장만 release로 빌드한다.
 
 ```sh
 uv run dev
@@ -37,8 +38,12 @@ uv run dev
 <http://127.0.0.1:8000/api/v1/health>다. 기본 포트 8000·5173 중 하나라도 사용 중이면 시작을
 거절하며 기존 서버를 종료하지 않는다. 개별 기동은 아래 [실행](#실행) 절을 참고한다.
 
-기본 `Rust` core로 백테스트하려면 Rust 빌드 환경을 준비하고 다음 확장을 설치한다. 설치하지 않은
-경우 서버와 화면은 실행할 수 있으며 백테스트 실행 설정에서 `Python reference`를 선택한다.
+기본 `Rust` core로 백테스트하려면 Rust 툴체인(<https://rustup.rs>)만 설치해 두면 된다. `uv run dev`가
+시작 전에 확장 설치 여부와 Rust 소스 지문(`backend/.venv/backtest_core.build-stamp`)을 보고 필요할
+때만 빌드한다. 처음 빌드는 몇 분 걸릴 수 있다. cargo를 찾지 못하거나 빌드가 실패하면 경고만 내고
+서버는 그대로 시작하며, 그때는 백테스트 실행 설정에서 `Python reference`를 선택한다. 자동 빌드를
+끄려면 `uv run dev --no-rust-build` 또는 환경 변수 `QUANT_STUDY_DEV_SKIP_RUST_BUILD=1`을 쓴다.
+`dev`를 거치지 않고 backend만 띄울 때는 다음 명령으로 직접 설치한다.
 
 ```sh
 cd backend
@@ -48,8 +53,8 @@ cd ..
 
 extra 목록은 CI(`.github/workflows/ci.yml`)와 같다. `equity`는 실데이터 duckdb adapter, `llm`은 AI
 어시스턴트 공급자 SDK다. extra를 빼고 `uv sync`를 다시 돌리면 설치해 둔 extra 패키지와
-`maturin develop`로 넣은 Rust 확장이 함께 빠지므로, 그때는 extra를 포함한 환경 설치와 Rust 확장
-설치를 다시 실행한다.
+`maturin develop`로 넣은 Rust 확장이 함께 빠지므로, 그때는 extra를 포함한 환경 설치를 다시 실행한다.
+Rust 확장은 다음 `uv run dev`가 다시 빌드한다.
 
 편집기는 **전략 편집**과 **중간 결과**를 명시해서 전환하며 원문·추적 범위·결과를 유지한다.
 구조·계약·AI 보조 영역은 필요할 때 열고, 그래프에서는 전략 구성·선정 미리보기·팩터 레시피·노드 캔버스의

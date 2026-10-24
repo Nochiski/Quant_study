@@ -6,8 +6,6 @@ import { useAssistChat, type AssistChat } from "./use-assist-chat";
 export type UseAssistSidebarStateOptions = {
   documentRef: DocumentRefView;
   readContext?: () => TurnContextPayload;
-  /** 패널이 보이는가(`useAssistChat`의 `enabled`). */
-  enabled?: boolean;
 };
 
 /**
@@ -29,6 +27,12 @@ export type AssistSidebarState = {
   noteSuggestionsKey: (key: string | undefined) => void;
   /** 입력칸 문장을 보낸다. 보낼 수 없으면 아무것도 하지 않는다. */
   submitDraft: () => void;
+  /**
+   * 이 상태를 그리는 사이드바가 지금 보이는지 알린다. 보이는 동안만 대화 목록·이력을 조회한다(`useAssistChat`의
+   * `enabled`). 보임 여부의 정본은 사이드바를 품은 자리(편집기 AI 열·안내 탭)이고 사이드바가 commit 때 알린다 —
+   * 화면이 사본을 따로 들지 않는다(5차 리뷰 9). identity 는 바뀌지 않는다.
+   */
+  setVisible: (visible: boolean) => void;
 };
 
 type Composer = {
@@ -43,9 +47,10 @@ const EMPTY: Composer = { draft: "", suggested: null, seenSuggestionsKey: undefi
 export const useAssistSidebarState = ({
   documentRef,
   readContext,
-  enabled = true,
 }: UseAssistSidebarStateOptions): AssistSidebarState => {
-  const chat = useAssistChat({ documentRef, readContext, enabled });
+  // 처음에는 아무 사이드바도 그리지 않았으므로 보이지 않는다 — 숨은 패널이 조회를 시작하지 않는다.
+  const [visible, setVisible] = useState(false);
+  const chat = useAssistChat({ documentRef, readContext, enabled: visible });
   const [composer, setComposer] = useState<Composer>(EMPTY);
   const [restoredNonce, setRestoredNonce] = useState<number | null>(null);
 
@@ -82,18 +87,21 @@ export const useAssistSidebarState = ({
    * 글이 아니므로 바꿔 넣는다(가이드 리뷰 4).
    */
   const pickSuggestion = (suggestion: string) => {
-    const userText = composer.draft.trim() !== "" && composer.draft !== composer.suggested;
-    setComposer({
-      ...composer,
-      draft: userText ? `${composer.draft.trimEnd()}\n${suggestion}` : suggestion,
-      suggested: userText ? null : suggestion,
+    setComposer((previous) => {
+      const userText = previous.draft.trim() !== "" && previous.draft !== previous.suggested;
+      return {
+        ...previous,
+        draft: userText ? `${previous.draft.trimEnd()}\n${suggestion}` : suggestion,
+        suggested: userText ? null : suggestion,
+      };
     });
   };
 
   const submitDraft = () => {
+    // 보내는 문장은 지금 그려진 입력칸 그대로다. 비우는 것은 그 사이 들어온 갱신과 겹치지 않게 함수형으로 한다.
     if (chat.running !== null || chat.busy || composer.draft.trim() === "") return;
     chat.send(composer.draft);
-    setComposer({ ...composer, draft: "", suggested: null });
+    setComposer((previous) => ({ ...previous, draft: "", suggested: null }));
   };
 
   return {
@@ -103,5 +111,6 @@ export const useAssistSidebarState = ({
     pickSuggestion,
     noteSuggestionsKey,
     submitDraft,
+    setVisible,
   };
 };

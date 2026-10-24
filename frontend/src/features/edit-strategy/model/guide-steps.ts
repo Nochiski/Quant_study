@@ -9,6 +9,7 @@
 import { errorsOf, fieldErrors, listErrors, sectionErrors } from "./diagnostic-counts";
 import type { DocumentDiagnostic } from "./document-state";
 import { requiresValue, type FormField, type FormSection } from "./form-projection";
+import type { ObjectSection } from "./form-transactions";
 import type { PipelineCard, PipelineProjection } from "./pipeline-projection";
 import { cardTemplate, pipelineDocumentProperties } from "./pipeline-projection";
 
@@ -115,8 +116,9 @@ const EMPTY: GuideStepStatus = { errors: 0, filled: false, required: "none" };
 const fieldsStatus = (
   fields: readonly FormField[],
   sectionDiagnostics: readonly DocumentDiagnostic[] = [],
+  sectionOf: (field: FormField) => ObjectSection | undefined = () => undefined,
 ): GuideStepStatus => {
-  const required = fields.filter(requiresValue);
+  const required = fields.filter((field) => requiresValue(field, sectionOf(field)));
   return {
     errors: errorsOf(sectionDiagnostics).length + fieldErrors(fields).length,
     filled: fields.some(holdsValue),
@@ -177,10 +179,12 @@ export const guideStepStatuses = (
         (other) => other.kind === "stage" && other.stage === step.stage && !other.listOnly,
       );
     const lists = (stage?.lists ?? []).filter((list) => step.listPointers.includes(list.pointer));
+    const rows = [...step.primary, ...step.more].flatMap((card) => card.rows);
     return combine([
       fieldsStatus(
-        [...step.primary, ...step.more].flatMap((card) => card.rows.map((row) => row.field)),
+        rows.map((row) => row.field),
         ownsStage ? (stage?.diagnostics ?? []) : [],
+        (field) => rows.find((row) => row.field === field)?.section,
       ),
       ...lists.map((list) => ({
         errors: listErrors(list).length,

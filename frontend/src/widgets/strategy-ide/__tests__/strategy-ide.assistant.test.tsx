@@ -242,22 +242,15 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(unmounted).not.toHaveBeenCalled();
   });
 
-  it("AI 열 펼침을 알리고, 접거나 위젯이 사라지면 닫힘을 알린다(SoT 3차 경미 1·최종 리뷰 5)", async () => {
-    const onAssistantOpenChange = vi.fn();
-    const view = mount({ onAssistantOpenChange });
-    // 이 테스트 환경의 기본은 접힘이다.
-    expect(onAssistantOpenChange).toHaveBeenLastCalledWith(false);
+  it("슬롯은 지금 펼쳤는지(open)를 받는다 — 접어도 마운트된 내용이 조회를 멈출 수 있다(5차 리뷰 9)", () => {
+    mount({ assistant: ({ open }) => <p>{open ? "슬롯 열림" : "슬롯 접힘"}</p> });
+    // 이 테스트 환경의 기본은 접힘이고, 한 번도 펼치지 않은 내용은 마운트하지 않는다.
+    expect(screen.queryByText(/^슬롯/u)).toBeNull();
 
     fireEvent.keyDown(window, { key: "a", altKey: true });
-    expect(onAssistantOpenChange).toHaveBeenLastCalledWith(true);
+    expect(screen.getByText("슬롯 열림")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "a", altKey: true });
-    expect(onAssistantOpenChange).toHaveBeenLastCalledWith(false);
-    fireEvent.keyDown(window, { key: "a", altKey: true });
-    expect(onAssistantOpenChange).toHaveBeenLastCalledWith(true);
-
-    // 펼친 채 사라져도 닫힘을 알린다.
-    view.unmount();
-    expect(onAssistantOpenChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByText("슬롯 접힘")).toBeInTheDocument();
   });
 
   it("화면 폭을 왕복해도 AI 인스턴스와 작성 중 문장을 유지한다", async () => {

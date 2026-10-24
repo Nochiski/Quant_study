@@ -15,7 +15,6 @@ import {
   type StrategyView,
 } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
-import { useCommittedRef } from "../../../shared/lib/react";
 import {
   useMediaQuery,
   useScrollbarFreeWidth,
@@ -133,15 +132,13 @@ export type StrategyIdeProps = {
    * 접는 경로다(spec D7). 패널 헤더의 접기 버튼은 대화를 끝내지 않는 패널 조작이라 확인을 거치지 않는다.
    */
   assistant?: ReactNode | ((controls: AssistantSlotControls) => ReactNode);
-  /**
-   * AI 사이드바가 펼쳐졌는지 알린다. 펼침 상태는 이 widget(패널 배치)이 소유하고, 대화 상태를 위쪽에 두는
-   * 화면은 이것으로 접힌 동안 대화 조회를 멈춘다. 처음 commit 때도 한 번 알린다.
-   */
-  onAssistantOpenChange?: (open: boolean) => void;
 };
 
-/** 슬롯 함수가 받는 패널 손잡이. */
-export type AssistantSlotControls = { close: () => void };
+/**
+ * 슬롯 함수가 받는 패널 손잡이. `open`은 지금 펼쳐졌는지다 — 한 번 펼친 뒤에는 접어도 내용이 마운트된 채
+ * 남으므로, 접힌 동안 조회를 멈출 내용은 이것을 읽는다. 펼침의 정본은 이 widget 이다.
+ */
+export type AssistantSlotControls = { close: () => void; open: boolean };
 
 const NARROW_QUERY = "(max-width: 1279px)";
 
@@ -239,7 +236,6 @@ export const StrategyIde = ({
   inspector,
   debugger: debuggerPanel,
   assistant,
-  onAssistantOpenChange,
 }: StrategyIdeProps) => {
   const narrow = useMediaQuery(NARROW_QUERY);
   const compact = useMediaQuery("(max-width: 767px)");
@@ -535,19 +531,6 @@ export const StrategyIde = ({
     if (narrow) close(["inspectorOpen", "assistantOpen"]);
   }, [narrow, close]);
 
-  // 펼침 상태를 화면에 알린다. commit 과 같은 시점(layout effect)이라 접은 직후의 대화 조회가 한 프레임 더
-  // 돌지 않는다. 콜백은 committed ref 로 읽어 콜백 identity 가 바뀌어도 다시 알리지 않는다.
-  const assistantOpenNow = hasAssistant && layout.assistantOpen;
-  const onAssistantOpenChangeRef = useCommittedRef(onAssistantOpenChange);
-  useLayoutEffect(() => {
-    onAssistantOpenChangeRef.current?.(assistantOpenNow);
-  }, [assistantOpenNow, onAssistantOpenChangeRef]);
-  // 사라질 때는 닫힌 것으로 알린다 — 화면에 남은 사본이 "열림"으로 굳어 조회가 계속 돌지 않게 한다(최종 리뷰 5).
-  useLayoutEffect(
-    () => () => onAssistantOpenChangeRef.current?.(false),
-    [onAssistantOpenChangeRef],
-  );
-
   // window 리스너는 layout effect로 설치한다(`.claude/rules/frontend-react-effects.md`, backlog 20·21).
   useLayoutEffect(() => {
     if (!narrow && overlayRight === null) return;
@@ -756,7 +739,7 @@ export const StrategyIde = ({
       <div className="ide__assistant-body">
         {assistantMounted
           ? typeof assistant === "function"
-            ? assistant({ close: closeAssistant })
+            ? assistant({ close: closeAssistant, open: layout.assistantOpen })
             : assistant
           : null}
       </div>

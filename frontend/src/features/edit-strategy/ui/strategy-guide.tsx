@@ -138,6 +138,14 @@ export const StrategyGuide = ({
     catalogProfiles(catalogs, catalog)?.find(
       (profile) => profile.field_id === value,
     )?.label ?? null;
+  // 안내를 떠나는 길(편집기·레시피·원문 열기)은 지금 단계를 지나간 것으로 남긴 뒤 떠난다 — 돌아왔을 때 떠나기 전
+  // 단계가 미작성으로 되돌아가지 않는다(5차 리뷰 2). 기록은 화면이 소유하므로 떠난 뒤에도 남는다.
+  const leaving =
+    <Args extends unknown[]>(go: (...args: Args) => void) =>
+    (...args: Args): void => {
+      if (pipeline !== null) visit(current.id);
+      go(...args);
+    };
   const context: CardContext | null =
     pipeline === null || schema === null
       ? null
@@ -149,7 +157,7 @@ export const StrategyGuide = ({
           catalogs,
           selectedPointer: undefined,
           revealSignal: undefined,
-          onOpenGraph,
+          onOpenGraph: leaving(onOpenGraph),
           onOpenAdvanced: undefined,
           librarySave: true,
           itemHeads: true,
@@ -205,7 +213,7 @@ export const StrategyGuide = ({
           <Button size="small" tone="ghost" onClick={onUndo} disabled={!canUndo}>
             {t("guide.undo")}
           </Button>
-          <Button size="small" tone="secondary" onClick={onOpenEditor}>
+          <Button size="small" tone="secondary" onClick={leaving(onOpenEditor)}>
             {t("guide.openEditor")}
           </Button>
         </div>
@@ -283,7 +291,7 @@ export const StrategyGuide = ({
                 context={context}
                 outside={outside}
                 onReview={() => onStep("review")}
-                onOpenSourceAt={onOpenSourceAt}
+                onOpenSourceAt={onOpenSourceAt === undefined ? undefined : leaving(onOpenSourceAt)}
               />
             ) : current.kind === "stage" ? (
               <StageStep

@@ -1,6 +1,6 @@
 import { ApiRequestError } from "../../../shared/api";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { strategyDocumentQuery } from "../../../entities/strategy";
 import { RunParameterSelection, useRunParameters } from "../../../entities/backtest";
@@ -264,14 +264,11 @@ export const StrategyRevisionPage = () => {
     environment: runSettings.environment,
     backtest: { canRun, settling: backtest.settling, run: runBacktest },
   });
-  // AI 대화·입력칸 상태는 새 전략 화면과 같이 화면이 든다. 편집기 AI 열의 펼침은 widget 이 알려 주고, 접힌 동안
-  // 대화 조회를 멈추되 입력 초안은 남긴다(SoT 3차 경미 1·2).
-  // 이 값은 widget(StrategyIde)이 owner 인 AI 열 펼침의 사본이다. 화면은 구독만 하고 직접 바꾸지 않는다.
-  const [assistantOpen, setAssistantOpen] = useState(false);
+  // AI 대화·입력칸 상태는 새 전략 화면과 같이 화면이 든다. 편집기 AI 열이 접힌 동안(widget 이 넘기는 `open`)
+  // 대화 조회를 멈추되 입력 초안은 남긴다(SoT 3차 경미 1·2, 5차 리뷰 9).
   const assistantState = useAssistSidebarState({
     documentRef: strategyAssistant.documentRef,
     readContext: strategyAssistant.readContext,
-    enabled: assistantOpen,
   });
   const selectSymbol = useCallback(
     (pointer: string): void => {
@@ -661,8 +658,7 @@ export const StrategyRevisionPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
-        onAssistantOpenChange={setAssistantOpen}
-        assistant={({ close }) => (
+        assistant={({ close, open }) => (
           <AssistStrategySidebar
             documentRef={strategyAssistant.documentRef}
             readContext={strategyAssistant.readContext}
@@ -670,6 +666,7 @@ export const StrategyRevisionPage = () => {
             // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
             // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
             onClose={close}
+            visible={open}
             state={assistantState}
           />
         )}

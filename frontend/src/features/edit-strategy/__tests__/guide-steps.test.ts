@@ -189,6 +189,14 @@ describe("requiresValue", () => {
   it("지금 설정에서 꺼진(applicable=false) 필수 칸은 채우지 않아도 된다(SoT 재리뷰 경미 2)", () => {
     expect(requiresValue({ ...title(), applicable: false })).toBe(false);
   });
+
+  it("문서에 없는 선택 섹션 안의 필수 칸은 채우지 않아도 된다(5차 리뷰 1)", () => {
+    // 지금 런타임 스키마에는 이런 칸이 없다(선택 섹션 eligibility·signal·portfolio·risk 에 기본값 없는 필수 칸이
+    // 없다). 스키마가 늘어도 문서에 없는 섹션 때문에 "필수"가 붙지 않게 술어를 고정한다.
+    expect(requiresValue(title(), { pointer: "/risk", written: false })).toBe(false);
+    expect(requiresValue(title(), { pointer: "/risk", written: true })).toBe(true);
+    expect(requiresValue(title(), { pointer: "", written: false })).toBe(true);
+  });
 });
 
 describe("leftStep", () => {

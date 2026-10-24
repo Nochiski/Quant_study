@@ -86,10 +86,18 @@ export type FormField = {
 
 /**
  * 사용자가 값을 채워야 하는 칸인가: 스키마 필수이고, 기본값이 없고(있으면 backend 가 채운다), 지금 설정에서 꺼지지
- * 않았다(`x-applicable-when` 이 끈 칸은 쓰이지 않는다). 안내의 "필수" 표식과 단계 완료 판정이 같은 술어를 쓴다.
+ * 않았고(`x-applicable-when` 이 끈 칸은 쓰이지 않는다), 칸이 든 섹션이 문서에 있다 — 문서에 없는 선택 섹션의 필수
+ * 칸은 그 섹션을 쓰기 전까지 채울 일이 없다(섹션 자체가 필수면 backend 진단이 막는다). 안내의 "필수" 표식과 단계
+ * 완료 판정이 같은 술어를 쓴다. `section` 은 칸이 든 object 섹션(루트 `""` 는 늘 있다)이다.
  */
-export const requiresValue = (field: FormField): boolean =>
-  field.required && !field.hasDefault && field.applicable !== false;
+export const requiresValue = (
+  field: FormField,
+  section?: { readonly pointer: string; readonly written: boolean },
+): boolean =>
+  field.required &&
+  !field.hasDefault &&
+  field.applicable !== false &&
+  (section === undefined || section.pointer === "" || section.written);
 
 export type FormListItem = {
   pointer: string;

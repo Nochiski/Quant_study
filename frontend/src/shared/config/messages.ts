@@ -3368,7 +3368,7 @@ export const messages = {
     "guide.factors.loading": "Loading the factor catalog.",
     "guide.factors.unavailable": "Could not load the factor catalog. Write in the editor or reopen later.",
     "guide.stepState.done": "(done)",
-    "guide.stepState.error": "{count} errors",
+    "guide.stepState.error": "Errors: {count}",
     "guide.progress": "{done} / {total} steps done",
     "guide.stepPosition": "Step {current} of {total}",
     "guide.nextStep": "Next: {name}",

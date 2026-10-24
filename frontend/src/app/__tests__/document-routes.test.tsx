@@ -5025,25 +5025,126 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     expect(await within(rail).findByText("편집기에서도 이어지는 답")).toBeInTheDocument();
   });
 
-  it("공급자 조회는 재시도하지 않고 첫 결과로 탭을 정한다(최종 리뷰 6)", async () => {
-    useGuideCatalog();
+  /** 첫 조회는 실패하고 재시도는 활성 공급자를 돌려준다. */
+  const failOnceThenConnected = () => {
     let calls = 0;
     server.use(
       http.get(`${API}/api/v1/assistant/providers`, () => {
         calls += 1;
-        return HttpResponse.json({ detail: "down" }, { status: 500 });
+        return calls === 1
+          ? HttpResponse.json({ detail: "down" }, { status: 500 })
+          : HttpResponse.json({
+              kinds: [],
+              profiles: [
+                {
+                  profile_id: "p-1",
+                  kind: "anthropic",
+                  label: "작업용 Claude",
+                  model: "claude-sonnet-5",
+                  base_url: null,
+                  secret_tail: "9876",
+                  active: true,
+                  created_at: "2026-09-20T00:00:00Z",
+                },
+              ],
+            });
       }),
     );
-    mountWithClient(
-      "/research/strategies/new?guide=true",
-      (client) => client.setDefaultOptions({ queries: { retry: 3, retryDelay: 1 } }),
+  };
+  const retryOnce = (client: QueryClient) =>
+    client.setDefaultOptions({ queries: { retry: 3, retryDelay: 300 } });
+
+  it("첫 실패 동안은 잠정으로 미리보기를 보이고, 재시도가 성공하면 고르지 않은 탭은 AI 도우미로 정한다(5차 리뷰 4)", async () => {
+    useGuideCatalog();
+    failOnceThenConnected();
+    mountWithClient("/research/strategies/new?guide=true", retryOnce, false);
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "전략 문서 미리보기" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "AI 도우미" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      ),
+    );
+  });
+
+  it("잠정 미리보기 동안 사용자가 탭을 고르면 재시도가 성공해도 그 탭이 남는다(5차 리뷰 4)", async () => {
+    useGuideCatalog();
+    failOnceThenConnected();
+    const user = userEvent.setup();
+    const { history } = mountWithClient("/research/strategies/new?guide=true", retryOnce, false);
+    const previewTab = await screen.findByRole("tab", { name: "전략 문서 미리보기" });
+    await user.click(previewTab);
+    await waitFor(() => expect(history.location.search).toContain("assist=preview"));
+    // 재시도가 성공할 시간을 준다.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(screen.getByRole("tab", { name: "전략 문서 미리보기" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("편집기로 떠날 때 지금 단계를 지나간 것으로 남기고, 고른 오른쪽 탭도 돌아오면 그대로다(5차 리뷰 2·5)", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    const { history } = mountWithClient(
+      "/research/strategies/new?guide=true&step=eligibility&assist=preview",
+      undefined,
       false,
     );
-    const previewTab = await screen.findByRole("tab", { name: "전략 문서 미리보기" });
-    expect(previewTab).toHaveAttribute("aria-selected", "true");
-    // 재시도가 돌았다면 짧은 간격 뒤 호출이 늘어난다.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(calls).toBe(1);
+    await screen.findByRole("navigation", { name: "만드는 단계" });
+    const universe = await within(steps()).findByRole("button", { name: "유니버스" });
+    expect(universe).not.toHaveAccessibleDescription("(완료)");
+
+    await user.click(screen.getByRole("button", { name: "편집기에서 직접 쓰기" }));
+    await waitFor(() => expect(history.location.search).not.toContain("guide"));
+    expect(history.location.search).toContain("assist=preview");
+    act(() => history.back());
+    expect(
+      await within(
+        await screen.findByRole("navigation", { name: "만드는 단계" }),
+      ).findByRole("button", { name: "유니버스" }),
+    ).toHaveAccessibleDescription("(완료)");
+    expect(screen.getByRole("tab", { name: "전략 문서 미리보기" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("방문 기록은 commit 뒤 탭 보관함에 쓰이고, 초안이 저장되면 지워진다(5차 리뷰 7·SoT 5차)", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    const { history } = mountWithClient(
+      "/research/strategies/new?guide=true&step=eligibility&assist=preview",
+      undefined,
+      false,
+    );
+    await within(
+      await screen.findByRole("navigation", { name: "만드는 단계" }),
+    ).findByRole("button", { name: "유니버스" });
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await waitFor(() => expect(history.location.search).toContain("draft="));
+    const draft = new URLSearchParams(history.location.search).get("draft")!;
+    const key = `strategy-guide.visited.${draft}`;
+    await waitFor(() => expect(sessionStorage.getItem(key)).toContain("eligibility"));
+
+    // 이름을 적고 확인 단계에서 저장한다.
+    await user.click(within(steps()).getByRole("button", { name: "이름·의도" }));
+    const title = await screen.findByRole("textbox", { name: /^전략 이름/u });
+    await user.type(title, "저장할 전략");
+    await user.tab();
+    await user.click(within(steps()).getByRole("button", { name: "확인" }));
+    const save = await screen.findByRole("button", { name: "저장하고 백테스트 준비" });
+    await waitFor(() => expect(save).toBeEnabled());
+    await user.click(save);
+    await waitFor(() =>
+      expect(history.location.pathname).toBe("/research/strategies/s9/revisions/1"),
+    );
+    expect(sessionStorage.getItem(key)).toBeNull();
   });
 
   it("지나간 단계는 편집기에 다녀오거나 새로고침해도 완료로 남는다(최종 리뷰 2)", async () => {

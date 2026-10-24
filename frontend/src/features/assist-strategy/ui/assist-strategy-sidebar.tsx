@@ -96,6 +96,11 @@ export type AssistStrategySidebarProps = AssistScreenProps & {
    */
   layout?: "rail" | "docked";
   /**
+   * 이 사이드바가 지금 보이는가. 접힌 열·숨은 탭 안에 마운트된 채 남는 자리가 넘긴다. 보이는 동안만 대화를
+   * 조회한다. 기본은 보임이다.
+   */
+  visible?: boolean;
+  /**
    * 위쪽에서 만든 대화·입력칸 상태(`useAssistSidebarState`). 주면 사이드바는 그리기만 한다.
    */
   state?: AssistSidebarState;
@@ -133,8 +138,15 @@ const SidebarView = ({
   suggestions = [],
   suggestionsKey,
   layout = "rail",
+  visible = true,
   state,
 }: AssistStrategySidebarProps & { state: AssistSidebarState }) => {
+  // 보임 여부를 상태에 알린다. 사라지면 보이지 않는 것이다.
+  const { setVisible } = state;
+  useLayoutEffect(() => {
+    setVisible(visible);
+    return () => setVisible(false);
+  }, [setVisible, visible]);
   // 추천 질문의 맥락은 그리는 자리가 안다(안내라면 안내가 해석한 지금 단계, 최종 리뷰 4). commit 때 알린다.
   const { noteSuggestionsKey } = state;
   useLayoutEffect(() => {

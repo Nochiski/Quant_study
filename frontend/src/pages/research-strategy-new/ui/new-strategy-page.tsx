@@ -50,6 +50,7 @@ import {
   useFormProjection,
   useSourceTransactions,
   useStrategyDocument,
+  clearGuideVisits,
   readGuideVisits,
   writeGuideVisits,
   useUpgradeDocument,
@@ -299,9 +300,12 @@ export const NewStrategyPage = () => {
   // 첫 순간에 한 번만 정하고(나중에 다시 읽혀도 탭이 저절로 바뀌지 않는다), 확정 전에는 정하지 않는다. URL 에
   // 적힌 탭은 언제나 이긴다(가이드 리뷰 2). 조회가 실패하면 미리보기로 정한다 — 공급자를 모르면 AI 를 먼저 보일
   // 근거가 없다(가이드 재리뷰 1).
-  // 이 판정은 첫 확정 결과 하나로 한다. 재시도하면 실패로 미리보기를 정한 뒤 성공해도 탭이 따라가지 않아 두 번의
-  // 결과가 어긋나므로, 여기서는 재시도하지 않는다(최종 리뷰 6).
-  const providers = useQuery({ ...assistantProvidersQuery(), retry: false });
+  // 공용 조회 옵션(재시도)은 건드리지 않는다 — 같은 키를 설정 화면·사이드바도 읽는다(5차 리뷰 4). 판정은 조회가
+  // 확정될 때(어느 시도든 성공해 목록이 오거나, 재시도까지 모두 실패) 한 번 한다. 재시도가 도는 동안(첫 실패 뒤)은
+  // 잠정으로 미리보기를 보일 뿐 결정하지 않는다 — 그 사이 사용자가 탭을 고르면(URL) 그것이 이기고, 고르지 않았다면
+  // 재시도 성공 뒤 공급자가 있으면 AI 도우미로 간다. 잠정 표시는 "확정해 보인 미리보기"가 아니므로 1회 결정 원칙과
+  // 충돌하지 않는다.
+  const providers = useQuery(assistantProvidersQuery());
   const [defaultPanel, setDefaultPanel] = useState<GuidePanel | null>(null);
   if (defaultPanel === null && (providers.data !== undefined || providers.isError))
     setDefaultPanel(
@@ -309,18 +313,15 @@ export const NewStrategyPage = () => {
         ? "assistant"
         : "preview",
     );
-  const guidePanel: GuidePanel | null = search.assist ?? defaultPanel;
+  const guidePanel: GuidePanel | null =
+    search.assist ?? defaultPanel ?? (providers.failureCount > 0 ? "preview" : null);
 
   // AI 대화·입력칸 상태는 화면이 한 벌 든다. 안내의 AI 탭과 편집기 AI 열이 같은 상태를 그려서, 안내를 닫고
-  // 편집기로 가도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4). 서버 조회는 AI 가 보이는 동안만 돈다 —
-  // 안내에서 미리보기 탭을 보거나 편집기 AI 열을 접으면 멈추고, 입력 초안은 남는다(SoT 3차 경미 1). 편집기 AI 열의
-  // 펼침은 widget 이 소유하고 알려 준다.
-  // 이 값은 widget(StrategyIde)이 owner 인 AI 열 펼침의 사본이다. 화면은 구독만 하고 직접 바꾸지 않는다.
-  const [ideAssistantOpen, setIdeAssistantOpen] = useState(false);
+  // 편집기로 가도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4). 서버 조회는 사이드바가 보이는 동안만 돈다 —
+  // 보임 여부는 사이드바를 품은 자리(안내 탭·편집기 AI 열)가 사이드바에 넘기고, 화면은 사본을 들지 않는다(5차 리뷰 9).
   const assistantState = useAssistSidebarState({
     documentRef: strategyAssistant.documentRef,
     readContext: strategyAssistant.readContext,
-    enabled: search.guide ? guidePanel === "assistant" : ideAssistantOpen,
   });
 
   // 단계별 안내(RD-04-D). 같은 문서·같은 트랜잭션을 쓰고, 편집기는 숨긴 채 살아 있어 되돌리기 이력이 이어진다.
@@ -335,14 +336,24 @@ export const NewStrategyPage = () => {
     setGuideVisits({ draftId: serverDraftId, visited: readGuideVisits(serverDraftId) });
   const visitGuideStep = useCallback(
     (stepId: string) =>
-      setGuideVisits((previous) => {
-        if (previous.visited.has(stepId)) return previous;
-        const visited = new Set(previous.visited).add(stepId);
-        writeGuideVisits(previous.draftId, visited);
-        return { ...previous, visited };
-      }),
+      setGuideVisits((previous) =>
+        previous.visited.has(stepId)
+          ? previous
+          : { ...previous, visited: new Set(previous.visited).add(stepId) },
+      ),
     [],
   );
+  // 보관함 쓰기는 commit 뒤에 한다 — 갱신 함수 안의 부수효과는 다시 불릴 수 있다(5차 리뷰 7). 다른 콜백이 이 값을
+  // 읽지 않으므로 passive effect 로 충분하다.
+  useEffect(() => {
+    if (guideVisits.visited.size > 0) writeGuideVisits(guideVisits.draftId, guideVisits.visited);
+  }, [guideVisits]);
+  // 초안이 저장돼 전략이 되면 그 초안의 방문 기록은 쓸 일이 없다. 저장 뒤 초안 id 는 리비전 초안으로 바뀌므로
+  // 진입 때의 초안 id 로 지운다.
+  const entryGuideDraftId = search.draft ?? entryDraftId;
+  useEffect(() => {
+    if (document.strategyId !== null) clearGuideVisits(entryGuideDraftId);
+  }, [document.strategyId, entryGuideDraftId]);
 
   const leaveGuide = (next: Partial<typeof search>) =>
     void navigate({
@@ -352,7 +363,6 @@ export const NewStrategyPage = () => {
         ...search,
         guide: undefined,
         step: undefined,
-        assist: undefined,
         path: undefined,
         recipe: undefined,
         ...next,
@@ -396,6 +406,7 @@ export const NewStrategyPage = () => {
                 suggestions={guideSuggestions(step)}
                 // 안내가 해석한 지금 단계(모르는 URL 값이면 첫 단계)가 추천 질문의 맥락이다(최종 리뷰 4).
                 suggestionsKey={step.id}
+                visible={guidePanel === "assistant"}
                 state={assistantState}
                 layout="docked"
               />
@@ -756,8 +767,7 @@ export const NewStrategyPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
-        onAssistantOpenChange={setIdeAssistantOpen}
-        assistant={({ close }) => (
+        assistant={({ close, open }) => (
           <AssistStrategySidebar
             documentRef={strategyAssistant.documentRef}
             readContext={strategyAssistant.readContext}
@@ -767,6 +777,7 @@ export const NewStrategyPage = () => {
             onClose={close}
             // 편집기로 오면 고치지 않은 안내 추천 질문은 입력칸에서 지워진다.
             suggestionsKey="editor"
+            visible={open}
             state={assistantState}
           />
         )}

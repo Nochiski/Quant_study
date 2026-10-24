@@ -28,3 +28,12 @@ export const writeGuideVisits = (draftId: string, visited: ReadonlySet<string>):
     // 보관함이 가득 찼거나 거절됐다. 이 화면 동안의 기억으로 충분하다.
   }
 };
+
+/** 초안이 전략으로 저장되면 그 초안의 방문 기록을 지운다. */
+export const clearGuideVisits = (draftId: string): void => {
+  try {
+    browserSessionStorage()?.removeItem(visitsKey(draftId));
+  } catch {
+    // 지우지 못해도 다음에 같은 초안 id 가 쓰이지 않으므로 해가 없다.
+  }
+};

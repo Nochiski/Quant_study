@@ -1,0 +1,181 @@
+/* 화면 위에 떠 있는 비모달 창(FloatingWindow). 위치·크기는 인라인 연속값이고 나머지는 토큰이다. */
+.floating-window {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-popover);
+}
+
+.floating-window[hidden] {
+  display: none;
+}
+
+.floating-window:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 2px;
+}
+
+.floating-window__bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+.floating-window__title {
+  overflow: hidden;
+  margin: 0;
+  font-size: var(--text-size-subsection);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.floating-window__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: default;
+}
+
+.floating-window__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.floating-window__icon:hover {
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+
+.floating-window__icon:focus-visible,
+.floating-window__launcher:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 2px;
+}
+
+.floating-window__size {
+  --control-size: var(--control-height-dense);
+  max-width: 7.5rem;
+  font-size: var(--text-size-small);
+}
+
+.floating-window__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 끄는 가장자리: 변은 6px 띠, 모서리는 12px 정사각형. 보이지 않고 커서만 바뀐다. */
+.floating-window__resize {
+  position: absolute;
+  z-index: 1;
+  touch-action: none;
+}
+
+.floating-window__resize--n,
+.floating-window__resize--s {
+  left: 12px;
+  right: 12px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.floating-window__resize--n {
+  top: 0;
+}
+
+.floating-window__resize--s {
+  bottom: 0;
+}
+
+.floating-window__resize--e,
+.floating-window__resize--w {
+  top: 12px;
+  bottom: 12px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.floating-window__resize--e {
+  right: 0;
+}
+
+.floating-window__resize--w {
+  left: 0;
+}
+
+.floating-window__resize--ne,
+.floating-window__resize--nw,
+.floating-window__resize--se,
+.floating-window__resize--sw {
+  width: 12px;
+  height: 12px;
+}
+
+.floating-window__resize--ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.floating-window__resize--sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.floating-window__resize--nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.floating-window__resize--se {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+/* 최소화 런처: 우하단에 떠 있는 버튼. */
+.floating-window__launcher {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  box-shadow: var(--shadow-popover);
+}
+
+@media (max-width: 720px) {
+  .floating-window__launcher {
+    right: var(--space-4);
+    bottom: var(--space-4);
+  }
+}

@@ -460,7 +460,7 @@
   margin-left: auto;
 }
 
-/* 오른쪽 칸: 탭(AI 도우미 | 문서 미리보기)과 두 패널. 둘 다 마운트를 유지하고 보이는 것만 바꾼다. */
+/* 오른쪽 칸: 문서 미리보기. AI 도우미는 화면 위에 떠 있는 창(FloatingWindow)이다. */
 .strategy-guide__side {
   position: sticky;
   top: var(--space-4);
@@ -471,31 +471,6 @@
   border-radius: var(--radius-large);
   background: var(--surface-panel);
   box-shadow: var(--shadow-card);
-}
-
-.strategy-guide__side-tabs {
-  gap: 0;
-  background: var(--surface-raised);
-}
-
-.strategy-guide__side-tabs .ui-tab {
-  flex: 1 1 0;
-  min-height: 44px;
-}
-
-.strategy-guide__side-tabs .ui-tab[aria-selected="true"] {
-  background: var(--surface-panel);
-}
-
-.strategy-guide__side-panel--assistant {
-  display: flex;
-  flex-direction: column;
-  height: min(72vh, calc(var(--space-6) * 22));
-  min-height: 0;
-}
-
-.strategy-guide__side-panel[hidden] {
-  display: none;
 }
 
 .strategy-guide__preview {
@@ -567,13 +542,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-}
-
-.strategy-guide__side-pending {
-  margin: 0;
-  padding: var(--space-4);
-  color: var(--text-muted);
-  font-size: var(--text-size-small);
 }
 
 /* 안내에 고칠 자리가 없는 칸(schema_version·parameters)의 오류: 이름 단계 몸통 위에서 오류 톤으로 알린다. */

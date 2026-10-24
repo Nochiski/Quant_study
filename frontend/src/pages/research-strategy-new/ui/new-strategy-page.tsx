@@ -51,12 +51,13 @@ import {
   useSourceTransactions,
   useStrategyDocument,
   clearGuideVisits,
+  readGuideAssistantOpen,
   readGuideVisits,
+  writeGuideAssistantOpen,
   writeGuideVisits,
   useUpgradeDocument,
   type DocumentSource,
   guideSuggestionKeys,
-  type GuidePanel,
   type GuideStep,
   type StrategyView,
 } from "../../../features/edit-strategy";
@@ -296,25 +297,29 @@ export const NewStrategyPage = () => {
     });
   }, [leaving, document.strategyId, document.baseRevision, navigate]);
 
-  // 안내 오른쪽 칸의 기본 탭: AI 공급자가 연결돼 있으면 AI 도우미, 아니면 문서 미리보기. 공급자 목록이 확정된
-  // 첫 순간에 한 번만 정하고(나중에 다시 읽혀도 탭이 저절로 바뀌지 않는다), 확정 전에는 정하지 않는다. URL 에
-  // 적힌 탭은 언제나 이긴다(가이드 리뷰 2). 조회가 실패하면 미리보기로 정한다 — 공급자를 모르면 AI 를 먼저 보일
-  // 근거가 없다(가이드 재리뷰 1).
-  // 공용 조회 옵션(재시도)은 건드리지 않는다 — 같은 키를 설정 화면·사이드바도 읽는다(5차 리뷰 4). 판정은 조회가
-  // 확정될 때(어느 시도든 성공해 목록이 오거나, 재시도까지 모두 실패) 한 번 한다. 재시도가 도는 동안(첫 실패 뒤)은
-  // 잠정으로 미리보기를 보일 뿐 결정하지 않는다 — 그 사이 사용자가 탭을 고르면(URL) 그것이 이기고, 고르지 않았다면
-  // 재시도 성공 뒤 공급자가 있으면 AI 도우미로 간다. 잠정 표시는 "확정해 보인 미리보기"가 아니므로 1회 결정 원칙과
-  // 충돌하지 않는다.
+  // 안내의 AI 도우미 창은 화면 위에 떠 있고 열림 상태는 UI 로컬이다. 처음 값의 우선순위: 주소의 옛 탭 값(`assist`,
+  // 하위호환 — `assistant`면 열고 `preview`면 닫는다) → 사용자가 마지막으로 열거나 최소화한 기록 → 공급자 연결
+  // 여부(연결돼 있으면 연다). 공급자 판정은 조회가 확정될 때(어느 시도든 성공해 목록이 오거나 재시도까지 모두 실패)
+  // 한 번 한다. 재시도가 도는 동안(첫 실패 뒤)은 잠정으로 런처만 보이고 결정하지 않는다 — 그 사이 사용자가 창을
+  // 열면 그것이 이긴다. 공용 조회 옵션(재시도)은 건드리지 않는다(같은 키를 설정 화면·사이드바도 읽는다).
   const providers = useQuery(assistantProvidersQuery());
-  const [defaultPanel, setDefaultPanel] = useState<GuidePanel | null>(null);
-  if (defaultPanel === null && (providers.data !== undefined || providers.isError))
-    setDefaultPanel(
-      providers.data !== undefined && hasActiveAssistantProvider(providers.data)
-        ? "assistant"
-        : "preview",
+  const [guideAssistantOpen, setGuideAssistantOpen] = useState<boolean | null>(() =>
+    search.assist === "assistant"
+      ? true
+      : search.assist === "preview"
+        ? false
+        : readGuideAssistantOpen(),
+  );
+  if (guideAssistantOpen === null && (providers.data !== undefined || providers.isError))
+    setGuideAssistantOpen(
+      providers.data !== undefined && hasActiveAssistantProvider(providers.data),
     );
-  const guidePanel: GuidePanel | null =
-    search.assist ?? defaultPanel ?? (providers.failureCount > 0 ? "preview" : null);
+  const guideWindowOpen: boolean | null =
+    guideAssistantOpen ?? (providers.failureCount > 0 ? false : null);
+  const changeGuideAssistantOpen = (open: boolean) => {
+    setGuideAssistantOpen(open);
+    writeGuideAssistantOpen(open);
+  };
 
   // AI 대화·입력칸 상태는 화면이 한 벌 든다. 안내의 AI 탭과 편집기 AI 열이 같은 상태를 그려서, 안내를 닫고
   // 편집기로 가도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4). 서버 조회는 사이드바가 보이는 동안만 돈다 —
@@ -386,15 +391,8 @@ export const NewStrategyPage = () => {
             visited={guideVisits.visited}
             onVisit={visitGuideStep}
             status={<ServerDraftBanner sync={serverDraft} />}
-            panel={guidePanel}
-            onPanel={(assist) =>
-              void navigate({
-                to: ROUTE,
-                search: { ...search, assist },
-                replace: true,
-                resetScroll: false,
-              })
-            }
+            assistantOpen={guideWindowOpen}
+            onAssistantOpenChange={changeGuideAssistantOpen}
             assistant={(step) => (
               <AssistStrategySidebar
                 copy="guide"
@@ -406,7 +404,7 @@ export const NewStrategyPage = () => {
                 suggestions={guideSuggestions(step)}
                 // 안내가 해석한 지금 단계(모르는 URL 값이면 첫 단계)가 추천 질문의 맥락이다(최종 리뷰 4).
                 suggestionsKey={step.id}
-                visible={guidePanel === "assistant"}
+                visible={guideAssistantOpen === true}
                 state={assistantState}
                 layout="docked"
               />

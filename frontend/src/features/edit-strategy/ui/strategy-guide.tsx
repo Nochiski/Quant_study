@@ -9,7 +9,8 @@ import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { FactorDefinition } from "../../../shared/api";
 import { t, tCode, tDescription, tFill, tName, tOptional } from "../../../shared/config";
 import { useCommittedRef } from "../../../shared/lib/react";
-import { Badge, Button, panelId, tabId, Tabs } from "../../../shared/ui";
+import { ASSISTANT_WINDOW_STORAGE_KEY } from "../../../entities/assistant";
+import { Badge, Button, FloatingWindow } from "../../../shared/ui";
 import { buildCanonicalSnippetCatalog, type SnippetCatalogSource } from "../model/canonical-snippets";
 import {
   catalogProfiles,
@@ -50,8 +51,7 @@ import "./strategy-guide.css";
 /** 안내의 feedback owner. 캔버스·Form·Graph와 슬롯을 나눈다. */
 const GUIDE_OWNER = "guide";
 
-/** 오른쪽 칸의 탭: AI 도우미와 문서 미리보기. 어느 탭인지는 화면(URL)이 소유한다. */
-export type GuidePanel = "assistant" | "preview";
+
 
 const stepName = (step: GuideStep): string => {
   if (step.kind === "document") return t("guide.step.document");
@@ -71,8 +71,8 @@ export const StrategyGuide = ({
   onStep,
   status,
   assistant,
-  panel = "preview",
-  onPanel,
+  assistantOpen = null,
+  onAssistantOpenChange,
   onOpenGraph,
   onOpenEditor,
   onOpenSourceAt,
@@ -112,13 +112,13 @@ export const StrategyGuide = ({
   /** 머리 띠 오른쪽의 초안 저장 상태(서버 초안 동기화 문장). */
   status?: ReactNode;
   /**
-   * 오른쪽 칸의 AI 도우미. 지금 단계를 받아 그 단계에 맞는 추천 질문을 고른다. 없으면 오른쪽 칸은 문서
-   * 미리보기 하나다. AI 패널은 탭을 바꿔도 마운트를 유지한다 — 치던 문장·진행 중 답변을 잃지 않는다.
+   * 화면 위에 떠 있는 AI 도우미 창의 본문. 지금 단계를 받아 그 단계에 맞는 추천 질문을 고른다. 창은 처음 열 때
+   * 본문을 마운트하고 최소화해도 유지한다 — 치던 문장·진행 중 답변을 잃지 않는다. 오른쪽 칸은 문서 미리보기다.
    */
   assistant?: (step: GuideStep) => ReactNode;
-  /** 열린 탭. null 이면 아직 정하지 못했다(공급자 연결 여부를 기다리는 중) — 오른쪽 칸은 불러오는 중이다. */
-  panel?: GuidePanel | null;
-  onPanel?: (panel: GuidePanel) => void;
+  /** 창이 열렸는가. null 이면 아직 정하지 못했다(공급자 연결 여부를 기다리는 중) — 창도 런처도 그리지 않는다. */
+  assistantOpen?: boolean | null;
+  onAssistantOpenChange?: (open: boolean) => void;
 }) => {
   const titleId = useId();
   const pipeline: PipelineProjection | null = useMemo(
@@ -195,12 +195,7 @@ export const StrategyGuide = ({
   ).length;
   const next = steps[index + 1];
   const changed = useChangedLines(source);
-  // AI 패널은 처음 열 때 마운트하고 그 뒤로는 탭을 바꿔도 유지한다 — 숨은 탭이 대화 조회를 시작하지 않고,
-  // 연 뒤에는 치던 문장·진행 중 답변을 잃지 않는다(가이드 재리뷰 7).
-  const [assistantMounted, setAssistantMounted] = useState(false);
-  if (!assistantMounted && panel === "assistant") setAssistantMounted(true);
-  const sideId = useId();
-  const preview = <YamlPreview source={source} changed={changed} />;
+
   return (
     <section className="strategy-guide" aria-labelledby={titleId}>
       <header className="strategy-guide__header">
@@ -343,56 +338,22 @@ export const StrategyGuide = ({
             )}
           </footer>
         </section>
-        {assistant === undefined ? (
-          <div className="strategy-guide__side">{preview}</div>
-        ) : panel === null ? (
-          // 기본 탭은 공급자 연결 여부가 정한다. 정해지기 전에 한쪽을 보였다가 바꾸면 화면이 뛴다.
-          <div className="strategy-guide__side">
-            <p className="strategy-guide__side-pending" role="status">
-              {t("page.loading")}
-            </p>
-          </div>
-        ) : (
-          <div className="strategy-guide__side">
-            <Tabs
-              className="strategy-guide__side-tabs"
-              label={t("guide.side")}
-              idBase={sideId}
-              value={panel}
-              onChange={(nextPanel) => onPanel?.(nextPanel)}
-              items={[
-                { id: "assistant", label: t("guide.side.assistant") },
-                {
-                  id: "preview",
-                  label: t("guide.preview"),
-                  badge:
-                    changed.size === 0
-                      ? undefined
-                      : tFill("guide.preview.changedCount", { count: changed.size }),
-                },
-              ]}
-            />
-            <div
-              role="tabpanel"
-              id={panelId(sideId, "assistant")}
-              aria-labelledby={tabId(sideId, "assistant")}
-              className="strategy-guide__side-panel strategy-guide__side-panel--assistant"
-              hidden={panel !== "assistant"}
-            >
-              {assistantMounted ? assistant(current) : null}
-            </div>
-            <div
-              role="tabpanel"
-              id={panelId(sideId, "preview")}
-              aria-labelledby={tabId(sideId, "preview")}
-              className="strategy-guide__side-panel"
-              hidden={panel !== "preview"}
-            >
-              {preview}
-            </div>
-          </div>
-        )}
+        <div className="strategy-guide__side">
+          <YamlPreview source={source} changed={changed} />
+        </div>
       </div>
+      {assistant === undefined || assistantOpen === null ? null : (
+        <FloatingWindow
+          title={t("guide.side.assistant")}
+          open={assistantOpen}
+          onOpenChange={(open) => onAssistantOpenChange?.(open)}
+          storageKey={ASSISTANT_WINDOW_STORAGE_KEY}
+          launcherLabel={t("guide.assistant.open")}
+          minimizeLabel={t("guide.assistant.minimize")}
+        >
+          {assistant(current)}
+        </FloatingWindow>
+      )}
     </section>
   );
 };

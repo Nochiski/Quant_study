@@ -315,6 +315,7 @@ def validate_factor_graph(
                 contracts,
                 field_by_id,
                 require_field_metadata=require_field_metadata,
+                unavailable_fields=unavailable_fields,
             )
             contracts[node.node_id] = contract
             issues.extend(contract_issues)
@@ -442,6 +443,7 @@ def _infer_contract(
     fields: dict[str, FieldMetadata],
     *,
     require_field_metadata: bool,
+    unavailable_fields: Mapping[str, str] | None = None,
 ) -> tuple[NodeContract, tuple[FactorValidationIssue, ...]]:
     dependencies = [contracts[dependency] for dependency in node_dependencies(node)]
     issues: list[FactorValidationIssue] = []
@@ -590,8 +592,11 @@ def _infer_contract(
                         "factor.graph.group_field_missing",
                         node.node_id,
                         node.node_id,
+                        # 필드 노드와 같이 어댑터가 뺀 그룹 필드는 그 사유를 싣는다(5차 리뷰 3).
                         missing_field_message(
-                            node.group_field_id, None, "그룹 필드 계약을 찾을 수 없습니다"
+                            node.group_field_id,
+                            (unavailable_fields or {}).get(node.group_field_id),
+                            "그룹 필드 계약을 찾을 수 없습니다",
                         ),
                     )
                 )

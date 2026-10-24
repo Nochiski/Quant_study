@@ -290,6 +290,28 @@ def test_an_unpicked_group_field_asks_to_pick_one_like_every_other_field_slot() 
     assert diagnostic.message == "아직 필드를 고르지 않았습니다. 목록에서 필드를 고르세요."
 
 
+def test_a_group_field_the_adapter_dropped_says_why_like_a_field_node() -> None:
+    """어댑터가 뺀 그룹 필드도 필드 노드와 같이 그 사유를 싣는다(5차 리뷰 3)."""
+    # 다른 그룹 필드는 있어 연산자는 쓸 수 있고, 이 그룹 필드만 어댑터가 뺐다.
+    source = _with_factor(_GROUP_FACTOR.replace("classification.sector", "classification.industry"))
+    compiled = _compile(
+        source,
+        _Catalog(
+            _CLOSE,
+            _ADJ_CLOSE,
+            _SECTOR_AS_GROUP,
+            unavailable={"classification.industry": _DROPPED},
+        ),
+    )
+
+    [diagnostic] = [
+        item for item in compiled.diagnostics if item.code.endswith("group_field_missing")
+    ]
+    assert _DROPPED in diagnostic.message
+    assert "field_id='classification.industry'" in diagnostic.message
+    assert "계약을 찾을 수 없습니다" not in diagnostic.message
+
+
 def test_without_an_adapter_a_group_node_compiles_as_before() -> None:
     assert _compile(_with_factor(_GROUP_FACTOR), None).ok
 

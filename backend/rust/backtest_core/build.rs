@@ -37,7 +37,9 @@ const FNV_PRIME: u128 = 0x0000000001000000000000000000013b;
 
 fn skipped_file(name: &str) -> bool {
     SKIPPED_FILES.contains(&name)
-        || SKIPPED_PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+        || SKIPPED_PREFIXES
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
         || SKIPPED_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
 }
 

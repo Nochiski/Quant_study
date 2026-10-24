@@ -23,6 +23,7 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.plans import
     SignalRecord,
 )
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal import (
+    SignalBasis,
     SignalRead,
     SignalSource,
 )
@@ -91,8 +92,14 @@ class WeeklyRebalanceService:
         self._now = now
         self._policy = policy or RebalancePolicy()
 
-    def prepare(self, signal_date: date, *, accept_anomalies: bool = False) -> PrepareResult:
-        """그 날짜 신호로 주문안을 만들어 남긴다. 이미 있으면 다시 만들지 않고 그대로 돌려준다.
+    def prepare(
+        self,
+        signal_date: date,
+        *,
+        basis: SignalBasis = SignalBasis.EVENING,
+        accept_anomalies: bool = False,
+    ) -> PrepareResult:
+        """그 날짜 `basis` 빌드 신호로 주문안을 만들어 남긴다. 이미 있으면 그대로 돌려준다.
 
         직전 빌드와 견줘 데이터 누락이 의심되면 만들지 않는다. 사람이 확인하고
         `accept_anomalies`로 다시 부를 때만 사유를 함께 남기고 만든다.
@@ -101,7 +108,7 @@ class WeeklyRebalanceService:
         existing = self._plans.load(plan_id)
         if existing is not None:
             return PrepareResult(PrepareStatus.EXISTS, existing, "plan already recorded")
-        read = self._signals.read(signal_date)
+        read = self._signals.read(signal_date, basis)
         if not read.ok or read.snapshot is None:
             return PrepareResult(PrepareStatus.SIGNAL_UNAVAILABLE, detail=read.detail)
         signal = read.snapshot
@@ -155,8 +162,7 @@ class WeeklyRebalanceService:
             if signal.previous_ranks is not None
             else "직전 빌드 없음"
             if signal.previous_build_id is None
-            else f"직전 빌드 {signal.previous_build_id} 순위를 쓸 수 없음"
-            "(읽기 실패 또는 같은 날 재빌드)"
+            else f"직전 빌드 {signal.previous_build_id} 순위를 쓸 수 없음(읽기 실패)"
         )
         record = PlanRecord(
             plan_id,
@@ -176,6 +182,7 @@ class WeeklyRebalanceService:
                     if signal.names is not None and line.symbol in signal.names
                 ),
                 skipped,
+                basis,
             ),
             account,
             plan,
@@ -213,9 +220,11 @@ class WeeklyRebalanceService:
         dropped = week_targets(record.plan, approval.no_trade).dropped_buys
         return ApproveResult(ApproveStatus.OK, approval, dropped_buys=dropped)
 
-    def signal_status(self, signal_date: date) -> SignalRead:
-        """예약 실행이 장 마감 빌드를 기다릴 때 묻는다. 준비 판정은 신호 어댑터 한 곳이 한다."""
-        return self._signals.read(signal_date)
+    def signal_status(
+        self, signal_date: date, basis: SignalBasis = SignalBasis.EVENING
+    ) -> SignalRead:
+        """예약 실행이 모델 빌드를 기다릴 때 묻는다. 준비 판정은 신호 어댑터 한 곳이 한다."""
+        return self._signals.read(signal_date, basis)
 
     def plan(self, plan_id: str) -> tuple[PlanRecord | None, Approval | None]:
         return self._plans.load(plan_id), self._plans.approval(plan_id)

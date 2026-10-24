@@ -15,6 +15,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     PlanExistsError,
     PlanRecord,
     PrepareStatus,
+    SignalBasis,
     SignalRead,
     SignalReadStatus,
     SignalSnapshot,
@@ -48,9 +49,11 @@ class Signals:
         default_factory=lambda: SignalRead(SignalReadStatus.OK, snapshot())
     )
     calls: int = 0
+    bases: list[SignalBasis] = field(default_factory=list)
 
-    def read(self, signal_date: date) -> SignalRead:
+    def read(self, signal_date: date, basis: SignalBasis) -> SignalRead:
         self.calls += 1
+        self.bases.append(basis)
         return self.read_result
 
 
@@ -114,6 +117,17 @@ def test_prepare_records_the_signal_and_plan_once() -> None:
     again = service(signals, plans=plans).prepare(DAY)
     assert again.status is PrepareStatus.EXISTS and again.record == record
     assert signals.calls == 1  # 남긴 주문안이 있으면 신호를 다시 읽지 않는다
+
+
+def test_prepare_reads_the_requested_build_and_records_which() -> None:
+    # 예약 실행은 휴장 첫날 주말 보강판으로 만든다(2026-10-23 사용자 결정).
+    # 주문안에 어느 빌드였는지 남는다
+    signals = Signals()
+    record = service(signals).prepare(DAY, basis=SignalBasis.SUPPLEMENT).record
+    assert signals.bases == [SignalBasis.SUPPLEMENT]
+    assert record is not None and record.signal.basis is SignalBasis.SUPPLEMENT
+    evening = service(Signals()).prepare(DAY).record
+    assert evening is not None and evening.signal.basis is SignalBasis.EVENING
 
 
 def test_plan_keeps_names_of_its_lines_and_why_holdings_left_the_signal() -> None:
@@ -196,11 +210,10 @@ def test_the_gap_check_looks_at_the_buffer_of_the_policy() -> None:
 
 def test_a_skipped_gap_check_is_recorded_with_why() -> None:
     # 리뷰 #606 P3: '점검 통과'와 '점검 건너뜀'이 구분되지 않았다
-    # (같은 날 재빌드한 판이 가장 위험하다)
-    rebuilt = snapshot(previous_build_id="e_same_day", previous_ranks=None)
-    record = service(Signals(SignalRead(SignalReadStatus.OK, rebuilt))).prepare(DAY).record
+    unreadable = snapshot(previous_build_id="e_unreadable", previous_ranks=None)
+    record = service(Signals(SignalRead(SignalReadStatus.OK, unreadable))).prepare(DAY).record
     assert record is not None and record.signal.gap_check_skipped is not None
-    assert "e_same_day" in record.signal.gap_check_skipped
+    assert "e_unreadable" in record.signal.gap_check_skipped
     first = service(Signals(SignalRead(SignalReadStatus.OK, snapshot()))).prepare(DAY).record
     assert first is not None and first.signal.gap_check_skipped == "직전 빌드 없음"
     checked = snapshot(previous_build_id="e_prev", previous_ranks={"000001": 1})

@@ -28,6 +28,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     LedgerRepairService,
     NoticeError,
     PlanRecord,
+    SignalBasis,
     SignalRead,
     SignalReadStatus,
     SignalRecord,
@@ -312,7 +313,7 @@ def test_telegram_says_when_the_gap_check_was_skipped() -> None:
         (),
         "e_prev",
         names=tuple(names.items()),
-        gap_check_skipped="직전 빌드 e_prev 순위를 쓸 수 없음(읽기 실패 또는 같은 날 재빌드)",
+        gap_check_skipped="직전 빌드 e_prev 순위를 쓸 수 없음(읽기 실패)",
     )
     record = PlanRecord("weekly-2026-10-23", NOW, signal, AccountState(1_000_000, {}, None), plan)
     text = render_telegram(record, date(2026, 10, 26))
@@ -441,6 +442,30 @@ def test_prepare_notify_sends_the_plan_or_why_it_was_not_made(
     capsys.readouterr()
     assert run_cli(unsent, [*prepare, *notify]) == 1  # 주문안은 남고 알림 실패는 드러낸다
     assert "[notice_failed] telegram unreachable" in capsys.readouterr().out
+
+
+def test_basis_picks_the_build_and_the_notice_names_it(tmp_path: Path) -> None:
+    # 서버 예약 실행은 휴장 첫날 주말 보강판으로 만든다(2026-10-23 사용자 결정)
+    notices = Notices()
+    signals = Signals()
+    factories = CliFactories(
+        _planner(signals, Account(), Plans()), _no_execution, _no_recorder, lambda: notices
+    )
+    common = ["--workdir", str(tmp_path), "--model-root", str(tmp_path)]
+    weekend = [*common, "--signal-date", "2026-10-23", "--basis", "supplement"]
+    notify = ["--notify", "--execute-on", "2026-10-26"]
+    assert run_cli(factories, ["signal-status", *weekend]) == 0
+    assert run_cli(factories, ["prepare", *weekend, *notify]) == 0
+    assert signals.bases == [SignalBasis.SUPPLEMENT, SignalBasis.SUPPLEMENT]
+    assert "<i>scope_v1.0 · 10/23(금) 주말 보강 신호</i>" in notices.sent[-1]
+
+    waiting = Signals(SignalRead(SignalReadStatus.NOT_READY, detail="latest supplement build"))
+    failed = CliFactories(
+        _planner(waiting, Account(), Plans()), _no_execution, _no_recorder, lambda: notices
+    )
+    assert run_cli(failed, ["prepare", *weekend, *notify]) == 1
+    assert notices.sent[-1].startswith("<b>S07 주문지 못 만듦</b> · 10/23(금) 주말 보강 신호")
+    assert "모델 신호를 읽지 못함 (signal_unavailable)" in notices.sent[-1]
 
 
 def test_notify_plan_prints_without_sending(

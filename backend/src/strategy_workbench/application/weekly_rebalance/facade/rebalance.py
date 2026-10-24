@@ -68,6 +68,7 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.repair impor
 )
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal import (
     EarlierClose,
+    SignalBasis,
     SignalRead,
     SignalReadStatus,
     SignalSnapshot,
@@ -116,6 +117,7 @@ __all__ = [
     "RepairResult",
     "RepairStatus",
     "ResumeOutcome",
+    "SignalBasis",
     "SignalRead",
     "SignalReadStatus",
     "SignalRecord",

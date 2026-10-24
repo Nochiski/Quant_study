@@ -84,7 +84,7 @@ bootstrap ─> application + adapters
   옮긴다. 이 노드는 `application.offline_execution`과 서로 import하지 않는다.
 - S07 주간 리밸런싱 주문안은 `domain/rebalance`(순위·보유·현금·기준가격 → 목표 주식 수, 순수
   계산)와 `application/weekly_rebalance`(자체 outgoing `SignalSource`·`AccountSource`·`PlanStore`)가
-  소유한다. `adapters/outbound/scope_signal`이 모델 DB의 현재 장 마감 빌드에서 순위와 신호일 종가를
+  소유한다. `adapters/outbound/scope_signal`이 모델 DB의 현재 빌드(장 마감·주말 보강판)에서 순위와 신호일 종가를
   읽고(pyarrow는 이 어댑터 안에만), `adapters/outbound/rebalance_files`가 주문안·승인을 한 번만 쓴다.
   `adapters/inbound/weekly_rebalance_cli`는 입력 해석·출력만 맡고, 별도 composition root
   `bootstrap/weekly_rebalance`(`python -m strategy_workbench.bootstrap.weekly_rebalance`)가 계좌 읽기를

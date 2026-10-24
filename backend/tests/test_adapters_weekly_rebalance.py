@@ -21,6 +21,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     EarlierClose,
     PlanExistsError,
     PlanRecord,
+    SignalBasis,
     SignalReadStatus,
     SignalRecord,
 )
@@ -37,12 +38,13 @@ def model_db(
     latest: dict[str, object] | None = None,
     manifest_build: str = BUILD,
     scores: list[tuple[str, int, str]] | None = None,
+    basis: SignalBasis = SignalBasis.EVENING,
 ) -> Path:
     model = root / "model"
     (model / "scope@2.0" / f"v={BUILD}").mkdir(parents=True)
     pointer = {
         "status": "ok",
-        "basis": "evening",
+        "basis": basis.value,
         "date": DAY.isoformat(),
         "build_id": BUILD,
         "fi_build_id": PRICES,
@@ -50,7 +52,7 @@ def model_db(
         "specs": {"scope@2.0": {"gates": {"MG0": {"status": "pass"}, "MG5": {"status": "skip"}}}},
     }
     pointer.update(latest or {})
-    (model / "latest_evening.json").write_text(json.dumps(pointer))
+    (model / f"latest_{basis.value}.json").write_text(json.dumps(pointer))
     (model / "scope@2.0" / "MANIFEST.json").write_text(
         json.dumps({"current_build": manifest_build})
     )
@@ -85,7 +87,7 @@ def model_db(
 
 def test_signal_reads_the_current_build_ranks_and_closes(tmp_path: Path) -> None:
     root = model_db(tmp_path)
-    read = ScopeSignalSource(root).read(DAY)
+    read = ScopeSignalSource(root).read(DAY, SignalBasis.EVENING)
     assert read.status is SignalReadStatus.OK and read.snapshot is not None
     snapshot = read.snapshot
     assert (snapshot.build_id, snapshot.prices_build_id) == (BUILD, PRICES)
@@ -120,9 +122,27 @@ def test_signal_refuses_stale_failed_or_inconsistent_builds(
     tmp_path: Path, kwargs: dict[str, object], status: SignalReadStatus
 ) -> None:
     root = model_db(tmp_path, **kwargs)  # pyright: ignore[reportArgumentType]  # reason: 사례 표
-    read = ScopeSignalSource(root).read(DAY)
+    read = ScopeSignalSource(root).read(DAY, SignalBasis.EVENING)
     assert read.status is status, read.detail
     assert read.snapshot is None
+
+
+def test_signal_reads_the_pointer_of_the_requested_basis(tmp_path: Path) -> None:
+    # 주말 보강판은 따로 남는다(2026-10-23 사용자 결정). 장 마감 포인터는 하루 전 판을 가리킨다
+    root = model_db(tmp_path, basis=SignalBasis.SUPPLEMENT)
+    evening = {"status": "ok", "basis": "evening", "date": "2026-10-22", "build_id": "e_prev"}
+    (root / "model" / "latest_evening.json").write_text(json.dumps(evening))
+    supplement = ScopeSignalSource(root).read(DAY, SignalBasis.SUPPLEMENT)
+    assert supplement.ok and supplement.snapshot is not None
+    assert supplement.snapshot.build_id == BUILD
+    assert ScopeSignalSource(root).read(DAY, SignalBasis.EVENING).status is (
+        SignalReadStatus.NOT_READY
+    )
+    # 포인터 안의 종류가 파일 이름과 다르면 쓰지 않는다
+    mixed = model_db(tmp_path / "mixed", latest={"basis": "evening"}, basis=SignalBasis.SUPPLEMENT)
+    assert ScopeSignalSource(mixed).read(DAY, SignalBasis.SUPPLEMENT).status is (
+        SignalReadStatus.NOT_READY
+    )
 
 
 def test_signal_reads_names_and_why_unranked_names_left(tmp_path: Path) -> None:
@@ -142,7 +162,7 @@ def test_signal_reads_names_and_why_unranked_names_left(tmp_path: Path) -> None:
         pa.table({name: [row[i] for row in rows] for i, name in enumerate(columns)}),
         universe / "part0.parquet",
     )
-    snapshot = ScopeSignalSource(root).read(DAY).snapshot
+    snapshot = ScopeSignalSource(root).read(DAY, SignalBasis.EVENING).snapshot
     assert snapshot is not None and snapshot.names is not None
     assert snapshot.names["000004"] == "추정치 끊김"
     assert dict(snapshot.exclusion_reasons or {}) == {
@@ -153,12 +173,13 @@ def test_signal_reads_names_and_why_unranked_names_left(tmp_path: Path) -> None:
         "000007": "유니버스 제외(new_rule)",
     }
     # 유니버스 판이 없으면 이름·이유 없이 진행한다
-    bare = ScopeSignalSource(model_db(tmp_path / "bare")).read(DAY).snapshot
+    bare = ScopeSignalSource(model_db(tmp_path / "bare")).read(DAY, SignalBasis.EVENING).snapshot
     assert bare is not None and bare.names is None and bare.exclusion_reasons is None
 
 
 def test_missing_model_db_is_unreadable(tmp_path: Path) -> None:
-    assert ScopeSignalSource(tmp_path).read(DAY).status is SignalReadStatus.UNREADABLE
+    read = ScopeSignalSource(tmp_path).read(DAY, SignalBasis.EVENING)
+    assert read.status is SignalReadStatus.UNREADABLE
 
 
 def _record() -> PlanRecord:
@@ -215,12 +236,36 @@ def test_signal_carries_the_previous_build_ranks_for_the_gap_check(tmp_path: Pat
     )
     builds = [{"build_id": "e_prev"}, {"build_id": BUILD}]
     (model / "MANIFEST.json").write_text(json.dumps({"current_build": BUILD, "builds": builds}))
-    snapshot = ScopeSignalSource(root).read(DAY).snapshot
+    snapshot = ScopeSignalSource(root).read(DAY, SignalBasis.EVENING).snapshot
     assert snapshot is not None and snapshot.previous_build_id == "e_prev"
     assert dict(snapshot.previous_ranks or {}) == {"000001": 2, "000009": 1}
     # 직전 빌드가 없으면 점검을 건너뛴다
-    fresh = ScopeSignalSource(model_db(tmp_path / "fresh")).read(DAY).snapshot
+    fresh = ScopeSignalSource(model_db(tmp_path / "fresh")).read(DAY, SignalBasis.EVENING).snapshot
     assert fresh is not None and fresh.previous_ranks is None
+
+
+def test_gap_check_skips_same_day_rebuilds_back_to_the_day_before(tmp_path: Path) -> None:
+    # 주말 보강판 바로 앞 판은 같은 신호일의 장 마감 판이다. 하루 사이 누락을 보는 점검이라
+    # 그 판을 건너뛰고 신호일 전 날짜의 판과 견준다
+    root = model_db(tmp_path)
+    model = root / "model" / "scope@2.0"
+    for build, day, ranks in (("e_prev", "2026-10-22", [2, 1]), ("e_same", "2026-10-23", [1, 2])):
+        (model / f"v={build}").mkdir()
+        pq.write_table(
+            pa.table({"stock_code": ["000001", "000009"], "rank": ranks, "score_date": [day] * 2}),
+            model / f"v={build}" / "scores.parquet",
+        )
+
+    def previous(*builds: str) -> tuple[str | None, dict[str, int] | None]:
+        listed = [{"build_id": build} for build in (*builds, BUILD)]
+        (model / "MANIFEST.json").write_text(json.dumps({"current_build": BUILD, "builds": listed}))
+        snapshot = ScopeSignalSource(root).read(DAY, SignalBasis.EVENING).snapshot
+        assert snapshot is not None
+        ranks = None if snapshot.previous_ranks is None else dict(snapshot.previous_ranks)
+        return snapshot.previous_build_id, ranks
+
+    assert previous("e_prev", "e_same") == ("e_prev", {"000001": 2, "000009": 1})
+    assert previous("e_same") == (None, None)
 
 
 def test_plan_store_keeps_review_flags_anomalies_and_no_trade(tmp_path: Path) -> None:
@@ -240,11 +285,20 @@ def test_plan_store_keeps_review_flags_anomalies_and_no_trade(tmp_path: Path) ->
         anomalies=("상위 30위 중 2종목이 사라짐",),
         names=(("000001", "가"), ("000009", "보유")),
         gap_check_skipped="직전 빌드 e_prev 순위를 쓸 수 없음",
+        basis=SignalBasis.SUPPLEMENT,
     )
     record = replace(base, signal=signal, plan=plan)
     store = JsonPlanStore(tmp_path)
     store.save(record)
     assert store.load(record.plan_id) == record
+    # 빌드 종류 칸이 생기기 전(2026-10-24)에 남긴 주문안은 장 마감 빌드로 읽힌다
+    path = tmp_path / "plans" / f"{record.plan_id}.json"
+    stored = json.loads(path.read_text())
+    del stored["signal"]["basis"]
+    path.write_text(json.dumps(stored))
+    assert store.load(record.plan_id) == replace(
+        record, signal=replace(signal, basis=SignalBasis.EVENING)
+    )
     approval = Approval(datetime(2026, 10, 23, 17, 0, tzinfo=KST), "동민", "", ("000009",))
     store.save_approval(record.plan_id, approval)
     assert store.approval(record.plan_id) == approval

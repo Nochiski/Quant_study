@@ -1,6 +1,7 @@
 """주간 리밸런싱(S07) 명령줄. 입력 해석과 사람이 읽을 출력만 맡는다.
 
-    prepare  --workdir <폴더> --model-root <모델 DB> --signal-date YYYY-MM-DD [--accept-anomalies]
+    prepare  --workdir <폴더> --model-root <모델 DB> --signal-date YYYY-MM-DD
+             [--basis evening|supplement] [--accept-anomalies]
     show     --workdir <폴더> --plan weekly-YYYY-MM-DD
     approve  --workdir <폴더> --plan weekly-YYYY-MM-DD --approver <이름> [--note <메모>]
              [--no-trade <종목> ...]   # 이번 주 매매에서 뺄 종목
@@ -12,7 +13,8 @@
     record-fills --workdir <폴더> --until HH:MM   # 장중 실시간 체결 알림 기록(한 곳에서만)
     notify-plan --workdir <폴더> --plan weekly-YYYY-MM-DD --execute-on YYYY-MM-DD [--print]
     signal-status --workdir <폴더> --model-root <모델 DB> --signal-date YYYY-MM-DD
-             # 장 마감 빌드가 준비됐나. 0 = 준비, 3 = 아직(기다린다), 1 = 다른 이유로 못 쓴다
+             [--basis evening|supplement]
+             # 그 빌드가 준비됐나. 0 = 준비, 3 = 아직(기다린다), 1 = 다른 이유로 못 쓴다
     ledger-status --workdir <폴더>   # 정지 래치·실행 정지·응답을 잃은 주문과 후보 주문번호
     ledger-bind --workdir <폴더> --intent <의도> --order-no <주문번호> --operator <이름> [--note]
     ledger-reject --workdir <폴더> --intent <의도> --operator <이름> [--note]
@@ -21,6 +23,9 @@
 
 원장 고치기(ledger-*)는 원장 파일을 손으로 고치지 않게 하는 명령이다(2026-10-22 리뷰 #593).
 고친 일은 실행 사건 기록에 남고, 고친 뒤 다시 대사해 일치하면 신규 주문 정지가 풀린다.
+
+`--basis`는 읽을 모델 빌드다. 기본은 장 마감 빌드(`evening`)이고, 서버 예약 실행은 휴장 첫날
+신호일 분 추정치까지 넣은 주말 보강판(`supplement`)을 쓴다.
 
 `prepare --notify --execute-on <실행일>`은 만든 주문지를 텔레그램으로 보낸다. 만들지 못했으면
 보류·실패 알림을 보낸다(주문지 흐름의 알림만 보내고 로그성 알림은 보내지 않는다).
@@ -57,6 +62,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     PrepareStatus,
     RepairError,
     RepairStatus,
+    SignalBasis,
     SignalReadStatus,
     WeeklyExecutionService,
     WeeklyRebalanceService,
@@ -107,14 +113,19 @@ _ACTION_LABELS = {
     RebalanceAction.SKIP: "건너뜀",
 }
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
+# 주문지 머리의 "… 신호" 앞말
+_BASIS_LABELS = {SignalBasis.EVENING: "장 마감", SignalBasis.SUPPLEMENT: "주말 보강"}
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="주간 리밸런싱(S07) 주문안·실행·기록")
     commands = parser.add_subparsers(dest="command", required=True)
-    prepare = commands.add_parser("prepare", help="장 마감 신호로 주문안을 만들어 남긴다")
+    prepare = commands.add_parser("prepare", help="모델 신호로 주문안을 만들어 남긴다")
     prepare.add_argument("--model-root", type=Path, required=True, help="모델 DB 폴더(model_db)")
     prepare.add_argument("--signal-date", type=date.fromisoformat, required=True)
+    prepare.add_argument(
+        "--basis", type=SignalBasis, choices=list(SignalBasis), default=SignalBasis.EVENING
+    )
     prepare.add_argument(
         "--accept-anomalies",
         action="store_true",
@@ -124,9 +135,12 @@ def _parser() -> argparse.ArgumentParser:
         "--notify", action="store_true", help="주문지(또는 보류·실패)를 텔레그램으로 보낸다"
     )
     prepare.add_argument("--execute-on", type=date.fromisoformat, help="주문지에 적을 실행일")
-    signal = commands.add_parser("signal-status", help="그 날짜 장 마감 빌드가 준비됐나 본다")
+    signal = commands.add_parser("signal-status", help="그 날짜 모델 빌드가 준비됐나 본다")
     signal.add_argument("--model-root", type=Path, required=True)
     signal.add_argument("--signal-date", type=date.fromisoformat, required=True)
+    signal.add_argument(
+        "--basis", type=SignalBasis, choices=list(SignalBasis), default=SignalBasis.EVENING
+    )
     show = commands.add_parser("show", help="남긴 주문안과 승인 여부를 보인다")
     show.add_argument("--plan", required=True)
     approve = commands.add_parser("approve", help="주문안을 승인한다(한 번만)")
@@ -196,7 +210,9 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             return _run_execution(service, args)
     planning = factories.planning(args.workdir, getattr(args, "model_root", None))
     if args.command == "prepare":
-        result = planning.prepare(args.signal_date, accept_anomalies=args.accept_anomalies)
+        result = planning.prepare(
+            args.signal_date, basis=args.basis, accept_anomalies=args.accept_anomalies
+        )
         if result.record is not None:
             print(render(result.record, planning.plan(result.record.plan_id)[1]))
         print(f"[{result.status.value}] {result.detail}".rstrip())
@@ -205,13 +221,15 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             text = (
                 render_telegram(result.record, args.execute_on)
                 if made and result.record is not None
-                else render_telegram_notice(result.status, args.signal_date, result.detail)
+                else render_telegram_notice(
+                    result.status, args.signal_date, result.detail, args.basis
+                )
             )
             if not _send(factories, text):
                 return 1
         return 0 if made else 1
     if args.command == "signal-status":
-        read = planning.signal_status(args.signal_date)
+        read = planning.signal_status(args.signal_date, args.basis)
         print(f"[{read.status.value}] {read.detail}".rstrip())
         if read.ok:
             return 0
@@ -561,7 +579,7 @@ def _reconciled(value: bool | None) -> str:
 
 _WEEKDAYS = "월화수목금토일"
 _NOTICE_REASONS = {
-    PrepareStatus.SIGNAL_UNAVAILABLE: "장 마감 신호를 읽지 못함",
+    PrepareStatus.SIGNAL_UNAVAILABLE: "모델 신호를 읽지 못함",
     PrepareStatus.ACCOUNT_UNAVAILABLE: "키움 모의 계좌를 읽지 못함",
     PrepareStatus.NOT_RECONCILED: "실행 원장과 키움 계좌가 맞지 않음",
     PrepareStatus.INVALID_INPUT: "주문안 계산 입력이 맞지 않음",
@@ -592,7 +610,7 @@ def render_telegram(record: PlanRecord, execute_on: date) -> str:
     parts = [
         f"<b>S07 주문지</b> · {_day(execute_on)} 실행\n"
         f"<i>{_html(signal.model_id.replace('@', '_v'))} · "
-        f"{_day(date.fromisoformat(signal.signal_date))} 장 마감 신호</i>"
+        f"{_day(date.fromisoformat(signal.signal_date))} {_BASIS_LABELS[signal.basis]} 신호</i>"
     ]
     parts += _section(f"▼ 매도 {len(sells)}", sells)
     parts += _section(f"▲ 매수 {len(buys)}", buys)
@@ -623,9 +641,11 @@ def render_telegram(record: PlanRecord, execute_on: date) -> str:
     return "\n\n".join(parts)
 
 
-def render_telegram_notice(status: PrepareStatus, signal_date: date, detail: str) -> str:
+def render_telegram_notice(
+    status: PrepareStatus, signal_date: date, detail: str, basis: SignalBasis
+) -> str:
     """주문지를 만들지 않았을 때의 알림. 원문 진단은 서버 기록에만 둔다(경로가 담길 수 있다)."""
-    when = f"{_day(signal_date)} 장 마감 신호"
+    when = f"{_day(signal_date)} {_BASIS_LABELS[basis]} 신호"
     if status is PrepareStatus.SIGNAL_SUSPECT:
         return (
             f"<b>S07 주문지 보류</b> · {when}\n"

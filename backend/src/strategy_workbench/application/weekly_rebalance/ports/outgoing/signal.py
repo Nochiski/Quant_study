@@ -1,4 +1,4 @@
-"""Outgoing port: 장 마감 모델 신호(순위)와 그 신호를 낸 날의 기준가격."""
+"""Outgoing port: 모델 신호(순위)와 그 신호를 낸 날의 기준가격."""
 
 from __future__ import annotations
 
@@ -8,7 +8,23 @@ from datetime import date
 from enum import StrEnum
 from typing import Protocol
 
-__all__ = ["EarlierClose", "SignalRead", "SignalReadStatus", "SignalSnapshot", "SignalSource"]
+__all__ = [
+    "EarlierClose",
+    "SignalBasis",
+    "SignalRead",
+    "SignalReadStatus",
+    "SignalSnapshot",
+    "SignalSource",
+]
+
+
+class SignalBasis(StrEnum):
+    """어느 모델 빌드를 읽는가. 값은 모델 DB 빌드의 `basis` 그대로다."""
+
+    EVENING = "evening"  # 장 마감 빌드(신호일 15:30~16:00 가격·그날까지 받은 추정치)
+    # 주말 보강판: 휴장 첫날 아침에 신호일 확정 가격과 신호일 분 WISE 추정치로 다시 지은 빌드
+    # (2026-10-23 사용자 결정 — 금요일 추정치가 토요일 새벽에 올라온다)
+    SUPPLEMENT = "supplement"
 
 
 class SignalReadStatus(StrEnum):
@@ -63,4 +79,4 @@ class SignalRead:
 
 
 class SignalSource(Protocol):
-    def read(self, signal_date: date) -> SignalRead: ...
+    def read(self, signal_date: date, basis: SignalBasis) -> SignalRead: ...

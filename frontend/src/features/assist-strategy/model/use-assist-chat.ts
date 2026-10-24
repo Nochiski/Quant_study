@@ -228,7 +228,10 @@ export const useAssistChat = ({
     running === null && watchedTurnId !== null
       ? assistantTurn(state, watchedTurnId)
       : null;
-  const busy = createSession.isPending || startTurn.isPending;
+  // 대화 목록을 읽는 동안 보내면 이어 쓸 대화를 모른 채 새 대화를 만든다. 목록이 올 때까지 보내기·추천 질문을
+  // 막는다(최종 리뷰 3). 꺼진 패널은 목록을 읽지 않으므로 막지 않는다.
+  const busy =
+    createSession.isPending || startTurn.isPending || (enabled && sessions.isPending);
 
   const promptTexts = useMemo(
     () =>

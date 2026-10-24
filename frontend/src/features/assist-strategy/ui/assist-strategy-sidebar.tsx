@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -96,8 +96,7 @@ export type AssistStrategySidebarProps = AssistScreenProps & {
    */
   layout?: "rail" | "docked";
   /**
-   * 위쪽에서 만든 대화·입력칸 상태(`useAssistSidebarState`). 주면 사이드바는 그리기만 하고, 이때
-   * `suggestionsKey`는 상태를 만든 쪽이 정한다.
+   * 위쪽에서 만든 대화·입력칸 상태(`useAssistSidebarState`). 주면 사이드바는 그리기만 한다.
    */
   state?: AssistSidebarState;
 };
@@ -121,7 +120,6 @@ const OwnedSidebar = (props: AssistStrategySidebarProps) => {
   const state = useAssistSidebarState({
     documentRef: props.documentRef,
     readContext: props.readContext,
-    suggestionsKey: props.suggestionsKey,
   });
   return <SidebarView {...props} state={state} />;
 };
@@ -133,9 +131,15 @@ const SidebarView = ({
   onApplyProposalAndBacktest,
   onClose,
   suggestions = [],
+  suggestionsKey,
   layout = "rail",
   state,
 }: AssistStrategySidebarProps & { state: AssistSidebarState }) => {
+  // 추천 질문의 맥락은 그리는 자리가 안다(안내라면 안내가 해석한 지금 단계, 최종 리뷰 4). commit 때 알린다.
+  const { noteSuggestionsKey } = state;
+  useLayoutEffect(() => {
+    noteSuggestionsKey(suggestionsKey);
+  }, [noteSuggestionsKey, suggestionsKey]);
   const confirmTextId = useId();
   const suggestionsId = useId();
   const providers = useQuery(assistantProvidersQuery());

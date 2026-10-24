@@ -589,6 +589,7 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   localStorage.clear();
+  sessionStorage.clear();
   delete globalThis.document.documentElement.dataset.theme;
   posted.length = 0;
   started.length = 0;
@@ -4852,8 +4853,8 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     expect(within(steps()).getByRole("button", { name: "확인" })).toHaveAttribute("aria-current", "step");
     expect(source()).toBe(before);
 
-    // 지나온 단계는 완료 표시가 붙어 이름 뒤에 "(완료)"가 읽힌다.
-    await user.click(within(steps()).getByRole("button", { name: /^결합/u }));
+    // 지나온 단계는 완료 표시가 붙지만 단계 이름은 그대로다(상태는 설명으로 읽힌다).
+    await user.click(within(steps()).getByRole("button", { name: "결합" }));
     const combine = screen.getByRole("region", { name: "결합" });
     expect(within(combine).getByText(/^더 설정하기 \(\d+\)$/u)).toBeInTheDocument();
   });
@@ -4971,7 +4972,7 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     mountWithClient("/research/strategies/new?guide=true&assist=preview", undefined, false);
     await within(await screen.findByRole("navigation", { name: "만드는 단계" })).findByRole(
       "button",
-      { name: /^유니버스/u },
+      { name: "유니버스" },
     );
     expect(sessionReads).toBe(0);
     expect(screen.queryByRole("textbox", { name: "어시스턴트에게 보낼 메시지" })).toBeNull();
@@ -4989,12 +4990,12 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
       false,
     );
     await screen.findByRole("navigation", { name: "만드는 단계" });
-    const universe = await within(steps()).findByRole("button", { name: /^유니버스/u });
+    const universe = await within(steps()).findByRole("button", { name: "유니버스" });
     expect(universe).not.toHaveTextContent("(완료)");
     act(() => history.push("/research/strategies/new?guide=true&step=portfolio&assist=preview"));
     await waitFor(() => expect(universe).toHaveTextContent("(완료)"));
     act(() => history.back());
-    const portfolio = within(steps()).getByRole("button", { name: /^포트폴리오 구성/u });
+    const portfolio = within(steps()).getByRole("button", { name: "포트폴리오 구성" });
     await waitFor(() => expect(portfolio).toHaveTextContent("(완료)"));
   });
 
@@ -5024,6 +5025,84 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     expect(await within(rail).findByText("편집기에서도 이어지는 답")).toBeInTheDocument();
   });
 
+  it("공급자 조회는 재시도하지 않고 첫 결과로 탭을 정한다(최종 리뷰 6)", async () => {
+    useGuideCatalog();
+    let calls = 0;
+    server.use(
+      http.get(`${API}/api/v1/assistant/providers`, () => {
+        calls += 1;
+        return HttpResponse.json({ detail: "down" }, { status: 500 });
+      }),
+    );
+    mountWithClient(
+      "/research/strategies/new?guide=true",
+      (client) => client.setDefaultOptions({ queries: { retry: 3, retryDelay: 1 } }),
+      false,
+    );
+    const previewTab = await screen.findByRole("tab", { name: "전략 문서 미리보기" });
+    expect(previewTab).toHaveAttribute("aria-selected", "true");
+    // 재시도가 돌았다면 짧은 간격 뒤 호출이 늘어난다.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).toBe(1);
+  });
+
+  it("지나간 단계는 편집기에 다녀오거나 새로고침해도 완료로 남는다(최종 리뷰 2)", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    const { history } = mountWithClient(
+      "/research/strategies/new?guide=true&step=eligibility&assist=preview",
+      undefined,
+      false,
+    );
+    await screen.findByRole("navigation", { name: "만드는 단계" });
+    await within(steps()).findByRole("button", { name: "유니버스" });
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await waitFor(() =>
+      expect(within(steps()).getByRole("button", { name: "유니버스" })).toHaveAccessibleDescription(
+        "(완료)",
+      ),
+    );
+    await waitFor(() => expect(history.location.search).toContain("draft="));
+
+    // 편집기에 다녀온다 — 안내가 다시 마운트된다.
+    await user.click(screen.getByRole("button", { name: "편집기에서 직접 쓰기" }));
+    await waitFor(() => expect(history.location.search).not.toContain("guide"));
+    act(() => history.back());
+    expect(
+      await within(
+        await screen.findByRole("navigation", { name: "만드는 단계" }),
+      ).findByRole("button", { name: "유니버스" }),
+    ).toHaveAccessibleDescription("(완료)");
+
+    // 같은 초안 주소로 새로 연다(새로고침).
+    const reload = `${history.location.pathname}${history.location.search}`;
+    cleanup();
+    useGuideCatalog();
+    mountWithClient(reload, undefined, false);
+    expect(
+      await within(
+        await screen.findByRole("navigation", { name: "만드는 단계" }),
+      ).findByRole("button", { name: "유니버스" }),
+    ).toHaveAccessibleDescription("(완료)");
+  });
+
+  it("추천 질문의 맥락은 안내가 해석한 단계라, 모르는 주소 단계에서 같은 단계를 다시 눌러도 지워지지 않는다(최종 리뷰 4)", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    mountWithClient(
+      "/research/strategies/new?guide=true&step=unknown-step&assist=assistant",
+      undefined,
+      false,
+    );
+    const panel = await screen.findByRole("tabpanel", { name: "AI 도우미" });
+    const input = await within(panel).findByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });
+    await user.click(
+      await within(panel).findByRole("button", { name: "어떤 전략을 만들지 같이 정해 주세요" }),
+    );
+    await user.click(await within(steps()).findByRole("button", { name: "이름·의도" }));
+    expect(input).toHaveValue("어떤 전략을 만들지 같이 정해 주세요");
+  });
+
   it("URL 에 적힌 탭은 공급자 연결 여부보다 먼저다(가이드 리뷰 2)", async () => {
     useGuideCatalog();
     mountWithClient("/research/strategies/new?guide=true&assist=preview", undefined, false);
@@ -5047,7 +5126,7 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
       within(panel).getByRole("button", { name: "거르기 규칙에 쓸 수 있는 필드를 설명해 주세요" }),
     );
     await user.type(input, " 특히 거래대금");
-    await user.click(within(steps()).getByRole("button", { name: /^알파 팩터/u }));
+    await user.click(within(steps()).getByRole("button", { name: "알파 팩터" }));
     expect(input).toHaveValue("거르기 규칙에 쓸 수 있는 필드를 설명해 주세요 특히 거래대금");
   });
 
@@ -5056,7 +5135,7 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     const user = userEvent.setup();
     mountWithClient("/research/strategies/new?guide=true&step=eligibility&assist=preview", undefined, false);
     expect(await screen.findByText("모두 만족하는 종목만 남습니다.")).toBeInTheDocument();
-    const universe = await within(steps()).findByRole("button", { name: /^유니버스/u });
+    const universe = await within(steps()).findByRole("button", { name: "유니버스" });
     expect(universe).not.toHaveTextContent("(완료)");
     await user.click(screen.getByRole("button", { name: "다음" }));
     await waitFor(() => expect(universe).toHaveTextContent("(완료)"));
@@ -5121,7 +5200,9 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
       expect(screen.getByRole("textbox", { name: /^전략 이름/u })).toHaveValue("저변동 모멘텀"),
     );
     await waitFor(() =>
-      expect(within(steps()).getByRole("button", { name: /^이름·의도/u })).toHaveTextContent("(완료)"),
+      expect(within(steps()).getByRole("button", { name: "이름·의도" })).toHaveAccessibleDescription(
+        "(완료)",
+      ),
     );
   });
 });

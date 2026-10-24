@@ -242,6 +242,24 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(unmounted).not.toHaveBeenCalled();
   });
 
+  it("AI 열 펼침을 알리고, 접거나 위젯이 사라지면 닫힘을 알린다(SoT 3차 경미 1·최종 리뷰 5)", async () => {
+    const onAssistantOpenChange = vi.fn();
+    const view = mount({ onAssistantOpenChange });
+    // 이 테스트 환경의 기본은 접힘이다.
+    expect(onAssistantOpenChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(onAssistantOpenChange).toHaveBeenLastCalledWith(true);
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(onAssistantOpenChange).toHaveBeenLastCalledWith(false);
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(onAssistantOpenChange).toHaveBeenLastCalledWith(true);
+
+    // 펼친 채 사라져도 닫힘을 알린다.
+    view.unmount();
+    expect(onAssistantOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
   it("화면 폭을 왕복해도 AI 인스턴스와 작성 중 문장을 유지한다", async () => {
     const media = responsiveMedia(1440);
     const user = userEvent.setup();

@@ -4,10 +4,11 @@
  * (`SentenceCard`·`StageList`)이며, 모든 선택은 같은 source 트랜잭션으로 문서에 들어간다 — 안내용 상태나
  * 직렬화 모델이 없다. 기본값을 고르지 않으면 문서에 아무것도 쓰지 않는다(카드 컨트롤이 기본값을 쓰지 않는다).
  */
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { FactorDefinition } from "../../../shared/api";
 import { t, tCode, tDescription, tFill, tName, tOptional } from "../../../shared/config";
+import { useCommittedRef } from "../../../shared/lib/react";
 import { Badge, Button, panelId, tabId, Tabs } from "../../../shared/ui";
 import { buildCanonicalSnippetCatalog, type SnippetCatalogSource } from "../model/canonical-snippets";
 import {
@@ -34,6 +35,7 @@ import {
   type PipelineCard,
   type PipelineProjection,
 } from "../model/pipeline-projection";
+import type { DocumentDiagnostic } from "../model/document-state";
 import type { JsonSchema } from "../model/schema-navigator";
 import { NO_FOCUS } from "../model/use-field-editing";
 import type { FormProjectionState } from "../model/use-form-projection";
@@ -74,6 +76,8 @@ export const StrategyGuide = ({
   onOpenGraph,
   onOpenEditor,
   onOpenSourceAt,
+  visited: visitedProp,
+  onVisit,
   onUndo,
   canUndo,
   review,
@@ -93,6 +97,12 @@ export const StrategyGuide = ({
   onOpenGraph: (pointer: string) => void;
   /** 안내를 닫고 같은 초안을 편집기 그래프 보기로 연다. */
   onOpenEditor: () => void;
+  /**
+   * 사용자가 지나간 단계. 필수 칸이 없는 단계는 지나가면 기본값을 받아들인 것으로 본다(`guideStepState`). 초안 단위
+   * 화면 상태라 화면(page)이 들고 편집기 왕복·새로고침에도 남긴다(최종 리뷰 2). 없으면 이 컴포넌트가 기억한다.
+   */
+  visited?: ReadonlySet<string>;
+  onVisit?: (stepId: string) => void;
   /** 안내를 닫고 편집기 원문에서 그 pointer 를 연다(안내에 고칠 자리가 없는 칸의 진단). */
   onOpenSourceAt?: (pointer: string) => void;
   onUndo: () => void;
@@ -145,19 +155,30 @@ export const StrategyGuide = ({
           itemHeads: true,
         };
   const disabled = transactions.disabled;
-  const statuses = useMemo(() => guideStepStatuses(steps, pipeline), [steps, pipeline]);
-  // 사용자가 떠난 단계. 필수 칸이 없는 단계는 지나가면 기본값을 받아들인 것으로 본다(`guideStepState`).
-  // 안내 화면의 UI 상태라 문서·URL 에 두지 않는다.
-  const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set());
+  // 안내 밖 칸의 오류는 한 번 모아 단계 상태와 이름 단계 본문이 함께 쓴다(최종 리뷰 9).
+  const outside = useMemo(
+    () => (pipeline === null ? [] : guideOutsideErrors(pipeline)),
+    [pipeline],
+  );
+  const statuses = useMemo(
+    () => guideStepStatuses(steps, pipeline, outside),
+    [steps, pipeline, outside],
+  );
+  const [localVisited, setLocalVisited] = useState<ReadonlySet<string>>(() => new Set());
+  const visited = visitedProp ?? localVisited;
+  const visit = onVisit ?? ((id: string) => setLocalVisited((previous) => new Set(previous).add(id)));
+  const visitRef = useCommittedRef(visit);
   // 지금 단계가 바뀌면(버튼·뒤로/앞으로·딥링크·제안 적용 뒤 이동 무엇이든) 떠난 단계를 방문으로 남긴다. 단계는 URL
-  // 이 소유하므로 버튼 처리기가 아니라 렌더 중에 직전 단계와 견준다 — effect 로 미루면 한 프레임 옛 표시가 남는다
-  // (`frontend-react-effects.md`, 가이드 재리뷰 6). 스키마가 오기 전의 임시 단계(문서 머리로 떨어진 것)는 세지 않는다.
-  const [shownStep, setShownStep] = useState<string | null>(null);
-  if (pipeline !== null && current.id !== shownStep) {
-    const left = leftStep(shownStep, steps);
-    if (left !== null) setVisited((previous) => new Set(previous).add(left));
-    setShownStep(current.id);
-  }
+  // 이 소유하고 방문 기록은 화면(page)이 소유하므로 commit 과 같은 시점(layout effect)에 알린다 — 그리기 전이라 옛
+  // 표시가 보이지 않는다(`frontend-react-effects.md`, 가이드 재리뷰 6). 스키마가 오기 전의 임시 단계(문서 머리로
+  // 떨어진 것)와 목록에서 사라져 대체된 단계는 세지 않는다(`leftStep`).
+  const shownStep = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (pipeline === null || current.id === shownStep.current) return;
+    const left = leftStep(shownStep.current, steps);
+    if (left !== null) visitRef.current(left);
+    shownStep.current = current.id;
+  }, [pipeline, steps, current.id, visitRef]);
   const states = steps.map((candidate, position) =>
     guideStepState(candidate, statuses[position]!, visited.has(candidate.id)),
   );
@@ -199,18 +220,27 @@ export const StrategyGuide = ({
                   type="button"
                   aria-current={position === index ? "step" : undefined}
                   data-state={state}
+                  // 상태(완료·오류 N)는 이름이 아니라 설명으로 읽는다 — 상태가 바뀔 때마다 단계 이름이 바뀌지
+                  // 않게 한다(탭 표식과 같은 방식, 최종 리뷰 7).
+                  aria-describedby={state === "todo" ? undefined : `${titleId}-state-${position}`}
                   onClick={() => onStep(candidate.id)}
                 >
-                  {/* 번호·체크는 목록 순서와 상태 문구가 이미 말한다. 버튼 이름은 단계 이름과 상태다. */}
+                  {/* 번호·체크는 목록 순서와 상태 설명이 이미 말한다. 버튼 이름은 단계 이름이다. */}
                   <span className="strategy-guide__step-number" aria-hidden="true">
                     {state === "done" ? <CheckIcon /> : position + 1}
                   </span>
                   <span className="strategy-guide__step-name">{stepName(candidate)}</span>
                   {state === "done" ? (
-                    <span className="sr-only">{t("guide.stepState.done")}</span>
+                    <span id={`${titleId}-state-${position}`} className="sr-only" aria-hidden="true">
+                      {t("guide.stepState.done")}
+                    </span>
                   ) : null}
                   {state === "error" ? (
-                    <span className="strategy-guide__step-tag">
+                    <span
+                      id={`${titleId}-state-${position}`}
+                      className="strategy-guide__step-tag"
+                      aria-hidden="true"
+                    >
                       {tFill("guide.stepState.error", {
                         count: statuses[position]!.errors,
                       })}
@@ -251,6 +281,7 @@ export const StrategyGuide = ({
               <DocumentStep
                 pipeline={pipeline}
                 context={context}
+                outside={outside}
                 onReview={() => onStep("review")}
                 onOpenSourceAt={onOpenSourceAt}
               />
@@ -367,18 +398,19 @@ const CheckIcon = () => (
 const DocumentStep = ({
   pipeline,
   context,
+  outside,
   onReview,
   onOpenSourceAt,
 }: {
   pipeline: PipelineProjection;
   context: CardContext;
+  outside: readonly DocumentDiagnostic[];
   onReview: () => void;
   onOpenSourceAt: ((pointer: string) => void) | undefined;
 }) => {
   const section = pipelineDocumentProperties(pipeline);
-  // 이 단계가 세는, 안내에 고칠 자리가 없는 칸의 오류(SoT 3차 경미 3). 숫자만 세고 문장을 숨기면 "오류 N"이 왜
-  // 붙었는지 알 수 없다. 문장은 backend 진단 그대로다.
-  const outside = guideOutsideErrors(pipeline);
+  // `outside`: 이 단계가 세는, 안내에 고칠 자리가 없는 칸의 오류(SoT 3차 경미 3). 숫자만 세고 문장을 숨기면
+  // "오류 N"이 왜 붙었는지 알 수 없다. 문장은 backend 진단 그대로다.
   return (
     <>
       <p className="strategy-guide__hint">{t("guide.document.description")}</p>

@@ -542,6 +542,11 @@ export const StrategyIde = ({
   useLayoutEffect(() => {
     onAssistantOpenChangeRef.current?.(assistantOpenNow);
   }, [assistantOpenNow, onAssistantOpenChangeRef]);
+  // 사라질 때는 닫힌 것으로 알린다 — 화면에 남은 사본이 "열림"으로 굳어 조회가 계속 돌지 않게 한다(최종 리뷰 5).
+  useLayoutEffect(
+    () => () => onAssistantOpenChangeRef.current?.(false),
+    [onAssistantOpenChangeRef],
+  );
 
   // window 리스너는 layout effect로 설치한다(`.claude/rules/frontend-react-effects.md`, backlog 20·21).
   useLayoutEffect(() => {

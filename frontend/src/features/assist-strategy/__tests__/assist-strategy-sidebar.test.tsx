@@ -839,6 +839,37 @@ describe("AssistStrategySidebar", () => {
     expect(startedTurns).toHaveLength(0);
   });
 
+  it("대화 목록을 읽는 동안에는 보내기와 추천 질문이 꺼져 새 대화를 만들지 않는다(최종 리뷰 3)", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(`${API}/api/v1/assistant/sessions`, async () => {
+        await held;
+        return HttpResponse.json([session("s-old", "지난 대화")]);
+      }),
+    );
+    const user = userEvent.setup();
+    mount({ suggestions: ["첫 추천"] });
+    const input = await screen.findByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    await user.type(input, "질문");
+    expect(screen.getByRole("button", { name: "보내기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "첫 추천" })).toBeDisabled();
+    await user.keyboard("{Enter}");
+    expect(createdSessions).toHaveLength(0);
+
+    release();
+    await waitFor(() => expect(screen.getByRole("button", { name: "보내기" })).toBeEnabled());
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(startedTurns).toHaveLength(1));
+    // 목록에 있던 지난 대화에 이어 쓴다.
+    expect(createdSessions).toHaveLength(0);
+    expect(startedTurns[0].sessionId).toBe("s-old");
+  });
+
   it("답변이 진행 중이면 추천 질문을 넣을 수 없다(가이드 리뷰 4)", async () => {
     const user = userEvent.setup();
     mount({ suggestions: ["첫 추천"] });

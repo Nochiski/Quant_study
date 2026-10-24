@@ -55,7 +55,7 @@ test(
       /^6리스크 제약/u,
       /^7확인/u,
     ]);
-    await expect(steps.getByRole("button", { name: /^이름·의도/u })).toHaveAttribute(
+    await expect(steps.getByRole("button", { name: "이름·의도", exact: true })).toHaveAttribute(
       "aria-current",
       "step",
     );
@@ -173,6 +173,8 @@ test(
     // 같은 문서가 바뀌므로 안내 칸과 단계 상태가 그대로 따라온다.
     await expect(page.getByRole("textbox", { name: /^전략 이름/u })).toHaveValue(IDEA_TITLE);
     const steps = page.getByRole("navigation", { name: "만드는 단계" });
-    await expect(steps.getByRole("button", { name: /^이름·의도/u })).toContainText("(완료)");
+    await expect(steps.getByRole("button", { name: "이름·의도", exact: true })).toHaveAccessibleDescription(
+      "(완료)",
+    );
   },
 );

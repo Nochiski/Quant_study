@@ -76,4 +76,5 @@ export { useEditorHandle } from "./model/use-editor-handle";
 export { DocumentResearchActions } from "./ui/document-research-actions";
 export { StrategyGuide, type GuidePanel } from "./ui/strategy-guide";
 export { guideSuggestionKeys, type GuideStep } from "./model/guide-steps";
+export { readGuideVisits, writeGuideVisits } from "./model/guide-visits";
 export { LibraryUpdateNotice } from "./ui/library-update-notice";

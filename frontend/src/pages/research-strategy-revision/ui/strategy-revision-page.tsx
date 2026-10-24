@@ -266,6 +266,7 @@ export const StrategyRevisionPage = () => {
   });
   // AI 대화·입력칸 상태는 새 전략 화면과 같이 화면이 든다. 편집기 AI 열의 펼침은 widget 이 알려 주고, 접힌 동안
   // 대화 조회를 멈추되 입력 초안은 남긴다(SoT 3차 경미 1·2).
+  // 이 값은 widget(StrategyIde)이 owner 인 AI 열 펼침의 사본이다. 화면은 구독만 하고 직접 바꾸지 않는다.
   const [assistantOpen, setAssistantOpen] = useState(false);
   const assistantState = useAssistSidebarState({
     documentRef: strategyAssistant.documentRef,

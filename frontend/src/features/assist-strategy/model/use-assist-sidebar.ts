@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import type { DocumentRefView, TurnContextPayload } from "../../../entities/assistant";
 import { useAssistChat, type AssistChat } from "./use-assist-chat";
@@ -6,12 +6,8 @@ import { useAssistChat, type AssistChat } from "./use-assist-chat";
 export type UseAssistSidebarStateOptions = {
   documentRef: DocumentRefView;
   readContext?: () => TurnContextPayload;
-  /** 서버 조회를 시작할지(`useAssistChat`의 `enabled`). */
+  /** 패널이 보이는가(`useAssistChat`의 `enabled`). */
   enabled?: boolean;
-  /**
-   * 추천 질문이 속한 맥락(안내 단계 id). 바뀌면 고치지 않은 채 남은 앞 맥락의 추천 질문을 입력칸에서 지운다.
-   */
-  suggestionsKey?: string;
 };
 
 /**
@@ -26,22 +22,32 @@ export type AssistSidebarState = {
   setDraft: (text: string) => void;
   /** 추천 질문을 넣는다. 보내지 않는다. */
   pickSuggestion: (suggestion: string) => void;
+  /**
+   * 추천 질문이 속한 맥락(안내 단계 id)을 알린다. 바뀌면 고치지 않은 채 남은 앞 맥락의 추천 질문을 입력칸에서
+   * 지운다. 맥락은 그리는 자리(사이드바)가 알므로 그 자리가 commit 때 부른다. identity 는 바뀌지 않는다.
+   */
+  noteSuggestionsKey: (key: string | undefined) => void;
   /** 입력칸 문장을 보낸다. 보낼 수 없으면 아무것도 하지 않는다. */
   submitDraft: () => void;
 };
+
+type Composer = {
+  draft: string;
+  /** 마지막으로 넣은 추천 질문. 입력칸이 아직 그 문장 그대로면 사용자가 쓴 글이 아니다. */
+  suggested: string | null;
+  seenSuggestionsKey: string | undefined;
+};
+
+const EMPTY: Composer = { draft: "", suggested: null, seenSuggestionsKey: undefined };
 
 export const useAssistSidebarState = ({
   documentRef,
   readContext,
   enabled = true,
-  suggestionsKey,
 }: UseAssistSidebarStateOptions): AssistSidebarState => {
   const chat = useAssistChat({ documentRef, readContext, enabled });
-  const [draft, setDraft] = useState("");
+  const [composer, setComposer] = useState<Composer>(EMPTY);
   const [restoredNonce, setRestoredNonce] = useState<number | null>(null);
-  // 마지막으로 넣은 추천 질문. 입력칸이 아직 그 문장 그대로면 사용자가 쓴 글이 아니다.
-  const [suggested, setSuggested] = useState<string | null>(null);
-  const [seenSuggestionsKey, setSeenSuggestionsKey] = useState(suggestionsKey);
 
   // 되돌아온 질문을 렌더 중에 입력칸으로 옮긴다. effect로 미루면 빈 칸이 한 프레임 보이고,
   // 그 사이 타이핑은 다음 렌더에 덮인다(`frontend-react-effects.md`).
@@ -50,17 +56,25 @@ export const useAssistSidebarState = ({
   // 지금 치고 있는 문장이 새 것이다. 보내지 못한 질문은 배너가 알린다(B-03 2차 리뷰 P3).
   if (chat.draftRestore !== null && chat.draftRestore.nonce !== restoredNonce) {
     setRestoredNonce(chat.draftRestore.nonce);
-    if (draft.trim() === "") {
-      setDraft(chat.draftRestore.text);
-      setSuggested(null);
-    }
+    if (composer.draft.trim() === "")
+      setComposer({ ...composer, draft: chat.draftRestore.text, suggested: null });
   }
+
   // 맥락(안내 단계)이 바뀌면 고치지 않은 앞 단계 추천 질문을 지운다. 사용자가 고친 문장은 남긴다(가이드 리뷰 6).
-  if (suggestionsKey !== seenSuggestionsKey) {
-    setSeenSuggestionsKey(suggestionsKey);
-    if (suggested !== null && draft === suggested) setDraft("");
-    setSuggested(null);
-  }
+  const noteSuggestionsKey = useCallback((key: string | undefined) => {
+    setComposer((previous) =>
+      previous.seenSuggestionsKey === key
+        ? previous
+        : {
+            draft:
+              previous.suggested !== null && previous.draft === previous.suggested
+                ? ""
+                : previous.draft,
+            suggested: null,
+            seenSuggestionsKey: key,
+          },
+    );
+  }, []);
 
   /**
    * 사용자가 직접 쓴 미전송 문장이 있으면 덮지 않고 줄을 바꿔 뒤에 잇는다 — 쓴 글을 경고 없이 지우면 되돌릴 길이
@@ -68,17 +82,26 @@ export const useAssistSidebarState = ({
    * 글이 아니므로 바꿔 넣는다(가이드 리뷰 4).
    */
   const pickSuggestion = (suggestion: string) => {
-    const userText = draft.trim() !== "" && draft !== suggested;
-    setDraft(userText ? `${draft.trimEnd()}\n${suggestion}` : suggestion);
-    setSuggested(userText ? null : suggestion);
+    const userText = composer.draft.trim() !== "" && composer.draft !== composer.suggested;
+    setComposer({
+      ...composer,
+      draft: userText ? `${composer.draft.trimEnd()}\n${suggestion}` : suggestion,
+      suggested: userText ? null : suggestion,
+    });
   };
 
   const submitDraft = () => {
-    if (chat.running !== null || chat.busy || draft.trim() === "") return;
-    chat.send(draft);
-    setDraft("");
-    setSuggested(null);
+    if (chat.running !== null || chat.busy || composer.draft.trim() === "") return;
+    chat.send(composer.draft);
+    setComposer({ ...composer, draft: "", suggested: null });
   };
 
-  return { chat, draft, setDraft, pickSuggestion, submitDraft };
+  return {
+    chat,
+    draft: composer.draft,
+    setDraft: (text) => setComposer((previous) => ({ ...previous, draft: text })),
+    pickSuggestion,
+    noteSuggestionsKey,
+    submitDraft,
+  };
 };

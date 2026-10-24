@@ -50,6 +50,8 @@ import {
   useFormProjection,
   useSourceTransactions,
   useStrategyDocument,
+  readGuideVisits,
+  writeGuideVisits,
   useUpgradeDocument,
   type DocumentSource,
   guideSuggestionKeys,
@@ -295,14 +297,13 @@ export const NewStrategyPage = () => {
 
   // 안내 오른쪽 칸의 기본 탭: AI 공급자가 연결돼 있으면 AI 도우미, 아니면 문서 미리보기. 공급자 목록이 확정된
   // 첫 순간에 한 번만 정하고(나중에 다시 읽혀도 탭이 저절로 바뀌지 않는다), 확정 전에는 정하지 않는다. URL 에
-  // 적힌 탭은 언제나 이긴다(가이드 리뷰 2). 첫 조회가 실패하면 재시도(기본 3회 백오프)를 기다리지 않고 바로
-  // 미리보기로 정한다 — 공급자를 모르면 AI 를 먼저 보일 근거가 없다(가이드 재리뷰 1).
-  const providers = useQuery(assistantProvidersQuery());
+  // 적힌 탭은 언제나 이긴다(가이드 리뷰 2). 조회가 실패하면 미리보기로 정한다 — 공급자를 모르면 AI 를 먼저 보일
+  // 근거가 없다(가이드 재리뷰 1).
+  // 이 판정은 첫 확정 결과 하나로 한다. 재시도하면 실패로 미리보기를 정한 뒤 성공해도 탭이 따라가지 않아 두 번의
+  // 결과가 어긋나므로, 여기서는 재시도하지 않는다(최종 리뷰 6).
+  const providers = useQuery({ ...assistantProvidersQuery(), retry: false });
   const [defaultPanel, setDefaultPanel] = useState<GuidePanel | null>(null);
-  if (
-    defaultPanel === null &&
-    (providers.data !== undefined || providers.isError || providers.failureCount > 0)
-  )
+  if (defaultPanel === null && (providers.data !== undefined || providers.isError))
     setDefaultPanel(
       providers.data !== undefined && hasActiveAssistantProvider(providers.data)
         ? "assistant"
@@ -314,17 +315,35 @@ export const NewStrategyPage = () => {
   // 편집기로 가도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4). 서버 조회는 AI 가 보이는 동안만 돈다 —
   // 안내에서 미리보기 탭을 보거나 편집기 AI 열을 접으면 멈추고, 입력 초안은 남는다(SoT 3차 경미 1). 편집기 AI 열의
   // 펼침은 widget 이 소유하고 알려 준다.
+  // 이 값은 widget(StrategyIde)이 owner 인 AI 열 펼침의 사본이다. 화면은 구독만 하고 직접 바꾸지 않는다.
   const [ideAssistantOpen, setIdeAssistantOpen] = useState(false);
   const assistantState = useAssistSidebarState({
     documentRef: strategyAssistant.documentRef,
     readContext: strategyAssistant.readContext,
     enabled: search.guide ? guidePanel === "assistant" : ideAssistantOpen,
-    // 추천 질문의 맥락은 안내 단계다. 편집기로 가면 고치지 않은 안내 추천 질문은 지워진다.
-    suggestionsKey: search.guide ? (search.step ?? "document") : "editor",
   });
 
   // 단계별 안내(RD-04-D). 같은 문서·같은 트랜잭션을 쓰고, 편집기는 숨긴 채 살아 있어 되돌리기 이력이 이어진다.
   // 안내를 닫으면 같은 초안을 편집기 그래프 보기로 연다.
+  // 안내에서 지나간 단계는 초안 단위로 화면이 든다. 편집기에 다녀와도(안내가 다시 마운트돼도) 남고, 새로고침에도
+  // 탭 보관함에서 되살아나 진행률이 문서 변화 없이 뒤로 가지 않는다(최종 리뷰 2).
+  const [guideVisits, setGuideVisits] = useState(() => ({
+    draftId: serverDraftId,
+    visited: readGuideVisits(serverDraftId),
+  }));
+  if (guideVisits.draftId !== serverDraftId)
+    setGuideVisits({ draftId: serverDraftId, visited: readGuideVisits(serverDraftId) });
+  const visitGuideStep = useCallback(
+    (stepId: string) =>
+      setGuideVisits((previous) => {
+        if (previous.visited.has(stepId)) return previous;
+        const visited = new Set(previous.visited).add(stepId);
+        writeGuideVisits(previous.draftId, visited);
+        return { ...previous, visited };
+      }),
+    [],
+  );
+
   const leaveGuide = (next: Partial<typeof search>) =>
     void navigate({
       to: ROUTE,
@@ -354,6 +373,8 @@ export const NewStrategyPage = () => {
             blockedReason={runSettings.blockedReason}
           />
           <StrategyGuide
+            visited={guideVisits.visited}
+            onVisit={visitGuideStep}
             status={<ServerDraftBanner sync={serverDraft} />}
             panel={guidePanel}
             onPanel={(assist) =>
@@ -373,6 +394,8 @@ export const NewStrategyPage = () => {
                 onPreviewProposal={strategyAssistant.proposalHandlers.onPreviewProposal}
                 onApplyProposal={strategyAssistant.proposalHandlers.onApplyProposal}
                 suggestions={guideSuggestions(step)}
+                // 안내가 해석한 지금 단계(모르는 URL 값이면 첫 단계)가 추천 질문의 맥락이다(최종 리뷰 4).
+                suggestionsKey={step.id}
                 state={assistantState}
                 layout="docked"
               />
@@ -742,6 +765,8 @@ export const NewStrategyPage = () => {
             // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
             // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
             onClose={close}
+            // 편집기로 오면 고치지 않은 안내 추천 질문은 입력칸에서 지워진다.
+            suggestionsKey="editor"
             state={assistantState}
           />
         )}

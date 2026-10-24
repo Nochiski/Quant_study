@@ -6,7 +6,7 @@
  * 나누는 규칙: 한 단계(`x-stage`)에 최상위 목록 섹션(`factors`)이 있으면 그 목록이 단계 하나가 되고, 같은
  * 단계의 카드(신호 결합 칸)는 그 뒤 단계가 된다. 다른 목록(`eligibility.rules`)은 자기 단계 안에 남는다.
  */
-import { errorCount, fieldErrors, listErrorCount, sectionErrors } from "./diagnostic-counts";
+import { errorsOf, fieldErrors, listErrors, sectionErrors } from "./diagnostic-counts";
 import type { DocumentDiagnostic } from "./document-state";
 import { requiresValue, type FormField, type FormSection } from "./form-projection";
 import type { PipelineCard, PipelineProjection } from "./pipeline-projection";
@@ -118,9 +118,7 @@ const fieldsStatus = (
 ): GuideStepStatus => {
   const required = fields.filter(requiresValue);
   return {
-    errors:
-      errorCount(sectionDiagnostics) +
-      fields.reduce((sum, field) => sum + errorCount(field.diagnostics), 0),
+    errors: errorsOf(sectionDiagnostics).length + fieldErrors(fields).length,
     filled: fields.some(holdsValue),
     required:
       required.length === 0 ? "none" : required.every(holdsValue) ? "met" : "missing",
@@ -162,13 +160,15 @@ export const guideOutsideErrors = (pipeline: PipelineProjection): DocumentDiagno
 export const guideStepStatuses = (
   steps: readonly GuideStep[],
   pipeline: PipelineProjection | null,
+  /** 미리 모은 `guideOutsideErrors`. 화면이 같은 모음을 이름 단계 본문에도 보이므로 한 번만 모은다. */
+  outside: readonly DocumentDiagnostic[] = pipeline === null ? [] : guideOutsideErrors(pipeline),
 ): GuideStepStatus[] =>
   steps.map((step) => {
     if (pipeline === null || step.kind === "review") return EMPTY;
     if (step.kind === "document") {
       const root = pipelineDocumentProperties(pipeline);
       const shown = fieldsStatus(root?.fields ?? [], root?.diagnostics ?? []);
-      return { ...shown, errors: shown.errors + guideOutsideErrors(pipeline).length };
+      return { ...shown, errors: shown.errors + outside.length };
     }
     const stage = pipeline.stages.find((candidate) => candidate.stage === step.stage);
     const ownsStage =
@@ -183,7 +183,7 @@ export const guideStepStatuses = (
         ownsStage ? (stage?.diagnostics ?? []) : [],
       ),
       ...lists.map((list) => ({
-        errors: listErrorCount(list),
+        errors: listErrors(list).length,
         filled: list.items.length > 0,
         required: "none" as const,
       })),

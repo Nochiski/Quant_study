@@ -68,6 +68,11 @@ INCOMING_PREFIX = "_kw_incoming_"
 # 실측: 372행 창 경계마다 재시작, 프로브 09-11 00:05 자정 창 이동으로 변경). 원천 정정이 아니므로
 # 머지의 `changed` 비교에서 뺀다. 원장에는 원문 그대로 남고 stage 가 `_valid` 로 다룬다.
 WINDOW_RELATIVE_COLS: frozenset[str] = frozenset({"ovr_shrts_qty"})
+# 원천이 필드를 옮긴 TR — TR → (새 필드, 옛 자리 필드). 원장 행의 새 필드가 NULL 이면(옮기기 전 첫 관측) 그 행의 두
+# 열은 뜻이 달라 머지의 `changed` 비교에서 뺀다. ka10060 10-22 저녁: 거래량이 acc_trde_prica → acc_trde_qty 로 옮기고
+# acc_trde_prica 는 거래대금(백만원) — 다시 받은 과거 행이 매일 약 25만 건 '정정'으로 찍혔다. 읽는 쪽 규칙은
+# stage `rules_kiwoom` volume_shr(fallback_src)
+FIELD_MOVES: dict[str, tuple[str, str]] = {"ka10060": ("acc_trde_qty", "acc_trde_prica")}
 FETCH_SOURCE = "kiwoom_fetch"
 MERGE_SOURCE = "kiwoom_merge"
 COVER_SOURCE = "kiwoom_cover"   # 06:00 보강 판정(T-13) — 다시 받은 fetch 자체는 FETCH_SOURCE 에 따로 남는다
@@ -841,13 +846,22 @@ def merge_tr(con: sqlite3.Connection, spec: TrSpec, date: str, dry_run: bool) ->
     join = (f'"{incoming}" i JOIN "{spec.table}" m ON m.ticker = i.ticker AND m.dt = i.dt '
             f'WHERE i.dt <= ?')
     n_changed = 0
+    move = FIELD_MOVES.get(spec.api_id)
+    if move is not None and move[0] not in had:      # 새 필드 열이 없던 원장 — 전 행이 옮기기 전 모양
+        compared = [c for c in compared if c != move[1]]
+
+    def _changed(c: str) -> str:
+        if move is not None and c in move and move[0] in had:
+            return f'(m."{move[0]}" IS NOT NULL AND {_changed_sql(c)})'
+        return _changed_sql(c)
+
     if compared:
-        differs = " OR ".join(_changed_sql(c) for c in compared)
+        differs = " OR ".join(_changed(c) for c in compared)
         row_changed = con.execute(f'SELECT COUNT(*) FROM {join} AND ({differs})', (date,)).fetchone()
         n_changed = 0 if row_changed is None else int(row_changed[0])
     if n_changed:
         # 무엇이 어떻게 바뀌었는지 남긴다 — 건수만으로는 "가정을 다시 본다" 는 재검토를 할 수 없다.
-        parts = [f'SELECT i.ticker, i.dt, \'{c}\', m."{c}", i."{c}" FROM {join} AND {_changed_sql(c)}'
+        parts = [f'SELECT i.ticker, i.dt, \'{c}\', m."{c}", i."{c}" FROM {join} AND {_changed(c)}'
                  for c in compared]
         sample = con.execute(" UNION ALL ".join(parts) + f" LIMIT {CHANGE_SAMPLE}",
                              tuple([date] * len(parts))).fetchall()

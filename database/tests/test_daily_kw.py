@@ -635,6 +635,39 @@ def test_merge_reports_real_corrections_with_values(tmp_path, monkeypatch, capsy
     assert "poss_stkcnt" in out and "'999' → '20'" in out
 
 
+def _ka10060_merge(ledger_has_qty: bool, ledger: list[tuple], incoming: list[tuple]) -> kw_daily.TrMerge:
+    """ka10060 원장 · incoming 을 직접 세우고 `merge_tr` 를 부른다. 행 = (ticker, dt, cur_prc, acc_trde_prica, acc_trde_qty)."""
+    spec = kw_daily.TRS["ka10060"]
+    con = sqlite3.connect(":memory:")
+    cols = ["dt", "cur_prc", "acc_trde_prica", *(["acc_trde_qty"] if ledger_has_qty else [])]
+    kw_daily.ensure_table(con, spec.table, cols)
+    con.executemany(f'INSERT INTO "{spec.table}" (ticker, {", ".join(cols)}, src_api, collected_at) '
+                    f'VALUES ({",".join("?" * (len(cols) + 3))})',
+                    [r[:len(cols) + 1] + ("ka10060", "old") for r in ledger])
+    inc = kw_daily.INCOMING_PREFIX + "ka10060"
+    con.execute(f'CREATE TABLE "{inc}" (ticker TEXT, dt TEXT, cur_prc TEXT, acc_trde_prica TEXT, '
+                'acc_trde_qty TEXT, src_api TEXT, collected_at TEXT)')
+    con.executemany(f'INSERT INTO "{inc}" VALUES (?,?,?,?,?,?,?)',
+                    [r + ("ka10060", "new") for r in incoming])
+    return kw_daily.merge_tr(con, spec, D, dry_run=False)
+
+
+def test_merge_does_not_count_the_ka10060_field_move_as_a_correction(capsys):
+    # 10-22 저녁 키움 응답 변경 — 거래량이 acc_trde_prica 에서 새 acc_trde_qty 로 옮기고 acc_trde_prica 는 거래대금(백만원).
+    # 옛 행(acc_trde_qty NULL)은 첫 관측대로 남고, 다시 받은 같은 날 행의 두 열은 뜻이 달라 정정이 아니다(매일 약 25만 건이었다).
+    old = [("005930", D_PREV, "-70000", "1000", None), ("000660", D_PREV, "250000", "2000", None)]
+    new = [("005930", D_PREV, "-70000", "70", "1000"), ("000660", D_PREV, "250500", "500", "2000")]
+    r = _ka10060_merge(True, old, new)
+    assert r.n_changed == 1                                   # 000660 종가 정정만 — 다른 열은 그대로 본다
+    out = capsys.readouterr().out
+    assert "cur_prc" in out and "acc_trde" not in out
+    # 열이 붙기 전 원장(전환 날)도 같다 — 옛 자리 열은 견주지 않는다
+    assert _ka10060_merge(False, [r[:4] for r in old], new).n_changed == 1
+    # 새 모양끼리는 그대로 센다 — 거래대금 · 거래량 원천 정정
+    assert _ka10060_merge(True, [("005930", D_PREV, "-70000", "70", "1000")],
+                          [("005930", D_PREV, "-70000", "71", "1001")]).n_changed == 1
+
+
 def _ledger_history(tmp_path, table, sessions, tickers):
     """원장에 과거 세션별 행을 심는다 — 종목축이 유니버스가 아닌 TR 의 추세 기준선."""
     con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")

@@ -373,6 +373,11 @@ def test_out_of_range_cross_sectional_values_are_a_validation_error(
             2.5,
             "상위 개수는 1 이상의 정수여야 합니다. 지금 값은 2.5입니다.",
         ),
+        (
+            EligibilityOperator.TOP_PERCENT,
+            -1e-07,
+            "상위 비율은 0보다 크고 1 이하인 비율이어야 합니다(20%는 0.2). 지금 값은 -1e-07입니다.",
+        ),
     ],
 )
 def test_out_of_range_cross_sectional_values_speak_plain_korean(

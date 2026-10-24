@@ -167,6 +167,17 @@ def _numeric_leaves(value: object, path: str = "") -> Iterator[tuple[str, float]
             yield from _numeric_leaves(item, child_path)
 
 
+def _plain_number(value: float) -> str:
+    """사용자 문장에 남기는 지금 값의 원문 표기(`.claude/rules/error-messages.md` 예외 절).
+
+    값은 `repr` 그대로 남기되, 정수인 실수(`20.0`)는 문서에 적은 모양(`20`)으로 `.0` 을 뗀다.
+    무한대·NaN·소수는 `repr` 그대로다(`inf`·`nan`·`2.5`).
+    """
+    if math.isfinite(value) and float(value).is_integer():
+        return str(int(value))
+    return repr(value)
+
+
 def _eligibility_rule_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
     """`top_*` 규칙의 `value` 가 cut 크기로 쓸 수 있는 값인지 검사한다 (spec D3 S5).
 
@@ -203,7 +214,7 @@ def _eligibility_rule_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
             yield semantic_issue(
                 "strategy.eligibility.rule_value",
                 path,
-                f"{expectation}. 지금 값은 {rule.value:g}입니다.",
+                f"{expectation}. 지금 값은 {_plain_number(rule.value)}입니다.",
             )
 
 

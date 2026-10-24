@@ -293,9 +293,45 @@
   margin-top: var(--space-2);
 }
 
-/* 컨트롤 사이 한국어 문장이 낱자로 끊기지 않게 어절 단위로 줄을 바꾼다("종 / 목만"). */
+/*
+ * 문장형 행: 글자 조각과 칸을 한 줄에 흘리다가 폭이 모자라면 조각 단위로 줄을 바꾼다. 조각과 입력칸은 같은 기준선에
+ * 서고, 칸 도움말은 입력칸 아래 보조 문구다. 컨트롤 사이 한국어 문장이 낱자로 끊기지 않게 어절 단위로 줄을 바꾼다.
+ */
 .strategy-guide .pipeline__sentence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-2);
+  line-height: var(--line-height-control, 1.4);
   word-break: keep-all;
+}
+
+.strategy-guide .pipeline__sentence > .pipeline__text {
+  white-space: normal;
+}
+
+.strategy-guide .pipeline__field {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/*
+ * 연산 이름("값이 큰 쪽 상위 비율 안에 드는")처럼 긴 선택값이 잘리지 않게 고른 값 길이에 맞춰 카드 폭까지는 늘어난다.
+ * `field-sizing` 을 모르는 브라우저는 가장 긴 선택지 폭을 쓰는 native 크기로 남는다.
+ */
+.strategy-guide .pipeline__field select {
+  max-width: 100%;
+  field-sizing: content;
+}
+
+.strategy-guide .pipeline__field--with-help {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.strategy-guide .pipeline__field--with-help .pipeline__field-help {
+  margin-left: 0;
 }
 
 .strategy-guide .pipeline__card-head {
@@ -487,7 +523,7 @@
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-@media (max-width: 1279px) {
+@media (max-width: 1439px) {
   .strategy-guide__body {
     grid-template-columns: minmax(0, 1fr);
   }

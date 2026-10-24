@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   messages,
+  t,
   tDescription,
   tName,
   tOptional,
@@ -19,6 +20,7 @@ import { nodeSlotsByKind } from "../model/graph-transactions";
 import {
   cardTemplate,
   projectPipeline,
+  sentenceItems,
   sentencePieces,
   strategySummary,
   unstagedNames,
@@ -473,5 +475,32 @@ describe("unstagedNames", () => {
     expect(
       unstagedNames(pipelineOf(EMPTY, [], staged as unknown as JsonSchema)),
     ).toEqual(["전략 이름", "전략 설명"]);
+  });
+});
+
+describe("sentenceItems", () => {
+  it("칸 바로 뒤 괄호 조각은 그 칸의 도움말로 묶고, 다른 글자 조각은 그대로 둔다", () => {
+    expect(
+      sentenceItems(
+        sentencePieces(t("strategy.field.eligibility_rule.operator.value.top_percent.card")),
+      ),
+    ).toEqual([
+      { key: "field_id", slider: false, hint: null },
+      { text: " " },
+      { key: "operator", slider: false, hint: null },
+      { text: " 종목만 — 상위 비율 " },
+      { key: "value", slider: false, hint: "0.2가 20%" },
+    ]);
+  });
+
+  it("괄호가 문장 중간에 섞인 조각이나 칸 앞의 괄호는 도움말이 아니다", () => {
+    expect(sentenceItems(sentencePieces("{value} (예) 이상"))).toEqual([
+      { key: "value", slider: false, hint: null },
+      { text: " (예) 이상" },
+    ]);
+    expect(sentenceItems(sentencePieces("(참고) {value}"))).toEqual([
+      { text: "(참고) " },
+      { key: "value", slider: false, hint: null },
+    ]);
   });
 });

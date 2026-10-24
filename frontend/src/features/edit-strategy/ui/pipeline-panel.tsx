@@ -31,6 +31,7 @@ import {
   pipelineDocumentProperties,
   placeName,
   projectPipeline,
+  sentenceItems,
   sentencePieces,
   strategySummary,
   unstagedNames,
@@ -614,6 +615,7 @@ export const SentenceCard = ({
 }) => {
   const cardId = useId();
   const pieces = template === null ? [] : sentencePieces(template);
+  const items = sentenceItems(pieces);
   const byKey = new Map(rows.map((row) => [row.field.key, row]));
   const placed = new Set(
     pieces.flatMap((piece) =>
@@ -644,16 +646,20 @@ export const SentenceCard = ({
       {head === undefined ? null : <div className="pipeline__card-head">{head}</div>}
       {pieces.length === 0 ? null : (
         <p className="pipeline__sentence">
-          {pieces.map((piece, index) =>
-            "text" in piece ? (
-              piece.text
-            ) : byKey.has(piece.key) ? (
+          {items.map((item, index) =>
+            "text" in item ? (
+              // 글자 조각도 요소로 둔다 — 줄을 나누는 배치가 조각 단위로 줄바꿈·기준선을 맞춘다.
+              <span key={`text:${index}`} className="pipeline__text">
+                {item.text}
+              </span>
+            ) : byKey.has(item.key) ? (
               <InlineField
-                key={`${piece.key}:${index}`}
-                row={byKey.get(piece.key)!}
-                notesId={notesIdOf(byKey.get(piece.key)!)}
+                key={`${item.key}:${index}`}
+                row={byKey.get(item.key)!}
+                notesId={notesIdOf(byKey.get(item.key)!)}
                 context={context}
-                slider={piece.slider}
+                slider={item.slider}
+                hint={item.hint}
               />
             ) : null,
           )}
@@ -716,16 +722,20 @@ const InlineField = ({
   notesId,
   context,
   slider = false,
+  hint = null,
 }: {
   row: PipelineRow;
   notesId: string;
   context: CardContext;
   /** 틀 자리 `{<키>.slider}`: 숫자 칸 옆에 끄는 막대를 둔다. */
   slider?: boolean;
+  /** 칸 바로 뒤 괄호 도움말(`sentenceItems`). 입력칸 아래 보조 문구로 둔다. */
+  hint?: string | null;
 }) => {
   const id = useId();
   const invalidId = `${id}-invalid`;
   const hintId = `${id}-hint`;
+  const helpId = `${id}-help`;
   const { field, section } = row;
   const name = tName(field.descriptionKey) ?? "";
   const editing = useFieldCommit({
@@ -737,12 +747,15 @@ const InlineField = ({
   });
   const describedBy = [
     editing.invalid === null ? null : invalidId,
+    hint === null || hint === undefined ? null : helpId,
     field.applicable === false ? hintId : null,
     field.diagnostics.length === 0 ? null : notesId,
   ].filter((value): value is string => value !== null);
   return (
     <span
-      className="pipeline__field"
+      className={
+        hint === null ? "pipeline__field" : "pipeline__field pipeline__field--with-help"
+      }
       aria-current={
         coversPointer(field.pointer, context.selectedPointer)
           ? "true"
@@ -766,6 +779,11 @@ const InlineField = ({
         slider={slider ? sliderRange(field.control) : undefined}
         {...editing.control}
       />
+      {hint === null ? null : (
+        <span id={helpId} className="pipeline__field-help">
+          {hint}
+        </span>
+      )}
       {field.applicable === false ? (
         <span id={hintId} className="sr-only">
           {t("form.field.inapplicable")}

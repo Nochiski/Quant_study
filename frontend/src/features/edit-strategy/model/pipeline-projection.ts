@@ -231,6 +231,33 @@ export const sentencePieces = (template: string): SentencePiece[] => {
   return pieces;
 };
 
+/** 카드 문장 조각을 그릴 단위: 글자, 또는 칸과 그 칸 바로 뒤 괄호 도움말(있으면). */
+export type SentenceItem =
+  | { text: string }
+  | { key: string; slider: boolean; hint: string | null };
+
+const PARENTHETICAL = /^\s*\(([^()]+)\)\s*$/u;
+
+/**
+ * 칸 바로 뒤에 괄호 하나로만 된 글자 조각("(0.2가 20%)")은 그 칸의 도움말로 묶는다. 화면은 도움말을 입력칸 아래
+ * 보조 문구로 두고, 입력칸 설명(`aria-describedby`)으로도 잇는다. 문구는 틀 그대로이고 뜻을 바꾸지 않는다.
+ */
+export const sentenceItems = (pieces: readonly SentencePiece[]): SentenceItem[] => {
+  const items: SentenceItem[] = [];
+  for (let index = 0; index < pieces.length; index += 1) {
+    const piece = pieces[index]!;
+    if ("text" in piece) {
+      items.push(piece);
+      continue;
+    }
+    const next = pieces[index + 1];
+    const hint = next !== undefined && "text" in next ? PARENTHETICAL.exec(next.text) : null;
+    items.push({ ...piece, hint: hint === null ? null : hint[1]!.trim() });
+    if (hint !== null) index += 1;
+  }
+  return items;
+};
+
 /**
  * 카드 문장 틀(WORKFLOW P4-02 결정): 필드 순서로 enum 필드가 고른 값의 이름 키 아래 `.card` 를 먼저 찾고, 없으면
  * `fallbackKey`(필드 카드는 앵커 설명 키, 목록 항목은 목록 설명 키) 아래 `.card` 다. 틀이 없으면 null — 카드는

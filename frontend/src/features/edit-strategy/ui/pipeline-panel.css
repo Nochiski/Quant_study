@@ -308,3 +308,15 @@
     width: 100%;
   }
 }
+
+/* 칸 바로 뒤 괄호 도움말("0.2가 20%"). 캔버스 문장 줄에서는 칸 옆에 작게 붙는다 — 안내 카드는 입력칸 아래로 둔다. */
+.pipeline__field-help {
+  margin-left: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+/* 문장 안 select 는 여백을 줄이되 화살표 자리(`.ui-select`)는 남긴다 — 줄이면 긴 선택값 끝이 화살표 밑에 깔린다. */
+.pipeline__field select.ui-select:not([multiple]):not([size]) {
+  padding-inline-end: var(--space-6);
+}

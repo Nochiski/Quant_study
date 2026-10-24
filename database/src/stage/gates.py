@@ -86,7 +86,8 @@ def g0_declaration(ctx: GateContext) -> GateResult:
         elif ctx.rule.blob_source is not None:
             need = set(ctx.rule.blob_source.required_columns)   # 파서 입력 컬럼이 원장 실물 계약
         else:
-            need = {c.src for c in ctx.rule.columns}
+            # fallback_src 열은 옛 자리가 실물 계약이다 — 새 자리는 옛 판에 없을 수 있다(build._union_sql NULL)
+            need = {c.fallback_src or c.src for c in ctx.rule.columns}
             if ctx.rule.observed_src:
                 need.add(ctx.rule.observed_src)
         missing += [f"{s.db}.{s.table}.{c}" for c in sorted(need - cols)]

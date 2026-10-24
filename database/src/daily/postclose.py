@@ -62,7 +62,8 @@ SOURCE = "kiwoom_postclose"
 SPEC = KW.TRS["ka10060"]
 TABLE = SPEC.table                         # 키움 원장과 같은 이름 — 파일(postclose.db)로 가른다
 # 키움 원장 `ka10060_investor_flows` 의 응답 열(실측 survey v2) — 응답 전에 스키마를 세운다
-COLS: tuple[str, ...] = ("dt", "cur_prc", "pred_pre", "acc_trde_prica", *KW.FLOW_KEYS)
+# `acc_trde_qty`(거래량) = 10-22 저녁 키움 응답 변경으로 생긴 필드 — 그 뒤 `acc_trde_prica` 는 거래대금(백만원)
+COLS: tuple[str, ...] = ("dt", "cur_prc", "pred_pre", "acc_trde_prica", "acc_trde_qty", *KW.FLOW_KEYS)
 EXTRA: tuple[str, ...] = ("fetched_at", "price_valid")
 LOCK_FILE = "/tmp/quant_ledger_postclose.lock"
 RUN_FLOOR_KST = dt.time(15, 41)            # 크론 시각과 같다. 수급 확정 15:40(N-35 ②) 뒤
@@ -369,7 +370,7 @@ def own_lock(path: str) -> Iterator[bool]:
 
 def _print_check_row(ticker: str, rows: Sequence[Mapping[str, object]], valid: bool) -> None:
     r = rows[0]
-    keys = ("cur_prc", "pred_pre", "acc_trde_prica", "ind_invsr", "frgnr_invsr", "orgn")
+    keys = ("cur_prc", "pred_pre", "acc_trde_prica", "acc_trde_qty", "ind_invsr", "frgnr_invsr", "orgn")
     extra = [k for k in r if k not in COLS]
     print(f"[postclose] check {ticker} T행={len(rows)} price_valid(16:00 기준)={int(valid)} "
           + " ".join(f"{k}={r.get(k)}" for k in keys) + f" 새 필드={extra}")

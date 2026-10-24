@@ -54,8 +54,10 @@ _FLOW_COLUMNS: tuple[ColumnRule, ...] = (
     # 부호는 전일 대비 방향 표시자 — abs 필수(KRX 종가 대조 abs 100% / raw 51.6%, SPEC §2-3)
     ColumnRule("cur_prc", "close_krw", KIND_NUMERIC, *p_headroom(7), sign="abs"),
     ColumnRule("pred_pre", "pred_pre_krw", KIND_NUMERIC, *p_headroom(6)),
-    # 명세 오표기: 이름은 누적거래대금이지만 실측은 거래량(주) — KRX ACC_TRDVOL 99.9864% 일치
-    ColumnRule("acc_trde_prica", "volume_shr", KIND_NUMERIC, *p_headroom(10)),
+    # 거래량(주). 10-22 저녁(21:05 수집)부터 키움 응답이 바뀌었다 — 새 필드 `acc_trde_qty` = 거래량,
+    # `acc_trde_prica` = 거래대금(백만원, 명세 이름대로). 그 전 응답은 `acc_trde_prica` 에 거래량을 실었다(명세
+    # 오표기 — KRX ACC_TRDVOL 99.9864% 일치). 원장은 첫 관측을 지켜 그 전 행은 `acc_trde_qty` 가 NULL 이다
+    ColumnRule("acc_trde_qty", "volume_shr", KIND_NUMERIC, *p_headroom(10), fallback_src="acc_trde_prica"),
     _flow_krw("ind_invsr"), _flow_krw("frgnr_invsr"), _flow_krw("orgn"),
     _flow_krw("fnnc_invt"), _flow_krw("insrnc"), _flow_krw("invtrt"),
     _flow_krw("etc_fnnc"), _flow_krw("bank"), _flow_krw("penfnd_etc"),

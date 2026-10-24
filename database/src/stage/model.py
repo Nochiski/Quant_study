@@ -14,7 +14,9 @@ from datetime import UTC, datetime
 #        파싱 전에 버린다(§1 예외 (f), 묶음 7 N-37). 두 표 fetched_date 뜻이 '그 원문을 처음 본 날'로 바뀐다
 # 2.8.0: stg_flow_postclose_kiwoom 추가 — 장 마감 직후 원장(postclose.db) ka10060, stg_flow_daily_kiwoom 과 같은
 #        열 규칙 + price_valid·collected_at(컷오버 PR-2). G4 골든 물려받기(golden_from). 다른 표 산출 불변
-RULES_VERSION = "2.8.0"
+# 2.9.0: ka10060 거래량(volume_shr) = `acc_trde_qty`, 그 열이 NULL 인 행(10-22 저녁 키움 응답 변경 전에 처음 관측된
+#        행)만 `acc_trde_prica` — ColumnRule.fallback_src. 10-22 부터의 행만 값이 바뀐다(거래대금 → 거래량)
+RULES_VERSION = "2.9.0"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 
 # 빌드 basis — 하루 2판 규약 (플랜 v2 §4 Task B.1). 빌드 id 접두어가 판을 구분한다:
@@ -89,6 +91,16 @@ class ColumnRule:
     required: bool = False          # 키는 아니지만 NULL 이면 행이 무의미 → reject(required_null)
     nonempty_flag: str | None = None  # 빈값 여부 불린 컬럼 병기 (예: sect_available)
     blank_is_value: bool = False    # 키의 '' 를 값으로 인정(key_missing 아님) — ws_call_log.pkey
+    # 원천이 필드를 옮긴 열 — src 가 NULL 인 행(그 열이 생기기 전에 처음 관측된 행)은 이 원장 열 원문을 쓴다.
+    # src 열이 원장에 아예 없으면(옛 판) 전 행이 이 열이다. '' 는 NULL 이 아니라 결측으로 남는다 — ka10060 거래량만
+    fallback_src: str | None = None
+
+    def src_sql(self, alias: str, prefix: str = "") -> str:
+        """원장 원문 식(`alias."prefix+src"`) — `fallback_src` 가 있으면 src 가 NULL 인 행만 그 열 원문."""
+        own = f'{alias}."{prefix}{self.src}"'
+        if self.fallback_src is None:
+            return own
+        return f'coalesce({own}, {alias}."{prefix}{self.fallback_src}")'
 
     @property
     def decimal_type(self) -> str:

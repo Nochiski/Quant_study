@@ -139,7 +139,9 @@ def test_flow_rules_scale_only_the_thirteen_investor_columns() -> None:
     rule = rules.RULES["stg_flow_daily_kiwoom"]
     scaled = {c.name: c.unit_scale for c in rule.columns if c.unit_scale is not None}
     assert len(scaled) == 13 and set(scaled.values()) == {1_000_000}
-    assert rule.column("volume_shr").src == "acc_trde_prica"    # 오표기 — 대금이 아니라 거래량
+    # 10-22 저녁 키움 응답 변경 — 거래량은 새 필드, 그 전 행은 옛 자리(오표기 — 대금이 아니라 거래량)
+    assert rule.column("volume_shr").src == "acc_trde_qty"
+    assert rule.column("volume_shr").fallback_src == "acc_trde_prica"
     assert rule.column("volume_shr").unit_scale is None
     assert rule.column("close_krw").sign == "abs"
     assert rule.lag_known is False                              # 수급 = 공표 시점 미상 (§6)
@@ -179,6 +181,37 @@ def test_flow_build_takes_abs_of_cur_prc_and_records_the_direction(
     assert con.execute("SELECT ticker, close_krw, close_krw_dir, pred_pre_krw FROM t "
                        "ORDER BY ticker").fetchall() == [
         ("0001A0", 51900, 1, 100), ("005930", 262500, -1, -19000)]
+
+
+def test_flow_volume_reads_the_new_quantity_field_and_falls_back_for_rows_seen_before_it(
+    tmp_path: Path
+) -> None:
+    """10-22 저녁부터 키움 ka10060 은 `acc_trde_qty` = 거래량, `acc_trde_prica` = 거래대금(백만원)을 준다.
+    원장은 첫 관측을 지켜 그 전 행은 `acc_trde_qty` 가 NULL 이고 `acc_trde_prica` 가 거래량이다."""
+    d = tmp_path / "raw"
+    d.mkdir()
+    db = d / "kiwoom_snap_q.db"
+    cols = [*FLOW_COLS[:5], "acc_trde_qty", *FLOW_COLS[5:]]
+    old = ("005930", "20261021", "-262500", "-19000", "10981416", None) + _INV + ("ka10060", COLLECTED)
+    new = ("005930", "20261022", "+263000", "+500", "2492992", "11469322") + _INV + (
+        "ka10060", "2026-10-22T12:05:00")
+    blank = ("0001A0", "20261022", "+51900", "+100", "0", "") + ("0",) * 13 + (
+        "ka10060", "2026-10-22T12:05:00")
+    _write(db, {"ka10060_investor_flows": (cols, [old, new, blank])})
+    snap = snapshot.make_snapshot({"kiwoom": db}, tmp_path / "snapshots", snapshot_id="snap_q")
+    fx = _unit_fixtures(tmp_path, "stg_flow_daily_kiwoom",
+                        {"ticker": "005930", "date": "2026-10-21"},
+                        {c.name: str(int(v) * 1_000_000) for c, v in zip(
+                            (c for c in rules.RULES["stg_flow_daily_kiwoom"].columns
+                             if c.unit_scale is not None), _INV, strict=True)})
+    r = _build("stg_flow_daily_kiwoom", snap, tmp_path, fixtures_path=fx)
+    con = _read(tmp_path, r)
+    assert con.execute("SELECT ticker, date, volume_shr FROM t ORDER BY ticker, date").fetchall() == [
+        ("0001A0", date(2026, 10, 22), None),            # 새 필드가 빈 값 — 옛 자리(대금)로 떨어지지 않는다
+        ("005930", date(2026, 10, 21), 10981416),
+        ("005930", date(2026, 10, 22), 11469322)]
+    assert con.execute("SELECT miss_kind.volume_shr FROM t WHERE ticker = '0001A0'").fetchone() == (
+        "ledger_blank",)
 
 
 # ── stg_short_daily_kiwoom (ka10014) ──────────────────────────────────────────

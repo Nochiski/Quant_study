@@ -19,12 +19,16 @@ from .model import (
     TableRule,
     p_headroom,
 )
+from .rules_kiwoom import STG_FLOW_DAILY_KIWOOM
 
 # G9 교차 조인 술어 — **게이트와 baseline 측정이 같은 모집단을 보도록 한 곳에 둔다**(DEFECT-B02).
 # 09-02 측정 baseline 은 시각 조건이 없는 조인으로 쟀고 게이트는 결정 10·11 로 20:00 KST 컷오프를
 # 쓰게 돼, 두 값이 서로 다른 모집단이 됐다(여유 7행). 축 이름만 형식 인자로 받고 술어 자체는 하나다.
 #   stage 축   : kw="o", ticker="s.ticker", dt8="strftime(s.date, '%Y%m%d')", day="s.date"
 #   원장 축    : kw="f", ticker="p.ISU_CD", dt8="p.BAS_DD", day="strptime(p.BAS_DD, '%Y%m%d')"
+# G9 키움 거래량 원문 — 키움 stage 거래량 열 규칙 그대로(10-22 응답 변경 · fallback_src). 게이트·baseline 이 같은 식,
+# 원장 별칭만 형식 인자 {kw}
+CROSS_VOLUME_SQL = STG_FLOW_DAILY_KIWOOM.column("volume_shr").src_sql("{kw}")
 CROSS_JOIN_PREDICATE_SQL = (
     "{kw}.ticker = {ticker} AND {kw}.dt = {dt8} "
     "AND (TRY_CAST({kw}.collected_at AS TIMESTAMP) + INTERVAL 9 HOUR) "
@@ -85,7 +89,7 @@ STG_PRICE_DAILY = TableRule(
         join_sql=CROSS_JOIN_PREDICATE_SQL.format(
             kw="o", ticker="s.ticker", dt8="strftime(s.date, '%Y%m%d')", day="s.date"),
         close_match_sql="abs(TRY_CAST(o.cur_prc AS BIGINT)) = s.close_krw",
-        volume_match_sql="TRY_CAST(o.acc_trde_prica AS BIGINT) = s.volume_shr",
+        volume_match_sql=f"TRY_CAST({CROSS_VOLUME_SQL.format(kw='o')} AS BIGINT) = s.volume_shr",
     ),
 )
 

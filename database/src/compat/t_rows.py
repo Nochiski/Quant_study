@@ -71,7 +71,7 @@ _LEDGERS = (("t_pc", "--postclose-db"), ("t_kw", "--kiwoom-db"))
 def _parsed(rule: TableRule) -> str:
     """원장 원문 수치 열(종가·전일대비·거래량·수급 13)을 stage 규칙대로 읽는 SELECT 목록
     (별칭 `r`)."""
-    return ",\n           ".join(_cast_expr(c, 'r."' + c.src + '"') + " AS " + c.name
+    return ",\n           ".join(_cast_expr(c, c.src_sql("r")) + " AS " + c.name
                                   for c in rule.columns if c.kind == KIND_NUMERIC)
 
 

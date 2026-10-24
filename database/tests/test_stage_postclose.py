@@ -35,8 +35,9 @@ _INV = ("-292", "12", "5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10")
 
 
 def _resp(cur: str, pred: str, vol: str, flows: Sequence[str]) -> dict[str, object]:
-    """키움 ka10060 응답 한 행(`postclose.COLS` 열)."""
-    return dict(zip(postclose.COLS, (T, cur, pred, vol, *flows), strict=True))
+    """키움 ka10060 응답 한 행(`postclose.COLS` 열). 10-22 저녁 응답 변경 뒤 모양 — 거래량은 `acc_trde_qty`,
+    `acc_trde_prica` 는 거래대금(백만원, 여기선 거래량과 다른 아무 값)."""
+    return dict(zip(postclose.COLS, (T, cur, pred, "7", vol, *flows), strict=True))
 
 
 # (종목, 응답 행, price_valid, 받은 시각 UTC) — 000020 은 16:00 뒤에 받아 가격이 애프터마켓 값이다

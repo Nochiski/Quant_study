@@ -38,7 +38,7 @@ CAND = ("000020", "005930", "005935")
 REST = ("035720", "440790")
 ORDER = [*CAND, *REST]
 ROWS_KEY = "stk_invsr_orgn_chart"
-LEDGER_COLS = ["ticker", "dt", "cur_prc", "pred_pre", "acc_trde_prica", *kw_daily.FLOW_KEYS,
+LEDGER_COLS = ["ticker", "dt", "cur_prc", "pred_pre", "acc_trde_prica", "acc_trde_qty", *kw_daily.FLOW_KEYS,
                "src_api", "collected_at"]
 DEAD = {"return_code": 3, "return_msg": "[8005:Token이 유효하지 않습니다]"}
 

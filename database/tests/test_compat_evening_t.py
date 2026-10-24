@@ -274,6 +274,25 @@ def test_t_row_values_ohl_amount_and_adj_close(env) -> None:
     assert got[C][6] == 30_100
 
 
+def test_t_row_volume_reads_the_new_quantity_field(env, tmp_path: Path) -> None:
+    """10-22 저녁부터 키움 ka10060 은 `acc_trde_qty` = 거래량, `acc_trde_prica` = 거래대금(백만원)을 준다 — 두 원장
+    모두 거래량은 새 필드다. 새 필드가 없는(NULL) 옛 행은 `acc_trde_prica` 가 거래량이다(나머지 픽스처 행)."""
+    rows = _postclose_rows()
+    rows[A] = ({**_ledger_row(T, "-69500", "-500", "69500"), "acc_trde_qty": "1000000"}, True)
+    pc = _postclose_db(tmp_path / "raw_q" / "postclose.db", rows=rows)
+    kw = _kiwoom_db(tmp_path / "raw_q" / "kiwoom.db")
+    con = sqlite3.connect(kw)
+    con.execute("UPDATE ka10060_investor_flows SET acc_trde_prica = '8', acc_trde_qty = '4000' "
+                "WHERE ticker = ? AND dt = ?", (D, T))
+    con.commit()
+    con.close()
+    _evening(env, postclose_db=pc, kiwoom_db=kw)
+    got = _t_prices(env["target"])
+    assert got[A][4:6] == (1_000_000, 69_500)        # 장 마감 원장 — 거래대금(69,500)이 거래량이 아니다
+    assert got[D][3:5] == (2_100, 4_000)             # 21:05 원장 — 거래대금(8)이 거래량이 아니다
+    assert got[B][4] == 300_000                      # 옛 행 — acc_trde_prica 가 거래량
+
+
 def test_t_row_adj_is_close_when_the_t_step_is_known_and_null_when_not(env, tmp_path: Path) -> None:
     """QL-E MAJOR-A — 키움 기준가(종가 − 전일대비) ≠ D' KRX 종가인 B 도 단계를 안다(I-1) → T 행 adj_close = 종가.
     전일대비가 없으면(기준가 미상) 단계를 모른다 → 조정가를 지어내지 않는다(NULL, P1)."""

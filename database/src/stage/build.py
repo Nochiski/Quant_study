@@ -159,6 +159,8 @@ def _union_sql(con: duckdb.DuckDBPyConnection, rule: TableRule) -> tuple[list[st
     src_cols: list[str] = []
     for cols in per_src.values():
         src_cols.extend(c for c in cols if c not in src_cols)
+    # fallback_src 열의 새 자리가 어느 원장에도 없으면(옛 판) NULL 로 세운다 — 전 행이 옛 자리를 쓴다
+    src_cols.extend(c.src for c in rule.columns if c.fallback_src and c.src not in src_cols)
     selects = []
     for s in rule.sources:
         have = set(per_src[(s.db, s.table)])
@@ -205,7 +207,7 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
     sel: list[str] = []
     joins: list[str] = []
     for c in rule.columns:
-        raw = f"s.{_q(c.src)}"
+        raw = c.src_sql("s") if c.fallback_src else f"s.{_q(c.src)}"
         if c.kind == KIND_TEXT and c.normalize_text:
             alias = f"nm_{c.src}"
             joins.append(f"LEFT JOIN {_q('norm__' + c.src)} {alias} ON {alias}.raw = {raw}")
@@ -259,7 +261,8 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
     fail_list = ", ".join(f"CASE WHEN {_q('mk__' + c.name)} = 'cast_failed' THEN ['{c.name}'] "
                           f"ELSE []::VARCHAR[] END" for c in mk_cols)
     mk_sel = ", ".join(
-        _miss_kind_expr(c, f"c.{_q('raw__' + c.src)}", f"c.{_q(c.name)}")
+        _miss_kind_expr(c, c.src_sql("c", "raw__") if c.fallback_src else f"c.{_q('raw__' + c.src)}",
+                        f"c.{_q(c.name)}")
         + f" AS {_q('mk__' + c.name)}" for c in mk_cols)
     # 원장 컬럼은 raw__ 접두사로 분리 — duckdb 식별자는 대소문자 무시(LIST_SHRS = list_shrs)
     raw_sel = ", ".join(f"s.{_q(c)} AS {_q('raw__' + c)}" for c in src_cols)

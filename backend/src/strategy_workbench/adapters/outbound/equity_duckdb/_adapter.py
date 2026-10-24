@@ -112,9 +112,11 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
     ResearchPanelResult,
     SecurityRef,
+    UniverseDefinition,
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+    describe_universe,
     field_contract_snapshot_id,
 )
 from strategy_workbench.domain.factor.facade.expression import (
@@ -1107,6 +1109,15 @@ class EquityDuckdbAdapter:
                 ),
             )
         return UniverseHistoryResult(points, DataLoadStatus.OK, self._snapshot_id)
+
+    def list_universes(self) -> tuple[UniverseDefinition, ...]:
+        """원장 `universe_policy` 에 술어가 있는 유니버스 전부(id 오름차순).
+
+        실행이 받는 id 와 같은 집합이다.
+        """
+        return tuple(
+            describe_universe(universe_id, MARKET) for universe_id in sorted(self._policies)
+        )
 
     def universe_securities(
         self, market: str, universe_id: str, as_of: date

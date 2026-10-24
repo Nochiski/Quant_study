@@ -259,7 +259,9 @@ export const fillRunEnvironment = async (
   }
   // `fill` 은 포인터를 쓰지 않는다. 날짜 칸을 타자로 채우면 브라우저 locale 의 칸 순서(월/일/연)에 묶인다.
   for (const [field, value] of fields) {
-    await field.fill(value);
+    // 유니버스는 드롭다운이라 고르고, 날짜는 채운다.
+    if (field === universe) await field.selectOption(value);
+    else await field.fill(value);
     await expect(field).toHaveValue(value);
   }
   await expect(band).toContainText(environment.universe_id);

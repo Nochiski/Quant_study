@@ -38,7 +38,7 @@ export type RunEnvironmentField = {
   scale: number;
   /** 이름(`<key>`)·한 줄 뜻(`<key>.description`)·enum 값 이름(`<key>.value.<값>`)의 stem. */
   descriptionKey: string | null;
-  /** `x-catalog`. 목록 endpoint 가 없는 카탈로그(`universe`)는 텍스트 입력이다. */
+  /** `x-catalog`. `universe` 칸은 실행 설정 패널이 `GET /api/v1/equity/universes` 목록으로 드롭다운을 그린다. */
   catalog: string | null;
   /** `x-applicable-when`: 이 칸을 읽는 모드(예: 직접 입력 세율은 `sell_tax = custom`). 없으면 늘 읽힌다. */
   applicableWhen: ApplicableWhen | null;

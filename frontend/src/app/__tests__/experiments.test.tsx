@@ -118,6 +118,17 @@ const document = {
 };
 
 const server = setupServer(
+  // 실행 설정 유니버스 칸·요약 띠가 읽는 연결된 시장 데이터의 유니버스 목록.
+  http.get(`${API}/api/v1/equity/universes`, () =>
+    HttpResponse.json([
+      {
+        universe_id: "krx.common-stock",
+        market: "KRX",
+        label: "KRX 보통주",
+        description: "KRX 상장 보통주입니다. 기준일마다 그날 상장돼 있던 종목으로 후보를 다시 고릅니다.",
+      },
+    ]),
+  ),
   http.get(`${API}/api/v1/experiments/:id/parameter-map`, () => HttpResponse.json({ cells: [], no_recommendation: "no_scored_cell" })),
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
     HttpResponse.json({ detail: { code: "x" } }, { status: 404 }),

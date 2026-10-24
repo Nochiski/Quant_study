@@ -13316,6 +13316,35 @@
         "title": "UniverseCoverageSummary",
         "type": "object"
       },
+      "UniverseDefinition": {
+        "description": "연결된 시장 데이터 어댑터가 실행에 쓸 수 있다고 답하는 유니버스 하나.\n\n실행 설정의 `universe_id` 가 고를 수 있는 값의 owner 는 어댑터다. 표시명·설명은 사람이 읽는\n문장이라 어댑터가 완성해 싣는다(화면은 다시 조립하지 않는다).",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "market": {
+            "title": "Market",
+            "type": "string"
+          },
+          "universe_id": {
+            "title": "Universe Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "universe_id",
+          "market",
+          "label",
+          "description"
+        ],
+        "title": "UniverseDefinition",
+        "type": "object"
+      },
       "UniverseHistoryQuery": {
         "properties": {
           "end": {
@@ -16045,6 +16074,29 @@
           }
         },
         "summary": "Equity Universe Preview"
+      }
+    },
+    "/api/v1/equity/universes": {
+      "get": {
+        "description": "연결된 시장 데이터가 실행에 쓸 수 있는 유니버스(id·표시명·설명).\n\n실행 설정 드롭다운의 출처다.",
+        "operationId": "listEquityUniverses",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UniverseDefinition"
+                  },
+                  "title": "Response Listequityuniverses",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Equity Universes"
       }
     },
     "/api/v1/experiments": {

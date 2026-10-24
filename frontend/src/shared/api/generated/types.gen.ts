@@ -8341,6 +8341,33 @@ export type UniverseCoverageSummary = {
 };
 
 /**
+ * UniverseDefinition
+ *
+ * 연결된 시장 데이터 어댑터가 실행에 쓸 수 있다고 답하는 유니버스 하나.
+ *
+ * 실행 설정의 `universe_id` 가 고를 수 있는 값의 owner 는 어댑터다. 표시명·설명은 사람이 읽는
+ * 문장이라 어댑터가 완성해 싣는다(화면은 다시 조립하지 않는다).
+ */
+export type UniverseDefinition = {
+  /**
+   * Description
+   */
+  description: string;
+  /**
+   * Label
+   */
+  label: string;
+  /**
+   * Market
+   */
+  market: string;
+  /**
+   * Universe Id
+   */
+  universe_id: string;
+};
+
+/**
  * UniverseHistoryQuery
  */
 export type UniverseHistoryQuery = {
@@ -10052,6 +10079,25 @@ export type PreviewEquityUniverseResponses = {
 
 export type PreviewEquityUniverseResponse =
   PreviewEquityUniverseResponses[keyof PreviewEquityUniverseResponses];
+
+export type ListEquityUniversesData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/equity/universes";
+};
+
+export type ListEquityUniversesResponses = {
+  /**
+   * Response Listequityuniverses
+   *
+   * Successful Response
+   */
+  200: Array<UniverseDefinition>;
+};
+
+export type ListEquityUniversesResponse =
+  ListEquityUniversesResponses[keyof ListEquityUniversesResponses];
 
 export type ListExperimentsData = {
   body?: never;

@@ -4,6 +4,8 @@ import {
   runEnvironmentLabel,
   runEnvironmentValueLabel,
 } from "../../../entities/backtest";
+import { useEquityUniverses } from "../../../entities/dataset";
+import { universeDisplayName } from "../model/universe-choices";
 import "./run-environment-summary.css";
 
 type RunEnvironmentSummaryProps = {
@@ -25,13 +27,15 @@ export const RunEnvironmentSummary = ({
     problemKind,
     openPanelAtFirstProblem,
   } = controller;
+  // 유니버스는 id 대신 연결된 시장 데이터가 답한 표시명으로 읽는다(목록을 못 받으면 id 그대로).
+  const universes = useEquityUniverses().data;
   const briefFields = new Set(["start", "end", "universe_id", "fee_bps", "slippage_bps"]);
   const values = (brief: boolean) => (
     <dl>
       {environmentFields.map((field) => {
         if (environment === null || !(field.name in environment) || (brief && !briefFields.has(field.name))) return null;
         const value = (environment as unknown as Record<string, unknown>)[field.name];
-        return <div key={field.name}><dt>{runEnvironmentLabel(field)}</dt><dd>{runEnvironmentValueLabel(field, value)}</dd></div>;
+        return <div key={field.name}><dt>{runEnvironmentLabel(field)}</dt><dd>{field.catalog === "universe" && typeof value === "string" ? universeDisplayName(universes, value) : runEnvironmentValueLabel(field, value)}</dd></div>;
       })}
     </dl>
   );

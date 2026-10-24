@@ -236,6 +236,17 @@ const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
 ) as Record<string, unknown>;
 
 const server = setupServer(
+  // 실행 설정 유니버스 칸·요약 띠가 읽는 연결된 시장 데이터의 유니버스 목록.
+  http.get(`${API}/api/v1/equity/universes`, () =>
+    HttpResponse.json([
+      {
+        universe_id: "krx.common-stock",
+        market: "KRX",
+        label: "KRX 보통주",
+        description: "KRX 상장 보통주입니다. 기준일마다 그날 상장돼 있던 종목으로 후보를 다시 고릅니다.",
+      },
+    ]),
+  ),
   http.post(`${API}/api/v1/strategies/:strategyId/draft-diff`, async ({ request, params }) => {
     const body = await request.json() as { base_revision: number };
     return HttpResponse.json({ strategy_id: params.strategyId, base_revision: body.base_revision, base_spec_hash: "2".repeat(64), target_spec_hash: "2".repeat(64), source_hash: "b".repeat(64), changes: [] });
@@ -858,6 +869,28 @@ describe("professional keyboard workflow (P6-03)", () => {
       expect(history.location.pathname).toBe(route.split("?")[0]);
     },
   );
+
+  // 실행 설정 요약 띠는 유니버스를 id 대신 연결된 시장 데이터가 답한 표시명으로 읽고, 패널의 유니버스
+  // 칸은 그 목록의 드롭다운이다.
+  it("reads the remembered universe by its market data name in the summary band and the panel dropdown", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    const band = await screen.findByRole("region", { name: "실행 설정 요약" });
+    await waitFor(() => expect(band).toHaveTextContent("유니버스KRX 보통주 (krx.common-stock)"));
+
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    const select = await screen.findByRole("combobox", { name: "유니버스" });
+    await waitFor(() => expect(select).toHaveValue("krx.common-stock"));
+    // 이 테스트는 첫 테스트(명령 검색 → 경로 드러내기) 뒤에 둔다. 앞에 두면 그 테스트가 실패한다(순서 의존,
+    // 원인 미확정 — 같은 리비전 화면을 한동안 열어 둔 앞 테스트의 남은 비동기 작업이 새는 것으로 보인다).
+    expect(select).toBeInstanceOf(HTMLSelectElement);
+    expect((select as HTMLSelectElement).selectedOptions[0]?.textContent).toBe(
+      "KRX 보통주 (krx.common-stock)",
+    );
+    // 열린 패널 상태를 다음 테스트로 넘기지 않는다.
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(select).not.toBeVisible());
+  });
 
   it("searches a runtime-schema semantic node identity and reveals its pointer", async () => {
     serveRuntimeGraphDocument();

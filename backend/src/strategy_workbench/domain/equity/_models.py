@@ -197,6 +197,43 @@ class UniversePoint:
 
 
 @dataclass(frozen=True)
+class UniverseDefinition:
+    """연결된 시장 데이터 어댑터가 실행에 쓸 수 있다고 답하는 유니버스 하나.
+
+    실행 설정의 `universe_id` 가 고를 수 있는 값의 owner 는 어댑터다. 표시명·설명은 사람이 읽는
+    문장이라 어댑터가 완성해 싣는다(화면은 다시 조립하지 않는다).
+    """
+
+    universe_id: str
+    market: str
+    label: str
+    description: str
+
+
+# 유니버스 id 가 뜻하는 종목 범위의 사람용 문장. 어떤 id 를 실제로 제공하는지는 어댑터가
+# 정하고, 같은 id 를 두 어댑터(mock·duckdb)가 같은 말로 부르도록 문장만 여기 한 곳에 둔다.
+_UNIVERSE_TEXT: dict[str, tuple[str, str]] = {
+    "krx.common-stock": (
+        "KRX 보통주",
+        "KRX 상장 보통주입니다. 기준일마다 그날 상장돼 있던 종목으로 후보를 다시 고릅니다.",
+    ),
+}
+
+
+def describe_universe(universe_id: str, market: str) -> UniverseDefinition:
+    """어댑터가 제공하는 유니버스 id 에 표시명·설명을 붙인다.
+
+    문장이 없는 id 는 id 를 그대로 이름으로 쓴다.
+    """
+    label, description = _UNIVERSE_TEXT.get(
+        universe_id, (universe_id, "설명이 등록되지 않은 유니버스입니다.")
+    )
+    return UniverseDefinition(
+        universe_id=universe_id, market=market, label=label, description=description
+    )
+
+
+@dataclass(frozen=True)
 class UniverseHistoryQuery:
     venue: str
     start: date

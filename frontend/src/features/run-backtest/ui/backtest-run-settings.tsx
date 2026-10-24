@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type SyntheticEvent } from "react";
+import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 
 import { t, tDescription } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
@@ -18,6 +18,13 @@ import {
 } from "../model/run-settings-problems";
 import type { BacktestRunSettingsController } from "../model/use-backtest-run-settings";
 import "./backtest-run-settings.css";
+import { useEquityUniverses } from "../../../entities/dataset";
+import {
+  universeChoices,
+  universeOptionLabel,
+  type UniverseChoices,
+  type UniverseListState,
+} from "../model/universe-choices";
 import {
   type RunEnvironmentField,
   runEnvironmentApplies,
@@ -48,26 +55,46 @@ const COST_SUMMARY_FIELDS = new Set(["fee_bps", "slippage_bps", "impact_model", 
 /**
  * 이 실행이 결과를 내면 계열 시도 수가 어떻게 되는가(spec D2). 새 시도인지 재확인인지는 backend 미리 계산이
  * 판정하고 여기서는 그 답을 문장으로만 옮긴다. 답이 아직 없거나 요청이 거절되면(봉인 겹침 등 — 실행 버튼이
- * 같은 거절을 이유와 함께 보인다) 아무것도 그리지 않는다.
+ * 같은 거절을 이유와 함께 보인다) 문장을 비운다.
+ *
+ * 칸을 한 글자 고칠 때마다 요청이 바뀐다. 문단이 나타났다 사라지면 아래 칸이 통째로 출렁이므로 자리는
+ * 늘 두고(높이 예약), 새 답이 오는 동안은 직전 답을 흐리게 두고 "갱신 중"을 앞에 붙인다 — 옛 시도 수를
+ * 지금 설정의 답으로 읽지 않게 한다.
  */
-const TrialImpact = ({ request }: { request: BacktestRunSpec }) => {
-  const { data } = useBacktestTrialPreview(request);
-  if (data === undefined) return null;
+const TrialImpact = ({ request }: { request: BacktestRunSpec | null }) => {
+  const { data, isPlaceholderData } = useBacktestTrialPreview(request);
+  // 물을 요청이 없으면(skipToken) 남은 직전 답도, 그 placeholder 표시도 쓰지 않는다.
+  const shown = request === null ? undefined : data;
+  const stale = request !== null && isPlaceholderData;
   return (
     <p
       className="backtest-settings__trial"
       role="status"
       aria-label={t("backtest.trial.label")}
+      aria-busy={stale || undefined}
+      data-stale={stale || undefined}
     >
-      {t(`backtest.trial.${data.reason}`)
-        .replace("{count}", String(data.trial_count))
-        .replace("{after}", String(data.trial_count_after))}
-      {data.reason === "new_trial" ? (
-        <small className="backtest-settings__hint">
-          {" "}
-          {t("backtest.trial.dsrNote")}
-        </small>
-      ) : null}
+      {request === null ? (
+        // 설정이 아직 덜 채워져 물을 요청이 없다. 빈 띠 대신 무엇이 여기 나올지 알린다.
+        t("backtest.trial.pending")
+      ) : shown === undefined ? null : (
+        <>
+          {stale ? (
+            <span className="backtest-settings__trial-updating">
+              {t("backtest.trial.updating")}{" "}
+            </span>
+          ) : null}
+          {t(`backtest.trial.${shown.reason}`)
+            .replace("{count}", String(shown.trial_count))
+            .replace("{after}", String(shown.trial_count_after))}
+          {shown.reason === "new_trial" ? (
+            <small className="backtest-settings__hint">
+              {" "}
+              {t("backtest.trial.dsrNote")}
+            </small>
+          ) : null}
+        </>
+      )}
     </p>
   );
 };
@@ -81,11 +108,14 @@ const EnvironmentInput = ({
   value,
   applies,
   error,
+  universes,
   onChange,
   onIncompleteChange,
 }: {
   field: RunEnvironmentField;
   value: string;
+  /** 유니버스 칸(`x-catalog: universe`)이면 그릴 모양. 다른 칸은 undefined. */
+  universes?: UniverseChoices;
   /** 지금 모드에서 읽히는 칸인가(스키마 `x-applicable-when`). 아니면 칸을 끈다 — 요청에도 실리지 않는다. */
   applies: boolean;
   error: RunEnvironmentFieldError | undefined;
@@ -96,7 +126,16 @@ const EnvironmentInput = ({
   const inputId = useId();
   const hintId = useId();
   const errorId = useId();
-  const description = tDescription(field.descriptionKey);
+  // 목록이 늦게 실패해 드롭다운이 직접 입력 칸으로 바뀔 때, 드롭다운에 있던 초점을 새 칸으로 옮긴다.
+  // 초점 여부는 이벤트에서만 적고(렌더 중 DOM 을 읽지 않는다) 새 칸이 처음 그려질 때 한 번 쓴다.
+  const [universeFocused, setUniverseFocused] = useState(false);
+  const chosenUniverse = universes?.kind === "list" ? universes.chosen : undefined;
+  // 고른 유니버스가 있으면 그 설명을, 목록이 없으면 직접 입력하는 까닭을, 아니면 칸의 한 줄 뜻을 보인다.
+  const description =
+    chosenUniverse?.description ??
+    (universes?.kind === "typed"
+      ? t(`backtest.settings.universe.typed.${universes.reason}`)
+      : tDescription(field.descriptionKey));
   // 날짜를 덜 친 칸은 값이 여전히 빈 문자열이라 값만 보면 "값을 정하세요."가 된다(#264). 브라우저는 칸
   // 안에서 자리를 채우는 동안 input 이벤트를 내지 않으므로, 키를 뗄 때·값이 바뀔 때·칸을 떠날 때 `badInput` 을
   // 읽어 컨트롤러에 알린다. 이 칸들은 필수라 빈 값 자체가 오류이므로, 칸 안에서 읽은 덜 친 상태도 검증에
@@ -119,7 +158,42 @@ const EnvironmentInput = ({
   return (
     <div className="backtest-settings__field">
       <label htmlFor={inputId}>{runEnvironmentLabel(field)}</label>
-      {field.control === "select" ? (
+      {universes !== undefined && universes.kind !== "typed" ? (
+        // 불러오는 동안에도 같은 드롭다운을 둔다 — 끄지 않으므로 초점·탭 순서가 그대로다.
+        <select className="ui-select"
+          {...common}
+          aria-busy={universes.kind === "loading" || undefined}
+          value={value}
+          onFocus={() => setUniverseFocused(true)}
+          onBlur={() => setUniverseFocused(false)}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          {universes.kind === "loading" ? (
+            <option value={value}>
+              {value === "" ? t("backtest.settings.universe.loading") : value}
+            </option>
+          ) : (
+            <>
+              {value === "" ? (
+                <option value="" disabled>
+                  {t("backtest.settings.universe.placeholder")}
+                </option>
+              ) : null}
+              {universes.universes.map((item) => (
+                <option key={item.universe_id} value={item.universe_id}>
+                  {universeOptionLabel(item)}
+                </option>
+              ))}
+              {/* 저장된 값이 지금 목록에 없어도 지우지 않는다 — 그대로 두고 까닭을 알린다. */}
+              {universes.stored === null ? null : (
+                <option value={value}>
+                  {t(`backtest.settings.universe.${universes.stored}`).replace("{id}", value)}
+                </option>
+              )}
+            </>
+          )}
+        </select>
+      ) : field.control === "select" ? (
         <select className="ui-select"
           {...common}
           value={value}
@@ -134,6 +208,8 @@ const EnvironmentInput = ({
       ) : (
         <input className="ui-input"
           {...common}
+          // 유니버스 드롭다운이 직접 입력 칸으로 바뀐 순간 초점이 드롭다운에 있었으면 이어받는다.
+          autoFocus={universes?.kind === "typed" && universeFocused}
           autoComplete="off"
           spellCheck={false}
           type={
@@ -175,11 +251,14 @@ const EnvironmentInput = ({
           {description}
         </small>
       )}
-      {error === undefined ? null : (
-        <small id={errorId} className="backtest-settings__field-error">
-          {runEnvironmentErrorMessage(field, error)}
-        </small>
-      )}
+      {/* 오류 줄은 비어 있어도 자리를 둔다 — 치는 도중 오류가 떴다 사라질 때 아래 칸이 밀리지 않는다. */}
+      <small
+        id={errorId}
+        className="backtest-settings__field-error"
+        aria-hidden={error === undefined || undefined}
+      >
+        {error === undefined ? null : runEnvironmentErrorMessage(field, error)}
+      </small>
     </div>
   );
 };
@@ -218,6 +297,7 @@ export const BacktestRunSettings = ({
   const optionErrors: ReadonlySet<BacktestRunSettingsError> = new Set(
     result.errors,
   );
+  const universeQuery = useEquityUniverses();
   const popoverRef = useRef<HTMLDivElement>(null);
   const summaryRef = useRef<HTMLElement>(null);
   const costSummaryId = useId();
@@ -253,10 +333,25 @@ export const BacktestRunSettings = ({
     .map((field) => `${runEnvironmentName(field)}: ${runEnvironmentValueLabel(field,
       runEnvironmentWireText(field, environmentValues[field.name] ?? ""))}`)
     .join(" · ");
+  const universeList: UniverseListState =
+    universeQuery.data !== undefined
+      ? { status: "success", universes: universeQuery.data }
+      : universeQuery.isError
+        ? { status: "error" }
+        : { status: "pending" };
   const renderField = (field: RunEnvironmentField) => (
     <EnvironmentInput
       key={field.name}
       field={field}
+      universes={
+        field.catalog === "universe"
+          ? universeChoices(
+              universeList,
+              environmentValues.market ?? "",
+              environmentValues[field.name] ?? "",
+            )
+          : undefined
+      }
       value={environmentValues[field.name] ?? ""}
       applies={runEnvironmentApplies(field, environmentValues)}
       error={environmentErrors[field.name]}
@@ -314,9 +409,24 @@ export const BacktestRunSettings = ({
       <summary ref={summaryRef} aria-label={t("backtest.settings.open")}>
         {t("backtest.settings.title")}
         <Badge tone={result.valid ? "neutral" : "error"}>
-          {result.valid
-            ? t("backtest.settings.ready")
-            : t("backtest.settings.invalid")}
+          {/* 지금 상태 문장 하나만 텍스트로 둔다. 다른 상태 문장은 보이지 않는 CSS 자리표시(`data-size`)로만
+              겹쳐 폭을 잡아, 상태가 바뀌어도 단추 폭이 그대로다 — DOM·접근성 트리에는 들어가지 않는다. */}
+          <span className="backtest-settings__state">
+            <span>
+              {result.valid
+                ? t("backtest.settings.ready")
+                : t("backtest.settings.invalid")}
+            </span>
+            <span
+              aria-hidden="true"
+              className="backtest-settings__state-size"
+              data-size={
+                result.valid
+                  ? t("backtest.settings.invalid")
+                  : t("backtest.settings.ready")
+              }
+            />
+          </span>
         </Badge>
       </summary>
       <div
@@ -331,7 +441,7 @@ export const BacktestRunSettings = ({
           </Button>
         </header>
         {/* 실행 전에 시도 수가 어떻게 되는지를 설정보다 먼저 보인다(RD-05-B). */}
-        {open && request !== null ? <TrialImpact request={request} /> : null}
+        {open ? <TrialImpact request={request} /> : null}
         <fieldset
           disabled={disabled}
           className="backtest-settings__environment"
@@ -357,7 +467,7 @@ export const BacktestRunSettings = ({
           <summary aria-label={t("backtest.settings.costs")} aria-describedby={`${costSummaryId}${costInvalid ? ` ${costSummaryId}-error` : ""}`}>
             <strong>{t("backtest.settings.costs")}</strong>
             {costInvalid ? <Badge id={`${costSummaryId}-error`} tone="error">{t("backtest.settings.invalid")}</Badge> : costDefault ? <Badge tone="neutral">{t("backtest.settings.default")}</Badge> : null}
-            <small id={costSummaryId}>{costSummary}</small>
+            <small id={costSummaryId} title={costSummary}>{costSummary}</small>
           </summary>
           <fieldset disabled={disabled} aria-label={t("backtest.settings.costs")}>
             {costFields.map(renderField)}

@@ -140,16 +140,44 @@
 }
 
 .backtest-settings__trial {
-  margin: var(--space-3) 0 0;
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border);
+  /* 답이 없어도 두 줄 자리를 둔다 — 칸을 고칠 때마다 문단이 나타났다 사라지며 아래가 출렁이지 않게. */
+  min-height: calc(2lh + var(--space-3));
+  margin: 0 0 var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
   color: var(--text-muted);
   font-size: var(--text-size-small);
 }
 
+.backtest-settings__trial[data-stale] {
+  opacity: 0.6;
+}
+
 .backtest-settings__field-error {
+  /* 오류가 없어도 한 줄 자리를 둔다(입력 중 오류가 떴다 사라져도 칸이 밀리지 않는다). */
+  min-height: 1lh;
   color: var(--status-error);
   font-size: var(--text-size-small);
+}
+
+/* 상태 배지의 두 문장을 한 칸에 겹친다. 폭은 긴 쪽에 맞고, 보이는 쪽만 바뀐다. */
+.backtest-settings__state {
+  display: inline-grid;
+}
+
+.backtest-settings__state > span {
+  grid-area: 1 / 1;
+}
+
+/* 다른 상태 문장은 생성 콘텐츠로만 자리를 잡는다(텍스트 노드가 없어 화면 읽기·검색에 걸리지 않는다). */
+.backtest-settings__state-size::before {
+  content: attr(data-size);
+  visibility: hidden;
+}
+
+.backtest-settings__trial-updating {
+  color: var(--text-muted);
+  font-weight: 600;
 }
 
 .backtest-settings__group {
@@ -170,10 +198,14 @@
 
 .backtest-settings__group > summary small {
   flex: 1 1 100%;
+  min-width: 0;
   padding-inline-start: var(--space-5);
+  overflow: hidden;
   color: var(--text-muted);
   font-size: var(--text-size-small);
-  overflow-wrap: anywhere;
+  /* 값 요약은 한 줄로 자른다 — 칸을 고칠 때 요약 길이가 바뀌어도 줄 수가 늘지 않는다. */
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 같은 행의 긴 라벨·설명도 입력 시작선을 바꾸지 않는다. 도움말과 오류는 별도 행이다. */
@@ -187,7 +219,8 @@
     grid-row: span 4;
     grid-template-rows: subgrid;
     gap: var(--field-gap);
-    margin-bottom: var(--space-3);
+    /* 오류 줄이 늘 한 줄 자리를 차지하므로 칸 사이 여백은 그만큼 줄인다. */
+    margin-bottom: var(--space-1);
   }
 
   .backtest-settings input,

@@ -141,6 +141,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
 from strategy_workbench.domain.backtest.facade.environment import ResearchWindowViolationError
 from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
+    UniverseDefinition,
     UniverseHistoryQuery,
 )
 from strategy_workbench.domain.paging.facade.page import MAX_PAGE_SIZE
@@ -862,6 +863,17 @@ def create_app(
                 page_size=page_size,
             )
         )
+
+    @app.get(
+        "/api/v1/equity/universes",
+        operation_id="listEquityUniverses",
+    )
+    def equity_universes() -> list[UniverseDefinition]:
+        """연결된 시장 데이터가 실행에 쓸 수 있는 유니버스(id·표시명·설명).
+
+        실행 설정 드롭다운의 출처다.
+        """
+        return list(equity_workspace.universes())
 
     @app.post(
         "/api/v1/equity/universe/preview",

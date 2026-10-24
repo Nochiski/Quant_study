@@ -36,6 +36,7 @@ from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import 
     EnvFileBrokerCredentialStore,
     EnvFileProviderStore,
     EnvProblem,
+    ProviderStoreConflictError,
     parse_env_text,
     resolve_documents_directory,
 )
@@ -1186,3 +1187,41 @@ def test_an_empty_kiwoom_value_counts_as_missing_everywhere(tmp_path: Path) -> N
         store.load()
     store.delete()
     assert parse_env_text(path.read_text(encoding="utf-8")) == {}
+
+
+# -- SoT 경미 고침 ------------------------------------------------------------------------------
+
+
+def test_a_logical_conflict_is_not_reported_as_storage_unavailable(tmp_path: Path) -> None:
+    """SoT 경미 1: 비어 있지 않은 묶음으로의 이전 같은 논리 오류는 "저장 불가"로 바꾸지 않는다."""
+    store = EnvFileProviderStore(CredentialsEnvFile(tmp_path / ".env"))
+    store.add(_profile("p1", active=True))
+
+    with pytest.raises(ProviderStoreConflictError):
+        store.import_profiles([(_profile("p2"), None)])
+    with pytest.raises(ProviderStoreConflictError):
+        store.add(_profile("p1"))
+
+
+def test_windows_write_check_tries_a_temporary_file_and_leaves_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SoT 경미 3: 윈도우는 폴더에 임시 파일을 만들었다 지워 본다. 실제 `.env`는 건드리지 않는다."""
+    folder = tmp_path / "auto_trading"
+    folder.mkdir()
+    env_path = folder / ".env"
+    env_path.write_text("KEEP=1\n", encoding="utf-8")
+    before = env_path.read_bytes()
+    file = CredentialsEnvFile(env_path, platform="win32", run_command=lambda _c: None)
+
+    assert file.writable_problem() is None
+    assert sorted(item.name for item in folder.iterdir()) == [".env"]
+    assert env_path.read_bytes() == before
+
+    from strategy_workbench.adapters.outbound.secrets_local import _env_file
+
+    def refuse(*_args: object, **_kwargs: object) -> tuple[int, str]:
+        raise PermissionError(errno.EACCES, "denied")
+
+    monkeypatch.setattr(_env_file.tempfile, "mkstemp", refuse)
+    assert file.writable_problem() == EnvProblem("file", "not_writable")

@@ -19,6 +19,7 @@ from strategy_workbench.adapters.outbound.secrets_local._env_providers import (
     AI_IMPORT_NAME,
     EnvFileProviderSecrets,
     EnvFileProviderStore,
+    ProviderStoreConflictError,
 )
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "IMPORTED_ENV_PREFIX",
     "KIWOOM_IMPORT_NAME",
     "EnvProblem",
+    "ProviderStoreConflictError",
     "AUTO_TRADING_DIRECTORY_NAME",
     "AUTO_TRADING_ENV_FILE_NAME",
     "KIWOOM_MOCK_ENV_NAMES",

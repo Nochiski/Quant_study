@@ -37,7 +37,13 @@ from strategy_workbench.domain.assistant.facade.models import ProviderKind, Prov
 from ._env_file import CredentialsEnvFile, EnvProblem
 from ._errors import SecretStoreStorageError
 
-__all__ = ["AI_ENV_PREFIX", "AI_IMPORT_NAME", "EnvFileProviderSecrets", "EnvFileProviderStore"]
+__all__ = [
+    "AI_ENV_PREFIX",
+    "AI_IMPORT_NAME",
+    "EnvFileProviderSecrets",
+    "EnvFileProviderStore",
+    "ProviderStoreConflictError",
+]
 
 AI_ENV_PREFIX = "STRATEGY_WORKBENCH_AI_"
 _HEADER = "Quant Workbench AI 공급자 — 앱 설정 화면이 고칩니다"
@@ -75,6 +81,14 @@ class _Loaded:
 
 
 AI_IMPORT_NAME = "AI_PROVIDERS"
+
+
+class ProviderStoreConflictError(RuntimeError):
+    """저장소 상태와 맞지 않는 요청(이미 있는 id, 비어 있지 않은 묶음으로의 이전 등).
+
+    파일 I/O·권한 실패가 아니라서 "저장 불가"로 바꾸지 않는다(SoT 리뷰 경미 1). 사용자에게 파일을
+    고치라고 안내하면 틀린 조치가 된다.
+    """
 
 
 class EnvFileProviderStore:
@@ -137,7 +151,7 @@ class EnvFileProviderStore:
             entries = loaded.entries
             incoming = profile
             if any(entry.profile.profile_id == incoming.profile_id for entry in entries):
-                raise SecretStoreStorageError(
+                raise ProviderStoreConflictError(
                     f"provider profile already exists — profile_id={incoming.profile_id!r}"
                 )
             if incoming.active and loaded.broken_active is not None:
@@ -202,12 +216,12 @@ class EnvFileProviderStore:
         def run() -> None:
             loaded = self._load()
             if loaded.entries or loaded.broken:
-                raise SecretStoreStorageError(
+                raise ProviderStoreConflictError(
                     "the credentials env file already has provider profiles — "
                     f"incoming={len(entries)}"
                 )
             if sum(1 for profile, _ in entries if profile.active) > 1:
-                raise SecretStoreStorageError(
+                raise ProviderStoreConflictError(
                     f"more than one incoming provider profile is active — incoming={len(entries)}"
                 )
             self._write([_Entry(profile, secret) for profile, secret in entries], [], loaded.loose)

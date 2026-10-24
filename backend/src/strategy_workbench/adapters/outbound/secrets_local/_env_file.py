@@ -22,6 +22,7 @@ from __future__ import annotations
 import errno
 import os
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
@@ -262,7 +263,11 @@ class CredentialsEnvFile:
             return EnvProblem("file", "not_writable")
         if self._path.exists() and not os.access(self._path, os.R_OK):
             return EnvProblem("file", "unreadable")
-        if existing != self._path.parent or self._platform == "win32":
+        if self._platform == "win32":
+            # 윈도우의 os.access는 ACL을 보지 않아 쓰기 거부를 놓친다. 폴더에 임시 파일을 만들었다
+            # 지워 본다(실제 .env는 건드리지 않는다, SoT 리뷰 경미 3).
+            return _probe_by_temporary_file(existing)
+        if existing != self._path.parent:
             return None
         try:
             descriptor = os.open(self._lock_path(), os.O_RDWR | os.O_CREAT, 0o600)
@@ -559,3 +564,17 @@ def _merged(
     updated = kept[:insert_at] + block + kept[insert_at:]
     newline = snapshot.newline
     return newline.join(updated) + newline if updated else ""
+
+
+def _probe_by_temporary_file(directory: Path) -> EnvProblem | None:
+    """`directory`에 임시 파일을 만들고 바로 지울 수 있으면 None."""
+    try:
+        descriptor, name = tempfile.mkstemp(dir=directory, prefix=".env-probe-", suffix=".tmp")
+    except OSError:
+        return EnvProblem("file", "not_writable")
+    os.close(descriptor)
+    try:
+        os.unlink(name)
+    except OSError:
+        return EnvProblem("file", "not_writable")
+    return None

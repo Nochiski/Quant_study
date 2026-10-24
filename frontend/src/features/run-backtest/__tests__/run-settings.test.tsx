@@ -1277,7 +1277,7 @@ describe("run environment panel", () => {
   });
 
   // 봉인 겹침처럼 미리 계산이 거절되면 줄을 그리지 않는다 — 같은 거절은 실행 버튼이 이유·교정과 함께 보인다.
-  it("draws no trial line when the preview is rejected", async () => {
+  it("leaves the reserved trial line empty when the preview is rejected", async () => {
     let asked = 0;
     server.use(
       http.post(`${API}/api/v1/backtests/trial-preview`, () => {
@@ -1300,7 +1300,76 @@ describe("run environment panel", () => {
     await openSettings();
 
     await waitFor(() => expect(asked).toBe(1));
-    expect(screen.queryByRole("status", { name: "시도 영향" })).toBeNull();
+    // 자리는 늘 두되(높이 예약) 거절된 요청의 문장은 쓰지 않는다 — 실행 버튼이 같은 거절을 이유와 함께 보인다.
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "시도 영향" }).textContent).toBe(""),
+    );
+  });
+
+  // 칸을 한 글자 고칠 때마다 요청이 바뀐다. 새 답을 기다리는 동안 문단이 사라지면 패널이 출렁이므로 직전 답을
+  // 흐리게 남겨 둔다(레이아웃 흔들림 수정).
+  it("keeps the previous trial verdict while the next request is still being asked", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(`${API}/api/v1/backtests/trial-preview`, async ({ request }) => {
+        const body = (await request.json()) as BacktestRunSpec;
+        if (body.initial_cash !== acceptedRequest.initial_cash) await gate;
+        return HttpResponse.json({
+          lineage_id: "strategy-1",
+          trial_key: "k",
+          trial_count: body.initial_cash === acceptedRequest.initial_cash ? 2 : 5,
+          new_trial: false,
+          trial_count_after: body.initial_cash === acceptedRequest.initial_cash ? 2 : 5,
+          reason: "recheck",
+        });
+      }),
+    );
+    const view = renderWithQuery(<Harness request={acceptedRequest} />);
+    await openSettings();
+    const line = await screen.findByRole("status", { name: "시도 영향" });
+    await waitFor(() => expect(line).toHaveTextContent("2회 그대로"));
+
+    view.rerender(<Harness request={{ ...acceptedRequest, initial_cash: 1 }} />);
+
+    // 새 답이 오기 전: 문장은 그대로, 옛 답임을 표시한다.
+    expect(screen.getByRole("status", { name: "시도 영향" })).toHaveTextContent("2회 그대로");
+    expect(screen.getByRole("status", { name: "시도 영향" })).toHaveAttribute("aria-busy", "true");
+    release();
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "시도 영향" })).toHaveTextContent("5회 그대로"),
+    );
+    expect(screen.getByRole("status", { name: "시도 영향" })).not.toHaveAttribute("aria-busy");
+  });
+
+  it("says what the reserved trial line will show while there is no run request yet", async () => {
+    renderWithQuery(<Harness request={null} />);
+    await openSettings();
+
+    expect(screen.getByRole("status", { name: "시도 영향" })).toHaveTextContent(
+      "실행 설정을 다 채우면 이 실행이 시도 수에 어떻게 들어가는지 여기 보입니다.",
+    );
+  });
+
+  it("reserves an empty error line under each run field so typing never pushes the fields below", async () => {
+    renderWithQuery(<Harness />);
+    await openSettings();
+
+    await screen.findByLabelText("시작일");
+    const fields = Array.from(document.querySelectorAll(".backtest-settings__field"));
+    expect(fields.length).toBeGreaterThan(0);
+    for (const field of fields) {
+      const input = field.querySelector("input, select");
+      const errorLine = field.querySelector(".backtest-settings__field-error");
+      // 오류가 있든 없든 줄은 늘 있다. 오류가 없으면 비어 있고 보조 기술에는 읽히지 않는다.
+      expect(errorLine).not.toBeNull();
+      if (input?.getAttribute("aria-invalid") !== "true") {
+        expect(errorLine?.textContent).toBe("");
+        expect(errorLine).toHaveAttribute("aria-hidden", "true");
+      }
+    }
   });
 
   it("실행 옵션 기본값과 코어 목록은 서버 스키마 변경을 그대로 따른다", async () => {

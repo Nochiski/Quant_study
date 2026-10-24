@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import {
+  keepPreviousData,
   queryOptions,
   skipToken,
   useMutation,
@@ -123,6 +124,8 @@ export const useStartBacktest = () => {
 /**
  * 실행 전 미리 계산(검증 랩 spec D2). 새 시도인지·시도 수가 얼마가 되는지는 backend 가 판정하고 화면은 응답을
  * 보이기만 한다. 거절(봉인 겹침 등)은 같은 요청이면 늘 같으므로 자동 재시도는 하지 않는다.
+ * 실행 설정을 한 글자 고칠 때마다 요청이 바뀌므로, 새 답이 오기 전까지 직전 답을 보여 패널 높이가
+ * 출렁이지 않게 한다(`isPlaceholderData` 로 옛 답임을 표시한다).
  */
 export const useBacktestTrialPreview = (spec: BacktestRunSpec | null) =>
   useQuery({
@@ -132,6 +135,7 @@ export const useBacktestTrialPreview = (spec: BacktestRunSpec | null) =>
         ? skipToken
         : () => strategyWorkbenchApi.previewBacktestTrial(spec),
     retry: false,
+    placeholderData: keepPreviousData,
   });
 
 export const useBacktestStatus = (runId: string | null) =>

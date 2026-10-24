@@ -48,26 +48,38 @@ const COST_SUMMARY_FIELDS = new Set(["fee_bps", "slippage_bps", "impact_model", 
 /**
  * 이 실행이 결과를 내면 계열 시도 수가 어떻게 되는가(spec D2). 새 시도인지 재확인인지는 backend 미리 계산이
  * 판정하고 여기서는 그 답을 문장으로만 옮긴다. 답이 아직 없거나 요청이 거절되면(봉인 겹침 등 — 실행 버튼이
- * 같은 거절을 이유와 함께 보인다) 아무것도 그리지 않는다.
+ * 같은 거절을 이유와 함께 보인다) 문장을 비운다.
+ *
+ * 칸을 한 글자 고칠 때마다 요청이 바뀐다. 문단이 나타났다 사라지면 아래 칸이 통째로 출렁이므로 자리는
+ * 늘 두고(높이 예약), 새 답이 오는 동안은 직전 답을 흐리게 보인다.
  */
-const TrialImpact = ({ request }: { request: BacktestRunSpec }) => {
-  const { data } = useBacktestTrialPreview(request);
-  if (data === undefined) return null;
+const TrialImpact = ({ request }: { request: BacktestRunSpec | null }) => {
+  const { data, isPlaceholderData } = useBacktestTrialPreview(request);
+  const shown = request === null ? undefined : data;
   return (
     <p
       className="backtest-settings__trial"
       role="status"
       aria-label={t("backtest.trial.label")}
+      aria-busy={isPlaceholderData || undefined}
+      data-stale={isPlaceholderData || undefined}
     >
-      {t(`backtest.trial.${data.reason}`)
-        .replace("{count}", String(data.trial_count))
-        .replace("{after}", String(data.trial_count_after))}
-      {data.reason === "new_trial" ? (
-        <small className="backtest-settings__hint">
-          {" "}
-          {t("backtest.trial.dsrNote")}
-        </small>
-      ) : null}
+      {request === null ? (
+        // 설정이 아직 덜 채워져 물을 요청이 없다. 빈 띠 대신 무엇이 여기 나올지 알린다.
+        t("backtest.trial.pending")
+      ) : shown === undefined ? null : (
+        <>
+          {t(`backtest.trial.${shown.reason}`)
+            .replace("{count}", String(shown.trial_count))
+            .replace("{after}", String(shown.trial_count_after))}
+          {shown.reason === "new_trial" ? (
+            <small className="backtest-settings__hint">
+              {" "}
+              {t("backtest.trial.dsrNote")}
+            </small>
+          ) : null}
+        </>
+      )}
     </p>
   );
 };
@@ -175,11 +187,14 @@ const EnvironmentInput = ({
           {description}
         </small>
       )}
-      {error === undefined ? null : (
-        <small id={errorId} className="backtest-settings__field-error">
-          {runEnvironmentErrorMessage(field, error)}
-        </small>
-      )}
+      {/* 오류 줄은 비어 있어도 자리를 둔다 — 치는 도중 오류가 떴다 사라질 때 아래 칸이 밀리지 않는다. */}
+      <small
+        id={errorId}
+        className="backtest-settings__field-error"
+        aria-hidden={error === undefined || undefined}
+      >
+        {error === undefined ? null : runEnvironmentErrorMessage(field, error)}
+      </small>
     </div>
   );
 };
@@ -314,9 +329,15 @@ export const BacktestRunSettings = ({
       <summary ref={summaryRef} aria-label={t("backtest.settings.open")}>
         {t("backtest.settings.title")}
         <Badge tone={result.valid ? "neutral" : "error"}>
-          {result.valid
-            ? t("backtest.settings.ready")
-            : t("backtest.settings.invalid")}
+          {/* 두 문장을 같은 칸에 겹쳐 두고 하나만 보인다 — 상태가 바뀌어도 단추 폭이 그대로다. */}
+          <span className="backtest-settings__state">
+            <span aria-hidden={!result.valid || undefined} data-shown={result.valid || undefined}>
+              {t("backtest.settings.ready")}
+            </span>
+            <span aria-hidden={result.valid || undefined} data-shown={!result.valid || undefined}>
+              {t("backtest.settings.invalid")}
+            </span>
+          </span>
         </Badge>
       </summary>
       <div
@@ -331,7 +352,7 @@ export const BacktestRunSettings = ({
           </Button>
         </header>
         {/* 실행 전에 시도 수가 어떻게 되는지를 설정보다 먼저 보인다(RD-05-B). */}
-        {open && request !== null ? <TrialImpact request={request} /> : null}
+        {open ? <TrialImpact request={request} /> : null}
         <fieldset
           disabled={disabled}
           className="backtest-settings__environment"
@@ -357,7 +378,7 @@ export const BacktestRunSettings = ({
           <summary aria-label={t("backtest.settings.costs")} aria-describedby={`${costSummaryId}${costInvalid ? ` ${costSummaryId}-error` : ""}`}>
             <strong>{t("backtest.settings.costs")}</strong>
             {costInvalid ? <Badge id={`${costSummaryId}-error`} tone="error">{t("backtest.settings.invalid")}</Badge> : costDefault ? <Badge tone="neutral">{t("backtest.settings.default")}</Badge> : null}
-            <small id={costSummaryId}>{costSummary}</small>
+            <small id={costSummaryId} title={costSummary}>{costSummary}</small>
           </summary>
           <fieldset disabled={disabled} aria-label={t("backtest.settings.costs")}>
             {costFields.map(renderField)}

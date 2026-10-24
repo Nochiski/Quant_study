@@ -101,6 +101,21 @@
   font-weight: 600;
 }
 
+/* "필수"·"선택" 표식(`requirementTags`, 새 전략 안내). 필수는 비워 두면 저장이 막히므로 오류 옅은 짝으로 구분한다. */
+.strategy-form__requirement {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-small);
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  font-weight: 600;
+}
+
+.strategy-form__requirement[data-required="true"] {
+  background: var(--status-error-soft);
+  color: var(--status-error);
+}
+
 .strategy-form__key {
   color: var(--text-muted);
   font-size: var(--text-size-small);

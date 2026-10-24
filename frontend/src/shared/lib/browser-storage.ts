@@ -6,3 +6,12 @@ export const browserStorage = (): Storage | null => {
     return null;
   }
 };
+
+/** 탭 단위 보관함(새로고침에는 남고 탭을 닫으면 사라진다). 없거나 거절되면 null 이다. */
+export const browserSessionStorage = (): Storage | null => {
+  try {
+    return typeof window === "undefined" ? null : window.sessionStorage;
+  } catch {
+    return null;
+  }
+};

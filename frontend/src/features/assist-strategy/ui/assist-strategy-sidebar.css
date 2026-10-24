@@ -337,3 +337,63 @@
     white-space: nowrap;
   }
 }
+
+/* 추천 질문: 누르면 입력칸을 채운다. 행동색 테두리로 일반 본문과 나눈다. */
+.assist__suggestions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.assist__suggestions-title {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  font-weight: 600;
+}
+
+.assist__suggestion-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.assist__suggestion {
+  min-height: var(--control-height-dense);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-panel);
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-size-label);
+  text-align: left;
+  cursor: pointer;
+}
+
+.assist__suggestion:hover {
+  background: var(--accent-soft);
+}
+
+.assist__suggestion:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 2px;
+}
+
+.assist__suggestion:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* `layout="docked"`: 고정 높이 칸 안에서는 대화가 비어 있어도 추천 질문과 입력칸을 칸 바닥에 붙인다. */
+.assist--docked .assist__suggestions,
+.assist--docked .assist__composer {
+  margin-top: auto;
+}
+
+.assist--docked .assist__suggestions + .assist__composer {
+  margin-top: 0;
+}
+
+.assist--docked .assist__suggestion {
+  word-break: keep-all;
+}

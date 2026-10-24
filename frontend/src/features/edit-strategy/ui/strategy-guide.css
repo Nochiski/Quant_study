@@ -1,8 +1,12 @@
-/* 새 전략 단계별 안내(RD-04-D). 왼쪽 단계 목록, 가운데 지금 단계, 오른쪽 문서 미리보기. */
+/*
+ * 새 전략 단계별 안내(RD-04-D). 머리 띠, 왼쪽 단계 목록, 가운데 지금 단계 카드(머리·몸통·바닥), 오른쪽
+ * AI 도우미·문서 미리보기. 바탕(--surface-canvas) 위에 작업 카드만 표면색과 얕은 그림자로 들어 올려
+ * 영역이 나뉘어 보이게 한다.
+ */
 .strategy-guide {
   display: grid;
-  grid-template-columns: minmax(0, calc(var(--space-6) * 7)) minmax(0, 1fr);
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, calc(var(--space-6) * 7.5)) minmax(0, 1fr);
+  gap: var(--space-5);
   align-items: start;
 }
 
@@ -10,9 +14,14 @@
   display: flex;
   flex-wrap: wrap;
   grid-column: 1 / -1;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-panel);
 }
 
 .strategy-guide__header h2 {
@@ -28,9 +37,22 @@
 .strategy-guide__header-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-2);
 }
 
+/* 서버 초안 동기화 문장은 머리 띠에서 상태 표식으로 읽힌다. 실패·충돌 배너는 그대로 둔다. */
+.strategy-guide__header-actions .server-draft--quiet {
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  font-weight: 600;
+}
+
+/* 단계 목록 */
 .strategy-guide__steps ol {
   display: grid;
   gap: var(--space-1);
@@ -42,14 +64,14 @@
 .strategy-guide__steps button {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   width: 100%;
-  min-height: var(--space-6);
+  min-height: 44px;
   padding: var(--space-2) var(--space-3);
   border: 1px solid transparent;
   border-radius: var(--radius-medium);
   background: transparent;
-  color: var(--text);
+  color: var(--text-muted);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -57,44 +79,122 @@
 
 .strategy-guide__steps button:hover {
   background: var(--surface-subtle);
+  color: var(--text);
+}
+
+.strategy-guide__steps button:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 2px;
 }
 
 .strategy-guide__steps button[aria-current="step"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
+  border-color: var(--border);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-card);
+  color: var(--text);
   font-weight: var(--font-weight-heading);
+}
+
+.strategy-guide__steps button[data-state="done"] {
+  color: var(--text);
 }
 
 .strategy-guide__step-number {
   display: inline-grid;
+  flex: none;
   place-items: center;
-  width: var(--space-5);
-  height: var(--space-5);
+  width: 26px;
+  height: 26px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-pill);
-  background: var(--surface-subtle);
+  background: var(--surface-panel);
+  font-size: var(--text-size-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.strategy-guide__steps button[data-state="done"] .strategy-guide__step-number {
+  border-color: transparent;
+  background: var(--status-ok-soft);
+  color: var(--status-ok);
+}
+
+.strategy-guide__steps button[data-state="error"] .strategy-guide__step-number {
+  border-color: var(--status-error);
+  color: var(--status-error);
+}
+
+.strategy-guide__steps button[aria-current="step"] .strategy-guide__step-number {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.strategy-guide__step-name {
+  min-width: 0;
+}
+
+.strategy-guide__step-tag {
+  flex: none;
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-small);
+  background: var(--status-error-soft);
+  color: var(--status-error);
+  font-size: var(--text-size-small);
+  font-weight: 600;
+}
+
+.strategy-guide__progress {
+  margin: var(--space-3) var(--space-3) 0;
+  color: var(--text-muted);
   font-size: var(--text-size-small);
 }
 
+/* 가운데 단계 카드와 오른쪽 칸 */
 .strategy-guide__body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, calc(var(--space-6) * 10));
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr) minmax(0, calc(var(--space-6) * 12));
+  gap: var(--space-5);
   align-items: start;
   min-width: 0;
 }
 
 .strategy-guide__step {
   display: grid;
-  gap: var(--space-3);
   min-width: 0;
-  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-large);
   background: var(--surface-panel);
+  box-shadow: var(--shadow-card);
 }
 
-.strategy-guide__step h3,
+.strategy-guide__step-head {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.strategy-guide__step-position {
+  margin: 0;
+  color: var(--accent);
+  font-size: var(--text-size-small);
+  font-weight: 600;
+}
+
+.strategy-guide__step-head h3 {
+  margin: 0;
+  font-size: var(--text-size-section-title);
+}
+
+.strategy-guide__step-body {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-5);
+}
+
 .strategy-guide__preview h3 {
   margin: 0;
   font-size: var(--text-size-subsection);
@@ -103,7 +203,7 @@
 .strategy-guide__stage,
 .strategy-guide__properties {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-4);
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -122,6 +222,118 @@
 
 .strategy-guide__more > summary {
   font-weight: var(--font-weight-heading);
+}
+
+/* 필드: 라벨·표식 → 설명 → 입력 → 오류 순으로 읽힌다. 미작성 칸도 실선이라 꺼진 칸처럼 보이지 않는다. */
+.strategy-guide .strategy-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--field-gap);
+  max-width: calc(var(--space-6) * 17);
+}
+
+.strategy-guide .strategy-form__field > * {
+  order: 2;
+}
+
+.strategy-guide .strategy-form__field > label,
+.strategy-guide .strategy-form__field > .strategy-form__label {
+  order: 0;
+}
+
+.strategy-guide .strategy-form__field > .strategy-form__description {
+  order: 1;
+  margin: 0;
+}
+
+.strategy-guide .strategy-form__control > input,
+.strategy-guide .strategy-form__control > textarea {
+  flex: 1 1 auto;
+}
+
+.strategy-guide .strategy-form__control > .ui-badge {
+  display: none;
+}
+
+.strategy-guide .strategy-form__field[data-written="false"] .strategy-form__control input,
+.strategy-guide .strategy-form__field[data-written="false"] .strategy-form__control select,
+.strategy-guide .pipeline__field[data-written="false"] input,
+.strategy-guide .pipeline__field[data-written="false"] select {
+  border-style: solid;
+}
+
+/* 목록(거르기 규칙): 규칙마다 머리 띠가 있는 카드, 오류가 있는 규칙은 머리 띠가 오류 톤이다. */
+.strategy-guide .pipeline__list {
+  gap: var(--space-3);
+}
+
+.strategy-guide .pipeline__list-title {
+  color: var(--text);
+  font-size: var(--text-size-subsection);
+  font-weight: 600;
+}
+
+.strategy-guide .pipeline__card[data-headed="true"] {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border-color: var(--border);
+  border-radius: var(--radius-medium);
+}
+
+.strategy-guide .pipeline__card[data-headed="true"] > :not(.pipeline__card-head) {
+  margin-inline: var(--space-3);
+}
+
+.strategy-guide .pipeline__card[data-headed="true"] > :last-child {
+  margin-bottom: var(--space-3);
+}
+
+.strategy-guide .pipeline__card[data-headed="true"] > .pipeline__sentence {
+  margin-top: var(--space-2);
+}
+
+/* 컨트롤 사이 한국어 문장이 낱자로 끊기지 않게 어절 단위로 줄을 바꾼다("종 / 목만"). */
+.strategy-guide .pipeline__sentence {
+  word-break: keep-all;
+}
+
+.strategy-guide .pipeline__card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.strategy-guide .pipeline__card-name {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  font-weight: 700;
+}
+
+.strategy-guide .pipeline__card[data-invalid="true"] {
+  border-color: var(--status-error-border);
+}
+
+.strategy-guide .pipeline__card[data-invalid="true"] > .pipeline__card-head {
+  border-bottom-color: var(--status-error-border);
+  background: var(--status-error-soft);
+}
+
+.strategy-guide .pipeline__card[data-invalid="true"] .pipeline__card-name {
+  color: var(--status-error);
+}
+
+.strategy-guide .pipeline__add {
+  width: 100%;
+  min-height: 44px;
+  border-style: dashed;
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--accent);
 }
 
 .strategy-guide__chips {
@@ -194,20 +406,67 @@
 
 .strategy-guide__footer {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius-large) var(--radius-large);
+  background: var(--surface-raised);
+}
+
+.strategy-guide__next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+}
+
+/* 오른쪽 칸: 탭(AI 도우미 | 문서 미리보기)과 두 패널. 둘 다 마운트를 유지하고 보이는 것만 바꾼다. */
+.strategy-guide__side {
+  position: sticky;
+  top: var(--space-4);
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-card);
+}
+
+.strategy-guide__side-tabs {
+  gap: 0;
+  background: var(--surface-raised);
+}
+
+.strategy-guide__side-tabs .ui-tab {
+  flex: 1 1 0;
+  min-height: 44px;
+}
+
+.strategy-guide__side-tabs .ui-tab[aria-selected="true"] {
+  background: var(--surface-panel);
+}
+
+.strategy-guide__side-panel--assistant {
+  display: flex;
+  flex-direction: column;
+  height: min(72vh, calc(var(--space-6) * 22));
+  min-height: 0;
+}
+
+.strategy-guide__side-panel[hidden] {
+  display: none;
 }
 
 .strategy-guide__preview {
-  position: sticky;
-  top: var(--space-4);
   display: grid;
   gap: var(--space-2);
   min-width: 0;
   padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-large);
-  background: var(--surface-raised);
 }
 
 .strategy-guide__preview pre {
@@ -233,7 +492,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .strategy-guide__preview {
+  .strategy-guide__side {
     position: static;
   }
 }
@@ -250,6 +509,10 @@
 
   .strategy-guide__steps button {
     white-space: nowrap;
+  }
+
+  .strategy-guide__progress {
+    margin-inline: 0;
   }
 
   .strategy-guide__factor {
@@ -270,3 +533,32 @@
   gap: var(--space-2);
 }
 
+.strategy-guide__side-pending {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+/* 안내에 고칠 자리가 없는 칸(schema_version·parameters)의 오류: 이름 단계 몸통 위에서 오류 톤으로 알린다. */
+.strategy-guide__outside {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--status-error-border);
+  border-radius: var(--radius-medium);
+  background: var(--status-error-soft);
+}
+
+.strategy-guide__outside-title {
+  margin: 0;
+  color: var(--status-error);
+  font-weight: 600;
+}
+
+.strategy-guide__outside ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+}

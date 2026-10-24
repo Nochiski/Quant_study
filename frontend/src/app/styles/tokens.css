@@ -120,6 +120,8 @@
   --radius-large: 12px;
   --radius-pill: 999px;
   --shadow-panel: 0 1px 2px rgb(23 32 51 / 4%);
+  /* 바탕(--surface-canvas)과 표면색이 가까운 작업 카드를 들어 올린다. 팝오버보다 얕다. */
+  --shadow-card: 0 1px 3px rgb(23 32 51 / 8%);
   --shadow-popover: 0 8px 24px rgb(16 24 40 / 16%);
 
   /* spacing scale */
@@ -202,6 +204,7 @@
   --syntax-comment: #94a5bf;
   --syntax-punctuation: #a8b5cb;
   --shadow-panel: 0 1px 2px rgb(0 0 0 / 12%);
+  --shadow-card: 0 1px 3px rgb(0 0 0 / 28%);
   --shadow-popover: 0 12px 32px rgb(0 0 0 / 42%);
 }
 

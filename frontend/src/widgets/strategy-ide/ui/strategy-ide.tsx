@@ -134,8 +134,11 @@ export type StrategyIdeProps = {
   assistant?: ReactNode | ((controls: AssistantSlotControls) => ReactNode);
 };
 
-/** 슬롯 함수가 받는 패널 손잡이. */
-export type AssistantSlotControls = { close: () => void };
+/**
+ * 슬롯 함수가 받는 패널 손잡이. `open`은 지금 펼쳐졌는지다 — 한 번 펼친 뒤에는 접어도 내용이 마운트된 채
+ * 남으므로, 접힌 동안 조회를 멈출 내용은 이것을 읽는다. 펼침의 정본은 이 widget 이다.
+ */
+export type AssistantSlotControls = { close: () => void; open: boolean };
 
 const NARROW_QUERY = "(max-width: 1279px)";
 
@@ -736,7 +739,7 @@ export const StrategyIde = ({
       <div className="ide__assistant-body">
         {assistantMounted
           ? typeof assistant === "function"
-            ? assistant({ close: closeAssistant })
+            ? assistant({ close: closeAssistant, open: layout.assistantOpen })
             : assistant
           : null}
       </div>

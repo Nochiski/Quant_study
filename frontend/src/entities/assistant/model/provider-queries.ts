@@ -8,6 +8,7 @@ import {
 import {
   AssistantRequestError,
   assistantProviderApi,
+  type ProvidersView,
 } from "../../../shared/api";
 
 export const assistantProvidersKey = () => ["assistant", "providers"] as const;
@@ -27,6 +28,11 @@ export const assistantProvidersQuery = () =>
     queryKey: assistantProvidersKey(),
     queryFn: () => assistantProviderApi.listProviders(),
   });
+
+/** 쓸 수 있는(활성) 공급자가 하나라도 있는가. 사이드바 빈 상태와 화면의 기본 패널 선택이 같은 술어를 쓴다. */
+export const hasActiveAssistantProvider = (
+  providers: Pick<ProvidersView, "profiles">,
+): boolean => providers.profiles.some((profile) => profile.active);
 
 /**
  * 404는 이 화면이 모르는 사이에 프로파일이 사라졌다는 뜻이다 — 다른 탭·다른 기기에서 지웠을 때.

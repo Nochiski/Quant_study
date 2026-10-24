@@ -31,3 +31,13 @@ def test_reads_only_the_named_values_with_quotes_and_inline_comments(tmp_path: P
         "FAKE_TOKEN": "abc#def",
         "FAKE_EMPTY": "",
     }
+
+
+def test_one_parser_with_the_credentials_file_strips_bom_and_unescapes(tmp_path: Path) -> None:
+    """코드 리뷰 7: 저장 파일과 같은 파서다. BOM을 떼고, 큰따옴표 안 이스케이프를 푼다."""
+    env = tmp_path / ".env"
+    env.write_bytes(b'\xef\xbb\xbfFAKE_APP_KEY=fake-app-0123\r\nFAKE_SECRET="a\\"b"\r\n')
+    assert read_env_values(env, {"FAKE_APP_KEY", "FAKE_SECRET"}) == {
+        "FAKE_APP_KEY": "fake-app-0123",
+        "FAKE_SECRET": 'a"b',
+    }

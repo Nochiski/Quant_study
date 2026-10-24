@@ -18,15 +18,12 @@
 
 from __future__ import annotations
 
-import errno as errno_module
 import getpass
 import json
 import os
 import subprocess
 import sys
-import tempfile
 from collections.abc import Callable, Sequence
-from contextlib import suppress
 from pathlib import Path
 from threading import RLock
 from typing import TypeAlias
@@ -36,6 +33,7 @@ from strategy_workbench.application.assistant_chat.facade.ports import (
 )
 
 from ._errors import SecretStoreStorageError
+from ._private_file import atomic_write_restricted, errno_name
 
 __all__ = [
     "CommandRunner",
@@ -142,11 +140,8 @@ def run_icacls(command: Sequence[str]) -> None:
         )
 
 
-def _errno_name(error: OSError) -> str:
-    """OSError의 errno를 이름으로. 숫자만으로는 어떤 실패인지 읽히지 않는다."""
-    if error.errno is None:
-        return "UNKNOWN"
-    return errno_module.errorcode.get(error.errno, f"ERRNO_{error.errno}")
+# 같은 패키지의 다른 파일이 이 이름으로 불러 쓴다.
+_errno_name = errno_name
 
 
 class LocalFileProviderSecretStore:
@@ -246,84 +241,15 @@ class LocalFileProviderSecretStore:
         return secrets
 
     def _write(self, secrets: dict[str, str]) -> None:
-        directory = self._prepare_directory()
-        try:
-            descriptor, temporary_name = tempfile.mkstemp(
-                dir=directory, prefix=".secrets-", suffix=".tmp"
-            )
-            os.close(descriptor)
-        except OSError as error:
-            raise SecretStoreStorageError(
-                f"could not create the provider secrets temporary file — operation=mkstemp "
-                f"errno={_errno_name(error)}",
-                path=self._path,
-            ) from error
-
-        temporary = Path(temporary_name)
-        try:
-            # 내용보다 권한이 먼저다. 순서가 바뀌면 평문이 잠깐 느슨한 권한으로 디스크에 눕는다.
-            self._restrict(temporary)
-            with temporary.open("w", encoding="utf-8") as stream:
-                json.dump(secrets, stream, ensure_ascii=False, sort_keys=True, indent=2)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, self._path)
-        except OSError as error:
-            self._discard(temporary)
-            raise SecretStoreStorageError(
-                f"could not write the provider secrets file — operation=replace "
-                f"entries={len(secrets)} errno={_errno_name(error)}",
-                path=self._path,
-            ) from error
-        except BaseException:
-            self._discard(temporary)
-            raise
-        self._sync_directory(directory)
-
-    def _prepare_directory(self) -> Path:
-        """비밀 파일이 놓일 디렉터리. **이 adapter가 만들었을 때만** 0700으로 좁힌다.
-
-        이미 있던 디렉터리의 권한은 건드리지 않는다. 경로는 bootstrap이 고르므로 홈이나 공유
-        설정 디렉터리를 가리킬 수 있고, 그걸 말없이 좁히면 같은 디렉터리를 쓰던 다른
-        프로세스·사용자가 조용히 접근을 잃는다(놀람 최소화). 비밀 값 자체는 파일 권한 0600이
-        지키므로 디렉터리가 느슨해도 값은 새지 않는다.
-        """
-        directory = self._path.parent
-        try:
-            directory.mkdir(parents=True)
-        except FileExistsError:
-            return directory
-        except OSError as error:
-            raise SecretStoreStorageError(
-                f"could not create the provider secrets directory — operation=mkdir "
-                f"errno={_errno_name(error)}",
-                path=self._path,
-            ) from error
-        if self._platform != "win32":
-            try:
-                os.chmod(directory, 0o700)
-            except OSError as error:
-                raise SecretStoreStorageError(
-                    f"could not restrict the provider secrets directory — operation=chmod "
-                    f"errno={_errno_name(error)}",
-                    path=self._path,
-                ) from error
-        return directory
-
-    def _sync_directory(self, directory: Path) -> None:
-        """rename 자체를 디스크에 확정한다.
-
-        내용은 `fsync`했지만 디렉터리 항목은 별개다. 이걸 빼면 갑작스러운 전원 차단에서 교체가
-        통째로 유실돼 직전 키로 되돌아간다. Windows는 디렉터리 핸들을 이렇게 열 수 없어 건너뛴다.
-        """
-        if self._platform == "win32":
-            return
-        with suppress(OSError):
-            descriptor = os.open(directory, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+        atomic_write_restricted(
+            self._path,
+            json.dumps(secrets, ensure_ascii=False, sort_keys=True, indent=2),
+            platform=self._platform,
+            restrict=self._restrict,
+            label="provider secrets file",
+            temporary_prefix=".secrets-",
+            detail=f"entries={len(secrets)}",
+        )
 
     def _restrict(self, path: Path) -> None:
         if self._platform == "win32":
@@ -331,9 +257,3 @@ class LocalFileProviderSecretStore:
             self._run_command(icacls_command(path, account=account))
             return
         os.chmod(path, 0o600)
-
-    @staticmethod
-    def _discard(temporary: Path) -> None:
-        """실패한 임시 파일을 지운다. 남겨 두면 평문 사본이 하나 더 생긴다."""
-        with suppress(OSError):
-            temporary.unlink()

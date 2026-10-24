@@ -12,9 +12,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import stat
 import sys
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,6 +31,7 @@ from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import 
     CredentialsEnvFile,
     EnvFileBrokerCredentialStore,
     EnvFileProviderStore,
+    EnvProblem,
     parse_env_text,
     resolve_documents_directory,
 )
@@ -145,8 +148,9 @@ def test_the_file_is_private_and_a_created_folder_is_too(tmp_path: Path) -> None
 
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     assert stat.S_IMODE(os.stat(path.parent).st_mode) == 0o700
-    # 임시 파일이 남지 않는다.
-    assert sorted(item.name for item in path.parent.iterdir()) == [".env"]
+    # 임시 파일이 남지 않는다. 옆의 `.env.lock`은 프로세스 간 잠금 파일이다(리뷰 4).
+    assert sorted(item.name for item in path.parent.iterdir()) == [".env", ".env.lock"]
+    assert stat.S_IMODE(os.stat(path.parent / ".env.lock").st_mode) == 0o600
 
 
 def test_a_path_inside_the_repository_is_refused(tmp_path: Path) -> None:
@@ -201,18 +205,69 @@ def test_a_second_active_profile_is_refused(tmp_path: Path) -> None:
         store.add(_profile("p2", active=True))
 
 
-def test_an_incomplete_hand_edit_is_reported_without_values(tmp_path: Path) -> None:
+def test_an_incomplete_hand_edit_is_skipped_reported_and_kept(tmp_path: Path) -> None:
+    """빠진 줄이 있는 항목은 목록에서 빠지고 사유만 알려진다(리뷰 1).
+
+    다음 쓰기에도 값 그대로 남는다.
+    """
     path = tmp_path / ".env"
-    path.write_text(f"STRATEGY_WORKBENCH_AI_1_ID=p1\nSTRATEGY_WORKBENCH_AI_1_API_KEY={SECRET}\n")
+    path.write_text(
+        f"STRATEGY_WORKBENCH_AI_1_ID=p1\nSTRATEGY_WORKBENCH_AI_1_API_KEY={SECRET}\n",
+        encoding="utf-8",
+    )
     store = EnvFileProviderStore(CredentialsEnvFile(path))
 
-    with pytest.raises(SecretStoreStorageError) as raised:
-        store.list()
+    assert store.list() == ()
+    assert store.problems() == (
+        EnvProblem(
+            "ai",
+            "incomplete",
+            1,
+            (
+                "STRATEGY_WORKBENCH_AI_1_KIND",
+                "STRATEGY_WORKBENCH_AI_1_MODEL",
+                "STRATEGY_WORKBENCH_AI_1_CREATED_AT",
+            ),
+        ),
+    )
 
-    message = str(raised.value)
-    assert "missing=['KIND', 'MODEL', 'CREATED_AT']" in message
-    assert SECRET not in message
-    assert str(tmp_path) not in message
+    store.add(_profile("p2", active=True))
+
+    assert [item.profile_id for item in store.list()] == ["p2"]
+    values = parse_env_text(path.read_text(encoding="utf-8"))
+    # 읽지 못한 항목은 번호만 새로 받아 값 그대로 남는다.
+    assert values["STRATEGY_WORKBENCH_AI_2_ID"] == "p1"
+    assert values["STRATEGY_WORKBENCH_AI_2_API_KEY"] == SECRET
+
+
+def test_unknown_lines_in_our_group_survive_a_write(tmp_path: Path) -> None:
+    """우리 접두어 안의 모르는 줄은 다음 쓰기에도 남는다(SoT 리뷰 M4)."""
+    path = tmp_path / ".env"
+    store = EnvFileProviderStore(CredentialsEnvFile(path))
+    store.add(_profile("p1", active=True))
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write("STRATEGY_WORKBENCH_AI_1_NOTE=내 메모\nSTRATEGY_WORKBENCH_AI_THEME=dark\n")
+
+    store.add(_profile("p2"))
+
+    values = parse_env_text(path.read_text(encoding="utf-8"))
+    assert values["STRATEGY_WORKBENCH_AI_1_NOTE"] == "내 메모"
+    assert values["STRATEGY_WORKBENCH_AI_THEME"] == "dark"
+    assert [item.profile_id for item in store.list()] == ["p1", "p2"]
+
+
+def test_a_non_utf8_file_reads_as_no_providers_and_refuses_to_overwrite(tmp_path: Path) -> None:
+    path = tmp_path / ".env"
+    original = b"KIS_APP_KEY=\xff\xfe\n"
+    path.write_bytes(original)
+    file = CredentialsEnvFile(path)
+    store = EnvFileProviderStore(file)
+
+    assert store.list() == ()
+    assert file.file_problem() == EnvProblem("file", "not_utf8")
+    with pytest.raises(SecretStoreStorageError):
+        store.add(_profile("p1", active=True))
+    assert path.read_bytes() == original
 
 
 # -- 이전 ------------------------------------------------------------------------------------
@@ -286,7 +341,7 @@ def test_the_server_stores_providers_in_the_env_file_and_reports_its_path(tmp_pa
     )
     with TestClient(app) as client:
         body = client.get("/api/v1/settings/credentials-file").json()
-    assert body == {"path": str(env_path.resolve())}
+    assert body == {"path": str(env_path.resolve()), "problems": []}
 
 
 def test_a_graph_without_the_env_file_reports_no_path(tmp_path: Path) -> None:
@@ -294,7 +349,10 @@ def test_a_graph_without_the_env_file_reports_no_path(tmp_path: Path) -> None:
         assistant=AssistantSettings(db_path=None, secrets_path=tmp_path / "secrets.json")
     )
     with TestClient(app) as client:
-        assert client.get("/api/v1/settings/credentials-file").json() == {"path": None}
+        assert client.get("/api/v1/settings/credentials-file").json() == {
+            "path": None,
+            "problems": [],
+        }
 
 
 # -- 키움 모의 연결 -----------------------------------------------------------------------------
@@ -385,3 +443,200 @@ def test_the_settings_screen_saves_kiwoom_keys_into_the_env_file(tmp_path: Path)
     values = parse_env_text(env_path.read_text(encoding="utf-8"))
     assert values["STRATEGY_WORKBENCH_KIWOOM_MOCK_APP_KEY"] == "app-key-0123456789"
     assert not (tmp_path / "secrets.json").exists()
+
+
+# -- 코드 리뷰 고침 ------------------------------------------------------------------------------
+
+
+def _settings(tmp_path: Path, env_path: Path) -> AssistantSettings:
+    return AssistantSettings(
+        db_path=tmp_path / "assistant.sqlite3",
+        secrets_path=tmp_path / "secrets.json",
+        credentials_env_path=env_path,
+    )
+
+
+def test_a_broken_file_does_not_stop_the_server_and_the_screen_says_why(tmp_path: Path) -> None:
+    """리뷰 1·2: 깨진 `.env`에도 서버가 뜨고, 공급자는 없음, 키움은 읽을 수 없음, 사유가 보인다."""
+    env_path = tmp_path / "auto_trading" / ".env"
+    env_path.parent.mkdir()
+    env_path.write_bytes(b"\xff\xfeSTRATEGY_WORKBENCH_AI_1_API_KEY=" + SECRET.encode() + b"\n")
+    legacy = LocalFileProviderSecretStore(tmp_path / "secrets.json")
+    LocalFileBrokerCredentialStore(legacy).save(
+        BrokerCredentials("app-key-0123", "secret-0123", "5012345678")
+    )
+
+    app = build_http_app(assistant=_settings(tmp_path, env_path))
+    with TestClient(app) as client:
+        providers = client.get("/api/v1/assistant/providers").json()
+        kiwoom = client.get("/api/v1/broker-connections/kiwoom-mock").json()
+        body = client.get("/api/v1/settings/credentials-file").json()
+
+    assert providers["profiles"] == []
+    assert kiwoom["unreadable"] is True
+    assert body["problems"] == [
+        {
+            "section": "file",
+            "reason": "not_utf8",
+            "fields": [],
+            "message": "저장 파일을 UTF-8로 읽지 못했습니다. 편집기에서 UTF-8로 다시 저장하세요.",
+        }
+    ]
+    assert SECRET not in str(body)
+    # 깨진 파일 위로 이전하지 않는다. 예전 키는 그대로 남는다.
+    assert LocalFileBrokerCredentialStore(legacy).load() is not None
+
+
+def test_an_incomplete_kiwoom_group_is_reported_by_name(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("STRATEGY_WORKBENCH_KIWOOM_MOCK_APP_KEY=app-key-0123\n", encoding="utf-8")
+
+    app = build_http_app(assistant=_settings(tmp_path, env_path))
+    with TestClient(app) as client:
+        body = client.get("/api/v1/settings/credentials-file").json()
+
+    assert [(item["section"], item["fields"]) for item in body["problems"]] == [
+        (
+            "kiwoom",
+            [
+                "STRATEGY_WORKBENCH_KIWOOM_MOCK_SECRET_KEY",
+                "STRATEGY_WORKBENCH_KIWOOM_MOCK_ACCOUNT",
+            ],
+        )
+    ]
+    assert "app-key-0123" not in str(body)
+
+
+def test_providers_deleted_after_the_move_do_not_come_back_from_another_checkout(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """리뷰 3·SoT M2/M3: 한 번 옮긴 뒤에는 어느 체크아웃의 예전 DB도 다시 읽지 않는다.
+
+    남은 것은 개수만 경고한다.
+    """
+    secrets = LocalFileProviderSecretStore(tmp_path / "secrets.json")
+    first = SQLiteProviderProfileRepository(AssistantDatabase(tmp_path / "a.sqlite3"))
+    second = SQLiteProviderProfileRepository(AssistantDatabase(tmp_path / "b.sqlite3"))
+    first.add(_profile("p1", active=True))
+    secrets.put("p1", SECRET)
+    second.add(_profile("p2", active=True))
+    secrets.put("p2", "sk-other-0123456789")
+    file = CredentialsEnvFile(tmp_path / "auto_trading" / ".env")
+    target = EnvFileProviderStore(file)
+
+    assert migrate_provider_profiles(first, secrets, target) == 1
+    target.secrets().delete("p1")
+    target.delete("p1")
+    assert target.list() == ()
+
+    with caplog.at_level("WARNING"):
+        assert migrate_provider_profiles(second, secrets, target) == 0
+
+    assert target.list() == ()
+    # 다른 체크아웃의 예전 것은 지우지 않는다(되돌릴 수 없으니). 개수만 남긴다.
+    assert [item.profile_id for item in second.list()] == ["p2"]
+    assert "profiles=1 keys=1" in caplog.text
+    assert "p2" not in caplog.text
+    assert "sk-other" not in caplog.text
+
+
+def test_kiwoom_keys_written_again_by_an_old_server_do_not_come_back(tmp_path: Path) -> None:
+    secrets = LocalFileProviderSecretStore(tmp_path / "secrets.json")
+    legacy = LocalFileBrokerCredentialStore(secrets)
+    legacy.save(BrokerCredentials("app-key-0123", "secret-0123", "5012345678"))
+    target = EnvFileBrokerCredentialStore(CredentialsEnvFile(tmp_path / ".env"))
+    assert migrate_kiwoom_credentials(legacy, target) is True
+    target.delete()
+    # 옛 버전 서버가 예전 파일에 다시 썼다.
+    legacy.save(BrokerCredentials("app-key-0123", "secret-0123", "5012345678"))
+
+    assert migrate_kiwoom_credentials(legacy, target) is False
+    assert target.load() is None
+
+
+def test_two_writers_on_separate_handles_do_not_lose_each_others_lines(tmp_path: Path) -> None:
+    """리뷰 4: 다른 객체가 동시에 써도 둘 다 남는다.
+
+    다른 프로세스와 같은 조건이다 — 둘을 막는 것은 OS 파일 잠금뿐이다.
+    """
+    path = tmp_path / ".env"
+    left = CredentialsEnvFile(path)
+    right = CredentialsEnvFile(path)
+
+    def write(file: CredentialsEnvFile, prefix: str) -> None:
+        for number in range(30):
+            with file.lock:
+                current = dict(file.group(prefix))
+                current[f"{prefix}{number}"] = str(number)
+                file.replace_group(prefix, prefix, sorted(current.items()))
+
+    threads = [
+        threading.Thread(target=write, args=(left, "LEFT_")),
+        threading.Thread(target=write, args=(right, "RIGHT_")),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    values = CredentialsEnvFile(path).read()
+    assert len([name for name in values if name.startswith("LEFT_")]) == 30
+    assert len([name for name in values if name.startswith("RIGHT_")]) == 30
+
+
+def test_crlf_and_bom_are_kept_and_the_first_line_is_read(tmp_path: Path) -> None:
+    """리뷰 5: BOM을 떼고 읽어 첫 줄 이름을 알아보고, 쓸 때 BOM·CRLF를 그대로 둔다."""
+    path = tmp_path / ".env"
+    path.write_bytes(b"\xef\xbb\xbfAPP_KEY=old\r\nKIS_APP_KEY=keep\r\n")
+    file = CredentialsEnvFile(path)
+    assert file.read() == {"APP_KEY": "old", "KIS_APP_KEY": "keep"}
+
+    file.replace_group("APP_", "앱 묶음", (("APP_KEY", "new"),))
+
+    raw = path.read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf")
+    assert raw.count(b"APP_KEY=") == 2  # 묶음이 겹치지 않는다(APP_KEY 하나 + KIS_APP_KEY 하나).
+    assert b"\n" not in raw.replace(b"\r\n", b"")
+    assert file.read() == {"APP_KEY": "new", "KIS_APP_KEY": "keep"}
+
+
+def test_deleting_from_a_missing_file_creates_nothing(tmp_path: Path) -> None:
+    """리뷰 6: 지울 게 없으면 폴더도 파일도 잠금 파일도 만들지 않는다.
+
+    같은 내용이면 다시 쓰지 않는다.
+    """
+    folder = tmp_path / "auto_trading"
+    file = CredentialsEnvFile(folder / ".env")
+    EnvFileBrokerCredentialStore(file).delete()
+    EnvFileProviderStore(file).secrets().delete("p1")
+    assert not folder.exists()
+
+    EnvFileBrokerCredentialStore(file).save(BrokerCredentials("a-0123", "s-0123", "5012345678"))
+    before = (folder / ".env").stat()
+    EnvFileBrokerCredentialStore(file).save(BrokerCredentials("a-0123", "s-0123", "5012345678"))
+    after = (folder / ".env").stat()
+    assert (before.st_ino, before.st_mtime_ns) == (after.st_ino, after.st_mtime_ns)
+
+
+def test_listing_with_keys_reads_the_file_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """리뷰 9: 목록과 각 키 조회가 파일이 그대로면 다시 읽지 않는다."""
+    path = tmp_path / ".env"
+    store = EnvFileProviderStore(CredentialsEnvFile(path))
+    store.add(_profile("p1", active=True))
+    store.secrets().put("p1", SECRET)
+    store.add(_profile("p2"))
+    reads: list[Path] = []
+    original = Path.read_bytes
+
+    def counting(self: Path) -> bytes:
+        reads.append(self)
+        return original(self)
+
+    monkeypatch.setattr(Path, "read_bytes", counting)
+    for profile in store.list():
+        with contextlib.suppress(ProviderSecretMissingError):
+            store.secrets().get(profile.profile_id)
+
+    assert len(reads) <= 1

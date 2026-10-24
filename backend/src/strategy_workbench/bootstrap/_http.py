@@ -242,6 +242,7 @@ def build_http_app(
         assistant_chat=container.assistant_chat,
         assistant_turns=container.assistant_turns,
         credentials_file_path=container.credentials_file_path,
+        credentials_file_issues=container.credentials_file_issues,
         allowed_origins=allowed_origins,
     )
 

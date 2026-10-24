@@ -17,10 +17,17 @@ from strategy_workbench.application.broker_connection.facade.connection import (
     BrokerCredentialsUnreadableError,
 )
 
-from ._env_file import CredentialsEnvFile
+from ._env_file import CredentialsEnvFile, EnvProblem
 from ._errors import SecretStoreStorageError
 
-__all__ = ["KIWOOM_MOCK_ENV_NAMES", "KIWOOM_MOCK_ENV_PREFIX", "EnvFileBrokerCredentialStore"]
+__all__ = [
+    "KIWOOM_IMPORT_NAME",
+    "KIWOOM_MOCK_ENV_NAMES",
+    "KIWOOM_MOCK_ENV_PREFIX",
+    "EnvFileBrokerCredentialStore",
+]
+
+KIWOOM_IMPORT_NAME = "KIWOOM_MOCK"
 
 KIWOOM_MOCK_ENV_PREFIX = "STRATEGY_WORKBENCH_KIWOOM_MOCK_"
 _HEADER = "Quant Workbench 키움 모의투자 — 앱 설정 화면이 고칩니다"
@@ -33,6 +40,22 @@ KIWOOM_MOCK_ENV_NAMES = (_APP_KEY, _SECRET_KEY, _ACCOUNT)
 class EnvFileBrokerCredentialStore:
     def __init__(self, file: CredentialsEnvFile) -> None:
         self._file = file
+
+    @property
+    def file(self) -> CredentialsEnvFile:
+        return self._file
+
+    def problems(self) -> tuple[EnvProblem, ...]:
+        """세 줄 중 일부만 있으면 빠진 이름. 파일 전체 문제는 `file_problem`이 따로 말한다."""
+        try:
+            values = self._file.group(KIWOOM_MOCK_ENV_PREFIX)
+        except SecretStoreStorageError:
+            return ()
+        present = [name for name in KIWOOM_MOCK_ENV_NAMES if values.get(name)]
+        if not present or len(present) == len(KIWOOM_MOCK_ENV_NAMES):
+            return ()
+        missing = tuple(name for name in KIWOOM_MOCK_ENV_NAMES if name not in present)
+        return (EnvProblem("kiwoom", "incomplete", None, missing),)
 
     def load(self) -> BrokerCredentials | None:
         try:

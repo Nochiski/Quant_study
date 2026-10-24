@@ -23,6 +23,10 @@ class SecretStoreStorageError(RuntimeError):
     않아 `str()`·`repr()`·기본 직렬화 어디에도 따라 나오지 않는다.
     """
 
-    def __init__(self, message: str, *, path: Path | None = None) -> None:
+    def __init__(
+        self, message: str, *, path: Path | None = None, reason: str | None = None
+    ) -> None:
         super().__init__(message)
         self.path = path
+        # 화면이 고를 사유 이름(`not_utf8`·`unreadable`·`incomplete` 등). 값·경로는 담지 않는다.
+        self.reason = reason

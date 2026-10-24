@@ -17,9 +17,12 @@ from strategy_workbench.adapters.outbound.assistant_sqlite.facade.repository imp
     SQLiteProviderProfileRepository,
 )
 from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import (
+    AI_IMPORT_NAME,
+    KIWOOM_IMPORT_NAME,
     CredentialsEnvFile,
     EnvFileBrokerCredentialStore,
     EnvFileProviderStore,
+    EnvProblem,
     default_auto_trading_env_path,
 )
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
@@ -73,65 +76,153 @@ def migrate_provider_profiles(
     legacy_secrets: LocalFileProviderSecretStore,
     target: EnvFileProviderStore,
 ) -> int:
-    """예전 프로파일(SQLite)과 키(`secrets.json`)를 새 파일로 한 번 옮기고 옮긴 개수를 돌려준다.
+    """예전 프로파일(SQLite)과 키(`secrets.json`)를 새 파일로 **한 번** 옮긴다.
 
-    새 파일에 이미 공급자가 있으면 옮기지 않는다(사용자가 새 위치를 이미 쓰고 있다).
-    새 파일에 먼저 쓰고 나서 예전 것을 지운다 — 중간에 실패해도 어느 한쪽에는 남는다.
-    예전 키 파일을 읽지 못하면 아무것도
-    지우지 않고 건너뛴다.
+    옮긴 개수를 돌려준다.
+
+
+    - 새 파일에 이전 기록(`STRATEGY_WORKBENCH_IMPORTED_AI_PROVIDERS`)이 있으면 다시 가져오지 않는다
+      (코드 리뷰 3). 그러지 않으면 화면에서 다 지운 뒤 다른 체크아웃이 켜질 때
+      그 체크아웃의 `.local` DB에 남은 옛 프로파일이 되살아난다.
+    - 새 파일에 이미 공급자가 있으면 옮기지 않고 기록만 남긴다(사용자가 새 위치를 이미 쓴다).
+    - 예전 저장에 아무것도 없으면 기록하지 않는다. 다른 체크아웃의 DB에 남은 것을 그 체크아웃이
+      처음 켜질 때 가져갈 수 있게 둔다.
+    - 새 파일에 먼저 쓰고 기록한 뒤 예전 것을 지운다. 중간에 실패해도 어느 한쪽에는 남는다.
+    - 이전이 끝난 뒤 예전 자리에 남은 것(다른 체크아웃분·지우기 실패분)은 **지우지 않는다**. 읽지도
+      않으니 되살아나지 않고, 지우면 되돌릴 수 없다. 개수만 경고 로그에 남긴다(SoT 리뷰 M2·M3).
+    - 새 파일이나 예전 키 파일을 읽지 못하면 아무것도 바꾸지 않고 건너뛴다. 서버는 뜬다(리뷰 1).
     """
-    if target.list():
-        return 0
-    profiles = legacy_profiles.list()
-    if not profiles:
-        return 0
-    moved: list[tuple[ProviderProfile, str | None]] = []
+    file = target.file
+    profiles: tuple[ProviderProfile, ...] = ()
     try:
-        for profile in profiles:
-            try:
-                secret: str | None = legacy_secrets.get(profile.profile_id)
-            except ProviderSecretMissingError:
-                secret = None
-            moved.append((profile, secret))
+        with file.lock:
+            if file.imported(AI_IMPORT_NAME):
+                _warn_leftover_providers(legacy_profiles, legacy_secrets)
+                return 0
+            if file.file_problem() is not None:
+                logger.warning("credentials env file is unreadable; skipped moving providers")
+                return 0
+            if target.has_any():
+                file.mark_imported(AI_IMPORT_NAME)
+                return 0
+            profiles = legacy_profiles.list()
+            if not profiles:
+                return 0
+            moved: list[tuple[ProviderProfile, str | None]] = []
+            for profile in profiles:
+                try:
+                    secret: str | None = legacy_secrets.get(profile.profile_id)
+                except ProviderSecretMissingError:
+                    secret = None
+                moved.append((profile, secret))
+            target.import_profiles(moved)
+            file.mark_imported(AI_IMPORT_NAME)
     except SecretStoreStorageError as error:
         logger.warning(
-            "legacy provider secrets are unreadable; skipped moving them — error=%s",
+            "could not move legacy providers; left everything in place — error=%s reason=%s",
             type(error).__name__,
+            error.reason,
         )
         return 0
-    target.import_profiles(moved)
-    for profile in profiles:
-        legacy_secrets.delete(profile.profile_id)
-        legacy_profiles.delete(profile.profile_id)
+    try:
+        for profile in profiles:
+            legacy_secrets.delete(profile.profile_id)
+            legacy_profiles.delete(profile.profile_id)
+    except Exception as error:  # noqa: BLE001 — reason: 옮긴 뒤 정리 실패는 기동을 막지 않는다
+        logger.warning(
+            "moved providers but could not clear the legacy copies — error=%s",
+            type(error).__name__,
+        )
     logger.info("moved provider profiles to the credentials env file — count=%d", len(profiles))
     return len(profiles)
+
+
+def _warn_leftover_providers(
+    legacy_profiles: SQLiteProviderProfileRepository,
+    legacy_secrets: LocalFileProviderSecretStore,
+) -> None:
+    """이전이 끝난 뒤 예전 자리에 남은 공급자 수만 알린다. 이름·값은 싣지 않는다."""
+    try:
+        profiles = legacy_profiles.list()
+        keys = 0
+        for profile in profiles:
+            try:
+                legacy_secrets.get(profile.profile_id)
+            except ProviderSecretMissingError:
+                continue
+            keys += 1
+    except Exception as error:  # noqa: BLE001 — reason: 경고용 집계 실패는 기동을 막지 않는다
+        logger.warning("could not count legacy providers — error=%s", type(error).__name__)
+        return
+    if profiles:
+        logger.warning(
+            "legacy providers remain after the move and are no longer read — profiles=%d keys=%d",
+            len(profiles),
+            keys,
+        )
 
 
 def migrate_kiwoom_credentials(
     legacy: LocalFileBrokerCredentialStore, target: EnvFileBrokerCredentialStore
 ) -> bool:
-    """예전 `secrets.json`의 키움 모의 자격증명을 새 파일로 한 번 옮긴다. 옮겼으면 True.
+    """예전 `secrets.json`의 키움 모의 자격증명을 새 파일로 **한 번** 옮긴다. 옮겼으면 True.
 
-    새 파일에 이미 있으면 옮기지 않는다. 새 파일에 먼저 쓰고 예전 항목을 지운다.
-    예전 항목이 깨졌으면 아무것도 지우지 않고 건너뛴다(설정 화면에서 다시 저장하면 새 파일에
-    들어간다).
+    공급자와 같은 규칙이다: 이전 기록(`STRATEGY_WORKBENCH_IMPORTED_KIWOOM_MOCK`)이 있으면 다시 읽지
+    않고(옛 버전 서버가 예전 파일에 다시 써도 되살아나지 않는다), 새 파일에 이미 있으면
+    기록만 남기며,
+    예전 항목이 깨졌거나 새 파일을 읽지 못하면 아무것도 바꾸지 않는다. 남은 예전 항목은 지우지 않고
+    개수만 경고한다.
     """
-    if target.load() is not None:
-        return False
+    file = target.file
     try:
-        saved = legacy.load()
-    except BrokerCredentialsUnreadableError as error:
+        with file.lock:
+            if file.imported(KIWOOM_IMPORT_NAME):
+                _warn_leftover_kiwoom(legacy)
+                return False
+            if file.file_problem() is not None or target.problems():
+                logger.warning("credentials env file is unreadable; skipped moving kiwoom keys")
+                return False
+            if target.load() is not None:
+                file.mark_imported(KIWOOM_IMPORT_NAME)
+                return False
+            try:
+                saved = legacy.load()
+            except BrokerCredentialsUnreadableError as error:
+                logger.warning(
+                    "legacy kiwoom mock credentials are unreadable; skipped moving them — error=%s",
+                    type(error).__name__,
+                )
+                return False
+            if saved is None:
+                return False
+            target.save(saved)
+            file.mark_imported(KIWOOM_IMPORT_NAME)
+    except (SecretStoreStorageError, BrokerCredentialsUnreadableError) as error:
         logger.warning(
-            "legacy kiwoom mock credentials are unreadable; skipped moving them — error=%s",
+            "could not move legacy kiwoom keys; left everything in place — error=%s",
             type(error).__name__,
         )
         return False
-    if saved is None:
-        return False
-    target.save(saved)
-    legacy.delete()
+    try:
+        legacy.delete()
+    except Exception as error:  # noqa: BLE001 — reason: 옮긴 뒤 정리 실패는 기동을 막지 않는다
+        logger.warning(
+            "moved kiwoom keys but could not clear the legacy copy — error=%s",
+            type(error).__name__,
+        )
     logger.info("moved kiwoom mock credentials to the credentials env file")
     return True
+
+
+def _warn_leftover_kiwoom(legacy: LocalFileBrokerCredentialStore) -> None:
+    try:
+        left = legacy.load() is not None
+    except Exception:  # noqa: BLE001 — reason: 깨진 예전 항목도 "남아 있음"이다
+        left = True
+    if left:
+        logger.warning(
+            "legacy kiwoom mock keys remain after the move and are no longer read — count=1"
+        )
 
 
 def kiwoom_credential_store(
@@ -152,3 +243,14 @@ def kiwoom_credential_store(
     target = EnvFileBrokerCredentialStore(credentials_file)
     migrate_kiwoom_credentials(legacy, target)
     return target
+
+
+def credentials_file_problems(file: CredentialsEnvFile) -> tuple[EnvProblem, ...]:
+    """설정 화면이 보일 저장 파일 문제. 파일 전체를 못 읽으면 그 하나만, 아니면 묶음별 문제."""
+    whole = file.file_problem()
+    if whole is not None:
+        return (whole,)
+    return (
+        *EnvFileProviderStore(file).problems(),
+        *EnvFileBrokerCredentialStore(file).problems(),
+    )

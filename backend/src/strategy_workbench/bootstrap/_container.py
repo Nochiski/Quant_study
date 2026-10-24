@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
+from strategy_workbench.adapters.inbound.http_api.facade.api import CredentialsFileIssue
 from strategy_workbench.adapters.outbound.artifact_local.facade.store import LocalArtifactStore
 from strategy_workbench.adapters.outbound.backtest_engine.facade.continuous import (
     ContinuousBacktestExecutorAdapter,
@@ -52,6 +53,7 @@ from strategy_workbench.adapters.outbound.run_worker_process.facade.worker impor
     VersionBundle,
     code_fingerprint,
 )
+from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import CredentialsEnvFile
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
     SQLiteFactorLibraryRepository,
     SQLiteStrategyDraftRepository,
@@ -144,7 +146,7 @@ from ._assistant import (
     build_assistant_services,
 )
 from ._file_guard import restrict_to_current_user
-from ._secrets import kiwoom_credential_store
+from ._secrets import credentials_file_problems, kiwoom_credential_store
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +173,8 @@ class BackendContainer:
     assistant_turns: AssistantTurnRunner
     # 설정 화면에 보일 저장 파일(내 문서 `auto_trading/.env`). 예전 저장을 쓰는 그래프는 None이다.
     credentials_file_path: Path | None = None
+    # 그 파일의 읽기 문제(리뷰 1·2). 설정 화면이 사유와 줄 이름을 보인다.
+    credentials_file_issues: Callable[[], Sequence[CredentialsFileIssue]] | None = None
 
 
 EQUITY_ADAPTERS = ("mock", "duckdb")
@@ -365,7 +369,24 @@ def build_container(
             if assistant_services.credentials_file is not None
             else None
         ),
+        credentials_file_issues=(
+            _credentials_file_issues(assistant_services.credentials_file)
+            if assistant_services.credentials_file is not None
+            else None
+        ),
     )
+
+
+def _credentials_file_issues(
+    file: CredentialsEnvFile,
+) -> Callable[[], Sequence[CredentialsFileIssue]]:
+    def issues() -> tuple[CredentialsFileIssue, ...]:
+        return tuple(
+            CredentialsFileIssue(problem.section, problem.reason, problem.index, problem.fields)
+            for problem in credentials_file_problems(file)
+        )
+
+    return issues
 
 
 def _broker_probe(*, fake: bool) -> BrokerConnectionProbe:

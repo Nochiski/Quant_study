@@ -16,7 +16,11 @@ from datetime import UTC, datetime
 #        열 규칙 + price_valid·collected_at(컷오버 PR-2). G4 골든 물려받기(golden_from). 다른 표 산출 불변
 # 2.9.0: ka10060 거래량(volume_shr) = `acc_trde_qty`, 그 열이 NULL 인 행(10-22 저녁 키움 응답 변경 전에 처음 관측된
 #        행)만 `acc_trde_prica` — ColumnRule.fallback_src. 10-22 부터의 행만 값이 바뀐다(거래대금 → 거래량)
-RULES_VERSION = "2.9.0"
+# 2.10.0: WISE blob 표 7개(`rules_wise._blob_table` — 연간·분기·매트릭스·재무 2·의견 2)에 수집 시각 `fetched_at_utc` 열 추가(#608) — equity S26 이 행마다
+#        가용일(장 전 수집은 그날 쓴다)을 센다. 기존 열·행 산출 불변, 열 하나 추가.
+#        W 계보(feat/equity-wise-fields)에서 2.9.0 으로 매겼던 것을 갈래 병합 때 다시 매김 — 서버 임시 빌드
+#        snap_20261022T232524Z 의 2.9.0 은 이 변경이다(운영 빌드 기록의 2.9.0 은 위 ka10060 줄)
+RULES_VERSION = "2.10.0"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 
 # 빌드 basis — 하루 2판 규약 (플랜 v2 §4 Task B.1). 빌드 id 접두어가 판을 구분한다:

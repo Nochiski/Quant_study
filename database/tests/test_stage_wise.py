@@ -543,7 +543,7 @@ def test_rules_analyst_broker_declares_key_and_two_digit_year_dates() -> None:
     assert r.natural_key == ("ticker", "fetched_date", "broker", "opinion_date") and r.key_unique
     assert r.column("opinion_date").kind == model.KIND_DATE_YY_SLASH
     assert r.blob_source is not None and r.blob_source.parser == "parse_analyst_broker"
-    assert {e.name for e in r.extras} == {"opinion_class", "prev_opinion_class"}
+    assert {e.name for e in r.extras} == {"fetched_at_utc", "opinion_class", "prev_opinion_class"}
     assert len(rules_wise.TABLES) == 14          # 13 + stg_fin_wise_q(10-01 T-Q3)
 
 

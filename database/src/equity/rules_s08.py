@@ -483,6 +483,16 @@ FIELDS: tuple[FieldProfile, ...] = (
                  "`penfnd_etc_krw` 를 직접 읽는다(그 컬럼은 그대로 다 나간다).",
         coverage_axis="grid_session", axis_columns=_FAXIS),
     FieldProfile(
+        field_id="flow.private_fund_net_buy", columns=("samo_fund_krw",),
+        label="사모펀드 순매수(대금)", unit="KRW", value_type="amount", frequency="session",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False, disclosure_basis=_FLOW_DISCLOSURE,
+        evidence="flow_daily.samo_fund_krw ← 키움 samo_fund_krw ∪ KIS pe_fund_ntby_tr_pbmn_krw(`KIS_MAPPING`). "
+                 "원 단위(stage ×1e6 완료 — 재환산 금지). 기관 합계(`orgn_krw`)를 이루는 7주체 가운데 하나다. "
+                 "선언은 2026-10-22(플랜 `2026-10-22-equity-wise-fields` T2, scope_v1.0 수급 축) — 열은 "
+                 "S08 부터 나가고 있었다. FIELD_MAP §2 어휘 밖이라 내부 스코프다(§7). " + _FLOW_SRC_NOTE,
+        coverage_axis="grid_session", scope="internal", axis_columns=_FAXIS),
+    FieldProfile(
         field_id="flow.retail_net_buy", columns=("ind_invsr_krw",),
         label="개인 순매수(대금)", unit="KRW", value_type="amount", frequency="session",
         recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,

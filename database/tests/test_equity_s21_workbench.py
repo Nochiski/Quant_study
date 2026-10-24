@@ -107,7 +107,7 @@ CHAIN_NAMES = (
     "flow_daily", "short_daily", "credit_daily",
     "disclosure_version", "fin_std", "holder_daily", "ownership_snapshot", "audit_opinion",
     "shares_outstanding", "treasury_stock", "dividend_event", "consensus_daily",
-    "opinion_daily", "opinion_broker_daily")
+    "opinion_daily", "opinion_broker_daily", "consensus_matrix", "consensus_annual", "fin_ratio_wise")
 CHAIN = (*(RULES[name] for name in CHAIN_NAMES), rules_s19.DATASET_PROFILE)
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 FIELDS = ("price.close", "price.adj_close", "price.market_cap")

@@ -1,0 +1,50 @@
+[
+ {
+  "id": "FX-26-002a",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "period_label": "2026.12(E)"
+  },
+  "column": "op",
+  "expect": "3933478.7000",
+  "source": "stage:stg_consensus_annual(005930, 2026-09-02) — 서버 판과 stage 절단본이 같은 원문(10-22 대조) 2026.12(E)",
+  "note": "당해 12월기 영업이익 추정(억원)"
+ },
+ {
+  "id": "FX-26-002b",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "period_label": "2026.12(E)"
+  },
+  "column": "ni",
+  "expect": "3224347.0000",
+  "source": "같은 행",
+  "note": "순이익 추정(억원)"
+ },
+ {
+  "id": "FX-26-002c",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "period_label": "2026.12(E)"
+  },
+  "column": "period_kind",
+  "expect": "E",
+  "source": "같은 행",
+  "note": "추정"
+ },
+ {
+  "id": "FX-26-002d",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "period_label": "2025.12(A)"
+  },
+  "column": "op",
+  "expect": "436010.5000",
+  "source": "2025.12(A) 행",
+  "note": "실적"
+ }
+]

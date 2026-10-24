@@ -63,7 +63,9 @@ CHAIN: tuple[str, ...] = (
     "flow_daily", "short_daily", "credit_daily",
     "disclosure_version", "fin_std", "holder_daily", "ownership_snapshot", "audit_opinion",
     "shares_outstanding", "treasury_stock", "dividend_event", "consensus_daily",
-    "opinion_daily", "opinion_broker_daily")
+    "opinion_daily", "opinion_broker_daily",
+    # S26 WISE 3표(2026-10-22) — stage 만 읽는다
+    "consensus_matrix", "consensus_annual", "fin_ratio_wise")
 
 # 2026-09-07 S08-2: `flow.foreign_ownership`·`flow.foreign_limit_exhaustion` 선언(72 → 74).
 # 2026-09-07 S02-2: `benchmark.close` 선언(75 → 76, R04 시장 베타).
@@ -77,9 +79,10 @@ CHAIN: tuple[str, ...] = (
 # 2026-09-28 문서 감사 결정 5: `price.adj_close` 를 내부 스코프에서 FIELD_MAP §2 어휘로 옮겼다(#218 이
 # 레지스트리 가격 변화 팩터의 입력으로 삼았다) → field_map +1 · internal −1 · 어휘 +1.
 # Q-4 병합(e1.27.0): 두 변경의 합 — 84 = field_map 36 + internal 48, 어휘 46.
-N_FIELDS = 84                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
+# 2026-10-22 S26: WISE 13(내부 스코프) + `flow.private_fund_net_buy`(내부 스코프 1) → 98.
+N_FIELDS = 98                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
 N_FIELD_MAP_SCOPE = 36           # FIELD_MAP §2 어휘 중 프로파일 행을 갖는 것
-N_INTERNAL_SCOPE = 48            # equity 내부 스코프(fin_std 계정·4B·유니버스 …)
+N_INTERNAL_SCOPE = 62            # equity 내부 스코프(fin_std 계정·4B·유니버스·WISE …)
 N_FIELD_MAP_VOCAB = 46           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
                                  # 2026-09-07: `flow.foreign_limit_exhaustion` 신설(F08 재료)
 PROFILE_GATES = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG2_dataset_profile", "EG9", "EG4",

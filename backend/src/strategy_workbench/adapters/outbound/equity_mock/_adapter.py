@@ -31,9 +31,11 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
     ResearchPanelResult,
     SecurityRef,
+    UniverseDefinition,
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+    describe_universe,
     field_contract_snapshot_id,
 )
 from strategy_workbench.domain.factor.facade.expression import (
@@ -143,6 +145,13 @@ class MockEquityDataAdapter:
             status=status,
             snapshot_id=self._snapshot.snapshot_id,
             detail=None if points else f"no mock universe sessions — query={query}",
+        )
+
+    def list_universes(self) -> tuple[UniverseDefinition, ...]:
+        """fixture 가 구성 종목을 가진 유니버스 전부(id 오름차순)."""
+        return tuple(
+            describe_universe(universe_id, market)
+            for market, universe_id in sorted(_MOCK_UNIVERSES, key=lambda key: key[1])
         )
 
     def universe_securities(

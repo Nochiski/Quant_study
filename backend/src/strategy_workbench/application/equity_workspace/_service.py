@@ -6,6 +6,7 @@ from strategy_workbench.domain.backtest.facade.environment import require_resear
 from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
     ResearchPanelResult,
+    UniverseDefinition,
     UniverseHistoryQuery,
     UniverseHistoryResult,
 )
@@ -36,6 +37,10 @@ class EquityWorkspaceService:
             all_fields=self._equity_data.list_fields(),
             query=query or FieldCatalogQuery(),
         )
+
+    def universes(self) -> tuple[UniverseDefinition, ...]:
+        """실행 설정에서 고를 수 있는 유니버스 목록. 연결된 어댑터가 답한 그대로다."""
+        return self._equity_data.list_universes()
 
     def preview_universe(self, query: UniverseHistoryQuery) -> UniversePreview:
         return summarize_universe(self._equity_data.load_universe(query))

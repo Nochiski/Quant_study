@@ -13,10 +13,12 @@ from strategy_workbench.domain.equity._models import (
     ResearchPanelQuery,
     ResearchPanelResult,
     SecurityRef,
+    UniverseDefinition,
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
     canonical_revision,
+    describe_universe,
     field_contract_snapshot_id,
 )
 
@@ -35,9 +37,11 @@ __all__ = [
     "ResearchPanelQuery",
     "ResearchPanelResult",
     "SecurityRef",
+    "UniverseDefinition",
     "UniverseHistoryQuery",
     "UniverseHistoryResult",
     "UniversePoint",
     "canonical_revision",
+    "describe_universe",
     "field_contract_snapshot_id",
 ]

@@ -129,6 +129,7 @@ export {
   type SaveStrategyDraftRequest,
   type SavedRevisionReference,
   type SourceDiagnostic,
+  type UniverseDefinition,
   type StrategyDocument,
   type StrategyDocumentContractResponse,
   type StrategyDocumentSchema,

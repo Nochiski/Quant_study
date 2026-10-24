@@ -48,6 +48,7 @@ import {
   getRunEnvironmentSchema,
   getTrialLedger,
   listBacktests,
+  listEquityUniverses,
   listExperimentTrials,
   listExperiments,
   listStrategies,
@@ -127,6 +128,7 @@ import type {
   RunEnvironmentSchema,
   RunKind,
   SaveDocumentRequest,
+  UniverseDefinition,
   SaveStrategyDraftRequest,
   SavedRevisionReference,
   SourceDiagnostic,
@@ -913,6 +915,12 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getRunEnvironmentSchema");
   },
 
+  /** 연결된 시장 데이터가 실행에 쓸 수 있는 유니버스. 실행 설정 드롭다운의 유일한 출처다. */
+  async listEquityUniverses(): Promise<UniverseDefinition[]> {
+    const response = await listEquityUniverses();
+    return unwrap(response, "listEquityUniverses");
+  },
+
   /** 그래프 노드 연산자 정의 전부(P1-03, spec D8). 팔레트·라벨이 읽는 유일한 연산자 목록이다. */
   async getStrategyOperatorCatalog(): Promise<StrategyOperatorCatalog> {
     const response = await getStrategyOperatorCatalog();
@@ -1038,6 +1046,7 @@ export type {
   RevisionSummary,
   RunEnvironment,
   RunEnvironmentSchema,
+  UniverseDefinition,
   RunKind,
   SaveDocumentRequest,
   SaveStrategyDraftRequest,

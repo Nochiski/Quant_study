@@ -1132,6 +1132,21 @@ def test_universe_securities_reads_names_through_the_observation_market(
     assert adapter.universe_securities("KRX", "krx.unknown", START) == ()
 
 
+def test_list_universes_answers_the_policy_ids_the_run_accepts(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """실행 설정 드롭다운의 선택지는 원장 `universe_policy` 의 id 와 같은 집합이다.
+
+    실행이 받는 id 와 같다.
+    """
+    universes = {item.universe_id: item for item in adapter.list_universes()}
+    # fixture 원장의 두 정책. 문장이 등록된 id 는 표시명을, 없는 id 는 id 를 그대로 이름으로 쓴다.
+    assert list(universes) == ["krx.all", "krx.common-stock"]
+    assert {item.market for item in universes.values()} == {"KRX"}
+    assert universes["krx.common-stock"].label == "KRX 보통주"
+    assert universes["krx.all"].label == "krx.all"
+
+
 # ── FactorMetadataPort · RawObservationPort ────────────────────────────────
 
 

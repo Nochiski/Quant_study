@@ -103,7 +103,11 @@ test(
     await expect(end).toHaveValue("2026-08-31");
     await expect(page.getByText(incomplete)).toHaveCount(0);
 
-    await universe.fill(RUN_ENVIRONMENT.universe_id);
+    // 유니버스는 연결된 시장 데이터가 답한 목록에서 고른다. 표시명과 id, 고른 유니버스의 설명이 보인다.
+    await expect(universe.locator("option")).toContainText(["KRX 보통주 (krx.common-stock)"]);
+    await universe.selectOption(RUN_ENVIRONMENT.universe_id);
+    await expect(universe.locator("option:checked")).toHaveText("KRX 보통주 (krx.common-stock)");
+    await expect(universe).toHaveAccessibleDescription(/KRX 상장 보통주입니다/u);
     await expect(summary).toContainText("2021-01-01");
     await expect(summary).toContainText("2026-08-31");
 
@@ -126,7 +130,8 @@ test(
     await expect(backtest(page)).toBeDisabled();
     await expect(oos).not.toHaveAttribute("aria-invalid", "true");
     await expect(summary).not.toContainText("OOS 시작일 칸을 고치세요");
-    await universe.click();
+    // 초점을 다른 칸으로 옮겨 OOS 칸을 떠난다(드롭다운을 펼치지 않는다).
+    await universe.focus();
     await expect(oos).toHaveValue("");
     await expect(oos).toHaveAttribute("aria-invalid", "true");
     const oosIncomplete = page.locator(".backtest-settings__errors").getByRole("listitem").filter({
@@ -156,7 +161,8 @@ test(
     await expect(oos).toHaveValue("");
     await expect(backtest(page)).toBeDisabled();
     await expect(oos).not.toHaveAttribute("aria-invalid", "true");
-    await universe.click();
+    // 초점을 다른 칸으로 옮겨 OOS 칸을 떠난다(드롭다운을 펼치지 않는다).
+    await universe.focus();
     await expect(oos).toHaveAttribute("aria-invalid", "true");
     // 덜 친 OOS 로는 시작 요청이 한 번도 나가지 않았다.
     expect(starts).toEqual([]);

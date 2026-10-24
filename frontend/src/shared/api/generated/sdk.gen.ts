@@ -163,6 +163,8 @@ import type {
   ListBacktestsData,
   ListBacktestsErrors,
   ListBacktestsResponses,
+  ListEquityUniversesData,
+  ListEquityUniversesResponses,
   ListExperimentsData,
   ListExperimentsErrors,
   ListExperimentsResponses,
@@ -845,6 +847,22 @@ export const previewEquityUniverse = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+/**
+ * Equity Universes
+ *
+ * 연결된 시장 데이터가 실행에 쓸 수 있는 유니버스(id·표시명·설명).
+ *
+ * 실행 설정 드롭다운의 출처다.
+ */
+export const listEquityUniverses = <ThrowOnError extends boolean = false>(
+  options?: Options<ListEquityUniversesData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListEquityUniversesResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/equity/universes", ...options });
 
 /**
  * List Experiments

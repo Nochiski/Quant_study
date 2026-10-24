@@ -18,6 +18,7 @@ import {
 } from "../model/run-settings-problems";
 import type { BacktestRunSettingsController } from "../model/use-backtest-run-settings";
 import "./backtest-run-settings.css";
+import { useEquityUniverses, type UniverseDefinition } from "../../../entities/dataset";
 import {
   type RunEnvironmentField,
   runEnvironmentApplies,
@@ -88,16 +89,28 @@ const TrialImpact = ({ request }: { request: BacktestRunSpec | null }) => {
 const isIncompleteDate = (event: SyntheticEvent<HTMLInputElement>): boolean =>
   event.currentTarget.type === "date" && event.currentTarget.validity.badInput;
 
+/**
+ * `x-catalog: universe` 칸의 선택지 상태. 목록은 연결된 시장 데이터 어댑터가 답한다(backend 소유).
+ * 목록을 못 받으면(`error`) 예전처럼 id 를 직접 적는 칸으로 돌아간다.
+ */
+type UniverseChoices =
+  | { status: "pending" }
+  | { status: "error" }
+  | { status: "ready"; universes: readonly UniverseDefinition[] };
+
 const EnvironmentInput = ({
   field,
   value,
   applies,
   error,
+  universes,
   onChange,
   onIncompleteChange,
 }: {
   field: RunEnvironmentField;
   value: string;
+  /** 유니버스 칸이면 고를 수 있는 목록. 다른 칸은 undefined. */
+  universes?: UniverseChoices;
   /** 지금 모드에서 읽히는 칸인가(스키마 `x-applicable-when`). 아니면 칸을 끈다 — 요청에도 실리지 않는다. */
   applies: boolean;
   error: RunEnvironmentFieldError | undefined;
@@ -108,7 +121,14 @@ const EnvironmentInput = ({
   const inputId = useId();
   const hintId = useId();
   const errorId = useId();
-  const description = tDescription(field.descriptionKey);
+  const universeList = universes?.status === "ready" ? universes.universes : null;
+  const chosenUniverse = universeList?.find((item) => item.universe_id === value);
+  // 고른 유니버스가 있으면 그 설명을, 목록을 못 받았으면 직접 입력 안내를, 아니면 칸의 한 줄 뜻을 보인다.
+  const description =
+    chosenUniverse?.description ??
+    (universes?.status === "error"
+      ? t("backtest.settings.universe.listError")
+      : tDescription(field.descriptionKey));
   // 날짜를 덜 친 칸은 값이 여전히 빈 문자열이라 값만 보면 "값을 정하세요."가 된다(#264). 브라우저는 칸
   // 안에서 자리를 채우는 동안 input 이벤트를 내지 않으므로, 키를 뗄 때·값이 바뀔 때·칸을 떠날 때 `badInput` 을
   // 읽어 컨트롤러에 알린다. 이 칸들은 필수라 빈 값 자체가 오류이므로, 칸 안에서 읽은 덜 친 상태도 검증에
@@ -131,7 +151,39 @@ const EnvironmentInput = ({
   return (
     <div className="backtest-settings__field">
       <label htmlFor={inputId}>{runEnvironmentLabel(field)}</label>
-      {field.control === "select" ? (
+      {universes !== undefined && universes.status !== "error" ? (
+        <select className="ui-select"
+          {...common}
+          disabled={common.disabled || universes.status === "pending"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          {universeList === null ? (
+            <option value={value}>{t("backtest.settings.universe.loading")}</option>
+          ) : (
+            <>
+              {value === "" ? (
+                <option value="" disabled>
+                  {t("backtest.settings.universe.placeholder")}
+                </option>
+              ) : null}
+              {universeList.map((item) => (
+                <option key={item.universe_id} value={item.universe_id}>
+                  {item.label === item.universe_id
+                    ? item.label
+                    : `${item.label} (${item.universe_id})`}
+                </option>
+              ))}
+              {/* 저장된 값이 지금 목록에 없어도 지우지 않는다 — 그대로 두고 모르는 값임을 알린다. */}
+              {value !== "" && chosenUniverse === undefined ? (
+                <option value={value}>
+                  {t("backtest.settings.universe.unknown").replace("{id}", value)}
+                </option>
+              ) : null}
+            </>
+          )}
+        </select>
+      ) : field.control === "select" ? (
         <select className="ui-select"
           {...common}
           value={value}
@@ -233,6 +285,7 @@ export const BacktestRunSettings = ({
   const optionErrors: ReadonlySet<BacktestRunSettingsError> = new Set(
     result.errors,
   );
+  const universeQuery = useEquityUniverses();
   const popoverRef = useRef<HTMLDivElement>(null);
   const summaryRef = useRef<HTMLElement>(null);
   const costSummaryId = useId();
@@ -268,10 +321,17 @@ export const BacktestRunSettings = ({
     .map((field) => `${runEnvironmentName(field)}: ${runEnvironmentValueLabel(field,
       runEnvironmentWireText(field, environmentValues[field.name] ?? ""))}`)
     .join(" · ");
+  const universeChoices: UniverseChoices =
+    universeQuery.data !== undefined
+      ? { status: "ready", universes: universeQuery.data }
+      : universeQuery.isError
+        ? { status: "error" }
+        : { status: "pending" };
   const renderField = (field: RunEnvironmentField) => (
     <EnvironmentInput
       key={field.name}
       field={field}
+      universes={field.catalog === "universe" ? universeChoices : undefined}
       value={environmentValues[field.name] ?? ""}
       applies={runEnvironmentApplies(field, environmentValues)}
       error={environmentErrors[field.name]}

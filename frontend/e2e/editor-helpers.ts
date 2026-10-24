@@ -83,7 +83,8 @@ export const runSettingsInputs = (page: Page) => ({
   toggle: page.getByLabel("실행 설정 열기"),
   start: page.getByLabel("시작일", { exact: true }),
   end: page.getByLabel("종료일", { exact: true }),
-  universe: page.getByRole("textbox", { name: "유니버스", exact: true }),
+  // 유니버스는 연결된 시장 데이터가 답한 목록에서 고르는 드롭다운이다.
+  universe: page.getByRole("combobox", { name: "유니버스", exact: true }),
   fee: page.getByRole("spinbutton", { name: "수수료 (bp)" }),
 });
 

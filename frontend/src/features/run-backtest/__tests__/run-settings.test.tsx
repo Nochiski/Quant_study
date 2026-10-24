@@ -1733,3 +1733,81 @@ describe("backtest run actions", () => {
     }
   });
 });
+
+// 유니버스는 자유 텍스트가 아니라 연결된 시장 데이터가 답한 목록에서 고른다(선택지 owner 는 backend 어댑터).
+describe("run settings universe choice", () => {
+  const UNIVERSES = [
+    {
+      universe_id: "krx.common-stock",
+      market: "KRX",
+      label: "KRX 보통주",
+      description: "KRX 상장 보통주입니다. 기준일마다 그날 상장돼 있던 종목으로 후보를 다시 고릅니다.",
+    },
+    {
+      universe_id: "krx.all",
+      market: "KRX",
+      label: "krx.all",
+      description: "설명이 등록되지 않은 유니버스입니다.",
+    },
+  ];
+  const serveUniverses = (body: typeof UNIVERSES = UNIVERSES) =>
+    server.use(http.get(`${API}/api/v1/equity/universes`, () => HttpResponse.json(body)));
+  beforeEach(() => {
+    servedSchema = RUN_ENVIRONMENT_SCHEMA;
+    server.use(schemaHandler);
+    localStorage.clear();
+  });
+  const open = async () => {
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    return user;
+  };
+
+  it("lists the universes the backend answers and shows the chosen one's description", async () => {
+    serveUniverses();
+    renderWithQuery(<Harness storageKey="universe-pick" />);
+    const user = await open();
+
+    const select = await screen.findByRole("combobox", { name: "유니버스" });
+    await waitFor(() => expect(select).toBeEnabled());
+    expect(
+      within(select).getAllByRole("option").map((option) => option.textContent),
+    ).toEqual(["유니버스를 고르세요", "KRX 보통주 (krx.common-stock)", "krx.all"]);
+    expect(select).toHaveValue("");
+
+    await user.selectOptions(select, "krx.common-stock");
+
+    expect(select).toHaveValue("krx.common-stock");
+    expect(select).toHaveAccessibleDescription(UNIVERSES[0].description);
+  });
+
+  it("keeps a stored universe the list no longer has and names it as unknown", async () => {
+    serveUniverses([UNIVERSES[1]]);
+    renderWithQuery(<Harness storageKey="universe-unknown" />);
+    // 패널 밖 단추를 누르면 패널이 닫히므로, 저장값을 먼저 넣고 연다.
+    await userEvent.setup().click(screen.getByRole("button", { name: "apply upgraded environment" }));
+    await open();
+
+    const select = await screen.findByRole("combobox", { name: "유니버스" });
+    await waitFor(() => expect(select).toHaveValue("krx.common-stock"));
+    expect(
+      within(select).getByRole("option", { selected: true }),
+    ).toHaveTextContent("알 수 없는 유니버스 (krx.common-stock)");
+  });
+
+  it("falls back to typing the id when the universe list cannot be read", async () => {
+    server.use(
+      http.get(`${API}/api/v1/equity/universes`, () =>
+        HttpResponse.json({ detail: "down" }, { status: 500 }),
+      ),
+    );
+    renderWithQuery(<Harness storageKey="universe-fallback" />);
+    await open();
+
+    const field = await screen.findByRole("textbox", { name: "유니버스" });
+    // 빈 필수 칸이라 오류 문장도 함께 읽힌다.
+    expect(field).toHaveAccessibleDescription(
+      /^유니버스 목록을 불러오지 못해 ID를 직접 적습니다\. 예: krx\.common-stock/,
+    );
+  });
+});

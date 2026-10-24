@@ -150,7 +150,8 @@ def _kiwoom_db(path: Path, second_day: bool = False) -> None:
                 continue
             close = krx(t) + (10 if t == CLOSE_DIFF else 0)
             move = close - prev(t)
-            vals = [t, day, f"+{close}", f"{move:+d}", str(1_000 * tf.IDX[t]),
+            # acc_trde_qty NULL — 10-22 저녁 키움 응답 변경 전 모양(거래량이 acc_trde_prica 에 있다)
+            vals = [t, day, f"+{close}", f"{move:+d}", str(1_000 * tf.IDX[t]), None,
                     *[str(v) for v in _kw_flows(t)], "ka10060", stamp]
             con.execute(f'INSERT INTO "{postclose.TABLE}" ({",".join(names)}) VALUES '
                         f'({",".join("?" * len(names))})', vals)

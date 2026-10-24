@@ -12,10 +12,13 @@ import {
   getFactorCatalog,
   type FactorDefinition,
 } from "../../src/shared/api/generated";
+import { ensureProvider } from "../assistant-helpers";
 import { currentSource } from "../editor-helpers";
 import { apiClient, requireData } from "../workbench-helpers";
 
 const TITLE = "안내로 만든 모멘텀";
+/** 대본이 제안하는 전략 제목(`_scenarios.py`의 `_IDEA_TITLE`). */
+const IDEA_TITLE = "KRX 대형 모멘텀";
 
 test(
   "US-DM-13 새 전략을 단계별로 고르면 같은 전략 문서가 만들어지고 편집기에서 이어 쓴다",
@@ -57,6 +60,8 @@ test(
       "step",
     );
     await expect(page.getByRole("button", { name: "편집기에서 직접 쓰기" })).toBeVisible();
+    // 오른쪽 칸은 AI 도우미와 문서 미리보기 탭이다. 공급자 연결 여부와 상관없이 미리보기를 연다.
+    await page.getByRole("tab", { name: /^전략 문서 미리보기/u }).click();
     const preview = page.getByRole("complementary", { name: "전략 문서 미리보기" });
 
     // 1단계: 이름을 적으면 오른쪽 문서에 바로 들어간다.
@@ -136,3 +141,38 @@ test(
   },
 );
 
+test(
+  "US-DM-13 안내 첫 단계부터 AI 도우미에게 만들 전략을 말하고 제안을 적용하면 단계 값이 채워진다",
+  { tag: ["@story", "@US-DM-13"] },
+  async ({ page }) => {
+    test.setTimeout(120_000);
+    await ensureProvider(page);
+    await page.goto("/research/strategies/new?guide=true");
+
+    // 공급자가 연결돼 있으면 오른쪽 칸은 AI 도우미 탭으로 열리고, 단계에 맞는 추천 질문이 보인다.
+    const tab = page.getByRole("tab", { name: "AI 도우미" });
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+    const panel = page.getByRole("tabpanel", { name: "AI 도우미" });
+    const input = panel.getByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });
+    await panel
+      .getByRole("group", { name: "이 단계에서 자주 묻는 것" })
+      .getByRole("button", { name: "어떤 전략을 만들지 같이 정해 주세요" })
+      .click();
+    // 추천 질문은 입력칸만 채우고 보내지 않는다.
+    await expect(input).toHaveValue("어떤 전략을 만들지 같이 정해 주세요");
+
+    // 대본 공급자는 "새 전략" 낱말로 전략 전체를 제안하는 대본을 고른다(`_scenarios.py`).
+    await input.fill("최근 많이 오른 대형주를 사는 새 전략을 만들어 줘");
+    await panel.getByRole("button", { name: "보내기" }).click();
+    const card = panel.getByRole("article", { name: IDEA_TITLE });
+    await expect(card).toBeVisible({ timeout: 60_000 });
+    // 안내에는 실행 설정이 없어 "적용 후 백테스트"를 두지 않는다.
+    await expect(card.getByRole("button", { name: "적용 후 백테스트" })).toHaveCount(0);
+    await card.getByRole("button", { name: "문서에 적용" }).click();
+
+    // 같은 문서가 바뀌므로 안내 칸과 단계 상태가 그대로 따라온다.
+    await expect(page.getByRole("textbox", { name: /^전략 이름/u })).toHaveValue(IDEA_TITLE);
+    const steps = page.getByRole("navigation", { name: "만드는 단계" });
+    await expect(steps.getByRole("button", { name: /^이름·의도/u })).toContainText("(완료)");
+  },
+);

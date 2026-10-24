@@ -30,14 +30,19 @@ export type AssistProposalAction = {
  * 사이드바가 붙은 화면의 종류. 안내 문구만 가른다.
  *
  * `result`는 백테스트 결과 화면이다(결과 설명 spec R1). 그 화면에서 "무엇을 만들고 싶은지 적으세요"는
- * 틀린 안내다. 모드 자체(도구·제안 여부)는 서버가 세션으로 정하므로 여기서 다시 판단하지 않는다.
+ * 틀린 안내다. `guide`는 새 전략 단계별 안내로, 아직 문서가 비어 있어 무슨 전략을 만들지부터 묻는다.
+ * 모드 자체(도구·제안 여부)는 서버가 세션으로 정하므로 여기서 다시 판단하지 않는다.
  */
-export type AssistCopy = "strategy" | "result";
+export type AssistCopy = "strategy" | "guide" | "result";
 
 const COPY = {
   strategy: {
     empty: "assistant.chat.empty.description",
     placeholder: "assistant.chat.input.placeholder",
+  },
+  guide: {
+    empty: "assistant.chat.empty.description.guide",
+    placeholder: "assistant.chat.input.placeholder.guide",
   },
   result: {
     empty: "assistant.chat.empty.description.result",
@@ -58,7 +63,7 @@ const COPY = {
 type AssistScreenProps =
   | {
       /** 안내 문구의 종류. 기본은 전략 화면이다. */
-      copy?: "strategy";
+      copy?: "strategy" | "guide";
       /** 턴 시작 순간의 편집기 텍스트·진단·실행 설정. 서버가 문서를 들지 않으므로 턴마다 싣는다. */
       readContext: () => TurnContextPayload;
     }
@@ -72,6 +77,11 @@ export type AssistStrategySidebarProps = AssistScreenProps & {
   onApplyProposalAndBacktest?: (action: AssistProposalAction) => void;
   /** 사이드바를 닫는 동작. 주면 닫기 버튼이 생긴다. */
   onClose?: () => void;
+  /**
+   * 입력칸 위에 두는 추천 질문. 누르면 입력칸을 그 문장으로 채울 뿐 보내지 않는다 — 사용자가 고쳐 보낼
+   * 수 있어야 한다. 화면이 지금 맥락(안내 단계)에 맞춰 고른다.
+   */
+  suggestions?: readonly string[];
 };
 
 /**
@@ -89,8 +99,12 @@ export const AssistStrategySidebar = ({
   onApplyProposal,
   onApplyProposalAndBacktest,
   onClose,
+  suggestions = [],
 }: AssistStrategySidebarProps) => {
   const confirmTextId = useId();
+  const suggestionsId = useId();
+  // 추천 질문을 누른 횟수가 nonce 다. 같은 문장을 두 번 눌러도 입력칸을 다시 채운다.
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
   const providers = useQuery(assistantProvidersQuery());
   const chat = useAssistChat({ documentRef, readContext });
   const [closeConfirm, setCloseConfirm] = useState(false);
@@ -316,7 +330,33 @@ export const AssistStrategySidebar = ({
           >
             {announcement ?? ""}
           </p>
+          {suggestions.length === 0 ? null : (
+            <div
+              className="assist__suggestions"
+              role="group"
+              aria-labelledby={suggestionsId}
+            >
+              <p className="assist__suggestions-title" id={suggestionsId}>
+                {t("assistant.chat.suggestions")}
+              </p>
+              <div className="assist__suggestion-list">
+                {suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    className="assist__suggestion"
+                    onClick={() =>
+                      setPrefill({ text: suggestion, nonce: (prefill?.nonce ?? 0) + 1 })
+                    }
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <AssistComposer
+            prefill={prefill}
             restore={chat.draftRestore}
             running={chat.running !== null}
             busy={chat.busy}

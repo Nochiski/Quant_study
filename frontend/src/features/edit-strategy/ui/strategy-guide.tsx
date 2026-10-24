@@ -8,7 +8,7 @@ import { useId, useMemo, useState, type ReactNode } from "react";
 
 import type { FactorDefinition } from "../../../shared/api";
 import { t, tCode, tDescription, tFill, tName, tOptional } from "../../../shared/config";
-import { Badge, Button } from "../../../shared/ui";
+import { Badge, Button, panelId, Tabs } from "../../../shared/ui";
 import { buildCanonicalSnippetCatalog, type SnippetCatalogSource } from "../model/canonical-snippets";
 import {
   catalogProfiles,
@@ -46,6 +46,9 @@ import "./strategy-guide.css";
 /** 안내의 feedback owner. 캔버스·Form·Graph와 슬롯을 나눈다. */
 const GUIDE_OWNER = "guide";
 
+/** 오른쪽 칸의 탭: AI 도우미와 문서 미리보기. 어느 탭인지는 화면(URL)이 소유한다. */
+export type GuidePanel = "assistant" | "preview";
+
 const stepName = (step: GuideStep): string => {
   if (step.kind === "document") return t("guide.step.document");
   if (step.kind === "review") return t("guide.step.review");
@@ -63,6 +66,9 @@ export const StrategyGuide = ({
   step: stepId,
   onStep,
   status,
+  assistant,
+  panel = "preview",
+  onPanel,
   onOpenGraph,
   onOpenEditor,
   onUndo,
@@ -90,6 +96,13 @@ export const StrategyGuide = ({
   review: ReactNode;
   /** 머리 띠 오른쪽의 초안 저장 상태(서버 초안 동기화 문장). */
   status?: ReactNode;
+  /**
+   * 오른쪽 칸의 AI 도우미. 지금 단계를 받아 그 단계에 맞는 추천 질문을 고른다. 없으면 오른쪽 칸은 문서
+   * 미리보기 하나다. AI 패널은 탭을 바꿔도 마운트를 유지한다 — 치던 문장·진행 중 답변을 잃지 않는다.
+   */
+  assistant?: (step: GuideStep) => ReactNode;
+  panel?: GuidePanel;
+  onPanel?: (panel: GuidePanel) => void;
 }) => {
   const titleId = useId();
   const pipeline: PipelineProjection | null = useMemo(
@@ -132,6 +145,8 @@ export const StrategyGuide = ({
   ).length;
   const next = steps[index + 1];
   const changed = useChangedLines(source);
+  const sideId = useId();
+  const preview = <YamlPreview source={source} changed={changed} />;
   return (
     <section className="strategy-guide" aria-labelledby={titleId}>
       <header className="strategy-guide__header">
@@ -259,9 +274,48 @@ export const StrategyGuide = ({
             )}
           </footer>
         </section>
-        <div className="strategy-guide__side">
-          <YamlPreview source={source} changed={changed} />
-        </div>
+        {assistant === undefined ? (
+          <div className="strategy-guide__side">{preview}</div>
+        ) : (
+          <div className="strategy-guide__side">
+            <Tabs
+              className="strategy-guide__side-tabs"
+              label={t("guide.side")}
+              idBase={sideId}
+              value={panel}
+              onChange={(nextPanel) => onPanel?.(nextPanel)}
+              items={[
+                { id: "assistant", label: t("guide.side.assistant") },
+                {
+                  id: "preview",
+                  label: t("guide.preview"),
+                  badge:
+                    changed.size === 0
+                      ? undefined
+                      : tFill("guide.preview.changedCount", { count: changed.size }),
+                },
+              ]}
+            />
+            <div
+              role="tabpanel"
+              id={panelId(sideId, "assistant")}
+              aria-labelledby={`${sideId}-tab-assistant`}
+              className="strategy-guide__side-panel strategy-guide__side-panel--assistant"
+              hidden={panel !== "assistant"}
+            >
+              {assistant(current)}
+            </div>
+            <div
+              role="tabpanel"
+              id={panelId(sideId, "preview")}
+              aria-labelledby={`${sideId}-tab-preview`}
+              className="strategy-guide__side-panel"
+              hidden={panel !== "preview"}
+            >
+              {preview}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

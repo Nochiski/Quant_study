@@ -4786,6 +4786,7 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     const user = userEvent.setup();
     const history = mountWithClient("/research/strategies/new?guide=true", undefined, false).history;
     await screen.findByRole("heading", { name: "새 전략 만들기" });
+    // 단계 상태(완료·오류 N)는 이름 뒤에 붙는다. 처음에는 아무 단계도 채우지 않았다.
     await waitFor(() =>
       expect(within(steps()).getAllByRole("button").map((button) => button.textContent)).toEqual([
         "1이름·의도",
@@ -4824,6 +4825,9 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     await user.click(within(chips).getByRole("button", { name: "가격 1" }));
     await user.click(screen.getByRole("button", { name: "Server momentum · 담기" }));
     await waitFor(() => expect(source()).toContain("factor_id: server.momentum"));
+    // 공급자가 연결돼 있어 오른쪽 칸은 AI 도우미 탭으로 열려 있다. 미리보기 탭에 바뀐 줄 수가 붙는다.
+    const previewTab = screen.getByRole("tab", { name: /^전략 문서 미리보기 \d+줄 바뀜$/u });
+    await user.click(previewTab);
     const preview = screen.getByRole("complementary", { name: "전략 문서 미리보기" });
     await waitFor(() =>
       expect(within(preview).getAllByText("방금 바뀐 줄:").length).toBeGreaterThan(0),
@@ -4849,6 +4853,102 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     await user.click(within(steps()).getByRole("button", { name: "결합" }));
     const combine = screen.getByRole("region", { name: "결합" });
     expect(within(combine).getByText(/^더 설정하기 \(\d+\)$/u)).toBeInTheDocument();
+  });
+
+  it("공급자가 연결돼 있으면 AI 도우미 탭이 먼저 열리고, 추천 질문은 입력칸만 채우며 탭을 바꿔도 남는다", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    const { history } = mountWithClient("/research/strategies/new?guide=true", undefined, false);
+    const assistantTab = await screen.findByRole("tab", { name: "AI 도우미" });
+    await waitFor(() => expect(assistantTab).toHaveAttribute("aria-selected", "true"));
+
+    const panel = screen.getByRole("tabpanel", { name: "AI 도우미" });
+    const suggestions = await within(panel).findByRole("group", { name: "이 단계에서 자주 묻는 것" });
+    await user.click(
+      within(suggestions).getByRole("button", { name: "어떤 전략을 만들지 같이 정해 주세요" }),
+    );
+    const input = within(panel).getByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });
+    expect(input).toHaveValue("어떤 전략을 만들지 같이 정해 주세요");
+    expect(input).toHaveFocus();
+    // 채우기만 하고 보내지 않는다.
+    expect(assistantTurns).toHaveLength(0);
+
+    // 미리보기로 바꾸면 URL 이 탭을 들고, 돌아와도 친 문장이 그대로다(AI 패널은 마운트를 유지한다).
+    await user.click(screen.getByRole("tab", { name: "전략 문서 미리보기" }));
+    await waitFor(() => expect(history.location.search).toContain("assist=preview"));
+    expect(screen.getByRole("complementary", { name: "전략 문서 미리보기" })).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "AI 도우미" }));
+    await waitFor(() => expect(history.location.search).toContain("assist=assistant"));
+    expect(input).toHaveValue("어떤 전략을 만들지 같이 정해 주세요");
+
+    // 추천 질문은 지금 단계를 따른다.
+    await user.click(await within(steps()).findByRole("button", { name: "유니버스" }));
+    expect(
+      await within(panel).findByRole("button", { name: "거르기 규칙에 쓸 수 있는 필드를 설명해 주세요" }),
+    ).toBeInTheDocument();
+  });
+
+  it("공급자가 없으면 문서 미리보기 탭으로 열고, AI 탭은 설정으로 가는 길을 보인다", async () => {
+    useGuideCatalog();
+    server.use(
+      http.get(`${API}/api/v1/assistant/providers`, () =>
+        HttpResponse.json({ kinds: [], profiles: [] }),
+      ),
+    );
+    const user = userEvent.setup();
+    mountWithClient("/research/strategies/new?guide=true", undefined, false);
+    const previewTab = await screen.findByRole("tab", { name: "전략 문서 미리보기" });
+    await waitFor(() => expect(previewTab).toHaveAttribute("aria-selected", "true"));
+    await user.click(screen.getByRole("tab", { name: "AI 도우미" }));
+    const panel = screen.getByRole("tabpanel", { name: "AI 도우미" });
+    expect(within(panel).getByRole("link", { name: "설정 열기" })).toBeVisible();
+    expect(within(panel).queryByRole("group", { name: "이 단계에서 자주 묻는 것" })).toBeNull();
+  });
+
+  it("안내에서 AI 제안을 적용하면 같은 문서가 바뀌어 단계 값이 채워지고, 적용 후 백테스트는 없다", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    mountWithClient("/research/strategies/new?guide=true", undefined, false);
+    const source = await hiddenSource();
+    const panel = await screen.findByRole("tabpanel", { name: "AI 도우미" });
+    const input = await within(panel).findByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });
+    await user.type(input, "싼 종목 중 오르는 종목을 사고 싶어요");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(assistantTurns).toHaveLength(1));
+    await waitFor(() => expect(assistantStream).not.toBeNull());
+    expect(assistantTurns[0]!.context.source_text).toBe(source());
+
+    const proposed = 'schema_version: "1.2"\ntitle: "저변동 모멘텀"\n';
+    act(() =>
+      assistantStream!.push({
+        sequence: 1,
+        turn_id: "t-1",
+        event: {
+          type: "proposal",
+          proposal: {
+            title: "저변동 모멘텀",
+            summary: "변동성이 낮은 모멘텀 상위 종목을 매수합니다.",
+            rationale: "최근 국내 시장은 저변동 구간입니다.",
+            sources: [],
+            source_format: "yaml",
+            source_text: proposed,
+            compile: { ok: true, spec_hash: "hash-1", diagnostics: [] },
+          },
+        },
+      }),
+    );
+    await within(panel).findByRole("button", { name: "문서에 적용" });
+    expect(within(panel).queryByRole("button", { name: "적용 후 백테스트" })).toBeNull();
+    await user.click(within(panel).getByRole("button", { name: "문서에 적용" }));
+
+    expect(source()).toBe(proposed);
+    expect(screen.getByText("제안을 문서에 적용했습니다.")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: /^전략 이름/u })).toHaveValue("저변동 모멘텀"),
+    );
+    await waitFor(() =>
+      expect(within(steps()).getByRole("button", { name: /^이름·의도/u })).toHaveTextContent("(완료)"),
+    );
   });
 });
 

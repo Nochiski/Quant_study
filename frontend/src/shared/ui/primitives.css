@@ -200,6 +200,14 @@ textarea.ui-input {
   color: var(--accent);
 }
 
+.ui-tab__badge {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-size-small);
+}
+
 .ui-tab[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.5;

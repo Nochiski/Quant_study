@@ -49,6 +49,8 @@ type StrategyDocumentSearch = {
   guide?: boolean;
   /** 안내의 지금 단계 id(`guideSteps`). 모르는 값이면 화면이 첫 단계로 본다. */
   step?: string;
+  /** 안내 오른쪽 칸의 탭(AI 도우미·문서 미리보기). 없으면 AI 공급자 연결 여부로 화면이 고른다. */
+  assist?: "assistant" | "preview";
 };
 type BacktestHistorySearch = {
   offset?: number;
@@ -78,6 +80,8 @@ const strategyDocumentSearch = (
     run: typeof search.run === "string" && search.run.trim() !== "" ? search.run.trim() : undefined,
     guide: search.guide === true || search.guide === "true" ? true : undefined,
     step: typeof search.step === "string" && search.step !== "" ? search.step : undefined,
+    assist:
+      search.assist === "assistant" || search.assist === "preview" ? search.assist : undefined,
   };
 };
 

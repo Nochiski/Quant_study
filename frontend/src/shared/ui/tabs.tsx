@@ -6,6 +6,8 @@ export type TabItem<Id extends string = string> = {
   id: Id;
   label: string;
   disabled?: boolean;
+  /** 탭 이름 뒤에 붙는 짧은 표식(예: "4줄 바뀜"). 접근 이름에도 들어간다. */
+  badge?: string;
 };
 
 type TabsProps<Id extends string> = {
@@ -80,6 +82,12 @@ export function Tabs<Id extends string>({
             onKeyDown={(event) => move(event, item.id)}
           >
             {item.label}
+            {item.badge === undefined ? null : (
+              <>
+                {" "}
+                <span className="ui-tab__badge">{item.badge}</span>
+              </>
+            )}
           </button>
         );
       })}

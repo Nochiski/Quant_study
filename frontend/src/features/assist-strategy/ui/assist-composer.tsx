@@ -1,4 +1,4 @@
-import { useId, useState, type KeyboardEvent } from "react";
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { t } from "../../../shared/config";
 import type { AssistDraftRestore } from "../model/use-assist-chat";
@@ -7,6 +7,11 @@ import { Button } from "../../../shared/ui";
 type AssistComposerProps = {
   /** 서버가 받지 않아 되돌아온 질문. `nonce`가 바뀔 때만 입력칸을 다시 채운다. */
   restore: AssistDraftRestore | null;
+  /**
+   * 사용자가 고른 추천 질문. `nonce`가 바뀔 때 입력칸을 그 문장으로 바꾸고 초점을 옮긴다. 사용자가 명시해
+   * 고른 문장이라 치던 문장이 있어도 덮는다(되돌아온 질문과 다르다).
+   */
+  prefill?: { text: string; nonce: number } | null;
   /** 진행 중 턴이 있으면 전송 대신 중지를 보여 준다. */
   running: boolean;
   /** 세션 생성·턴 시작 요청이 도는 중. 같은 질문을 두 번 보내지 않게 막는다. */
@@ -25,6 +30,7 @@ type AssistComposerProps = {
  * 보내 버린다.
  */
 export const AssistComposer = ({
+  prefill = null,
   restore,
   running,
   busy,
@@ -35,6 +41,8 @@ export const AssistComposer = ({
   const inputId = useId();
   const [text, setText] = useState("");
   const [restoredNonce, setRestoredNonce] = useState<number | null>(null);
+  const [prefilledNonce, setPrefilledNonce] = useState<number | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // 되돌아온 질문을 렌더 중에 입력칸으로 옮긴다. effect로 미루면 빈 칸이 한 프레임 보이고,
   // 그 사이 타이핑은 다음 렌더에 덮인다(`frontend-react-effects.md`).
@@ -45,6 +53,16 @@ export const AssistComposer = ({
     setRestoredNonce(restore.nonce);
     if (text.trim() === "") setText(restore.text);
   }
+
+  if (prefill !== null && prefill.nonce !== prefilledNonce) {
+    setPrefilledNonce(prefill.nonce);
+    setText(prefill.text);
+  }
+  // 초점은 DOM 명령이라 렌더 중에 못 한다. 채운 문장이 commit 된 직후 옮겨 바로 고치거나 보낼 수 있게 한다.
+  const focusNonce = prefill?.nonce ?? null;
+  useLayoutEffect(() => {
+    if (focusNonce !== null) inputRef.current?.focus();
+  }, [focusNonce]);
 
   const submit = () => {
     if (running || busy || text.trim() === "") return;
@@ -71,6 +89,7 @@ export const AssistComposer = ({
         {t("assistant.chat.input")}
       </label>
       <textarea
+        ref={inputRef}
         className="assist__input"
         id={inputId}
         rows={3}

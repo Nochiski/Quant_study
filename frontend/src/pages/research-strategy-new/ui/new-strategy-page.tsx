@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import {
   ContractInspector,
@@ -51,15 +52,18 @@ import {
   useStrategyDocument,
   useUpgradeDocument,
   type DocumentSource,
+  type GuidePanel,
+  type GuideStep,
   type StrategyView,
 } from "../../../features/edit-strategy";
+import { assistantProvidersQuery } from "../../../entities/assistant";
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
   RunEnvironmentSummary,
   useBacktestRunSettings,
 } from "../../../features/run-backtest";
-import { t } from "../../../shared/config";
+import { t, tOptional } from "../../../shared/config";
 import { useNavigate, useSearch } from "../../../shared/lib/router";
 import { Badge, Button } from "../../../shared/ui";
 import {
@@ -82,6 +86,10 @@ const NEW_DRAFT: DocumentSource = {
   format: "yaml",
   source: NEW_STRATEGY_STARTER,
 };
+
+/** 안내 단계마다 AI 도우미에 띄울 추천 질문(`guide.assist.suggest.<단계 id>.<n>`). 문구가 있는 것만 보인다. */
+const guideSuggestions = (step: GuideStep): string[] =>
+  [1, 2, 3].flatMap((n) => tOptional(`guide.assist.suggest.${step.id}.${n}`) ?? []);
 
 /**
  * New-strategy entry (WORKFLOW P2-04): a draft with no base. Saving creates the strategy, after
@@ -278,13 +286,27 @@ export const NewStrategyPage = () => {
     });
   }, [leaving, document.strategyId, document.baseRevision, navigate]);
 
+  // 안내 오른쪽 칸의 기본 탭: AI 공급자가 연결돼 있으면 AI 도우미, 아니면 문서 미리보기. 사용자가 고르면 URL 이 이긴다.
+  const providers = useQuery(assistantProvidersQuery());
+  const guidePanel: GuidePanel =
+    search.assist ??
+    (providers.data?.profiles.some((profile) => profile.active) ? "assistant" : "preview");
+
   // 단계별 안내(RD-04-D). 같은 문서·같은 트랜잭션을 쓰고, 편집기는 숨긴 채 살아 있어 되돌리기 이력이 이어진다.
   // 안내를 닫으면 같은 초안을 편집기 그래프 보기로 연다.
   const leaveGuide = (next: Partial<typeof search>) =>
     void navigate({
       to: ROUTE,
       // 숨은 편집기의 커서가 남긴 선택(`path`)은 버린다. 남기면 그 팩터의 노드 편집기가 열린다.
-      search: { ...search, guide: undefined, step: undefined, path: undefined, recipe: undefined, ...next },
+      search: {
+        ...search,
+        guide: undefined,
+        step: undefined,
+        assist: undefined,
+        path: undefined,
+        recipe: undefined,
+        ...next,
+      },
       resetScroll: false,
     });
   if (search.guide)
@@ -294,8 +316,34 @@ export const NewStrategyPage = () => {
           {autosave.recovery ? (
             <RecoveryBanner recovery={autosave.recovery} />
           ) : null}
+          {/* 제안 적용 결과는 안내 위 알림 줄에 둔다(편집기 화면과 같은 자리 규칙). */}
+          <ProposalApplyFeedback
+            apply={proposalApply}
+            chain={strategyAssistant.chain}
+            blockedReason={runSettings.blockedReason}
+          />
           <StrategyGuide
             status={<ServerDraftBanner sync={serverDraft} />}
+            panel={guidePanel}
+            onPanel={(assist) =>
+              void navigate({
+                to: ROUTE,
+                search: { ...search, assist },
+                replace: true,
+                resetScroll: false,
+              })
+            }
+            assistant={(step) => (
+              <AssistStrategySidebar
+                copy="guide"
+                documentRef={strategyAssistant.documentRef}
+                readContext={strategyAssistant.readContext}
+                // 안내에는 실행 설정·백테스트 게이트가 없어 "적용 후 백테스트"는 넘기지 않는다.
+                onPreviewProposal={strategyAssistant.proposalHandlers.onPreviewProposal}
+                onApplyProposal={strategyAssistant.proposalHandlers.onApplyProposal}
+                suggestions={guideSuggestions(step)}
+              />
+            )}
             form={form}
             schema={assist.schema}
             transactions={transactions}
@@ -359,6 +407,7 @@ export const NewStrategyPage = () => {
             />
           </div>
         </div>
+        <ProposalApplyDialog apply={proposalApply} />
         <DirtyLeaveGuard dirty={document.dirty && !leaving} acceptedRunId={null} />
       </>
     );

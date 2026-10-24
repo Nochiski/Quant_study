@@ -204,10 +204,17 @@ class DevRustBuildTest(unittest.TestCase):
         self, _running: Mock, _ready: Mock, ensure_core: Mock, _servers: Mock
     ) -> None:
         self.assertEqual(dev.run(CHECKOUT, open_browser=False), 130)
-        ensure_core.assert_called_once_with(CHECKOUT, disabled=False, retry=False)
+        ensure_core.assert_called_once_with(CHECKOUT, uv=None, disabled=False)
         ensure_core.reset_mock()
-        dev.run(CHECKOUT, open_browser=False, rust_build=False, retry_rust_build=True)
-        ensure_core.assert_called_once_with(CHECKOUT, disabled=True, retry=True)
+        dev.run(CHECKOUT, open_browser=False, rust_build=False)
+        ensure_core.assert_called_once_with(CHECKOUT, uv=None, disabled=True)
+
+    def test_backend_uv_is_the_one_the_server_command_found(self) -> None:
+        servers = (
+            dev.DevServer("프런트엔드", ("C:/bin/npm.cmd",), CHECKOUT, 5173, "u"),
+            dev.DevServer(dev.BACKEND, ("C:/bin/uv.cmd", "run"), CHECKOUT, 8000, "u"),
+        )
+        self.assertEqual(dev._backend_uv(servers), "C:/bin/uv.cmd")
 
     @patch.object(dev, "_servers")
     @patch.object(dev, "_require_available_port", side_effect=RuntimeError("occupied"))

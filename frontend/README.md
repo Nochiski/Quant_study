@@ -124,7 +124,7 @@ npm run docs:capture # 실행 중인 실제 frontend/backend로 사용자 매뉴
 `npm run test:e2e`가 본다. 이 명령은 실제 FastAPI와 production preview를 격리된 SQLite에서 함께 띄운다
 (`e2e/README.md`). 먼저 `backend`에서 `uv sync`와
 `uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release`를 실행해야 기본 Rust
-백테스트까지 검증된다.
+백테스트까지 검증된다. Rust 소스를 바꾼 뒤 다시 빌드하지 않으면 엔진이 오래된 확장을 거절한다.
 
 OpenAPI 생성물은 `src/shared/api/generated`에만 있고 앱 코드는 `shared/api` gateway를 통해서만
 접근한다. `npm run api:generate` 뒤 diff가 생기면 backend 계약과 생성물을 같은 변경으로 커밋한다.

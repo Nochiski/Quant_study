@@ -22,6 +22,7 @@ from .rust_core import ensure_core
 from .server import _repo_root
 
 FRONTEND_URL = "http://localhost:5173"
+BACKEND = "백엔드"
 READINESS_TIMEOUT_SECONDS = 30.0
 STOP_TIMEOUT_SECONDS = 5.0
 
@@ -51,7 +52,7 @@ def _servers(root: Path) -> tuple[DevServer, ...]:
         )
     return (
         DevServer(
-            "백엔드",
+            BACKEND,
             backend_uv_command(uv, root / "backend", "server"),
             root / "backend",
             8000,
@@ -193,13 +194,14 @@ def _stop(servers: Sequence[OwnedServer]) -> None:
             )
 
 
-def run(
-    root: Path,
-    *,
-    open_browser: bool,
-    rust_build: bool = True,
-    retry_rust_build: bool = False,
-) -> int:
+def _backend_uv(servers: Sequence[DevServer]) -> str | None:
+    """백엔드 명령이 찾은 uv를 Rust 코어 준비에도 그대로 쓴다."""
+    return next(
+        (server.command[0] for server in servers if server.name == BACKEND), None
+    )
+
+
+def run(root: Path, *, open_browser: bool, rust_build: bool = True) -> int:
     """두 서버의 준비와 생존을 감시하고 이 실행이 시작한 프로세스만 정리한다."""
     owned: list[OwnedServer] = []
     try:
@@ -207,7 +209,7 @@ def run(
         for server in servers:
             _require_available_port(server)
         # 포트를 먼저 확인해 이미 떠 있는 서버가 있으면 긴 빌드 없이 바로 거절한다.
-        ensure_core(root, disabled=not rust_build, retry=retry_rust_build)
+        ensure_core(root, uv=_backend_uv(servers), disabled=not rust_build)
         # 빌드하는 동안 다른 프로세스가 포트를 잡았을 수 있어 시작 직전에 다시 확인한다.
         for server in servers:
             _require_available_port(server)
@@ -258,14 +260,6 @@ def main() -> None:
             " (환경 변수 QUANT_STUDY_DEV_SKIP_RUST_BUILD=1과 같음)."
         ),
     )
-    parser.add_argument(
-        "--retry-rust-build",
-        action="store_true",
-        help=(
-            "같은 Rust 소스로 실패했던 빌드도 다시 시도합니다"
-            " (환경 변수 QUANT_STUDY_DEV_RETRY_RUST_BUILD=1과 같음)."
-        ),
-    )
     options = parser.parse_args()
     try:
         root = _repo_root()
@@ -275,10 +269,5 @@ def main() -> None:
         )
         raise SystemExit(1) from error
     raise SystemExit(
-        run(
-            root,
-            open_browser=options.open,
-            rust_build=not options.no_rust_build,
-            retry_rust_build=options.retry_rust_build,
-        )
+        run(root, open_browser=options.open, rust_build=not options.no_rust_build)
     )

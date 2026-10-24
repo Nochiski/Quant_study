@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import functools
 import importlib
-import importlib.util
 from datetime import datetime
 from decimal import ROUND_DOWN, Decimal
 from typing import Any, Protocol, cast
@@ -21,6 +20,7 @@ from backtest_engine.engine.broker import (
     QuoteCore,
     QuoteNumbers,
 )
+from backtest_engine.engine.core_source import BUILD_COMMAND, core_status
 from backtest_engine.engine.portfolio import Portfolio as PythonPortfolio
 from backtest_engine.engine.portfolio import scale_quantity
 from backtest_engine.engine.power_projection import ExecutionState, project_execution
@@ -78,19 +78,27 @@ def core_available(core: str) -> bool:
     if core == "python":
         return True
     if core in RUST_CORES:
-        return importlib.util.find_spec("backtest_core") is not None
+        # 현재 소스보다 오래된 확장은 없는 것과 같이 다룬다. 낡은 코어의 결과가 섞이면 안 된다.
+        return core_status() in ("fresh", "unchecked")
     return False
 
 
 def _require_core(core: str) -> None:
     if core not in CORES:
         raise CoreUnavailable(f"unknown core — core={core!r} available={CORES}")
-    if not core_available(core):
-        raise CoreUnavailable(
-            f"core extension not installed — core={core!r}; build with "
-            f"`uv run maturin develop --manifest-path "
-            f"rust/backtest_core/Cargo.toml --release` from the backend directory"
-        )
+    if core in RUST_CORES:
+        status = core_status()
+        if status == "missing":
+            raise CoreUnavailable(
+                f"core extension not installed — core={core!r}; build with "
+                f"`{BUILD_COMMAND}` from the backend directory"
+            )
+        if status == "stale":
+            raise CoreUnavailable(
+                f"core extension is older than the current Rust source — core={core!r}; "
+                f"rebuild with `{BUILD_COMMAND}` from the backend directory "
+                "(or restart `uv run dev`)"
+            )
 
 
 class PythonPricing:

@@ -26,8 +26,10 @@ paths:
   - 기존 오류를 grandfather하는 diff 기준 게이트는 없다. 오류가 나면 같은 PR에서 고치거나 사유를
     단 라인별 ignore를 둔다(아래 ignore 규칙).
 - 로컬 환경은 CI와 같은 extra로 맞춘다: `cd backend && uv sync --locked --extra parquet --extra equity --extra llm`
-  뒤 `uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release`. extra가 빠지면
-  pyright가 없는 모듈을 오류로 보고한다.
+  뒤 `uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release`(`uv run dev`는 코어가
+  없거나 현재 Rust 소스보다 오래됐으면 이 빌드를 자동으로 한다). extra가 빠지면 pyright가 없는 모듈을
+  오류로 보고한다. 오래된 확장은 엔진이 `CoreUnavailable`로 거절하므로 Rust 소스를 바꾼 뒤에는 다시
+  빌드한다.
 - lint 룰 무시 시 reason 코멘트 의무:
   - ruff: `# noqa: F401  # reason: ...`
   - pyright: `# pyright: ignore[reportOptionalMemberAccess]  # reason: ...`

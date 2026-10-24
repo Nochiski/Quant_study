@@ -12,7 +12,7 @@ import pytest
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
-from backtest_engine.engine.core import core_available, instrument_key
+from backtest_engine.engine.core import instrument_key
 from backtest_engine.errors import EquityWipedOut
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import StrategyEvent
@@ -21,13 +21,13 @@ from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.strategy import StrategyContext
 from tests import test_short_selling
 from tests.conftest import day, make_bar, make_instrument
+from tests.rust_core_guard import RUST_CORE
 from tests.test_engine_golden import GOLDEN_BARS, ScriptedStrategy, target_70pct
 
-RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="rust core not built")
 INSTRUMENT = make_instrument()
 
 
-@RUST_ONLY
+@RUST_CORE
 @pytest.mark.parametrize(
     ("crash_close", "equity"),
     [
@@ -63,7 +63,7 @@ def test_equity_wiped_out_is_raised_at_the_same_close_with_the_same_message(
     assert "positions=[('005930', '-10')]" in outcomes[0][0]
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_runtime_stays_failed_after_a_session_domain_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -102,7 +102,7 @@ def test_runtime_stays_failed_after_a_session_domain_error(
         runtime.finish()
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_retained_context_keeps_callback_time_portfolio() -> None:
     """전략이 ctx를 보관했다가 run 종료 후 읽어도 콜백 시점 포트폴리오를 본다."""
     contexts: list[StrategyContext] = []
@@ -128,7 +128,7 @@ def test_retained_context_keeps_callback_time_portfolio() -> None:
     assert contexts[0].open_orders() == ()
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_python_strategy_sees_feed_snapshot_objects_for_market_callbacks() -> None:
     """market 콜백 이벤트는 feed의 MarketSnapshot 객체 그대로다 (복사·재조립 없음)."""
     seen: list[MarketSnapshot] = []
@@ -147,7 +147,7 @@ def test_python_strategy_sees_feed_snapshot_objects_for_market_callbacks() -> No
     ] * len(GOLDEN_BARS)
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_rust_feed_rejects_two_instruments_that_share_one_key() -> None:
     """`instrument_key`가 필드를 ':'로 이어 붙이므로 필드 안의 ':'가 두 종목을 한 key로 합친다.
 
@@ -180,7 +180,7 @@ def test_rust_feed_rejects_two_instruments_that_share_one_key() -> None:
     python_engine.run(ScriptedStrategy(script=(None, None)), DataFeed(bars))
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_partial_trace_keeps_decision_when_submit_fails_after_recording(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

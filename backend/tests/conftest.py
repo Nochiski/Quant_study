@@ -20,6 +20,7 @@ from strategy_workbench.adapters.outbound.secrets_local.facade.store import defa
 from strategy_workbench.bootstrap import _container, _http, _secrets
 
 from .runtime_path_guard import RuntimePathGuard
+from .rust_core_guard import require_rust_core
 
 # 테스트가 열면 안 되는 개발자 로컬 런타임 상태의 위치(#211). 아래 격리 fixture가 기본값을
 # tmp로 바꾸기 전에, 실제 기본값에서 계산한다.
@@ -199,3 +200,14 @@ def make_snapshot(ts: datetime, *bars: Bar) -> MarketSnapshot:
 
 def day(day_of_month: int) -> datetime:
     return datetime(2026, 8, day_of_month)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", "rust_core: Rust 코어 확장이 필요하다(없으면 건너뛰고 낡았으면 실패)"
+    )
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    if item.get_closest_marker("rust_core") is not None:
+        require_rust_core()

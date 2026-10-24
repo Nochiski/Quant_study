@@ -711,7 +711,8 @@ Claude·Codex 앱과는 관계없다. 저장소 README 「바로 실행」의 `u
 <details>
 <summary>개발자용: Rust core 설치와 문서 화면 다시 캡처하기</summary>
 
-Persistent Rust core를 사용하려면 한 번 빌드한다.
+`uv run dev`로 실행하면 Rust 툴체인만 있으면 Persistent Rust core가 없거나 현재 Rust 소스보다 오래됐을 때
+자동으로 빌드한다. backend를 따로 띄울 때는 직접 빌드한다(Rust 소스를 바꾼 뒤에도 다시 빌드한다).
 
 ```powershell
 cd backend

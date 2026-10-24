@@ -25,12 +25,22 @@ def _owned(name: str = "서버", port: int = 8000) -> dev.OwnedServer:
 
 
 class DevTest(unittest.TestCase):
+    def setUp(self) -> None:
+        # 서버 수명주기 시험이 실제 uv·cargo를 부르지 않게 Rust 코어 준비를 막는다.
+        patcher = patch.object(dev, "ensure_core")
+        self.ensure_core = patcher.start()
+        self.addCleanup(patcher.stop)
+        executables = patch.object(dev, "_executables", return_value=("uv", "npm"))
+        executables.start()
+        self.addCleanup(executables.stop)
+
     @patch.object(dev.shutil, "which", side_effect=lambda name: f"C:/bin/{name}.cmd")
     def test_reuses_canonical_commands_without_installing_dependencies(
         self, which: Mock
     ) -> None:
         root = Path("checkout")
-        backend, frontend = dev._servers(root)
+        # setUp이 _executables를 막아 두므로 같은 which 결과를 직접 넘긴다.
+        backend, frontend = dev._servers(root, (which("uv"), which("npm")))
         self.assertEqual(
             backend.command,
             (
@@ -187,6 +197,64 @@ class DevTest(unittest.TestCase):
         cast(Mock, owned.process).poll.return_value = 0
         dev._interrupt(owned)
         kill.assert_called_once_with(1234, 1)
+
+
+class DevRustBuildTest(unittest.TestCase):
+    def setUp(self) -> None:
+        executables = patch.object(
+            dev, "_executables", return_value=("C:/bin/uv.cmd", "npm")
+        )
+        executables.start()
+        self.addCleanup(executables.stop)
+
+    @patch.object(dev, "_servers", return_value=())
+    @patch.object(dev, "ensure_core")
+    @patch.object(dev, "_wait_until_ready")
+    @patch.object(dev, "_require_running", side_effect=KeyboardInterrupt)
+    def test_rust_core_is_prepared_before_servers_and_can_be_disabled(
+        self, _running: Mock, _ready: Mock, ensure_core: Mock, _servers: Mock
+    ) -> None:
+        self.assertEqual(dev.run(CHECKOUT, open_browser=False), 130)
+        ensure_core.assert_called_once_with(
+            CHECKOUT, uv="C:/bin/uv.cmd", disabled=False
+        )
+        ensure_core.reset_mock()
+        dev.run(CHECKOUT, open_browser=False, rust_build=False)
+        ensure_core.assert_called_once_with(CHECKOUT, uv="C:/bin/uv.cmd", disabled=True)
+
+    @patch.object(dev, "_servers")
+    @patch.object(dev, "_require_available_port", side_effect=RuntimeError("occupied"))
+    @patch.object(dev, "ensure_core")
+    def test_occupied_port_is_rejected_before_a_long_build(
+        self, ensure_core: Mock, _port: Mock, servers: Mock
+    ) -> None:
+        servers.return_value = (dev.DevServer("백엔드", ("c",), CHECKOUT, 8000, "u"),)
+        self.assertEqual(dev.run(CHECKOUT, open_browser=False), 1)
+        ensure_core.assert_not_called()
+
+    @patch.object(dev, "_servers")
+    @patch.object(
+        dev, "_require_available_port", side_effect=[None, RuntimeError("포트 8000")]
+    )
+    @patch.object(dev, "ensure_core")
+    @patch.object(dev, "_start")
+    def test_port_taken_during_build_is_rejected_before_starting(
+        self, start: Mock, _ensure: Mock, _port: Mock, servers: Mock
+    ) -> None:
+        servers.return_value = (dev.DevServer("백엔드", ("c",), CHECKOUT, 8000, "u"),)
+        self.assertEqual(dev.run(CHECKOUT, open_browser=False), 1)
+        start.assert_not_called()
+
+
+class ExecutablesTest(unittest.TestCase):
+    @patch.object(dev.shutil, "which", side_effect=lambda name: f"C:/bin/{name}.cmd")
+    def test_finds_uv_and_npm_once(self, which: Mock) -> None:
+        self.assertEqual(dev._executables(), ("C:/bin/uv.cmd", "C:/bin/npm.cmd"))
+
+    @patch.object(dev.shutil, "which", return_value=None)
+    def test_missing_tool_is_reported(self, _which: Mock) -> None:
+        with self.assertRaisesRegex(RuntimeError, "uv"):
+            dev._executables()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,10 @@
 """`backtest_core` PyO3 확장 로컬 타입 스텁. 구현은 backend/rust/backtest_core/src/lib.rs."""
 
 __version__: str
+# build.rs가 구운 빌드 입력 지문(backtest_engine.engine.core_source 규칙).
+SOURCE_DIGEST: str
+# build.rs가 구운 cargo 빌드 프로필(release·debug).
+BUILD_PROFILE: str
 
 # Python 정본(`engine/store.RecordKind`, `engine/queue.EventPriority`)과 대조하는 wire 상수.
 # 실행 경로는 읽지 않고 `tests/test_core_parity.py`가 값 일치를 고정한다.

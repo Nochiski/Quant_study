@@ -15,7 +15,6 @@ import pytest
 
 from backtest_engine import BacktestEngine, BacktestResult, RunConfig
 from backtest_engine.data.feed import DataFeed
-from backtest_engine.engine.core import core_available
 from backtest_engine.errors import CorporateActionWithoutBar
 from backtest_engine.types.actions import (
     ActionKind,
@@ -44,6 +43,7 @@ from backtest_engine.types.requirements import (
 )
 from backtest_engine.types.strategy import StrategyContext
 from tests.conftest import day, make_instrument, make_ohlc
+from tests.rust_core_guard import RUST_CORE
 
 INSTRUMENT = make_instrument()
 
@@ -133,10 +133,7 @@ def run(
     return engine, strategy, result
 
 
-RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core 확장 없음")
-
-
-@RUST_ONLY
+@RUST_CORE
 def test_corporate_action_notifications_are_identical_across_cores() -> None:
     """GAP-1: 같은 세션에 사건이 둘이어도 알림 index ↔ side table 정합이 두 코어에서 같다.
 

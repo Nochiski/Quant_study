@@ -7,7 +7,6 @@ from datetime import date
 
 import pytest
 
-from backtest_engine.engine.core import core_available
 from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
     BacktestEngineExecutorAdapter,
 )
@@ -42,12 +41,13 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     compile_target_tape,
 )
 from strategy_workbench.domain.strategy.facade.specification import RebalanceFrequency
+from tests.rust_core_guard import RUST_CORE
 
 CORES = [
     ExecutionCore.PYTHON,
     pytest.param(
         ExecutionCore.RUST,
-        marks=pytest.mark.skipif(not core_available("rust"), reason="Rust 확장 미설치"),
+        marks=RUST_CORE,
     ),
 ]
 

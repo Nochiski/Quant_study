@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemePreferenceProvider } from "../../../shared/lib/theme";
 import { StrategyIde } from "..";
+import { ASSISTANT_WINDOW_STORAGE_KEY } from "../../../entities/assistant";
 import { PANEL_LAYOUT_STORAGE_KEY } from "../model/use-panel-layout";
 
 afterEach(() => {
@@ -52,83 +53,6 @@ const matchMedia = (matches: boolean) =>
     })),
   );
 
-/** 1440px 창에서 전략 구조 240 + 계약 320 + 사이드바 기본 360 + 편집기 480에 손잡이 셋(18)을 더한 폭. */
-const SIDE_BY_SIDE = 1418;
-
-/**
- * 본문(`.ide__body`) 배치를 흉내 낸다. jsdom에는 배치가 없어, 편집기 최소 폭 판정(#269)이 읽는 폭을
- * 여기서 준다. `width`는 페이지 세로 스크롤바가 없을 때 좌우 패널이 나눠 갖는 폭이고, `scrollbar`는 지금
- * 스크롤바가 차지한 폭(브라우저 확대에서는 소수)이다. 관찰 알림은 브라우저처럼 첫 칠 뒤에 오므로
- * `notify`로 따로 보낸다.
- */
-const ideLayout = (width: number, scrollbar: () => number = () => 0) => {
-  const viewport = 1440;
-  const padding = 24;
-  // 여백은 스타일시트가 준다 — 테스트는 컴포넌트 CSS를 싣지 않는다.
-  const style = document.createElement("style");
-  style.dataset.ideLayout = "";
-  style.textContent = `.ide__body { padding: 0 ${padding}px; }`;
-  document.head.append(style);
-  vi.stubGlobal("innerWidth", viewport);
-  const boxWidth = (element: Element) =>
-    element === document.documentElement
-      ? viewport - scrollbar()
-      : element.classList.contains("ide__body")
-        ? width + 2 * padding - scrollbar()
-        : 0;
-  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
-    function (this: Element) {
-      return DOMRect.fromRect({ width: boxWidth(this) });
-    },
-  );
-  // 정수 폭은 요소마다 따로 반올림된다. 스크롤바가 소수 폭이면 본문과 루트가 서로 다른 쪽으로 반올림돼
-  // 합이 1px 어긋난다(80% 확대 실측: 스크롤바가 생기면 본문은 19px, 루트는 18px 준다).
-  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
-    function (this: HTMLElement) {
-      return this === document.documentElement
-        ? Math.ceil(boxWidth(this))
-        : Math.floor(boxWidth(this));
-    },
-  );
-  const observers = new Set<() => void>();
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      readonly #notify: () => void;
-      constructor(notify: ResizeObserverCallback) {
-        this.#notify = () =>
-          notify(
-            [
-              {
-                contentRect: { width: width - scrollbar() },
-              } as unknown as ResizeObserverEntry,
-            ],
-            this as unknown as ResizeObserver,
-          );
-      }
-      observe() {
-        observers.add(this.#notify);
-      }
-      unobserve() {}
-      disconnect() {
-        observers.delete(this.#notify);
-      }
-    },
-  );
-  return {
-    notify: () => act(() => observers.forEach((notify) => notify())),
-  };
-};
-
-/** DOM 부모와 무관하게 실제 배치가 레일에 붙어 있는지 판정한다. */
-const assistantAttached = () =>
-  document.querySelector(".ide__body > .ide__assistant:not(.ide__drawer)") !== null;
-
-const assistantFloating = () =>
-  screen
-    .getByRole("complementary", { name: "AI 어시스턴트" })
-    .closest(".ide__drawer") !== null;
-
 /** 제품과 같은 모양의 슬롯: 손잡이를 받아 자기 닫기를 그리는 함수. */
 const sidebarSlot = ({ close }: { close: () => void }) => (
   <section>
@@ -155,12 +79,6 @@ const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
       />
     </ThemePreferenceProvider>,
   );
-
-/** 폭 경계 회귀는 과거와 같은 세 보조 패널을 사용자가 명시해서 연 상태로 검증한다. */
-const openRails = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
-  await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
-};
 
 /** 접기 버튼을 위젯이 그리는 쪽(슬롯이 평범한 노드). */
 const mountNodeSlot = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
@@ -230,7 +148,8 @@ describe("StrategyIde assistant 슬롯", () => {
     await user.type(input, "원천 값을 비교할 질문");
     await user.selectOptions(screen.getByRole("combobox", { name: "선택 대화" }), "earlier");
     await user.click(screen.getByRole("button", { name: "중간 결과" }));
-    await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
+    // 떠 있는 창은 추적 작업공간으로 가도 닫히지 않는다.
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
     expect(screen.getByRole("textbox", { name: "미전송 질문" })).toBe(input);
     expect(input).toHaveValue("원천 값을 비교할 질문");
     expect(screen.getByRole("combobox", { name: "선택 대화" })).toHaveValue("earlier");
@@ -285,7 +204,7 @@ describe("StrategyIde assistant 슬롯", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("노드 슬롯이면 위젯이 접기 버튼을 그리고 거기로 포커스를 넘긴다", async () => {
+  it("떠 있는 창은 최소화 버튼을 그리고, 최소화하면 우하단 런처로 초점이 돌아온다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     mountNodeSlot();
@@ -297,24 +216,21 @@ describe("StrategyIde assistant 슬롯", () => {
       name: "AI 어시스턴트",
       expanded: false,
     });
-    expect(
-      document.getElementById(open.getAttribute("aria-controls") ?? ""),
-    ).not.toBeNull();
     await user.click(open);
 
     const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
     expect(within(panel).getByText("AI 사이드바")).toBeInTheDocument();
-    const collapse = screen.getByRole("button", {
-      name: "AI 어시스턴트 접기",
-    });
-    await waitFor(() => expect(collapse).toHaveFocus());
-    await user.click(collapse);
+    await waitFor(() => expect(panel).toHaveFocus());
+    await user.click(within(panel).getByRole("button", { name: "AI 어시스턴트 접기" }));
     expect(
       screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
     ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false })).toHaveFocus(),
+    );
   });
 
-  it("펼치면 포커스가 사이드바 패널로 간다 — 상단 토글은 스스로 사라진다", async () => {
+  it("펼치면 포커스가 떠 있는 창으로 간다 — 런처는 스스로 사라진다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     mount();
@@ -366,30 +282,26 @@ describe("StrategyIde assistant 슬롯", () => {
     ).toBeInTheDocument();
   });
 
-  it("폭과 펼침 상태를 저장하고 다시 열 때 복원한다", async () => {
+  it("펼침 상태를 패널 배치에 저장하고, 창 위치·크기는 공용 창 키에 저장한다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     const first = mount();
     fireEvent.keyDown(window, { key: "a", altKey: true });
-    // 펼침은 포커스를 패널로 옮긴다(microtask). 그 뒤에 핸들을 잡는다.
-    const handle = await screen.findByRole("separator", {
-      name: "AI 어시스턴트 크기 조절",
-    });
-    handle.focus();
-    await user.keyboard("{ArrowRight}");
-    expect(handle).toHaveAttribute("aria-valuenow", "376");
+    const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
+    // 펼침은 초점을 창으로 옮긴다(microtask). 그 뒤에 옮기기 손잡이를 잡는다.
+    await waitFor(() => expect(panel).toHaveFocus());
+    within(panel).getByRole("button", { name: "창 옮기기" }).focus();
+    await user.keyboard("{ArrowLeft}");
+    const left = panel.style.left;
     first.unmount();
 
     mount();
-    expect(
-      screen.getByRole("complementary", { name: "AI 어시스턴트" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
-    ).toHaveAttribute("aria-valuenow", "376");
+    const again = screen.getByRole("complementary", { name: "AI 어시스턴트" });
+    expect(again.style.left).toBe(left);
     expect(
       JSON.parse(localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY) ?? "null"),
     ).toMatchObject({ open: { assistant: true } });
+    expect(localStorage.getItem(ASSISTANT_WINDOW_STORAGE_KEY)).not.toBeNull();
   });
 
   it("사이드바 키가 없던 기록도 그대로 읽고 기본값만 채운다", async () => {
@@ -411,24 +323,22 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(
       screen.getByRole("separator", { name: "전략 구조 크기 조절" }),
     ).toHaveAttribute("aria-valuenow", "300");
-    // 기록에 AI 열 키가 없으면 새 기본값(열림)을 쓴다(RD-04-A).
+    // 기록에 AI 키가 없으면 새 기본값(열림)을 쓴다(RD-04-A).
     expect(
       screen.getByRole("complementary", { name: "AI 어시스턴트" }),
     ).toBeVisible();
   });
 
-  it("처음 연 편집기는 AI 열을 왼쪽에 열어 두고, 접어 둔 기록은 그대로 존중한다", async () => {
+  it("처음 연 편집기는 AI 창을 열어 두고, 접어 둔 기록은 그대로 존중한다 — 옛 열 폭 기록은 무시한다", async () => {
     matchMedia(false);
     localStorage.clear();
     const user = userEvent.setup();
     const first = mount();
-    const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
-    expect(panel).toBeVisible();
-    // 본문의 첫 칸이다 — 전략 구조·편집기보다 왼쪽이다.
-    expect(panel.parentElement?.firstElementChild).toBe(panel);
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+    // AI 는 더 이상 본문 열이 아니다 — 열 폭 조절 손잡이가 없다.
     expect(
-      screen.getByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
-    ).toHaveAttribute("aria-valuenow", "360");
+      screen.queryByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
+    ).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: "a", altKey: true });
     expect(
       screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
@@ -443,6 +353,25 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
   });
 
+  it("옛 판의 AI 열 폭 기록이 있어도 깨지지 않고 열린다", () => {
+    matchMedia(false);
+    localStorage.setItem(
+      PANEL_LAYOUT_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        sizes: {
+          outlineWidth: 240,
+          inspectorWidth: 320,
+          debuggerHeight: 220,
+          assistantWidth: 400,
+        },
+        open: { assistant: true },
+      }),
+    );
+    mount();
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+  });
+
   it("저장소를 못 쓰면 기본값으로 뜨고 화면은 그대로 동작한다", () => {
     matchMedia(false);
     vi.stubGlobal("localStorage", {
@@ -454,256 +383,35 @@ describe("StrategyIde assistant 슬롯", () => {
       },
     });
     mount();
-    // 기록을 읽지 못하면 기본값이다: AI 열이 열려 있고 기본 폭이다.
-    expect(
-      screen.getByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
-    ).toHaveAttribute("aria-valuenow", "360");
+    // 기록을 읽지 못하면 기본값이다: AI 창이 열려 있다.
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
     fireEvent.keyDown(window, { key: "a", altKey: true });
     expect(
       screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
     ).not.toBeInTheDocument();
   });
 
-  it("좁은 폭에서는 오버레이 서랍이 되고 Escape로 닫힌다", () => {
+  it("좁은 폭에서도 AI 는 떠 있는 창이고, Escape 는 창을 닫지 않는다", () => {
     matchMedia(true);
     mount();
     fireEvent.keyDown(window, { key: "a", altKey: true });
     const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
-    expect(panel.closest(".ide__drawer")).not.toBeNull();
-    // 오버레이 폭은 CSS가 정하므로 인라인 폭을 주지 않는다.
-    expect(panel).not.toHaveAttribute("style");
-    expect(
-      screen.queryByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
-    ).not.toBeInTheDocument();
-
+    expect(panel.closest(".ide__drawer")).toBeNull();
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(
-      screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
   });
 
-  it("편집기가 최소 폭 아래로 내려가면 나중에 연 패널을 오버레이로 돌린다", async () => {
-    // 1440px 창이라 좁은 화면 규칙은 아니지만, 셸 사이드바·여백을 뺀 본문 1204px은 패널 셋과 편집기
-    // 최소 폭을 나란히 담는 1418px보다 좁다. 뷰포트로 재면 담는 것으로 보여 편집기가 266px로 눌렸다(#269).
-    matchMedia(false);
-    ideLayout(1204);
-    const user = userEvent.setup();
-    mount();
-    await openRails(user);
-    // 구조와 계약을 명시해서 연 뒤, 먼저 연 계약은 자리에 박혀 있다.
-    expect(
-      screen.getByRole("complementary", { name: "계약" }).closest(".ide__drawer"),
-    ).toBeNull();
-
-    await user.click(
-      screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
-    );
-    const assistant = screen.getByRole("complementary", {
-      name: "AI 어시스턴트",
-    });
-    // AI 열은 왼쪽이라 서랍은 왼쪽 자기 자리만 덮는다 — AI 열 폭(기본 360)을 따른다(RD-04-A).
-    expect(assistant.closest(".ide__drawer")).toHaveStyle({ width: "360px" });
-    expect(
-      screen.getByRole("complementary", { name: "계약" }).closest(".ide__drawer"),
-    ).toBeNull();
-    expect(
-      screen.queryByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
-    ).not.toBeInTheDocument();
-
-    // Escape는 떠 있는 패널만 닫는다.
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(
-      screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("complementary", { name: "계약" }),
-    ).toBeInTheDocument();
-
-    // 계약을 닫았다가 다시 열면 이번에는 계약이 나중에 연 패널이다.
-    await user.click(screen.getByRole("button", { name: "계약 접기" }));
-    fireEvent.keyDown(window, { key: "a", altKey: true });
-    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
-    expect(
-      screen.getByRole("complementary", { name: "계약" }).closest(".ide__drawer"),
-    ).toHaveStyle({ width: "360px" });
-    expect(assistantFloating()).toBe(false);
-  });
-
-  it("편집기 최소 폭 480px에 손잡이 폭을 넣지 않는다", async () => {
-    // 패널 셋과 편집기 480을 담고도 손잡이 몫이 1px 모자란 본문. 손잡이를 480에 넣어 재면 붙어서
-    // 편집기가 462px까지 내려갔다(#290 리뷰 P3-3).
-    matchMedia(false);
-    ideLayout(SIDE_BY_SIDE - 1);
-    const user = userEvent.setup();
-    mount();
-    await openRails(user);
-    await user.click(
-      screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
-    );
-    expect(assistantFloating()).toBe(true);
-  });
-
-  it("관찰 알림 전에 처음 측정한 폭으로 복원된 사이드바의 배치를 정한다", async () => {
-    // 관찰 알림은 칠한 뒤에야 온다(여기서는 `notify`를 부르지 않는다). 첫 칠 전 측정이 없으면 폭을
-    // 모르는 배치로 판단한다. 기본 접힌 구조·계약은 명시해서 열고 관찰 알림은 보내지 않는다(#290 리뷰 P3-2).
-    matchMedia(false);
-    localStorage.setItem(
-      PANEL_LAYOUT_STORAGE_KEY,
-      JSON.stringify({
-        version: 1,
-        sizes: { outlineWidth: 240, inspectorWidth: 320, debuggerHeight: 220 },
-        open: { assistant: true },
-      }),
-    );
-    ideLayout(1204);
-    const user = userEvent.setup();
-    mount();
-    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
-    await openRails(user);
-    await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
-    await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
-    expect(assistantFloating()).toBe(true);
-  });
-
-  it("페이지 스크롤바가 켜지고 꺼져도 사이드바 자리가 흔들리지 않는다", async () => {
-    // 사이드바를 붙이면 페이지가 길어져 세로 스크롤바(15px)가 본문 폭을 먹고, 띄우면 스크롤바가 사라지는
-    // 창이다. 판정이 스크롤바를 뺀 폭을 읽으면 관찰 알림마다 붙었다 떴다를 되풀이했다(#290 리뷰 P1-1).
-    matchMedia(false);
-    const layout = ideLayout(SIDE_BY_SIDE + 7, () =>
-      assistantAttached() ? 15 : 0,
-    );
-    const user = userEvent.setup();
-    mount();
-    await openRails(user);
-    await user.click(
-      screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
-    );
-    const placements = [assistantFloating()];
-    for (let round = 0; round < 3; round += 1) {
-      layout.notify();
-      placements.push(assistantFloating());
-    }
-    expect(placements).toEqual([false, false, false, false]);
-  });
-
-  it("브라우저 확대로 스크롤바가 소수 폭이어도 사이드바 자리가 흔들리지 않는다", async () => {
-    // 80% 확대의 스크롤바는 18.75 CSS px다. 요소마다 따로 반올림한 정수 폭을 더하면 판정 폭이 임계에서
-    // 1px 모자라, 붙이면 떠 버리고 띄우면 다시 붙었다(#290 리뷰 r2 P1-1).
-    matchMedia(false);
-    const layout = ideLayout(SIDE_BY_SIDE, () =>
-      assistantAttached() ? 18.75 : 0,
-    );
-    const user = userEvent.setup();
-    mount();
-    await openRails(user);
-    await user.click(
-      screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
-    );
-    const placements = [assistantFloating()];
-    for (let round = 0; round < 3; round += 1) {
-      layout.notify();
-      placements.push(assistantFloating());
-    }
-    expect(placements).toEqual([false, false, false, false]);
-  });
-
-  it("넓은 화면에서는 둘 다 자리에 박혀 있다", async () => {
-    matchMedia(false);
-    // 1920px 창의 본문 폭.
-    ideLayout(1684);
-    const user = userEvent.setup();
-    mount();
-    await openRails(user);
-    fireEvent.keyDown(window, { key: "a", altKey: true });
-    expect(
-      screen
-        .getByRole("complementary", { name: "AI 어시스턴트" })
-        .closest(".ide__drawer"),
-    ).toBeNull();
-  });
-
-  it("슬롯이 요소를 여럿 넘겨도 본문 래퍼 하나가 패널 높이를 갖는다", () => {
-    matchMedia(false);
-    mount({
-      assistant: (
-        <>
-          <p>알림 한 줄</p>
-          <section>채팅</section>
-        </>
-      ),
-    });
-    fireEvent.keyDown(window, { key: "a", altKey: true });
-    const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
-    // 패널 직계 자식은 헤더와 본문 래퍼 둘뿐이다(리뷰 P1-1: fragment 자식이 높이를 나눠 가졌다).
-    expect([...panel.children].map((child) => child.className)).toEqual([
-      "ide__panel-header",
-      "ide__assistant-body",
-    ]);
-  });
-
-  it("좁은 화면에서는 우측 서랍이 한 번에 하나만 뜬다", async () => {
+  it("좁은 화면에서 계약 서랍을 열어 둔 채 AI 창을 열어도 서랍은 그대로다(창은 자리를 다투지 않는다)", async () => {
     matchMedia(true);
     const user = userEvent.setup();
     mount();
     await user.click(screen.getByRole("button", { name: "계약" }));
-    expect(
-      screen.getByRole("complementary", { name: "계약" }),
-    ).toBeInTheDocument();
-
     fireEvent.keyDown(window, { key: "a", altKey: true });
-    expect(
-      screen.getByRole("complementary", { name: "AI 어시스턴트" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("complementary", { name: "계약" }),
-    ).not.toBeInTheDocument();
-    expect(
-      document.querySelectorAll(
-        ".ide__drawer:not(.ide__drawer--bottom):not([hidden])",
-      ),
-    ).toHaveLength(1);
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+    expect(screen.getByRole("complementary", { name: "계약" })).toBeInTheDocument();
   });
 
-  it("폭 조절이 오버레이 판정을 바꾸지 않아 핸들이 남는다", async () => {
-    // 본문이 패널 셋과 편집기 최소 폭을 딱 담는다.
-    matchMedia(false);
-    ideLayout(SIDE_BY_SIDE);
-    const user = userEvent.setup();
-    const first = mount();
-    await openRails(user);
-    await user.click(screen.getByRole("button", { name: "AI 어시스턴트" }));
-    const handle = () =>
-      screen.getByRole("separator", { name: "AI 어시스턴트 크기 조절" });
-    handle().focus();
-
-    // 기본 폭을 넘겨 넓혀도 판정은 기본 폭으로 한다. 지금 폭으로 재면 여기서 오버레이로 바뀌어 핸들이
-    // 사라지고 드래그가 끊겼다(리뷰 P1-3).
-    await user.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}");
-    expect(handle()).toHaveAttribute("aria-valuenow", "408");
-    expect(
-      screen
-        .getByRole("complementary", { name: "AI 어시스턴트" })
-        .closest(".ide__drawer"),
-    ).toBeNull();
-
-    // 넓힌 폭은 저장되고, 다음 방문에도 고정 패널로 열린다.
-    await user.keyboard("{ArrowLeft}");
-    expect(handle()).toHaveAttribute("aria-valuenow", "392");
-    first.unmount();
-
-    mount();
-    // 펼침 상태도 저장되므로 다시 열 필요가 없다.
-    expect(
-      screen.getByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
-    ).toHaveAttribute("aria-valuenow", "392");
-    expect(
-      screen
-        .getByRole("complementary", { name: "AI 어시스턴트" })
-        .closest(".ide__drawer"),
-    ).toBeNull();
-  });
-
-  it("슬롯이 손잡이를 받으면 닫기는 슬롯이 그리고 패널 제목은 슬롯 헤더가 그린다", async () => {
+  it("슬롯이 손잡이를 받으면 슬롯의 닫기로도 접고, 창 제목은 위젯이 그린다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     mount({
@@ -718,14 +426,10 @@ describe("StrategyIde assistant 슬롯", () => {
     fireEvent.keyDown(window, { key: "a", altKey: true });
 
     const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
-    // 제목은 슬롯 헤더가 그린다 — 슬롯 내용은 이름 없는 section이라 landmark 이름이 여기서만 나온다.
+    // 제목은 창 제목 줄이 그린다 — 슬롯 내용은 이름 없는 section이라 landmark 이름이 여기서만 나온다.
     expect(
       within(panel).getByRole("heading", { name: "AI 어시스턴트" }),
     ).toBeInTheDocument();
-    // 닫기는 한 곳만: 슬롯이 그리므로 패널 헤더의 접기 버튼은 없다.
-    expect(
-      screen.queryByRole("button", { name: "AI 어시스턴트 접기" }),
-    ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
     expect(

@@ -169,7 +169,6 @@
 
 .ide__outline,
 .ide__inspector,
-.ide__assistant,
 .ide__debugger,
 .ide__editor,
 .ide__snippets {
@@ -179,8 +178,7 @@
 }
 
 .ide__outline,
-.ide__inspector,
-.ide__assistant {
+.ide__inspector {
   display: flex;
   flex: none;
   flex-direction: column;
@@ -193,7 +191,6 @@
   flex: 1;
 }
 
-.ide__assistant-body,
 .ide__inspector-body {
   display: flex;
   flex: 1;
@@ -325,23 +322,14 @@
   box-shadow: var(--shadow-popover);
 }
 
-.ide__drawer .ide__inspector,
-.ide__drawer .ide__assistant {
+.ide__drawer .ide__inspector {
   width: 100%;
   height: 100%;
   border: 0;
   border-radius: 0;
 }
 
-.ide__drawer--rail {
-  width: auto;
-}
 
-/* AI 열의 서랍은 왼쪽에서 나온다(RD-04-A). */
-.ide__drawer--left {
-  right: auto;
-  left: var(--ide-gutter);
-}
 
 @media (max-width: 767px) {
   .ide {

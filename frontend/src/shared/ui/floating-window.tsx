@@ -78,6 +78,8 @@ type Gesture = {
 };
 
 export type FloatingWindowProps = {
+  /** 창(aside) id. 여는 조작이 초점을 옮길 자리·`aria-controls` 대상으로 쓴다. */
+  id?: string;
   /** 창 제목. 창(landmark)의 이름이자 제목 줄 글자다. */
   title: string;
   open: boolean;
@@ -103,6 +105,7 @@ export type FloatingWindowProps = {
  * 기본값·저장 규칙이 다르다.
  */
 export const FloatingWindow = ({
+  id,
   title,
   open,
   onOpenChange,
@@ -215,6 +218,7 @@ export const FloatingWindow = ({
       {mounted ? (
         <aside
           ref={windowRef}
+          id={id}
           className="floating-window"
           aria-labelledby={titleId}
           tabIndex={-1}
@@ -296,6 +300,9 @@ export const FloatingWindow = ({
           id={launcherId}
           type="button"
           className="floating-window__launcher ui-button ui-button--primary"
+          // 런처는 창을 여닫는 토글이다. 창이 아직 마운트되지 않았으면 가리킬 대상이 없다.
+          aria-expanded={false}
+          aria-controls={mounted ? id : undefined}
           onClick={restore}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">

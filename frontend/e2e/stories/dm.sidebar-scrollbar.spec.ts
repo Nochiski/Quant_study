@@ -1,6 +1,7 @@
 /**
- * 정동민의 스토리 e2e — 페이지 세로 스크롤바가 폭을 차지하는 창에서도 AI 사이드바 자리가 흔들리지 않는다
- * (US-DM-03, #290 리뷰 P1-1).
+ * 정동민의 스토리 e2e — 페이지 세로 스크롤바가 폭을 차지하는 창에서도 AI 창 자리가 흔들리지 않는다
+ * (US-DM-03, #290 리뷰 P1-1). AI 는 화면 위에 떠 있는 창이라 본문 폭 판정에 끼지 않지만, 스크롤바가 생기고
+ * 없어지는 창에서 창이 다시 마운트되거나 위치가 흔들리지 않는지는 계속 본다.
  *
  * 스토리 문구와 수용 기준의 정본은 `docs/product/user-stories/stories/dm.md`다. 헤드리스 기본값
  * (`--hide-scrollbars`)은 스크롤바를 숨기므로, 이 파일만 Windows 기본처럼 스크롤바가 폭을 차지하는 창을
@@ -20,7 +21,7 @@ test.use({
 });
 
 test(
-  "US-DM-03 스크롤바가 폭을 차지하는 창에서도 사이드바가 붙었다 떴다 하지 않는다",
+  "US-DM-03 스크롤바가 폭을 차지하는 창에서도 AI 창이 흔들리지 않는다",
   { tag: ["@story", "@US-DM-03"] },
   async ({ page }) => {
     // 새 본문 여백에서 1636×1120은 스크롤바를 제외한 폭이 1424px로 나란히 배치하는 임계(1418px) 위다.
@@ -29,7 +30,7 @@ test(
     await openEditor(page, "/research/strategies/new");
     // 본문은 창 높이에 제한되므로, 상시 페이지 스크롤바를 쓰는 OS 환경을 fixture에서 명시한다.
     await page.addStyleTag({ content: ":root { overflow-y: scroll; }" });
-    // 전략 구조·계약을 먼저 열고 AI 열을 마지막에 연다 — 처음부터 열린 AI 열을 먼저 접는다(RD-04-A).
+    // 전략 구조·계약을 먼저 열고 AI 창을 마지막에 연다 — 처음부터 열린 AI 창을 먼저 접는다(RD-04-A).
     await collapseAssistant(page);
     await page.getByRole("button", { name: "전략 구조", exact: true }).click();
     await page.getByRole("button", { name: "계약", exact: true }).click();
@@ -37,7 +38,7 @@ test(
       .getByRole("button", { name: "AI 어시스턴트", exact: true })
       .click();
     await expect(
-      page.getByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
+      page.getByRole("complementary", { name: "AI 어시스턴트", exact: true }),
     ).toBeVisible();
     // 가짜 폭을 넣지 않는다. OS의 실제 스크롤바가 폭을 차지하는 상태인지 먼저 본다.
     await expect
@@ -68,8 +69,8 @@ test(
               for (const node of record.addedNodes)
                 if (
                   node instanceof HTMLElement &&
-                  (node.matches(".ide__assistant") ||
-                    node.querySelector(".ide__assistant") !== null)
+                  (node.matches(".floating-window") ||
+                    node.querySelector(".floating-window") !== null)
                 )
                   remounts += 1;
           };
@@ -84,10 +85,10 @@ test(
           }, 1_000);
         }),
     );
-    expect(observed.remounts, "1초 동안 사이드바가 다시 마운트된 횟수").toBe(0);
+    expect(observed.remounts, "1초 동안 AI 창이 다시 마운트된 횟수").toBe(0);
     expect(observed.samples, "같은 1초 동안 실제 배치를 여러 프레임 관측한다").toBeGreaterThan(1);
     // 소수점 배치 반올림만 0.5 CSS px까지 허용한다. 붙음·뜸 전환의 수십 px 재배치는 이 한계를 넘는다.
-    expect(observed.maxXDelta, "같은 1초 동안 사이드바 가로 위치의 최대 편차").toBeLessThanOrEqual(0.5);
-    expect(observed.maxWidthDelta, "같은 1초 동안 사이드바 폭의 최대 편차").toBeLessThanOrEqual(0.5);
+    expect(observed.maxXDelta, "같은 1초 동안 AI 창 가로 위치의 최대 편차").toBeLessThanOrEqual(0.5);
+    expect(observed.maxWidthDelta, "같은 1초 동안 AI 창 폭의 최대 편차").toBeLessThanOrEqual(0.5);
   },
 );

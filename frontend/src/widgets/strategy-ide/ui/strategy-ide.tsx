@@ -14,17 +14,15 @@ import {
   type StrategyOutlineSymbol,
   type StrategyView,
 } from "../../../features/edit-strategy";
+import { ASSISTANT_WINDOW_STORAGE_KEY } from "../../../entities/assistant";
 import { t } from "../../../shared/config";
-import {
-  useMediaQuery,
-  useScrollbarFreeWidth,
-} from "../../../shared/lib/media";
+import { useMediaQuery } from "../../../shared/lib/media";
 import { useThemePreference } from "../../../shared/lib/theme";
 import {
   Badge,
   Button,
+  FloatingWindow,
   CommandPalette,
-  SPLIT_HANDLE_SIZE,
   SplitHandle,
   Tabs,
   type CommandPaletteItem,
@@ -175,11 +173,6 @@ const hasNativeUndo = (target: EventTarget | null): boolean => {
 };
 
 /**
- * 좌우 패널이 다 펼쳐졌을 때 가운데 편집기에 남겨 두는 최소 폭(B-04 정본 480px). 이 아래로 내려가면
- * 오버레이로 돌린다. 판정은 패널마다 손잡이 폭을 따로 더한다(#290 리뷰 P3-3).
- */
-const EDITOR_MIN_WIDTH = 480;
-/**
  * 펼친 AI 사이드바로 포커스를 옮기는 방법 — 페이지를 굴리지 않는다. 제품 슬롯은 접기 버튼을 그리지 않아
  * 창보다 긴 패널 자신이 포커스를 받는데, 그냥 옮기면 브라우저가 패널 아래 끝을 창 아래 끝에 맞추려 페이지를
  * 굴려 서랍 머리 줄이 상단 바 밑에 깔렸다(#325, #290 리뷰 r3 P2-1). 여는 세 입구(상단 바 토글·Alt+A·명령
@@ -240,27 +233,6 @@ export const StrategyIde = ({
   const narrow = useMediaQuery(NARROW_QUERY);
   const compact = useMediaQuery("(max-width: 767px)");
   const { layout, resize, toggle, close } = usePanelLayout(DEFAULT_LAYOUT);
-  // 계약과 AI 사이드바를 나란히 두면 편집기가 최소 폭 아래로 내려가는 화면인가.
-  //
-  // 뷰포트가 아니라 좌우 패널이 실제로 나눠 갖는 폭(`.ide__body` content box)으로 잰다. 뷰포트로 재면
-  // 앱 셸 사이드바와 여백(1440px에서 약 250px)을 빼먹어, 1440px에서 AI 사이드바를 열면 편집기가 266px로
-  // 눌리고 툴바가 계약 칸 밑으로 넘쳤다(#269). 페이지 세로 스크롤바는 빼지 않는다 — 판정이 페이지 높이를
-  // 바꿔 스크롤바를 켜고 끄면 판정 입력이 다시 흔들려 사이드바가 매 프레임 붙었다 떴다(#290 리뷰 P1-1).
-  //
-  // 사이드바 폭은 **기본값 상수**로 재고 지금 폭을 쓰지 않는다. 지금 폭을 쓰면 폭 조절 드래그가 판정을
-  // 바꿔, 임계를 넘는 순간 패널이 오버레이로 바뀌며 핸들이 사라지고(포인터 캡처가 끊긴다) 저장된 폭
-  // 때문에 다음 방문에도 오버레이로 굳는다(B-04 리뷰 P1-3). 오버레이 전환은 "패널을 열었다"로만
-  // 일어나야 한다. 접힌 패널은 자리를 차지하지 않으므로 더하지 않는다. 펼친 패널은 손잡이 하나를 데려온다.
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const bodyWidth = useScrollbarFreeWidth(bodyRef);
-  const squeezed =
-    bodyWidth !== null &&
-    bodyWidth <
-      (layout.outlineOpen ? layout.outlineWidth + SPLIT_HANDLE_SIZE : 0) +
-        (layout.inspectorOpen ? layout.inspectorWidth + SPLIT_HANDLE_SIZE : 0) +
-        DEFAULT_LAYOUT.assistantWidth +
-        SPLIT_HANDLE_SIZE +
-        EDITOR_MIN_WIDTH;
   const outlineId = useId();
   const inspectorId = useId();
   const debuggerId = useId();
@@ -279,41 +251,10 @@ export const StrategyIde = ({
   const outlineCollapse = useRef<HTMLButtonElement>(null);
   const inspectorCollapse = useRef<HTMLButtonElement>(null);
   const debuggerCollapse = useRef<HTMLButtonElement>(null);
-  const assistantRestore = useRef<HTMLButtonElement>(null);
-  const assistantCollapse = useRef<HTMLButtonElement>(null);
   const hasAssistant = assistant !== undefined;
-  /**
-   * 좁은 화면에서 둘 다 펼쳐져 있으면 **나중에 연 쪽**을 오버레이로 돌린다. 먼저 보고 있던 패널을
-   * 빼앗지 않으면서 편집기 폭을 지키는 규칙이다.
-   */
-  const overlayRight =
-    !narrow &&
-    squeezed &&
-    hasAssistant &&
-    layout.inspectorOpen &&
-    layout.assistantOpen
-      ? (layout.lastOpenedRight ?? "assistantOpen")
-      : null;
-  const inspectorFloating = layout.debuggerOpen || narrow || overlayRight === "inspectorOpen";
-  const assistantFloating = layout.debuggerOpen || narrow || overlayRight === "assistantOpen";
-  // 넓은 화면의 오버레이 서랍은 붙어 있는 오른쪽 패널 자리만 덮는다 — 폭의 owner는 그 패널의 폭
-  // 상태다. 좁은 화면용 서랍 폭(420px)은 그 자리보다 넓어 편집기 오른쪽 칸을 가렸다(#290 리뷰 P2-1).
-  const railDrawer =
-    overlayRight === null
-      ? undefined
-      : {
-          width:
-            overlayRight === "assistantOpen"
-              ? layout.inspectorWidth
-              : layout.assistantWidth,
-        };
-  const drawerClass =
-    railDrawer === undefined ? "ide__drawer" : "ide__drawer ide__drawer--rail";
-  // 기본이 접힘인데 내용을 미리 마운트하면 화면을 열 때마다 사이드바의 질의가 나간다. 한 번 펼친
-  // 뒤에는 접어도 유지한다 — 진행 중 턴의 스트림이 접기로 끊기면 안 된다(B-04 리뷰 P3).
-  const [assistantMounted, setAssistantMounted] = useState(
-    layout.assistantOpen,
-  );
+  // AI 어시스턴트는 본문 열이 아니라 화면 위에 떠 있는 창이다(FloatingWindow). 오른쪽 계약 패널만 좁은 화면·추적
+  // 작업공간에서 서랍으로 뜬다 — AI 창과 자리를 다투지 않는다.
+  const inspectorFloating = layout.debuggerOpen || narrow;
   /**
    * 오른쪽 패널 토글. 좁은 화면에서는 계약·AI 서랍이 같은 자리(본문 오른쪽 끝)에 뜨므로
    * 한 번에 하나만 연다 — 겹치면 뒤에 깔린 패널이 보이지 않은 채 탭 순서와 접근성 트리에 남는다
@@ -321,38 +262,33 @@ export const StrategyIde = ({
    */
   const togglePanel = useCallback(
     (panel: "outlineOpen" | "inspectorOpen" | "debuggerOpen" | "assistantOpen"): void => {
-      const other =
-        panel === "inspectorOpen" ? "assistantOpen" : "inspectorOpen";
       const opening = !layout[panel];
       if (opening && panel === "outlineOpen") close(["debuggerOpen"]);
-      if (opening && panel === "debuggerOpen") close(["outlineOpen", "inspectorOpen", "assistantOpen"]);
-      // 작은 화면의 보조 서랍은 하나만 펼쳐 가려진 내용이 탭 순서에 남지 않게 한다.
-      if (opening && compact) {
-        close((["outlineOpen", "inspectorOpen", "assistantOpen"] as const).filter((key) => key !== panel));
-      } else if (opening && (narrow || layout.debuggerOpen) && (panel === "inspectorOpen" || panel === "assistantOpen") && layout[other]) {
-        close([other]);
+      if (opening && panel === "debuggerOpen") close(["outlineOpen", "inspectorOpen"]);
+      // 작은 화면의 보조 서랍은 하나만 펼쳐 가려진 내용이 탭 순서에 남지 않게 한다. AI 창은 떠 있는 창이라
+      // 서랍과 자리를 다투지 않는다.
+      if (opening && compact && panel !== "assistantOpen") {
+        close((["outlineOpen", "inspectorOpen"] as const).filter((key) => key !== panel));
       }
-      if (opening && panel === "assistantOpen") setAssistantMounted(true);
       toggle(panel);
     },
-    [close, compact, layout, narrow, toggle],
+    [close, compact, layout, toggle],
   );
   const openTraceWorkspace = useCallback(() => {
     if (!layout.debuggerOpen) togglePanel("debuggerOpen");
   }, [layout.debuggerOpen, togglePanel]);
   const inspect = useCallback((focusInspector = true) => {
     if (!layout.inspectorOpen) toggle("inspectorOpen");
-    if (narrow || layout.debuggerOpen) close(["assistantOpen"]);
     if (compact) close(["outlineOpen"]);
     queueMicrotask(() => {
       const body = document.getElementById(`${inspectorId}-body`);
       if (body !== null) body.scrollTop = 0;
       if (compact && focusInspector) document.getElementById(`${inspectorId}-collapse`)?.focus({ preventScroll: true });
     });
-  }, [close, compact, layout.debuggerOpen, layout.inspectorOpen, narrow, toggle, inspectorId]);
+  }, [close, compact, layout.inspectorOpen, toggle, inspectorId]);
 
   // 슬롯 함수는 렌더 중에 불리므로 이 손잡이는 ref를 닫지 않는다(`react-hooks/refs`). 접은 뒤 돌아갈
-  // 자리는 상단 바 토글이고, 그 자리는 id로 찾는다.
+  // 자리는 창의 최소화 런처이고, 그 자리는 id로 찾는다.
   const assistantToggleId = `${assistantId}-toggle`;
   /**
    * 사이드바를 펼친 뒤 포커스가 갈 자리. 슬롯이 접기 버튼을 그리면 그 버튼, 아니면 패널 자신이다
@@ -360,9 +296,13 @@ export const StrategyIde = ({
    * `body`로 떨어진다(3차 리뷰 P1-1).
    */
   const assistantFocusTarget = useCallback(
-    (): HTMLElement | null =>
-      assistantCollapse.current ?? document.getElementById(assistantId),
+    (): HTMLElement | null => document.getElementById(assistantId),
     [assistantId],
+  );
+  /** 창을 닫은 뒤 초점이 돌아갈 자리: 우하단 런처. */
+  const assistantLauncher = useCallback(
+    (): HTMLElement | null => document.getElementById(assistantToggleId),
+    [assistantToggleId],
   );
   const closeAssistant = useCallback((): void => {
     close(["assistantOpen"]);
@@ -460,9 +400,7 @@ export const StrategyIde = ({
               label: `${layout.assistantOpen ? t("command.hide") : t("command.show")} ${t("ide.assistant")}`,
               shortcut: "Alt A",
               focusAfterExecute: () =>
-                layout.assistantOpen
-                  ? assistantRestore.current
-                  : assistantFocusTarget(),
+                layout.assistantOpen ? assistantLauncher() : assistantFocusTarget(),
               focusOptions: ASSISTANT_FOCUS,
               execute: () => togglePanel("assistantOpen"),
             },
@@ -504,6 +442,7 @@ export const StrategyIde = ({
     ];
   }, [
     assistantFocusTarget,
+    assistantLauncher,
     availableViews,
     close,
     hasAssistant,
@@ -528,24 +467,20 @@ export const StrategyIde = ({
   ]);
 
   useEffect(() => {
-    if (narrow) close(["inspectorOpen", "assistantOpen"]);
+    if (narrow) close(["inspectorOpen"]);
   }, [narrow, close]);
 
   // window 리스너는 layout effect로 설치한다(`.claude/rules/frontend-react-effects.md`, backlog 20·21).
   useLayoutEffect(() => {
-    if (!narrow && overlayRight === null) return;
+    if (!narrow) return;
     const onKey = (event: KeyboardEvent) => {
-      // 오버레이로 떠 있는 패널만 닫는다. 자리에 박혀 있는 패널은 Escape로 사라지지 않는다.
+      // 오버레이로 떠 있는 계약 서랍만 닫는다. 자리에 박혀 있는 패널과 떠 있는 AI 창은 Escape로 사라지지 않는다.
       if (event.key !== "Escape") return;
-      close(
-        narrow
-          ? ["inspectorOpen", "assistantOpen"]
-          : [overlayRight as "inspectorOpen" | "assistantOpen"],
-      );
+      close(["inspectorOpen"]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [narrow, overlayRight, close]);
+  }, [narrow, close]);
 
   // layout effect인 이유: 이 리스너는 화면의 버튼과 같은 게이트(`saveDisabled`·`runDisabled`·`validateDisabled`)를
   // 닫힌 값으로 읽는다. passive effect(`useEffect`)면 버튼이 켜진 commit과 새 리스너 설치 사이에 틈이 생겨, 그
@@ -595,9 +530,7 @@ export const StrategyIde = ({
         const opening = !layout.assistantOpen;
         togglePanel("assistantOpen");
         queueMicrotask(() =>
-          (opening ? assistantFocusTarget() : assistantRestore.current)?.focus(
-            ASSISTANT_FOCUS,
-          ),
+          (opening ? assistantFocusTarget() : assistantLauncher())?.focus(ASSISTANT_FOCUS),
         );
       } else if (event.altKey && !modifier && /^[1-2]$/.test(event.key)) {
         const next = VIEWS[Number(event.key) - 1];
@@ -620,6 +553,7 @@ export const StrategyIde = ({
     return () => window.removeEventListener("keydown", onKey);
   }, [
     assistantFocusTarget,
+    assistantLauncher,
     availableViews,
     close,
     hasAssistant,
@@ -694,56 +628,31 @@ export const StrategyIde = ({
   );
 
   /**
-   * AI 어시스턴트 열. 편집기 view와 무관하게 본문 왼쪽에 붙어 있어 YAML·Graph 어느 탭에서도 같은 대화가
-   * 보인다(spec D7, RD-04-A). 1280px 미만에서는 왼쪽에서 나오는 오버레이 서랍이 된다.
+   * AI 어시스턴트 창. 편집기 view와 무관하게 화면 위에 떠 있어 YAML·Graph 어느 탭에서도 같은 대화가 보인다(spec D7).
+   * 열림의 owner 는 이 widget 의 패널 배치(`assistantOpen`)이고, 슬롯 함수가 그 값(`open`)을 받아 닫힌 동안 조회를
+   * 멈춘다. 창은 처음 열 때 본문을 마운트하고 최소화해도 유지한다 — 진행 중 턴의 스트림이 끊기지 않는다. 위치·크기는
+   * 새 전략 안내의 AI 창과 같은 보관함 키로 기억한다.
+   *
+   * 닫기는 두 곳이다: 창의 최소화 버튼은 대화를 끝내지 않는 패널 조작이고, 슬롯이 손잡이를 받는 함수면 그쪽의
+   * 닫기가 진행 중 작업을 확인한 뒤 접는다(spec D7).
    */
   const assistantNode = hasAssistant ? (
-    <aside
+    <FloatingWindow
       id={ids.assistant}
-      className={`ide__assistant${assistantFloating ? ` ${drawerClass} ide__drawer--left` : ""}`}
-      aria-label={t("ide.assistant")}
-      // 펼친 직후 포커스를 받을 수 있게 한다. 탭 순서에는 들어가지 않는다.
-      tabIndex={-1}
-      hidden={!layout.assistantOpen}
-      style={
-        assistantFloating
-          ? railDrawer === undefined
-            ? undefined
-            : { width: layout.assistantWidth }
-          : { width: layout.assistantWidth }
-      }
+      title={t("ide.assistant")}
+      open={layout.assistantOpen}
+      onOpenChange={(open) => {
+        if (open !== layout.assistantOpen) togglePanel("assistantOpen");
+      }}
+      storageKey={ASSISTANT_WINDOW_STORAGE_KEY}
+      launcherLabel={t("ide.assistant")}
+      launcherId={assistantToggleId}
+      minimizeLabel={t("ide.collapseAssistant")}
     >
-      {/*
-        패널의 landmark·이름·제목은 슬롯이 소유한다(WORKFLOW B-04 Acceptance). 슬롯 내용은 이름 없는
-        `<section>`이라 여기서 이름을 달지 않으면 landmark 탐색으로 닿지 않는다.
-        닫기는 한 곳만 그린다: 슬롯이 손잡이를 받는 함수면 그쪽이 닫기(진행 중 작업 확인 포함)를
-        그리므로 여기서는 접기 버튼을 내지 않는다.
-      */}
-      <header className="ide__panel-header">
-        <h2>{t("ide.assistant")}</h2>
-        {typeof assistant === "function" ? null : (
-          <Button
-            ref={assistantCollapse}
-            size="small"
-            tone="ghost"
-            onClick={() => {
-              togglePanel("assistantOpen");
-              queueMicrotask(() => assistantRestore.current?.focus());
-            }}
-          >
-            {t("ide.collapseAssistant")}
-          </Button>
-        )}
-      </header>
-      {/* 본문은 한 겹 감싼다 — 슬롯이 요소를 여럿 넘겨도 패널 높이를 나눠 갖지 않는다(리뷰 P1-1). */}
-      <div className="ide__assistant-body">
-        {assistantMounted
-          ? typeof assistant === "function"
-            ? assistant({ close: closeAssistant, open: layout.assistantOpen })
-            : assistant
-          : null}
-      </div>
-    </aside>
+      {typeof assistant === "function"
+        ? assistant({ close: closeAssistant, open: layout.assistantOpen })
+        : assistant}
+    </FloatingWindow>
   ) : null;
 
   return (
@@ -803,25 +712,6 @@ export const StrategyIde = ({
               aria-expanded={layout.inspectorOpen}
             >
               {t("ide.inspector")}
-            </Button>
-          ) : null}
-          {hasAssistant && (assistantFloating || !layout.assistantOpen) ? (
-            <Button
-              ref={assistantRestore}
-              id={assistantToggleId}
-              size="small"
-              onClick={() => {
-                togglePanel("assistantOpen");
-                queueMicrotask(() =>
-                  assistantFocusTarget()?.focus(ASSISTANT_FOCUS),
-                );
-              }}
-              aria-label={t("ide.assistant")}
-              aria-controls={ids.assistant}
-              aria-expanded={layout.assistantOpen}
-              aria-keyshortcuts="Alt+A"
-            >
-              <span className="ide__label-full">{t("ide.assistant")}</span><span className="ide__label-short" aria-hidden="true">AI</span>
             </Button>
           ) : null}
         <details
@@ -912,21 +802,10 @@ export const StrategyIde = ({
       {notice ? <div className="ide__notice">{notice}</div> : null}
 
       <OpenTraceWorkspaceContext.Provider value={openTraceWorkspace}>
-      <div className="ide__body" ref={bodyRef}>
-        {/* AI 열은 본문 맨 왼쪽이다(RD-04-A). 서랍일 때도 같은 자리에 두어 DOM 부모·순서를 바꾸지 않는다 —
-            대화·미전송 입력·스트림 소유자를 재마운트하지 않는다. */}
+      <div className="ide__body">
+        {/* AI 창은 화면 위에 떠 있다. 늘 같은 자리에 두어 DOM 부모·순서를 바꾸지 않는다 — 대화·미전송 입력·스트림
+            소유자를 재마운트하지 않는다. */}
         {assistantNode}
-        {hasAssistant && !assistantFloating && layout.assistantOpen ? (
-          <SplitHandle
-            orientation="vertical"
-            label={t("ide.resizeAssistant")}
-            value={layout.assistantWidth}
-            min={PANEL_BOUNDS.assistantWidth.min}
-            max={PANEL_BOUNDS.assistantWidth.max}
-            onChange={(value) => resize("assistantWidth", value)}
-            controls={ids.assistant}
-          />
-        ) : null}
         <div
           className={`ide__left${compact ? " ide__left--drawer" : ""}`}
           hidden={!layout.outlineOpen || layout.debuggerOpen}
@@ -1050,11 +929,7 @@ export const StrategyIde = ({
 
         {/* 서랍은 본문 안에 그린다 — 오른쪽 서랍의 세로 범위가 본문과 같아 상단 바 밑에 깔리지 않는다(#325). */}
         {inspectorFloating ? (
-          <div
-            className={drawerClass}
-            style={railDrawer}
-            hidden={!layout.inspectorOpen}
-          >
+          <div className="ide__drawer" hidden={!layout.inspectorOpen}>
             {inspectorNode}
           </div>
         ) : null}

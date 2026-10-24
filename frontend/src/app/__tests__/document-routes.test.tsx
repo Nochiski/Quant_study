@@ -953,7 +953,10 @@ describe("professional keyboard workflow (P6-03)", () => {
       name: "명령과 문서 경로 검색",
     });
     await user.type(search, "node:mom_252");
-    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    // 떠 있는 AI 창의 "창 크기" 선택지는 세지 않는다 — 팔레트 안의 명령만 본다.
+    expect(
+      within(screen.getByRole("dialog", { name: "전략 명령 팔레트" })).queryByRole("option"),
+    ).not.toBeInTheDocument();
     expect(screen.getByText(t("command.empty"))).toBeVisible();
     fireEvent.keyDown(search, { key: "Enter" });
     expect(search).toHaveFocus();
@@ -962,7 +965,10 @@ describe("professional keyboard workflow (P6-03)", () => {
     expect(view.state.selection.main.to).toBe(selection.to);
 
     await screen.findByText(t("ide.outline.stale"));
-    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    // 떠 있는 AI 창의 "창 크기" 선택지는 세지 않는다 — 팔레트 안의 명령만 본다.
+    expect(
+      within(screen.getByRole("dialog", { name: "전략 명령 팔레트" })).queryByRole("option"),
+    ).not.toBeInTheDocument();
     fireEvent.keyDown(search, { key: "Enter" });
     expect(history.location.search).not.toContain("path=");
     expect(view.state.selection.main.from).toBe(selection.from);

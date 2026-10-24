@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -166,18 +167,18 @@ describe("StrategyIde", () => {
     expect(screen.getByRole("textbox", { name: "추적 종목" })).toHaveValue("SEC001,SEC002");
   });
 
-  it("추적 중 AI와 계약을 명시해서 열어도 추적과 범위 입력을 유지한다", async () => {
+  it("추적 중 AI 창과 계약을 함께 열어도 추적과 범위 입력을 유지한다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     mount({ assistant: <p>AI 대화</p>, debugger: <input aria-label="추적 범위" defaultValue="SEC001" /> });
+    // AI 창은 처음부터 떠 있고, 추적 작업공간으로 가도 닫히지 않는다(본문 자리를 다투지 않는다).
     await user.click(screen.getByRole("button", { name: "중간 결과" }));
-    await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
     expect(screen.getByRole("region", { name: "중간 결과" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     expect(screen.getByRole("region", { name: "중간 결과" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "추적 범위" })).toHaveValue("SEC001");
-    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
   });
 
   it("추적 중 표현 열기 단축키는 원문을 보존하며 편집으로 복귀한다", async () => {
@@ -269,11 +270,13 @@ describe("StrategyIde", () => {
     await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "계약 접기" })).toHaveFocus();
-    await user.keyboard("{Alt>}a{/Alt}");
-    expect(screen.queryByRole("complementary", { name: "계약" })).not.toBeInTheDocument();
+    // AI 는 떠 있는 창이라 서랍 전환에 끼지 않는다 — Alt+A 는 창만 여닫고 계약 서랍은 그대로다.
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    await user.keyboard("{Alt>}a{/Alt}");
     expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "계약" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    expect(screen.queryByRole("complementary", { name: "계약" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "전략 구조 접기" })).toHaveFocus();
   });
 
@@ -594,12 +597,12 @@ describe("StrategyIde", () => {
       symbols: [{ id: "/risk/max_name_weight", pointer: "/risk/max_name_weight", label: "최대 종목 비중", description: "/risk/max_name_weight", keywords: ["비중"] }],
       onSelectSymbol,
     });
-    if (width < 1280) {
-      await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
-      expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
-    } else screen.getByRole("textbox", { name: "source" }).focus();
+    // AI 창은 처음부터 떠 있다.
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
+    if (width >= 1280) screen.getByRole("textbox", { name: "source" }).focus();
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    await user.type(screen.getByRole("combobox"), "최대 종목 비중");
+    // AI 창의 "창 크기" 선택 상자도 combobox 라 팔레트 안에서 찾는다.
+    await user.type(within(screen.getByRole("dialog", { name: "전략 명령 팔레트" })).getByRole("combobox"), "최대 종목 비중");
     await user.keyboard("{Enter}");
     expect(onSelectSymbol).toHaveBeenCalledWith("/risk/max_name_weight");
     await waitFor(() => expect(screen.getByRole("textbox", { name: "source" })).toHaveFocus());

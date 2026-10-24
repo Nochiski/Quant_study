@@ -668,6 +668,8 @@ export const StrategyRevisionPage = () => {
             onClose={close}
             visible={open}
             state={assistantState}
+            // 떠 있는 창 안이라 대화가 비어 있어도 입력칸을 창 바닥에 붙인다.
+            layout="docked"
           />
         )}
         debugger={

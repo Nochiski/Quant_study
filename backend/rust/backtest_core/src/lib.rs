@@ -62,6 +62,7 @@ fn backtest_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     // build.rs가 구운 빌드 입력 지문. 엔진이 현재 소스와 비교해 낡은 확장을 거른다.
     m.add("SOURCE_DIGEST", env!("BACKTEST_CORE_SOURCE_DIGEST"))?;
+    m.add("BUILD_PROFILE", env!("BACKTEST_CORE_BUILD_PROFILE"))?;
     Ok(())
 }
 

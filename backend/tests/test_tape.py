@@ -15,7 +15,6 @@ import pytest
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
-from backtest_engine.engine.core import core_available
 from backtest_engine.engine.tape import evaluate_tape
 from backtest_engine.errors import UndeclaredActionReturned
 from backtest_engine.types.actions import (
@@ -39,8 +38,9 @@ from backtest_engine.types.requirements import (
 from backtest_engine.types.strategy import StrategyContext
 from backtest_engine.types.tape import DeclarativeTapeStrategy, TapeFrame
 from tests.conftest import day, make_bar, make_instrument
+from tests.rust_core_guard import RUST_CORE
 
-RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="rust core not built")
+RUST_ONLY = RUST_CORE
 SIGNAL = date(2018, 4, 27)
 A, B, C = make_instrument("000660:1"), make_instrument("005930:1"), make_instrument("000030:1")
 # 작은따옴표가 든 심볼. feed에 없어 미보유 no_bar 경로를 탄다.
@@ -348,7 +348,7 @@ def test_no_bar_reason_quotes_symbols_containing_an_apostrophe() -> None:
     assert reasons["rust"] == [
         "tape:d1",
         "tape_idle",
-        '''tape:d3 no_bar=("00'30",)''',
+        """tape:d3 no_bar=("00'30",)""",
         "tape_idle",
     ]
 

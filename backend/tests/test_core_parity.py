@@ -22,7 +22,6 @@ from backtest_engine import BacktestEngine, BacktestResult, RunConfig
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.core import (
     PortfolioLedger,
-    core_available,
     make_persistent_runtime,
     make_portfolio,
     make_pricing,
@@ -95,6 +94,7 @@ from backtest_engine.types.requirements import (
 from backtest_engine.types.strategy import Strategy, StrategyContext
 from tests import test_basket, test_corporate_action_engine, test_margin, test_short_selling
 from tests.conftest import day, make_bar, make_instrument, make_ohlc, make_snapshot
+from tests.rust_core_guard import RUST_CORE
 from tests.test_broker import RULE_TABLE
 from tests.test_engine_golden import (
     GOLDEN_BARS,
@@ -105,7 +105,7 @@ from tests.test_engine_golden import (
 )
 
 INSTRUMENT = make_instrument()
-RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core 확장 없음")
+RUST_ONLY = RUST_CORE
 # rust_legacy(= backtest_core.Portfolio 단독 어댑터)를 직접 쓰는 테스트용.
 # deprecation 경고는 의도된 것이라 무시한다.
 LEGACY_DEPRECATION = pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning")

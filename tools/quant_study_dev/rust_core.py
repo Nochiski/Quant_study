@@ -40,11 +40,24 @@ class Action(enum.Enum):
     BUILT = "built"
     WARN_NO_TOOLCHAIN = "warn_no_toolchain"
     WARN_BUILD_FAILED = "warn_build_failed"
+    WARN_DIGEST_MISMATCH = "warn_digest_mismatch"
+    WARN_UNKNOWN_STATUS = "warn_unknown_status"
     WARN_ERROR = "warn_error"
 
 
+# backend `core_source.CoreStatus`와 같은 값. 이 도구는 backend 패키지를 import하지 않는다.
+STATUSES = frozenset({"missing", "stale", "debug", "fresh", "unchecked"})
+_REASONS = {
+    "missing": "설치되어 있지 않습니다",
+    "stale": "현재 Rust 소스보다 오래됐습니다",
+    "debug": "디버그 빌드라 느립니다",
+}
+
+
 def decide(status: str, toolchain: bool) -> Action | None:
-    """backend 상태로 할 일을 정한다. None이면 빌드한다."""
+    """backend 상태로 할 일을 정한다. None이면 release로 빌드한다."""
+    if status not in STATUSES:
+        return Action.WARN_UNKNOWN_STATUS
     if status in ("fresh", "unchecked"):
         return Action.UP_TO_DATE
     if not toolchain:
@@ -83,7 +96,7 @@ def build_environment(environ: Mapping[str, str], cargo: Path | None) -> dict[st
 def core_status(
     uv: str, backend: Path, environment: Mapping[str, str], run: Runner
 ) -> str:
-    """backend 판정(missing·stale·fresh·unchecked)을 한 단어로 받는다."""
+    """backend 판정을 받는다. 출력의 마지막 줄만 상태로 본다(앞의 경고 등은 무시)."""
     completed = run(
         list(backend_uv_command(uv, backend, "python", "-c", STATUS_SCRIPT)),
         cwd=backend,
@@ -96,7 +109,8 @@ def core_status(
             f"코어 상태 확인이 실패했습니다(exit={completed.returncode}): "
             + completed.stderr.decode(errors="replace").strip()[-300:]
         )
-    return completed.stdout.decode().strip()
+    lines = completed.stdout.decode(errors="replace").strip().splitlines()
+    return lines[-1].strip() if lines else ""
 
 
 def build(uv: str, backend: Path, environment: Mapping[str, str], run: Runner) -> bool:
@@ -160,11 +174,13 @@ def _ensure(
     action = decide(status, cargo is not None)
     if action is Action.UP_TO_DATE:
         return action
-    reason = (
-        "설치되어 있지 않습니다"
-        if status == "missing"
-        else "현재 Rust 소스보다 오래됐습니다"
-    )
+    if action is Action.WARN_UNKNOWN_STATUS:
+        say(
+            f"[dev] 경고: backend가 알 수 없는 Rust 코어 상태를 돌려줘 빌드하지 않습니다"
+            f"(status={status!r}). 서버는 계속 시작합니다."
+        )
+        return action
+    reason = _REASONS[status]
     if action is Action.WARN_NO_TOOLCHAIN:
         say(
             f"[dev] 경고: Rust 백테스트 코어가 {reason}. Rust 툴체인(cargo)을 찾지 못해 빌드하지 "
@@ -172,19 +188,24 @@ def _ensure(
         )
         return action
     say(
-        f"[dev] Rust 백테스트 코어가 {reason}. 빌드합니다(release, 처음에는 몇 분 걸릴 수 있음)."
+        f"[dev] Rust 백테스트 코어가 {reason}. release로 빌드합니다"
+        "(처음에는 몇 분 걸릴 수 있음)."
     )
-    if build(uv, backend, environment, run) and core_status(
-        uv, backend, environment, run
-    ) in (
-        "fresh",
-        "unchecked",
-    ):
+    if not build(uv, backend, environment, run):
+        say(
+            "[dev] 경고: Rust 백테스트 코어 빌드에 실패했습니다. 위 빌드 로그를 확인해 주세요. "
+            "다음 uv run dev에서 다시 시도하며, 끄려면 --no-rust-build를 씁니다. "
+            + FALLBACK_HINT
+        )
+        return Action.WARN_BUILD_FAILED
+    after = core_status(uv, backend, environment, run)
+    if after == "fresh":
         say("[dev] Rust 백테스트 코어 빌드 완료.")
         return Action.BUILT
     say(
-        "[dev] 경고: Rust 백테스트 코어 빌드에 실패했습니다. 위 빌드 로그를 확인해 주세요. "
-        "다음 uv run dev에서 다시 시도하며, 끄려면 --no-rust-build를 씁니다. "
-        + FALLBACK_HINT
+        "[dev] 경고: 빌드는 성공했지만 설치된 Rust 코어가 현재 소스와 맞지 않습니다"
+        f"(status={after!r}). 빌드하는 동안 소스가 바뀌었거나, 확장이 다른 Python 환경에"
+        " 설치됐거나, build.rs와 backend의 지문 규칙이 어긋났을 수 있습니다. "
+        "다음 uv run dev에서 다시 시도합니다. " + FALLBACK_HINT
     )
-    return Action.WARN_BUILD_FAILED
+    return Action.WARN_DIGEST_MISMATCH

@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 
 from backtest_engine import BacktestEngine, RunConfig
-from backtest_engine.engine.core import core_available
 from backtest_engine.types.actions import (
     ActionKind,
     ExecutionPolicy,
@@ -56,6 +55,7 @@ from tests.application.test_benchmark_corporate_actions import (
     _metric,
     _run,
 )
+from tests.rust_core_guard import RUST_CORE
 
 SUSPENDED = (date(2024, 1, 12), date(2024, 1, 15))
 SPLIT_SESSION = date(2024, 1, 15)  # 정지 중 사건 — 다음 bar(2024-01-16)에 정산된다
@@ -198,7 +198,7 @@ def test_no_benchmark_means_no_values_and_no_carry() -> None:
 # 벤치마크 지표가 사용 불가가 되는 이유를 경고로 알린다.
 DELIST_CODE = "benchmark.delisted_sessions_frozen"
 LEADING_CODE = "benchmark.no_bar_at_start"
-RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core 확장 없음")
+RUST_ONLY = RUST_CORE
 
 
 class _BenchmarkGaps:

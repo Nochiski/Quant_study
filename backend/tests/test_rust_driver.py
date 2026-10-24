@@ -12,7 +12,7 @@ import pytest
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
-from backtest_engine.engine.core import core_available, instrument_key
+from backtest_engine.engine.core import instrument_key
 from backtest_engine.errors import EquityWipedOut
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import StrategyEvent
@@ -21,9 +21,10 @@ from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.strategy import StrategyContext
 from tests import test_short_selling
 from tests.conftest import day, make_bar, make_instrument
+from tests.rust_core_guard import RUST_CORE
 from tests.test_engine_golden import GOLDEN_BARS, ScriptedStrategy, target_70pct
 
-RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="rust core not built")
+RUST_ONLY = RUST_CORE
 INSTRUMENT = make_instrument()
 
 

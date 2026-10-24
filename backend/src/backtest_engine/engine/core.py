@@ -20,7 +20,11 @@ from backtest_engine.engine.broker import (
     QuoteCore,
     QuoteNumbers,
 )
-from backtest_engine.engine.core_source import BUILD_COMMAND, core_status
+from backtest_engine.engine.core_source import (
+    BUILD_COMMAND,
+    USABLE_STATUSES,
+    process_core_status,
+)
 from backtest_engine.engine.portfolio import Portfolio as PythonPortfolio
 from backtest_engine.engine.portfolio import scale_quantity
 from backtest_engine.engine.power_projection import ExecutionState, project_execution
@@ -79,7 +83,7 @@ def core_available(core: str) -> bool:
         return True
     if core in RUST_CORES:
         # 현재 소스보다 오래된 확장은 없는 것과 같이 다룬다. 낡은 코어의 결과가 섞이면 안 된다.
-        return core_status() in ("fresh", "unchecked")
+        return process_core_status() in USABLE_STATUSES
     return False
 
 
@@ -87,7 +91,7 @@ def _require_core(core: str) -> None:
     if core not in CORES:
         raise CoreUnavailable(f"unknown core — core={core!r} available={CORES}")
     if core in RUST_CORES:
-        status = core_status()
+        status = process_core_status()
         if status == "missing":
             raise CoreUnavailable(
                 f"core extension not installed — core={core!r}; build with "
@@ -96,8 +100,8 @@ def _require_core(core: str) -> None:
         if status == "stale":
             raise CoreUnavailable(
                 f"core extension is older than the current Rust source — core={core!r}; "
-                f"rebuild with `{BUILD_COMMAND}` from the backend directory "
-                "(or restart `uv run dev`)"
+                f"rebuild with `{BUILD_COMMAND}` from the backend directory, then restart the "
+                "server (`uv run dev` rebuilds on start)"
             )
 
 

@@ -7,9 +7,16 @@ from collections.abc import Mapping
 from pathlib import Path
 
 
-def backend_uv_command(uv: str, backend: Path, *arguments: str) -> tuple[str, ...]:
-    """설치된 backend 환경을 그대로 쓴다. 의존성을 설치하거나 동기화하지 않는다."""
-    return (uv, "run", "--no-sync", "--project", str(backend), *arguments)
+def backend_uv_command(
+    uv: str, backend: Path, *arguments: str, sync: bool = False
+) -> tuple[str, ...]:
+    """backend 프로젝트에서 명령을 실행한다.
+
+    기본은 설치된 환경을 그대로 쓰고 의존성을 설치·동기화하지 않는다(`dev`). `uv run server`
+    위임처럼 uv 기본 동기화를 유지해야 하는 호출만 `sync=True`를 쓴다.
+    """
+    options = () if sync else ("--no-sync",)
+    return (uv, "run", *options, "--project", str(backend), *arguments)
 
 
 def backend_process_environment(environ: Mapping[str, str]) -> dict[str, str]:

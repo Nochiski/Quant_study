@@ -15,8 +15,14 @@ class DecideTest(unittest.TestCase):
         for status in ("fresh", "unchecked"):
             self.assertIs(rust_core.decide(status, toolchain=False), Action.UP_TO_DATE)
 
-    def test_missing_or_stale_builds_when_cargo_exists(self) -> None:
-        for status in ("missing", "stale"):
+    def test_unknown_status_is_not_built(self) -> None:
+        for status in ("", "weird", "fresh extra"):
+            self.assertIs(
+                rust_core.decide(status, toolchain=True), Action.WARN_UNKNOWN_STATUS
+            )
+
+    def test_missing_stale_or_debug_builds_when_cargo_exists(self) -> None:
+        for status in ("missing", "stale", "debug"):
             self.assertIsNone(rust_core.decide(status, toolchain=True))
             self.assertIs(
                 rust_core.decide(status, toolchain=False), Action.WARN_NO_TOOLCHAIN
@@ -88,7 +94,10 @@ class EnsureCoreTest(unittest.TestCase):
         if "maturin" in command:
             return subprocess.CompletedProcess(command, 0 if self.build_ok else 1)
         status = self.statuses.pop(0)
-        return subprocess.CompletedProcess(command, 0, status.encode(), b"")
+        # 상태 앞에 경고 같은 다른 출력이 있어도 마지막 줄만 본다.
+        return subprocess.CompletedProcess(
+            command, 0, f"warning line\n{status}\n".encode(), b""
+        )
 
     def _ensure(self, cargo: bool = True, **kwargs: object) -> Action:
         return rust_core.ensure_core(
@@ -124,14 +133,25 @@ class EnsureCoreTest(unittest.TestCase):
         self.assertIs(self._ensure(), Action.UP_TO_DATE)
         self.assertFalse(self._built())
 
-    def test_build_failure_or_still_stale_warns_and_retries_next_time(self) -> None:
+    def test_debug_build_is_rebuilt_in_release(self) -> None:
+        self.statuses = ["debug", "fresh"]
+        self.assertIs(self._ensure(), Action.BUILT)
+        self.assertIn("디버그", self.logs[0])
+
+    def test_build_failure_warns_and_retries_next_time(self) -> None:
         self.build_ok = False
         self.assertIs(self._ensure(), Action.WARN_BUILD_FAILED)
         self.assertIn("다음 uv run dev에서 다시 시도", self.logs[-1])
-        self.calls.clear()
-        self.build_ok = True
+
+    def test_successful_build_that_is_still_stale_is_reported_separately(self) -> None:
         self.statuses = ["stale", "stale"]
-        self.assertIs(self._ensure(), Action.WARN_BUILD_FAILED)
+        self.assertIs(self._ensure(), Action.WARN_DIGEST_MISMATCH)
+        self.assertIn("빌드는 성공했지만", self.logs[-1])
+
+    def test_unknown_status_warns_without_building(self) -> None:
+        self.statuses = ["huh"]
+        self.assertIs(self._ensure(), Action.WARN_UNKNOWN_STATUS)
+        self.assertFalse(self._built())
 
     def test_no_toolchain_warns_without_building(self) -> None:
         self.statuses = ["stale"]

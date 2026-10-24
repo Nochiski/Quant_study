@@ -69,7 +69,18 @@ const acceptedRequest: BacktestRunSpec = {
 
 let cancelledRun: string | null = null;
 let replayedRequest: BacktestRunSpec | null = null;
+/** 연결된 시장 데이터가 답하는 유니버스 목록(기본 핸들러). 패널의 유니버스 칸은 이 목록의 드롭다운이다. */
+const UNIVERSE_LIST = [
+  {
+    universe_id: "krx.common-stock",
+    market: "KRX",
+    label: "KRX 보통주",
+    description: "KRX 상장 보통주입니다. 기준일마다 그날 상장돼 있던 종목으로 후보를 다시 고릅니다.",
+  },
+];
+
 const server = setupServer(
+  http.get(`${API}/api/v1/equity/universes`, () => HttpResponse.json(UNIVERSE_LIST)),
   http.post(`${API}/api/v1/backtests/:runId/cancel`, ({ params }) => {
     cancelledRun = String(params.runId);
     return HttpResponse.json({
@@ -194,7 +205,9 @@ const Harness = ({
 const openSettings = async (expandGroups = true) => {
   const user = userEvent.setup();
   await user.click(screen.getByLabelText("실행 설정 열기"));
-  await screen.findByRole("textbox", { name: "유니버스" });
+  // 유니버스 드롭다운이 목록을 받을 때까지 기다린다(불러오는 동안은 aria-busy).
+  const universe = await screen.findByRole("combobox", { name: "유니버스" });
+  await waitFor(() => expect(universe).not.toHaveAttribute("aria-busy"));
   if (expandGroups) {
     for (const label of ["비용", "고급 실행"]) {
       const summary = screen.getByLabelText(label, { selector: "summary" });
@@ -215,8 +228,8 @@ const fillPeriodAndUniverse = async (
 ) => {
   await user.type(screen.getByLabelText(/^시작일/), "2021-01-01");
   await user.type(screen.getByLabelText(/^종료일/), "2026-08-31");
-  await user.type(
-    screen.getByRole("textbox", { name: "유니버스" }),
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "유니버스" }),
     "krx.common-stock",
   );
 };
@@ -468,9 +481,11 @@ describe("run environment panel", () => {
       "drop",
     );
     expect(screen.getByLabelText(/^시작일/)).toHaveValue("");
-    expect(screen.getByRole("textbox", { name: "유니버스" })).toHaveValue("");
+    expect(screen.getByRole("combobox", { name: "유니버스" })).toHaveValue("");
     expect(screen.getAllByText("값을 정하세요.")).toHaveLength(3);
     expect(within(screen.getByLabelText("실행 설정 열기")).getByText("입력 확인")).toBeInTheDocument();
+    // 상태 배지는 지금 상태 문장 하나만 텍스트로 갖는다(반대 문장은 폭 자리표시로만 있다).
+    expect(within(screen.getByLabelText("실행 설정 열기")).queryByText("준비됨")).toBeNull();
     expect(requestBody()).toBeNull();
     // 차단 안내와 요약 띠가 "어느 칸을 채우라"를 칸 이름으로 말한다(P3-02 결정 1 보충).
     expect(
@@ -486,7 +501,7 @@ describe("run environment panel", () => {
     const user = await openSettings(false);
     expect(screen.getByLabelText(/^시작일/)).toBeVisible();
     expect(screen.getByLabelText(/^종료일/)).toBeVisible();
-    expect(screen.getByRole("textbox", { name: "유니버스" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "유니버스" })).toBeVisible();
     expect(screen.getByRole("spinbutton", { name: /수수료/ })).not.toBeVisible();
     expect(screen.getByRole("combobox", { name: "실행 core" })).not.toBeVisible();
     const costs = screen.getByLabelText("비용", { selector: "summary" });
@@ -542,7 +557,7 @@ describe("run environment panel", () => {
   it("설정 밖으로 이동하면 패널을 닫고 외부 초점을 유지한다", async () => {
     renderWithQuery(<Harness />);
     await openSettings();
-    const field = screen.getByRole("textbox", { name: "유니버스" });
+    const field = screen.getByRole("combobox", { name: "유니버스" });
     const outside = screen.getByRole("button", { name: "apply upgraded environment" });
     act(() => field.focus());
     act(() => outside.focus());
@@ -554,7 +569,7 @@ describe("run environment panel", () => {
   it("설정 내부와 summary로 초점을 옮길 때는 열린 상태를 유지한다", async () => {
     renderWithQuery(<Harness />);
     await openSettings();
-    const field = screen.getByRole("textbox", { name: "유니버스" });
+    const field = screen.getByRole("combobox", { name: "유니버스" });
     const close = screen.getByRole("button", { name: "실행 설정 닫기" });
     const summary = screen.getByLabelText("실행 설정 열기");
     act(() => field.focus());
@@ -568,7 +583,7 @@ describe("run environment panel", () => {
   it("다음 초점이 없는 네이티브 선택창·창 이탈은 패널을 닫지 않는다", async () => {
     renderWithQuery(<Harness />);
     await openSettings();
-    const field = screen.getByRole("textbox", { name: "유니버스" });
+    const field = screen.getByRole("combobox", { name: "유니버스" });
     act(() => field.focus());
     fireEvent.blur(field, { relatedTarget: null });
     expect(field).toBeVisible();
@@ -598,8 +613,8 @@ describe("run environment panel", () => {
     );
 
     await user.type(screen.getByLabelText(/^종료일/), "2026-08-31");
-    await user.type(
-      screen.getByRole("textbox", { name: "유니버스" }),
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "유니버스" }),
       "krx.common-stock",
     );
     expect(
@@ -718,6 +733,8 @@ describe("run environment panel", () => {
     await user.selectOptions(method, "custom");
     expect(rate).toBeEnabled();
     expect(within(screen.getByLabelText("실행 설정 열기")).getByText("입력 확인")).toBeInTheDocument();
+    // 상태 배지는 지금 상태 문장 하나만 텍스트로 갖는다(반대 문장은 폭 자리표시로만 있다).
+    expect(within(screen.getByLabelText("실행 설정 열기")).queryByText("준비됨")).toBeNull();
     expect(screen.getByTestId("blocked")).toHaveTextContent(
       "실행 설정에서 매도 거래세율 칸을 채우세요.",
     );
@@ -734,6 +751,7 @@ describe("run environment panel", () => {
     expect(rate).toBeDisabled();
     expect(rate).toHaveValue(12);
     expect(screen.getByText("준비됨")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("실행 설정 열기")).queryByText("입력 확인")).toBeNull();
     expect(requestBody()?.environment).toEqual(ENVIRONMENT);
   });
 
@@ -909,9 +927,13 @@ describe("run environment panel", () => {
     await fillPeriodAndUniverse(user);
 
     expect(requestBody()?.environment).toEqual(ENVIRONMENT);
+    // 요약 띠는 유니버스를 id 대신 연결된 시장 데이터가 답한 표시명으로 읽는다.
     expect(
       screen.getByRole("region", { name: "실행 설정 요약" }),
-    ).toHaveTextContent("krx.common-stock");
+    ).toHaveTextContent("유니버스KRX 보통주");
+    expect(
+      screen.getByRole("region", { name: "실행 설정 요약" }),
+    ).not.toHaveTextContent("krx.common-stock");
 
     const participation = screen.getByRole("spinbutton", { name: /참여율/ });
     await user.clear(participation);
@@ -1057,7 +1079,7 @@ describe("run environment panel", () => {
 
     renderWithQuery(<Harness storageKey="strategy-1" />);
     await openSettings();
-    expect(screen.getByRole("textbox", { name: "유니버스" })).toHaveValue(
+    expect(screen.getByRole("combobox", { name: "유니버스" })).toHaveValue(
       "krx.common-stock",
     );
     cleanup();
@@ -1335,13 +1357,26 @@ describe("run environment panel", () => {
     view.rerender(<Harness request={{ ...acceptedRequest, initial_cash: 1 }} />);
 
     // 새 답이 오기 전: 문장은 그대로, 옛 답임을 표시한다.
-    expect(screen.getByRole("status", { name: "시도 영향" })).toHaveTextContent("2회 그대로");
+    // 새 답이 오기 전: 직전 답을 남기되 "갱신 중"을 앞에 붙여 옛 답임을 보이고 읽힌다.
+    expect(screen.getByRole("status", { name: "시도 영향" })).toHaveTextContent(
+      /^갱신 중 · 직전 답: .*2회 그대로/u,
+    );
     expect(screen.getByRole("status", { name: "시도 영향" })).toHaveAttribute("aria-busy", "true");
     release();
     await waitFor(() =>
       expect(screen.getByRole("status", { name: "시도 영향" })).toHaveTextContent("5회 그대로"),
     );
     expect(screen.getByRole("status", { name: "시도 영향" })).not.toHaveAttribute("aria-busy");
+    expect(screen.getByRole("status", { name: "시도 영향" })).not.toHaveTextContent("갱신 중");
+
+    // 설정이 다시 덜 채워져 물을 요청이 없어지면 남은 직전 답의 "갱신 중"도 쓰지 않는다.
+    view.rerender(<Harness request={null} />);
+    const pending = screen.getByRole("status", { name: "시도 영향" });
+    expect(pending).toHaveTextContent(
+      "실행 설정을 다 채우면 이 실행이 시도 수에 어떻게 들어가는지 여기 보입니다.",
+    );
+    expect(pending).not.toHaveAttribute("aria-busy");
+    expect(pending).not.toHaveAttribute("data-stale");
   });
 
   it("says what the reserved trial line will show while there is no run request yet", async () => {
@@ -1429,6 +1464,8 @@ describe("run environment panel", () => {
     );
     expect(cash).toHaveAttribute("aria-invalid", "true");
     expect(within(screen.getByLabelText("실행 설정 열기")).getByText("입력 확인")).toBeInTheDocument();
+    // 상태 배지는 지금 상태 문장 하나만 텍스트로 갖는다(반대 문장은 폭 자리표시로만 있다).
+    expect(within(screen.getByLabelText("실행 설정 열기")).queryByText("준비됨")).toBeNull();
   });
 });
 
@@ -1795,6 +1832,58 @@ describe("run settings universe choice", () => {
     ).toHaveTextContent("알 수 없는 유니버스 (krx.common-stock)");
   });
 
+  it("falls back to typing the id with the reason when no universe is listed for the market", async () => {
+    serveUniverses([{ ...UNIVERSES[0], market: "NYSE" }]);
+    renderWithQuery(<Harness storageKey="universe-empty" />);
+    await open();
+
+    const field = await screen.findByRole("textbox", { name: "유니버스" });
+    expect(field).toHaveAccessibleDescription(
+      /^연결된 시장 데이터가 이 시장에서 고를 유니버스를 알려 주지 않아 ID를 직접 적습니다\./u,
+    );
+  });
+
+  it("lists only the run market's universes and names a stored universe of another market", async () => {
+    // 저장값 krx.common-stock 이 다른 시장(NYSE) 유니버스로 답해진 목록. 실행 시장은 KRX 다.
+    serveUniverses([{ ...UNIVERSES[0], market: "NYSE" }, UNIVERSES[1]]);
+    renderWithQuery(<Harness storageKey="universe-market" />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "apply upgraded environment" }));
+    await open();
+
+    const select = await screen.findByRole("combobox", { name: "유니버스" });
+    await waitFor(() => expect(select).not.toHaveAttribute("aria-busy"));
+    expect(within(select).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "krx.all",
+      "다른 시장 유니버스 (krx.common-stock)",
+    ]);
+    expect(select).toHaveValue("krx.common-stock");
+  });
+
+  it("keeps the same dropdown while the list loads and hands its focus to the typed field when the list fails", async () => {
+    let fail: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      fail = resolve;
+    });
+    server.use(
+      http.get(`${API}/api/v1/equity/universes`, async () => {
+        await gate;
+        return HttpResponse.json({ detail: "down" }, { status: 500 });
+      }),
+    );
+    renderWithQuery(<Harness storageKey="universe-loading" />);
+    await open();
+
+    const select = await screen.findByRole("combobox", { name: "유니버스" });
+    // 불러오는 동안에도 끄지 않은 같은 드롭다운이고, 불러오는 중임을 알린다.
+    expect(select).toBeEnabled();
+    expect(select).toHaveAttribute("aria-busy", "true");
+    act(() => select.focus());
+    fail();
+
+    const field = await screen.findByRole("textbox", { name: "유니버스" });
+    await waitFor(() => expect(field).toHaveFocus());
+  });
+
   it("falls back to typing the id when the universe list cannot be read", async () => {
     server.use(
       http.get(`${API}/api/v1/equity/universes`, () =>
@@ -1805,9 +1894,10 @@ describe("run settings universe choice", () => {
     await open();
 
     const field = await screen.findByRole("textbox", { name: "유니버스" });
-    // 빈 필수 칸이라 오류 문장도 함께 읽힌다.
+    // 빈 필수 칸이라 오류 문장도 함께 읽힌다. 예시 id 는 적지 않는다(목록 owner 는 backend).
     expect(field).toHaveAccessibleDescription(
-      /^유니버스 목록을 불러오지 못해 ID를 직접 적습니다\. 예: krx\.common-stock/,
+      /^유니버스 목록을 불러오지 못해 ID를 직접 적습니다\./,
     );
+    expect(field).not.toHaveAccessibleDescription(/krx\.common-stock/);
   });
 });

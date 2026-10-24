@@ -61,6 +61,9 @@ _MOCK_SECTORS = ("technology", "industrial", "consumer")
 _CAPITAL_IMPAIRED_INDEX = 2
 # (market, universe_id) -> venue the fixture memberships are keyed by.
 _MOCK_UNIVERSES: dict[tuple[str, str], str] = {("KRX", "krx.common-stock"): "XKRX"}
+_MOCK_UNIVERSE_DESCRIPTION = (
+    "연습용 모의 데이터의 고정 종목 묶음입니다. 실데이터의 같은 유니버스와 종목 구성이 다릅니다."
+)
 
 
 class MockEquityDataAdapter:
@@ -148,9 +151,16 @@ class MockEquityDataAdapter:
         )
 
     def list_universes(self) -> tuple[UniverseDefinition, ...]:
-        """fixture 가 구성 종목을 가진 유니버스 전부(id 오름차순)."""
+        """fixture 가 구성 종목을 가진 유니버스 전부(id 오름차순).
+
+        표시명은 실데이터와 같은 이름을 쓰되, 설명은 mock 의 실제 구성(고정 합성 종목)을
+        말한다 — 원장 술어를 요약한 실데이터 설명을 그대로 쓰면 날짜마다 상장 종목을 다시
+        고른다고 잘못 말한다.
+        """
         return tuple(
-            describe_universe(universe_id, market)
+            replace(
+                describe_universe(universe_id, market), description=_MOCK_UNIVERSE_DESCRIPTION
+            )
             for market, universe_id in sorted(_MOCK_UNIVERSES, key=lambda key: key[1])
         )
 

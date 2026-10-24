@@ -107,7 +107,8 @@ test(
     await expect(universe.locator("option")).toContainText(["KRX 보통주 (krx.common-stock)"]);
     await universe.selectOption(RUN_ENVIRONMENT.universe_id);
     await expect(universe.locator("option:checked")).toHaveText("KRX 보통주 (krx.common-stock)");
-    await expect(universe).toHaveAccessibleDescription(/KRX 상장 보통주입니다/u);
+    // e2e backend 는 mock 어댑터라 mock 의 실제 구성을 말하는 설명이다.
+    await expect(universe).toHaveAccessibleDescription(/모의 데이터의 고정 종목 묶음입니다/u);
     await expect(summary).toContainText("2021-01-01");
     await expect(summary).toContainText("2026-08-31");
 

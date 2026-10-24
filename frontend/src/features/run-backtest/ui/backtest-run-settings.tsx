@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type SyntheticEvent } from "react";
+import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 
 import { t, tDescription } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
@@ -18,7 +18,13 @@ import {
 } from "../model/run-settings-problems";
 import type { BacktestRunSettingsController } from "../model/use-backtest-run-settings";
 import "./backtest-run-settings.css";
-import { useEquityUniverses, type UniverseDefinition } from "../../../entities/dataset";
+import { useEquityUniverses } from "../../../entities/dataset";
+import {
+  universeChoices,
+  universeOptionLabel,
+  type UniverseChoices,
+  type UniverseListState,
+} from "../model/universe-choices";
 import {
   type RunEnvironmentField,
   runEnvironmentApplies,
@@ -52,24 +58,32 @@ const COST_SUMMARY_FIELDS = new Set(["fee_bps", "slippage_bps", "impact_model", 
  * 같은 거절을 이유와 함께 보인다) 문장을 비운다.
  *
  * 칸을 한 글자 고칠 때마다 요청이 바뀐다. 문단이 나타났다 사라지면 아래 칸이 통째로 출렁이므로 자리는
- * 늘 두고(높이 예약), 새 답이 오는 동안은 직전 답을 흐리게 보인다.
+ * 늘 두고(높이 예약), 새 답이 오는 동안은 직전 답을 흐리게 두고 "갱신 중"을 앞에 붙인다 — 옛 시도 수를
+ * 지금 설정의 답으로 읽지 않게 한다.
  */
 const TrialImpact = ({ request }: { request: BacktestRunSpec | null }) => {
   const { data, isPlaceholderData } = useBacktestTrialPreview(request);
+  // 물을 요청이 없으면(skipToken) 남은 직전 답도, 그 placeholder 표시도 쓰지 않는다.
   const shown = request === null ? undefined : data;
+  const stale = request !== null && isPlaceholderData;
   return (
     <p
       className="backtest-settings__trial"
       role="status"
       aria-label={t("backtest.trial.label")}
-      aria-busy={isPlaceholderData || undefined}
-      data-stale={isPlaceholderData || undefined}
+      aria-busy={stale || undefined}
+      data-stale={stale || undefined}
     >
       {request === null ? (
         // 설정이 아직 덜 채워져 물을 요청이 없다. 빈 띠 대신 무엇이 여기 나올지 알린다.
         t("backtest.trial.pending")
       ) : shown === undefined ? null : (
         <>
+          {stale ? (
+            <span className="backtest-settings__trial-updating">
+              {t("backtest.trial.updating")}{" "}
+            </span>
+          ) : null}
           {t(`backtest.trial.${shown.reason}`)
             .replace("{count}", String(shown.trial_count))
             .replace("{after}", String(shown.trial_count_after))}
@@ -89,15 +103,6 @@ const TrialImpact = ({ request }: { request: BacktestRunSpec | null }) => {
 const isIncompleteDate = (event: SyntheticEvent<HTMLInputElement>): boolean =>
   event.currentTarget.type === "date" && event.currentTarget.validity.badInput;
 
-/**
- * `x-catalog: universe` 칸의 선택지 상태. 목록은 연결된 시장 데이터 어댑터가 답한다(backend 소유).
- * 목록을 못 받으면(`error`) 예전처럼 id 를 직접 적는 칸으로 돌아간다.
- */
-type UniverseChoices =
-  | { status: "pending" }
-  | { status: "error" }
-  | { status: "ready"; universes: readonly UniverseDefinition[] };
-
 const EnvironmentInput = ({
   field,
   value,
@@ -109,7 +114,7 @@ const EnvironmentInput = ({
 }: {
   field: RunEnvironmentField;
   value: string;
-  /** 유니버스 칸이면 고를 수 있는 목록. 다른 칸은 undefined. */
+  /** 유니버스 칸(`x-catalog: universe`)이면 그릴 모양. 다른 칸은 undefined. */
   universes?: UniverseChoices;
   /** 지금 모드에서 읽히는 칸인가(스키마 `x-applicable-when`). 아니면 칸을 끈다 — 요청에도 실리지 않는다. */
   applies: boolean;
@@ -121,13 +126,15 @@ const EnvironmentInput = ({
   const inputId = useId();
   const hintId = useId();
   const errorId = useId();
-  const universeList = universes?.status === "ready" ? universes.universes : null;
-  const chosenUniverse = universeList?.find((item) => item.universe_id === value);
-  // 고른 유니버스가 있으면 그 설명을, 목록을 못 받았으면 직접 입력 안내를, 아니면 칸의 한 줄 뜻을 보인다.
+  // 목록이 늦게 실패해 드롭다운이 직접 입력 칸으로 바뀔 때, 드롭다운에 있던 초점을 새 칸으로 옮긴다.
+  // 초점 여부는 이벤트에서만 적고(렌더 중 DOM 을 읽지 않는다) 새 칸이 처음 그려질 때 한 번 쓴다.
+  const [universeFocused, setUniverseFocused] = useState(false);
+  const chosenUniverse = universes?.kind === "list" ? universes.chosen : undefined;
+  // 고른 유니버스가 있으면 그 설명을, 목록이 없으면 직접 입력하는 까닭을, 아니면 칸의 한 줄 뜻을 보인다.
   const description =
     chosenUniverse?.description ??
-    (universes?.status === "error"
-      ? t("backtest.settings.universe.listError")
+    (universes?.kind === "typed"
+      ? t(`backtest.settings.universe.typed.${universes.reason}`)
       : tDescription(field.descriptionKey));
   // 날짜를 덜 친 칸은 값이 여전히 빈 문자열이라 값만 보면 "값을 정하세요."가 된다(#264). 브라우저는 칸
   // 안에서 자리를 채우는 동안 input 이벤트를 내지 않으므로, 키를 뗄 때·값이 바뀔 때·칸을 떠날 때 `badInput` 을
@@ -151,15 +158,20 @@ const EnvironmentInput = ({
   return (
     <div className="backtest-settings__field">
       <label htmlFor={inputId}>{runEnvironmentLabel(field)}</label>
-      {universes !== undefined && universes.status !== "error" ? (
+      {universes !== undefined && universes.kind !== "typed" ? (
+        // 불러오는 동안에도 같은 드롭다운을 둔다 — 끄지 않으므로 초점·탭 순서가 그대로다.
         <select className="ui-select"
           {...common}
-          disabled={common.disabled || universes.status === "pending"}
+          aria-busy={universes.kind === "loading" || undefined}
           value={value}
+          onFocus={() => setUniverseFocused(true)}
+          onBlur={() => setUniverseFocused(false)}
           onChange={(event) => onChange(event.target.value)}
         >
-          {universeList === null ? (
-            <option value={value}>{t("backtest.settings.universe.loading")}</option>
+          {universes.kind === "loading" ? (
+            <option value={value}>
+              {value === "" ? t("backtest.settings.universe.loading") : value}
+            </option>
           ) : (
             <>
               {value === "" ? (
@@ -167,19 +179,17 @@ const EnvironmentInput = ({
                   {t("backtest.settings.universe.placeholder")}
                 </option>
               ) : null}
-              {universeList.map((item) => (
+              {universes.universes.map((item) => (
                 <option key={item.universe_id} value={item.universe_id}>
-                  {item.label === item.universe_id
-                    ? item.label
-                    : `${item.label} (${item.universe_id})`}
+                  {universeOptionLabel(item)}
                 </option>
               ))}
-              {/* 저장된 값이 지금 목록에 없어도 지우지 않는다 — 그대로 두고 모르는 값임을 알린다. */}
-              {value !== "" && chosenUniverse === undefined ? (
+              {/* 저장된 값이 지금 목록에 없어도 지우지 않는다 — 그대로 두고 까닭을 알린다. */}
+              {universes.stored === null ? null : (
                 <option value={value}>
-                  {t("backtest.settings.universe.unknown").replace("{id}", value)}
+                  {t(`backtest.settings.universe.${universes.stored}`).replace("{id}", value)}
                 </option>
-              ) : null}
+              )}
             </>
           )}
         </select>
@@ -198,6 +208,8 @@ const EnvironmentInput = ({
       ) : (
         <input className="ui-input"
           {...common}
+          // 유니버스 드롭다운이 직접 입력 칸으로 바뀐 순간 초점이 드롭다운에 있었으면 이어받는다.
+          autoFocus={universes?.kind === "typed" && universeFocused}
           autoComplete="off"
           spellCheck={false}
           type={
@@ -321,9 +333,9 @@ export const BacktestRunSettings = ({
     .map((field) => `${runEnvironmentName(field)}: ${runEnvironmentValueLabel(field,
       runEnvironmentWireText(field, environmentValues[field.name] ?? ""))}`)
     .join(" · ");
-  const universeChoices: UniverseChoices =
+  const universeList: UniverseListState =
     universeQuery.data !== undefined
-      ? { status: "ready", universes: universeQuery.data }
+      ? { status: "success", universes: universeQuery.data }
       : universeQuery.isError
         ? { status: "error" }
         : { status: "pending" };
@@ -331,7 +343,15 @@ export const BacktestRunSettings = ({
     <EnvironmentInput
       key={field.name}
       field={field}
-      universes={field.catalog === "universe" ? universeChoices : undefined}
+      universes={
+        field.catalog === "universe"
+          ? universeChoices(
+              universeList,
+              environmentValues.market ?? "",
+              environmentValues[field.name] ?? "",
+            )
+          : undefined
+      }
       value={environmentValues[field.name] ?? ""}
       applies={runEnvironmentApplies(field, environmentValues)}
       error={environmentErrors[field.name]}
@@ -389,14 +409,23 @@ export const BacktestRunSettings = ({
       <summary ref={summaryRef} aria-label={t("backtest.settings.open")}>
         {t("backtest.settings.title")}
         <Badge tone={result.valid ? "neutral" : "error"}>
-          {/* 두 문장을 같은 칸에 겹쳐 두고 하나만 보인다 — 상태가 바뀌어도 단추 폭이 그대로다. */}
+          {/* 지금 상태 문장 하나만 텍스트로 둔다. 다른 상태 문장은 보이지 않는 CSS 자리표시(`data-size`)로만
+              겹쳐 폭을 잡아, 상태가 바뀌어도 단추 폭이 그대로다 — DOM·접근성 트리에는 들어가지 않는다. */}
           <span className="backtest-settings__state">
-            <span aria-hidden={!result.valid || undefined} data-shown={result.valid || undefined}>
-              {t("backtest.settings.ready")}
+            <span>
+              {result.valid
+                ? t("backtest.settings.ready")
+                : t("backtest.settings.invalid")}
             </span>
-            <span aria-hidden={result.valid || undefined} data-shown={!result.valid || undefined}>
-              {t("backtest.settings.invalid")}
-            </span>
+            <span
+              aria-hidden="true"
+              className="backtest-settings__state-size"
+              data-size={
+                result.valid
+                  ? t("backtest.settings.invalid")
+                  : t("backtest.settings.ready")
+              }
+            />
           </span>
         </Badge>
       </summary>

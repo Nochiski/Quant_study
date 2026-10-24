@@ -21,6 +21,7 @@ def test_mock_adapter_lists_the_universe_its_fixture_serves() -> None:
         ("KRX", "krx.common-stock")
     ]
     assert universes[0].label == "KRX 보통주"
+    assert "모의 데이터" in universes[0].description
 
 
 def test_universe_without_registered_text_keeps_its_id_as_the_label() -> None:
@@ -39,8 +40,10 @@ def test_http_lists_universes_from_the_connected_adapter() -> None:
             "universe_id": "krx.common-stock",
             "market": "KRX",
             "label": "KRX 보통주",
+            # 기본 HTTP 앱은 mock 어댑터라 mock 의 실제 구성(고정 합성 종목)을 말하는 설명이다.
             "description": (
-                "KRX 상장 보통주입니다. 기준일마다 그날 상장돼 있던 종목으로 후보를 다시 고릅니다."
+                "연습용 모의 데이터의 고정 종목 묶음입니다. "
+                "실데이터의 같은 유니버스와 종목 구성이 다릅니다."
             ),
         }
     ]

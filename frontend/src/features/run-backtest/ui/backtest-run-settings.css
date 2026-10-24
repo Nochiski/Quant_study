@@ -167,11 +167,17 @@
 
 .backtest-settings__state > span {
   grid-area: 1 / 1;
+}
+
+/* 다른 상태 문장은 생성 콘텐츠로만 자리를 잡는다(텍스트 노드가 없어 화면 읽기·검색에 걸리지 않는다). */
+.backtest-settings__state-size::before {
+  content: attr(data-size);
   visibility: hidden;
 }
 
-.backtest-settings__state > span[data-shown] {
-  visibility: visible;
+.backtest-settings__trial-updating {
+  color: var(--text-muted);
+  font-weight: 600;
 }
 
 .backtest-settings__group {

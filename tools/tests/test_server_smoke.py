@@ -63,6 +63,10 @@ class RootServerSmokeTest(unittest.TestCase):
         environment["STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH"] = str(
             Path(runtime_directory.name) / "secrets.json"
         )
+        # AI 공급자·키움 연결 저장 파일. 비우면 개발자의 실제 내 문서 `auto_trading/.env`를 연다.
+        environment["STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH"] = str(
+            Path(runtime_directory.name) / "auto_trading.env"
+        )
         # 개발자 셸의 실자료·공급자 선택과 무관하게 부팅하며 중첩 uv가 extras를 지우지 않는다.
         environment["STRATEGY_WORKBENCH_EQUITY_ADAPTER"] = "mock"
         environment.pop("STRATEGY_WORKBENCH_EQUITY_ROOT", None)

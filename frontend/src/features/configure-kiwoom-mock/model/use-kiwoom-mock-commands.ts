@@ -5,9 +5,11 @@ import {
   BrokerConnectionRequestError,
   brokerConnectionApi,
   refreshKiwoomMockConnection,
+  useDeleteKiwoomMockConnection,
   type ConnectionOutcome,
   type SaveKiwoomMockConnectionBody,
 } from "../../../entities/broker";
+import { refreshCredentialsFile } from "../../../entities/credentials-file";
 import { t } from "../../../shared/config";
 
 export type KiwoomField = "app_key" | "secret_key" | "account_number" | "form";
@@ -46,7 +48,10 @@ export const useSaveKiwoomMockConnection = () => {
     setPending(true);
     try {
       await brokerConnectionApi.save(input);
-      await refreshKiwoomMockConnection(queryClient);
+      await Promise.all([
+        refreshKiwoomMockConnection(queryClient),
+        refreshCredentialsFile(queryClient),
+      ]);
       return null;
     } catch (error) {
       return rejection(error);
@@ -100,3 +105,7 @@ export const useVerifyKiwoomMockConnection = () => {
 
   return { pending, result, verify, reset };
 };
+
+/** 삭제 변이. 성공하면 저장 여부와 저장 파일 문제 목록을 함께 새로 읽는다(무효화는 이 파일 한 곳). */
+export const useDeleteKiwoomMock = () =>
+  useDeleteKiwoomMockConnection(refreshCredentialsFile);

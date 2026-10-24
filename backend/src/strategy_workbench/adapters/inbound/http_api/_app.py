@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from threading import Event
 from typing import Annotated, Any, NoReturn, TypeVar
 
@@ -173,6 +174,7 @@ from ._execution_error_contract import (
 from ._experiment_routes import register_experiment_routes
 from ._factor_library_routes import register_factor_library_routes
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
+from ._settings_routes import CredentialsFileIssue, register_settings_routes
 from ._sse import SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_SECONDS, SSE_POLL_SECONDS, sse_frame
 from ._strategy_document_contract import (
     StrategyDocumentNotUpgradeableDetail,
@@ -365,6 +367,8 @@ def create_app(
     assistant_profiles: ProviderProfileService | None = None,
     assistant_chat: AssistantChatService | None = None,
     assistant_turns: AssistantTurnRunner | None = None,
+    credentials_file_path: Path | None = None,
+    credentials_file_issues: Callable[[], Sequence[CredentialsFileIssue]] | None = None,
     allowed_origins: tuple[str, ...],
 ) -> FastAPI:
     """Compose the HTTP surface; the assistant routes appear only when their services arrive.
@@ -418,6 +422,8 @@ def create_app(
     @app.get("/api/v1/health", operation_id="getHealth")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    register_settings_routes(app, credentials_file_path, credentials_file_issues)
 
     @app.get(
         "/api/v1/backtests",

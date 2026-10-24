@@ -73,6 +73,7 @@ __all__ = [
     "AssistantProbeFailedDetail",
     "AssistantProviderNotInstalledDetail",
     "AssistantSecretMissingDetail",
+    "AssistantStorageUnavailableDetail",
     "AssistantTurnInProgressDetail",
     "ChatMessageView",
     "CreateProviderProfileRequest",
@@ -496,6 +497,17 @@ class AssistantSecretMissingDetail:
 
 
 @dataclass(frozen=True)
+class AssistantStorageUnavailableDetail:
+    """공급자 저장 파일(내 문서 `auto_trading/.env`) 자체를 읽거나 쓸 수 없다(3차 리뷰 4).
+
+    연결 테스트 전에 거절한다. 사용자가 파일을 고치거나 지워야 풀린다. 경로·값은 싣지 않는다.
+    """
+
+    code: Literal["assistant.storage_unavailable"]
+    message: str
+
+
+@dataclass(frozen=True)
 class AssistantDocumentRefInvalidDetail:
     """`document_ref`가 "저장된 전략과 초안 중 정확히 하나" 규칙을 어겼다.
 
@@ -537,6 +549,7 @@ AssistantUnprocessableDetail: TypeAlias = Annotated[
     | AssistantProbeFailedDetail
     | AssistantBaseUrlRejectedDetail
     | AssistantSecretMissingDetail
+    | AssistantStorageUnavailableDetail
     | AssistantDocumentRefInvalidDetail
     | AssistantResultUnavailableDetail
     | AssistantTurnContextMismatchDetail,

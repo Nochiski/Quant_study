@@ -1,6 +1,7 @@
 """키움 모의 키와 주문지 알림 봇 토큰을 어디서 읽을지 정한다(S07).
 
-- 기본(맥): 설정 화면이 저장한 사용자 설정 폴더의 `secrets.json`.
+- 기본(맥): 설정 화면이 저장한 내 문서 `auto_trading/.env`(2026-10-24 사용자 결정, 예전
+  `secrets.json`에 남은 키는 열 때 한 번 옮긴다).
 - 서버: `STRATEGY_WORKBENCH_KIWOOM_ENV_FILE`이 있으면 그 `.env`에서
   `PAPER_TRADING_KIWOOM_{APP_KEY,SECRET_KEY,ACCOUNT}_<쌍>` 세 이름만 읽는다(쌍 번호는
   `STRATEGY_WORKBENCH_KIWOOM_KEY_PAIR`, 기본 2). 다른 이름은 읽지 않는다. 그 파일에 실전 키가

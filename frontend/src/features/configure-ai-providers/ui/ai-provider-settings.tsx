@@ -4,8 +4,6 @@ import { flushSync } from "react-dom";
 
 import {
   assistantProvidersQuery,
-  useActivateAssistantProvider,
-  useDeleteAssistantProvider,
   type ProviderKindView,
   type ProviderProfileView,
 } from "../../../entities/assistant";
@@ -13,6 +11,8 @@ import { t } from "../../../shared/config";
 import { Badge, Button, EmptyState, Tooltip } from "../../../shared/ui";
 import { providerKindLabel, providerRejection } from "../model/provider-copy";
 import {
+  useActivateProvider,
+  useDeleteProvider,
   useProbeProvider,
   type ProbeOutcome,
 } from "../model/use-provider-commands";
@@ -177,8 +177,8 @@ export const AiProviderSettings = () => {
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const providers = useQuery(assistantProvidersQuery());
-  const activate = useActivateAssistantProvider();
-  const remove = useDeleteAssistantProvider();
+  const activate = useActivateProvider();
+  const remove = useDeleteProvider();
   const { isProbing, probe } = useProbeProvider();
   const [probes, setProbes] = useState<Record<string, ProbeOutcome>>({});
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -227,7 +227,12 @@ export const AiProviderSettings = () => {
   return (
     <section className="ai-providers" aria-labelledby={titleId}>
       {/* `tabIndex={-1}`은 탭 순서에 넣지 않고 프로그램 포커스만 허용한다(삭제 성공 후 복귀 지점). */}
-      <h2 className="ai-providers__title" id={titleId} ref={heading} tabIndex={-1}>
+      <h2
+        className="ai-providers__title"
+        id={titleId}
+        ref={heading}
+        tabIndex={-1}
+      >
         {t("settings.assistant.title")}
       </h2>
       <p className="ai-providers__description">

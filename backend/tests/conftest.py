@@ -13,6 +13,9 @@ from backtest_engine.types.market import Bar, MarketSnapshot
 from strategy_workbench.adapters.outbound.run_worker_process.facade.execution import (
     ProcessRunExecution,
 )
+from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import (
+    default_auto_trading_env_path,
+)
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import default_secrets_path
 from strategy_workbench.bootstrap import _container, _http, _secrets
 
@@ -28,6 +31,8 @@ RUNTIME_PATH_GUARD = RuntimePathGuard(
         _http.DEFAULT_CONTINUOUS_DB_PATH.parent,
         _container.DEFAULT_RUN_ARTIFACT_ROOT,
         default_secrets_path().parent,
+        # 내 문서 `auto_trading/.env`(AI 공급자·키움 모의 연결). 실제 사용자 키가 있는 파일이다.
+        default_auto_trading_env_path().parent,
     )
 )
 sys.addaudithook(RUNTIME_PATH_GUARD)
@@ -61,6 +66,9 @@ def _redirect_runtime_defaults(monkeypatch: pytest.MonkeyPatch, root: Path) -> N
     monkeypatch.setattr(_http, "DEFAULT_CONTINUOUS_DB_PATH", root / "continuous-accounts.sqlite3")
     monkeypatch.setattr(_container, "DEFAULT_RUN_ARTIFACT_ROOT", root / "backtest-runs")
     monkeypatch.setattr(_secrets, "default_secrets_path", lambda: root / "secrets.json")
+    monkeypatch.setattr(
+        _secrets, "default_credentials_env_path", lambda: root / "auto_trading" / ".env"
+    )
 
 
 def _fail_if_touched(when: str) -> None:

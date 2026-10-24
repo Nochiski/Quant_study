@@ -1,3 +1,4 @@
+import { CredentialsFileLocation } from "../../../entities/credentials-file";
 import { AiProviderSettings } from "../../../features/configure-ai-providers";
 import { KiwoomMockSettings } from "../../../features/configure-kiwoom-mock";
 import { t } from "../../../shared/config";
@@ -35,7 +36,19 @@ const ThemeSettings = () => {
   );
 };
 
-/** `/settings` 화면. 화면 테마, AI 어시스턴트 공급자, 키움 모의투자 연결 섹션이다. */
+/**
+ * AI 공급자와 키움 모의 연결이 함께 쓰는 저장 파일. 두 섹션이 같은 파일이라 화면에 한 번만 둔다
+ * (마지막 리뷰 8). 각 섹션 설명은 이 자리를 가리킨다.
+ */
+const CredentialsFileSettings = () => (
+  <section className="settings-page__section" aria-labelledby="settings-credentials-file-title">
+    <h2 id="settings-credentials-file-title">{t("settings.credentialsFile.title")}</h2>
+    <p className="settings-page__description">{t("settings.credentialsFile.description")}</p>
+    <CredentialsFileLocation />
+  </section>
+);
+
+/** `/settings` 화면. 화면 테마, 연결 정보 저장 위치, AI 공급자, 키움 모의투자 연결 섹션이다. */
 export const SettingsPage = () => (
   <div className="page settings-page">
     <header className="settings-page__header">
@@ -45,6 +58,7 @@ export const SettingsPage = () => (
       </p>
     </header>
     <ThemeSettings />
+    <CredentialsFileSettings />
     <AiProviderSettings />
     <KiwoomMockSettings />
   </div>

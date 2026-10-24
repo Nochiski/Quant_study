@@ -9,6 +9,7 @@
 | `dataset` | 데이터 필드·유니버스 조회, 필드 계약 어휘(셀 상태·값 타입·빈도) 문구(`field-copy.ts`, 계약 인스펙터·편집기 완성·추적 원시 데이터가 함께 읽는다) |
 | `backtest` | 실행 시작·상태·결과 query, 실행 설정 스키마의 필드 모델(`run-environment-fields.ts`, 패널과 run 상세가 함께 읽는다), 지표 쉬운 이름·사용 불가 사유 문구(`metric-copy.ts`) |
 | `assistant` | AI 공급자 프로파일, 채팅 세션·턴, SSE 리더와 이벤트 리듀서. 생성 SDK 타입과 `shared/api`의 어시스턴트 상수·오류 타입을 여기서 다시 내보내 상위 레이어의 입구를 하나로 둔다 |
+| `credentials-file` | 연결 정보 저장 파일(내 문서 `auto_trading/.env`) 경로 조회와 그 경로 한 줄 표현. AI 공급자·키움 모의 연결 설정이 함께 읽는다 |
 | `broker` | 증권사 연결 설정 조회(키움 모의 저장 여부·계좌 끝 4자리)와 키를 싣지 않는 삭제 mutation. 생성 SDK 타입과 `shared/api`의 오류 타입을 다시 내보낸다 |
 
 `assistant`의 SSE 리더는 생성 SDK의 SSE 클라이언트를 쓰고 `EventSource`를 쓰지 않는다. 리듀서는

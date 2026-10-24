@@ -36,6 +36,7 @@ from strategy_workbench.application.assistant_chat.facade.ports import (
     ChatSessionNotFoundError,
     ProviderProfileNotFoundError,
     ProviderSecretMissingError,
+    ProviderStorageUnavailableError,
     TurnNotFoundError,
 )
 from strategy_workbench.application.assistant_chat.facade.profiles import (
@@ -143,6 +144,7 @@ def register_assistant_routes(
             ProviderNotInstalledError,
             ProviderBaseUrlRejectedError,
             ProviderProbeFailedError,
+            ProviderStorageUnavailableError,
         ) as error:
             raise _unprocessable(error) from error
         return profile_view(profiles.summary(created.profile_id))
@@ -162,20 +164,29 @@ def register_assistant_routes(
             return probe_result_view(profiles.test(profile_id))
         except ProviderProfileNotFoundError as error:
             raise _provider_not_found(error) from error
-        except (ProviderNotInstalledError, ProviderSecretMissingError) as error:
+        except (
+            ProviderNotInstalledError,
+            ProviderSecretMissingError,
+            ProviderStorageUnavailableError,
+        ) as error:
             raise _unprocessable(error) from error
 
     @app.post(
         f"{ASSISTANT_PREFIX}/providers/{{profile_id}}/activate",
         operation_id="activateAssistantProvider",
         tags=["assistant"],
-        responses={404: {"model": AssistantNotFoundResponse, **_NOT_FOUND_DESCRIPTION}},
+        responses={
+            404: {"model": AssistantNotFoundResponse, **_NOT_FOUND_DESCRIPTION},
+            422: {"model": Assistant422Response, **_UNPROCESSABLE_DESCRIPTION},
+        },
     )
     def activate_assistant_provider(profile_id: str) -> ProviderProfileView:
         try:
             profiles.activate(profile_id)
         except ProviderProfileNotFoundError as error:
             raise _provider_not_found(error) from error
+        except ProviderStorageUnavailableError as error:
+            raise _unprocessable(error) from error
         return profile_view(profiles.summary(profile_id))
 
     @app.delete(
@@ -183,7 +194,10 @@ def register_assistant_routes(
         operation_id="deleteAssistantProvider",
         status_code=status.HTTP_204_NO_CONTENT,
         tags=["assistant"],
-        responses={404: {"model": AssistantNotFoundResponse, **_NOT_FOUND_DESCRIPTION}},
+        responses={
+            404: {"model": AssistantNotFoundResponse, **_NOT_FOUND_DESCRIPTION},
+            422: {"model": Assistant422Response, **_UNPROCESSABLE_DESCRIPTION},
+        },
     )
     def delete_assistant_provider(profile_id: str) -> None:
         """프로파일과 그 키를 함께 지운다. 활성이었으면 application이 승계를 정한다."""
@@ -191,6 +205,8 @@ def register_assistant_routes(
             profiles.delete(profile_id)
         except ProviderProfileNotFoundError as error:
             raise _provider_not_found(error) from error
+        except ProviderStorageUnavailableError as error:
+            raise _unprocessable(error) from error
 
     @app.post(
         f"{ASSISTANT_PREFIX}/sessions",
@@ -480,6 +496,7 @@ def _unprocessable(
     | ProviderBaseUrlRejectedError
     | ProviderProbeFailedError
     | ProviderSecretMissingError
+    | ProviderStorageUnavailableError
     | NoActiveProviderError
     | BacktestResultUnavailableError
     | TurnContextMismatchError,
@@ -502,6 +519,8 @@ def _unprocessable(
         detail = {"code": "assistant.provider_not_installed", "message": str(error)}
     elif isinstance(error, ProviderSecretMissingError):
         detail = {"code": "assistant.provider_secret_missing", "message": str(error)}
+    elif isinstance(error, ProviderStorageUnavailableError):
+        detail = {"code": "assistant.storage_unavailable", "message": str(error)}
     elif isinstance(error, BacktestResultUnavailableError):
         detail = {"code": "assistant.result_unavailable", "message": str(error)}
     elif isinstance(error, TurnContextMismatchError):

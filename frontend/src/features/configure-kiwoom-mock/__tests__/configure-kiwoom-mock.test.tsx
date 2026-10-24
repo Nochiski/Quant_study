@@ -32,8 +32,21 @@ let saveReply: () => Response;
 let verifyReply: KiwoomMockConnectionCheckBody;
 let verifyGate: Promise<void>;
 let deleted: number;
+let fileReads = 0;
+let fileProblems: {
+  section: string;
+  reason: string;
+  fields: string[];
+  message: string;
+}[] = [];
+
+const ENV_PATH = "C:\\Users\\me\\OneDrive\\문서\\auto_trading\\.env";
 
 const server = setupServer(
+  http.get(`${API}/api/v1/settings/credentials-file`, () => {
+    fileReads += 1;
+    return HttpResponse.json({ path: ENV_PATH, problems: fileProblems });
+  }),
   http.get(PATH, () => HttpResponse.json(status)),
   http.put(PATH, async ({ request }) => {
     saveBodies.push((await request.json()) as Record<string, unknown>);
@@ -58,6 +71,8 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 beforeEach(() => {
+  fileReads = 0;
+  fileProblems = [];
   status = { saved: false, account_tail: null };
   saveBodies = [];
   deleted = 0;
@@ -92,6 +107,49 @@ const fill = async (
 };
 
 describe("KiwoomMockSettings", () => {
+  it("reads the file problems again after saving keys", async () => {
+    fileProblems = [
+      {
+        section: "kiwoom",
+        reason: "incomplete",
+        fields: ["STRATEGY_WORKBENCH_KIWOOM_MOCK_ACCOUNT"],
+        message:
+          "키움 모의 연결 세 줄 중 빠진 줄이 있습니다: STRATEGY_WORKBENCH_KIWOOM_MOCK_ACCOUNT",
+      },
+    ];
+    const user = userEvent.setup();
+    renderWithClient(<KiwoomMockSettings />);
+    await screen.findByText("저장된 키 없음");
+    await waitFor(() => expect(fileReads).toBeGreaterThan(0));
+    const before = fileReads;
+
+    fileProblems = [];
+    await fill(user, "5012-3456-78");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(fileReads).toBeGreaterThan(before));
+  });
+
+  it("asks to fix or delete the file when the whole file is unreadable", async () => {
+    status = { saved: false, account_tail: null, unreadable: true };
+    fileProblems = [
+      {
+        section: "file",
+        reason: "not_utf8",
+        fields: [],
+        message:
+          "저장 파일을 UTF-8로 읽지 못했습니다. 편집기에서 UTF-8로 다시 저장하세요.",
+      },
+    ];
+    renderWithClient(<KiwoomMockSettings />);
+    expect(
+      await screen.findByText(
+        "저장 파일을 읽을 수 없음 — 저장 위치의 파일을 고치거나 지우세요",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/다시 저장하거나 지우세요/)).toBeNull();
+  });
+
   it("shows nothing saved and keeps the check disabled", async () => {
     renderWithClient(<KiwoomMockSettings />);
     expect(await screen.findByText("저장된 키 없음")).toBeTruthy();

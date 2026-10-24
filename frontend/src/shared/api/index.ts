@@ -4,6 +4,7 @@ export {
   assistantSessionApi,
 } from "./assistant";
 export { BrokerConnectionRequestError, brokerConnectionApi } from "./broker";
+export { settingsApi } from "./settings";
 export {
   ASSISTANT_SSE_MAX_RETRY_ATTEMPTS,
   assistantEventEnvelope,

@@ -238,6 +238,9 @@ def test_the_runtime_settings_fall_back_to_the_documented_defaults(
     assert DEFAULT_ASSISTANT_DB_PATH.parts[-2:] == (".local", "assistant.sqlite3")
     # `None`은 "OS 규칙이 정하는 사용자 설정 디렉터리"라는 뜻이고, 그 계산의 owner는 어댑터다.
     assert settings.secrets_path is None
+    # 서버는 늘 내 문서 `auto_trading/.env`에 공급자를 둔다. conftest가 그 기본값을 tmp로 옮긴다.
+    assert settings.credentials_env_path is not None
+    assert Path(settings.credentials_env_path).parts[-2:] == ("auto_trading", ".env")
     assert settings.allow_insecure_base_url is False
     # 대본 공급자는 기본이 꺼짐이다. 켜진 채로 배포되면 사용자가 받는 답이 전부 대본이 된다.
     assert settings.provider_factories is PROVIDER_ADAPTER_FACTORIES

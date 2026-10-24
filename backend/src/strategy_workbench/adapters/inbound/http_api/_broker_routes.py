@@ -18,6 +18,7 @@ from strategy_workbench.application.broker_connection.facade.connection import (
     BrokerConnectionResult,
     BrokerConnectionService,
     BrokerConnectionStatus,
+    BrokerCredentialsUnwritableError,
     ConnectionOutcome,
     InvalidBrokerCredentialsError,
 )
@@ -26,7 +27,15 @@ from ._backtest_contract import CodedBodyValidationRoute
 
 KIWOOM_MOCK_CONNECTION_PATH = "/api/v1/broker-connections/kiwoom-mock"
 
-BrokerErrorCode = Literal["broker.request_invalid", "broker.credentials_invalid"]
+BrokerErrorCode = Literal[
+    "broker.request_invalid", "broker.credentials_invalid", "broker.storage_unavailable"
+]
+# 저장 파일 자체를 못 읽거나 못 쓸 때 사용자에게 보일 문장. 다시
+# 저장해도 고쳐지지 않는다(3차 리뷰 3).
+STORAGE_UNAVAILABLE_MESSAGE = (
+    "키를 저장하는 파일을 읽거나 쓸 수 없습니다. 설정 화면의 저장 위치에 보이는 파일을 고치거나 "
+    "지운 뒤 다시 시도하세요."
+)
 
 
 @dataclass(frozen=True)
@@ -109,6 +118,13 @@ def _check(result: BrokerConnectionResult) -> KiwoomMockConnectionCheckBody:
     )
 
 
+def _storage_unavailable() -> HTTPException:
+    return HTTPException(
+        422,
+        detail={"code": "broker.storage_unavailable", "message": STORAGE_UNAVAILABLE_MESSAGE},
+    )
+
+
 def register_broker_connection_routes(app: FastAPI, service: BrokerConnectionService) -> None:
     responses: dict[int | str, dict[str, object]] = {422: {"model": BrokerErrorResponse}}
 
@@ -128,6 +144,8 @@ def register_broker_connection_routes(app: FastAPI, service: BrokerConnectionSer
                     "field": error.field,
                 },
             ) from error
+        except BrokerCredentialsUnwritableError as error:
+            raise _storage_unavailable() from error
 
     app.router.add_api_route(
         KIWOOM_MOCK_CONNECTION_PATH,
@@ -139,10 +157,16 @@ def register_broker_connection_routes(app: FastAPI, service: BrokerConnectionSer
     )
 
     @app.delete(
-        KIWOOM_MOCK_CONNECTION_PATH, operation_id="deleteKiwoomMockConnection", status_code=204
+        KIWOOM_MOCK_CONNECTION_PATH,
+        operation_id="deleteKiwoomMockConnection",
+        status_code=204,
+        responses=responses,
     )
     def delete_connection() -> None:
-        service.delete()
+        try:
+            service.delete()
+        except BrokerCredentialsUnwritableError as error:
+            raise _storage_unavailable() from error
 
     @app.post(f"{KIWOOM_MOCK_CONNECTION_PATH}/verify", operation_id="verifyKiwoomMockConnection")
     def verify_connection() -> KiwoomMockConnectionCheckBody:

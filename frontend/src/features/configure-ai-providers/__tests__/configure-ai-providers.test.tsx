@@ -50,7 +50,12 @@ let activated: string[];
 let deleted: string[];
 let createReply: () => Response;
 
+const ENV_PATH = "/Users/me/Documents/auto_trading/.env";
+
 const server = setupServer(
+  http.get(`${API}/api/v1/settings/credentials-file`, () =>
+    HttpResponse.json({ path: ENV_PATH, problems: [] }),
+  ),
   http.get(`${API}/api/v1/assistant/providers`, () => HttpResponse.json(view)),
   http.post(`${API}/api/v1/assistant/providers`, async ({ request }) => {
     createBodies.push((await request.json()) as Record<string, unknown>);

@@ -191,6 +191,7 @@ class ProviderProfileService:
         """연결 테스트를 통과한 프로파일만 저장한다. 첫 프로파일은 활성으로 시작한다."""
         provider = self._provider_for(kind)
         self._check_base_url(base_url)
+        self._repository.ensure_writable()
         chosen_model = model or provider.default_model()
         result = provider.probe(secret, model=chosen_model, base_url=base_url)
         if not result.ok:
@@ -213,7 +214,9 @@ class ProviderProfileService:
         except Exception:
             self._repository.delete(profile.profile_id)
             raise
-        return profile
+        # 저장소가 실제로 남긴 값을 돌려준다. 활성 표시가 읽지 못한 항목에 있으면 저장소가 새 항목을
+        # 비활성으로 넣는다(3차 리뷰 5).
+        return self._repository.get(profile.profile_id)
 
     def test(self, profile_id: str) -> ProbeResult:
         """저장된 키·모델로 연결을 다시 확인한다. 결과는 예외가 아니라 값으로 돌려준다."""

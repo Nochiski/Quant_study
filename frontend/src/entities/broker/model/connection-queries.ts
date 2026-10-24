@@ -25,11 +25,18 @@ export const kiwoomMockConnectionQuery = () =>
 /**
  * 키를 싣지 않는 삭제만 mutation으로 둔다. 저장은 키를 싣으므로 `features/configure-kiwoom-mock`의
  * plain async 명령이 부른다 — mutation 인자는 `MutationCache`에 남는다(AI 키 설정과 같은 규칙).
+ * `afterSuccess`는 성공 뒤 함께 새로 읽을 다른 조회로, 그 조회를 아는 feature가 넘긴다.
  */
-export const useDeleteKiwoomMockConnection = () => {
+export const useDeleteKiwoomMockConnection = (
+  afterSuccess?: (queryClient: QueryClient) => Promise<unknown>,
+) => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => brokerConnectionApi.remove(),
-    onSuccess: () => refreshKiwoomMockConnection(queryClient),
+    onSuccess: () =>
+      Promise.all([
+        refreshKiwoomMockConnection(queryClient),
+        afterSuccess?.(queryClient),
+      ]),
   });
 };

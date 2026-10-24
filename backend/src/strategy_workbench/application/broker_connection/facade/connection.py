@@ -13,6 +13,7 @@ from strategy_workbench.application.broker_connection.ports.outgoing.broker impo
     BrokerCredentials,
     BrokerCredentialStore,
     BrokerCredentialsUnreadableError,
+    BrokerCredentialsUnwritableError,
     ConnectionCheck,
     ConnectionOutcome,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "BrokerCredentialStore",
     "BrokerCredentials",
     "BrokerCredentialsUnreadableError",
+    "BrokerCredentialsUnwritableError",
     "ConnectionCheck",
     "ConnectionOutcome",
     "InvalidBrokerCredentialsError",

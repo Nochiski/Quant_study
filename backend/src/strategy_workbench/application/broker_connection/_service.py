@@ -111,6 +111,7 @@ class BrokerConnectionService:
         return self.status()
 
     def delete(self) -> None:
+        """저장 파일을 쓸 수 없으면 `BrokerCredentialsUnwritableError`가 그대로 올라간다."""
         self._store.delete()
 
     def verify(self) -> BrokerConnectionResult:

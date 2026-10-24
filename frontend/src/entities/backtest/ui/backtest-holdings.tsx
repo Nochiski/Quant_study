@@ -15,6 +15,7 @@ import {
   holdingMoney,
   holdingPercent,
   holdingShares,
+  holdingWeight,
   securityName,
   type HoldingRowView,
 } from "./holdings-format";
@@ -26,7 +27,7 @@ type HoldingsView = "sessions" | "securities";
 
 /** 매매한 날 목록 한 줄의 높이(px). 목록은 이 높이로 가상 스크롤해 매매일이 수백 개여도 보이는 줄만 그린다. */
 const DATE_ROW_HEIGHT = 56;
-/** 목록 칸 높이를 아직 재지 못했을 때의 가정(px, CSS 의 목록 최대 높이와 같은 크기). */
+/** 목록 칸 높이를 아직 재지 못했을 때의 가정(px, 넓은 화면에서 CSS 의 목록 최대 높이). */
 const DATE_LIST_FALLBACK_HEIGHT = 480;
 /** 비중 막대·견본 색 단계 수(`backtest-holdings.css` 의 `holdings-swatch--N`). */
 const SWATCHES = 6;
@@ -182,7 +183,7 @@ const SessionHoldingsView = ({
                   cash:
                     holdings.cash_weight === null
                       ? holdingMoney(holdings.cash)
-                      : holdingPercent(holdings.cash_weight),
+                      : holdingWeight(holdings.cash_weight),
                 })}
               </span>
             </div>
@@ -215,7 +216,7 @@ const SessionHoldingsView = ({
                           </span>
                         </td>
                         <td className="is-number">{holdingShares(row.quantity)}</td>
-                        <td className="is-number">{row.weight === null ? "—" : holdingPercent(row.weight)}</td>
+                        <td className="is-number">{row.weight === null ? "—" : holdingWeight(row.weight)}</td>
                         <td className="is-number">{holdingMoney(row.market_value)}</td>
                         <td className="is-number">
                           {row.unrealized_return === null ? "—" : (
@@ -311,15 +312,15 @@ const WeightBar = ({
   rows: readonly HoldingRowView[];
   cashWeight: number | null;
 }) => {
-  // 숏(음수 비중)은 막대에 그리지 않는다. 표가 부호와 함께 보인다.
+  // 숏(음수 비중)은 막대에 그리지 않는다. 표의 비중 칸이 "−" 부호와 함께 보인다.
   const longs = rows
     .map((row, index) => ({ row, index }))
     .filter(({ row }) => row.weight !== null && row.weight > 0);
   if (longs.length === 0) return null;
   const items = [
-    ...longs.map(({ row }) => `${securityName(row.security)} ${holdingPercent(row.weight ?? 0)}`),
+    ...longs.map(({ row }) => `${securityName(row.security)} ${holdingWeight(row.weight ?? 0)}`),
     ...(cashWeight !== null && cashWeight > 0
-      ? [`${t("backtest.holdings.session.cash")} ${holdingPercent(cashWeight)}`]
+      ? [`${t("backtest.holdings.session.cash")} ${holdingWeight(cashWeight)}`]
       : []),
   ].join(", ");
   return (
@@ -375,9 +376,11 @@ const SessionList = ({
     if (element === null) return;
     const top = position * DATE_ROW_HEIGHT;
     const height = element.clientHeight || DATE_LIST_FALLBACK_HEIGHT;
-    if (top < element.scrollTop) element.scrollTop = top;
-    else if (top + DATE_ROW_HEIGHT > element.scrollTop + height)
-      element.scrollTop = top + DATE_ROW_HEIGHT - height;
+    const before = element.scrollTop;
+    if (top < before) element.scrollTop = top;
+    else if (top + DATE_ROW_HEIGHT > before + height) element.scrollTop = top + DATE_ROW_HEIGHT - height;
+    // 브라우저의 scroll 이벤트는 다음 프레임에 온다. 그 사이 빈 줄이 비치지 않게 그려질 범위를 바로 다시 잰다.
+    if (element.scrollTop !== before) element.dispatchEvent(new Event("scroll"));
   }, [position]);
 
   // 화살표로 고른 줄로 초점을 옮긴다. 가상 스크롤이라 그 줄은 스크롤 측정이 반영된 뒤에야 그려질 수 있어,
@@ -394,6 +397,12 @@ const SessionList = ({
     }
   }, [position, range.start, range.end, sessions]);
 
+  // 클릭·날짜 입력으로 고르면 초점을 옮기지 않는다(화살표로 고를 때만).
+  const pick = (session: string) => {
+    focusPending.current = false;
+    onPick(session);
+  };
+
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
     const delta = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
     if (delta === 0 || !(event.target instanceof HTMLButtonElement)) {
@@ -401,7 +410,17 @@ const SessionList = ({
       return;
     }
     event.preventDefault();
-    const next = Math.min(sessions.length - 1, Math.max(0, position + delta));
+    // 고른 날이 매매일이 아니면 그 날의 바로 앞·뒤 매매일로 간다.
+    const later = sessions.findIndex((item) => item.session > day);
+    const next =
+      delta < 0
+        ? selectedIsTradeDay || sessions[position].session > day
+          ? position - 1
+          : position
+        : selectedIsTradeDay
+          ? position + 1
+          : later;
+    if (next < 0 || next >= sessions.length) return;
     focusPending.current = true;
     onPick(sessions[next].session);
   };
@@ -422,7 +441,10 @@ const SessionList = ({
             min={first ?? undefined}
             max={last ?? undefined}
             onChange={(event) => {
-              if (event.target.value) onPick(event.target.value);
+              // 키보드로 연도를 한 자리씩 치는 동안의 중간 값(예: 0002-…)은 실행 기간 밖이라 묻지 않는다.
+              const value = event.target.value;
+              if (value.length === 10 && (first === null || value >= first) && (last === null || value <= last))
+                pick(value);
             }}
           />
         </label>
@@ -432,7 +454,8 @@ const SessionList = ({
         className="holdings__date-list"
         role="group"
         aria-labelledby={listId}
-        tabIndex={-1}
+        // 고른 줄이 가상 창 밖으로 스크롤돼도 Tab 으로 목록에 닿게 한다. 칸에서는 ↑·↓·Page·Home·End 로 스크롤한다.
+        tabIndex={0}
         onScroll={range.onScroll}
         onKeyDown={move}
       >
@@ -449,7 +472,7 @@ const SessionList = ({
               aria-pressed={selected}
               // 목록 안 초점은 고른 줄 하나만 Tab 으로 닿는다. 나머지는 화살표로 옮긴다.
               tabIndex={item.session === sessions[position]?.session ? 0 : -1}
-              onClick={() => onPick(item.session)}
+              onClick={() => pick(item.session)}
             >
               <span className="holdings__date-value">{item.session}</span>
               <span className="holdings__date-delta">

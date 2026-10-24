@@ -1,7 +1,8 @@
-import { Fragment, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { HoldingsOverview } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
+import { useVirtualWindow } from "../../../shared/lib/virtual-window";
 import { Button, SignedValue } from "../../../shared/ui";
 import { useBacktestSecurityTrades } from "../model/backtest-queries";
 import { periodBar } from "../model/holdings-layout";
@@ -10,6 +11,7 @@ import {
   changeText,
   holdingMoney,
   holdingPercent,
+  holdingPrice,
   holdingShares,
   securityName,
   sideLabel,
@@ -18,6 +20,11 @@ import { SecurityName } from "./holdings-security-name";
 
 type SecuritySummary = HoldingsOverview["securities"][number];
 type SecurityFilter = "all" | "open" | "closed";
+
+/** 종목 목록 한 줄의 높이(px). 거래한 종목이 수백 개여도 보이는 줄만 그린다. */
+const SECURITY_ROW_HEIGHT = 60;
+/** 목록 칸 높이를 아직 재지 못했을 때의 가정(px, CSS 의 목록 최대 높이). */
+const SECURITY_LIST_FALLBACK_HEIGHT = 520;
 
 const isOpen = (item: SecuritySummary) => item.final_quantity !== null;
 
@@ -37,11 +44,16 @@ export const HoldingsSecurities = ({
   const filter = own.filter;
   const setFilter = (next: SecurityFilter) => setChoice({ ...own, filter: next });
   const setPicked = (next: string) => setChoice({ ...own, picked: next });
-  const selectedId = own.picked ?? overview.securities[0]?.security.security_id ?? null;
-  const shown = overview.securities.filter(
-    (item) => filter === "all" || (filter === "open") === isOpen(item),
+  const shown = useMemo(
+    () =>
+      overview.securities.filter(
+        (item) => filter === "all" || (filter === "open") === isOpen(item),
+      ),
+    [overview.securities, filter],
   );
-  const selected = overview.securities.find((item) => item.security.security_id === selectedId);
+  // 거르기로 고른 종목이 목록에서 빠지면 상세도 목록의 첫 종목으로 옮긴다.
+  const selected =
+    shown.find((item) => item.security.security_id === own.picked) ?? shown[0];
   const first = overview.first_session;
   const last = overview.last_session;
   const filters: { id: SecurityFilter; label: string }[] = [
@@ -69,7 +81,7 @@ export const HoldingsSecurities = ({
         <p className="holdings__hint">{t("backtest.holdings.securities.hint")}</p>
       </div>
       <div className="holdings__securities-body">
-        <div className="holdings__security-list" role="group" aria-label={t("backtest.holdings.securities.list")}>
+        <div className="holdings__security-panel">
           {first && last ? (
             <div className="holdings__axis" aria-hidden="true">
               <span className="holdings__axis-range">
@@ -80,68 +92,115 @@ export const HoldingsSecurities = ({
           ) : null}
           {shown.length === 0 ? (
             <p className="holdings__notice">{t("backtest.holdings.securities.emptyFilter")}</p>
-          ) : null}
-          {shown.map((item) => {
-            const open = isOpen(item);
-            const status = t(open ? "backtest.holdings.securities.open" : "backtest.holdings.securities.closed");
-            return (
-              <button
-                key={item.security.security_id}
-                type="button"
-                className="holdings__security-row"
-                aria-pressed={item.security.security_id === selectedId}
-                aria-label={tFill("backtest.holdings.securities.rowLabel", {
-                  name: securityName(item.security),
-                  status,
-                  count: item.fill_count,
-                })}
-                onClick={() => setPicked(item.security.security_id)}
-              >
-                <span className="holdings__security-cell">
-                  <SecurityName security={item.security} />
-                  <span className={`holdings__security-status${open ? " is-open" : ""}`}>
-                    {tFill("backtest.holdings.securities.status", { status, count: item.fill_count })}
-                  </span>
-                </span>
-                <span className="holdings__track" aria-hidden="true">
-                  {first && last
-                    ? item.holding_periods.map((period) => {
-                        const bar = periodBar(period, first, last);
-                        return (
-                          <span
-                            key={period.start}
-                            className={`holdings__track-bar${period.open ? " is-open" : ""}`}
-                            style={{ left: `${bar.left}%`, width: `${bar.width}%` }}
-                          />
-                        );
-                      })
-                    : null}
-                </span>
-                <span className="holdings__security-pnl">
-                  {open ? (
-                    item.final_unrealized_return === null ? "—" : (
-                      <>
-                        {t("backtest.holdings.securities.unrealized")}{" "}
-                        <SignedValue
-                          value={item.final_unrealized_return}
-                          magnitude={holdingPercent(item.final_unrealized_return)}
-                        />
-                      </>
-                    )
-                  ) : (
-                    <>
-                      {t("backtest.holdings.securities.realized")}{" "}
-                      <SignedValue value={item.realized_pnl} magnitude={holdingMoney(Math.abs(item.realized_pnl))} />
-                    </>
-                  )}
-                </span>
-              </button>
-            );
-          })}
+          ) : (
+            <SecurityList
+              items={shown}
+              selectedId={selected?.security.security_id ?? null}
+              first={first}
+              last={last}
+              onPick={setPicked}
+            />
+          )}
         </div>
         {selected ? <SecurityTrades runId={runId} summary={selected} /> : null}
       </div>
     </div>
+  );
+};
+
+const SecurityList = ({
+  items,
+  selectedId,
+  first,
+  last,
+  onPick,
+}: {
+  items: readonly SecuritySummary[];
+  selectedId: string | null;
+  first: string | null;
+  last: string | null;
+  onPick: (securityId: string) => void;
+}) => {
+  const viewport = useRef<HTMLDivElement>(null);
+  const range = useVirtualWindow(viewport, {
+    itemCount: items.length,
+    itemHeight: SECURITY_ROW_HEIGHT,
+    fallbackViewportHeight: SECURITY_LIST_FALLBACK_HEIGHT,
+  });
+  return (
+    <div
+      ref={viewport}
+      className="holdings__security-list"
+      role="group"
+      aria-label={t("backtest.holdings.securities.list")}
+      tabIndex={0}
+      onScroll={range.onScroll}
+      onKeyDown={range.onKeyDown}
+    >
+      <div style={{ height: range.paddingBefore }} aria-hidden="true" />
+      {items.slice(range.start, range.end).map((item) => {
+        const open = isOpen(item);
+        const status = t(open ? "backtest.holdings.securities.open" : "backtest.holdings.securities.closed");
+        return (
+          <button
+            key={item.security.security_id}
+            type="button"
+            className="holdings__security-row"
+            style={{ height: SECURITY_ROW_HEIGHT }}
+            aria-pressed={item.security.security_id === selectedId}
+            aria-label={tFill("backtest.holdings.securities.rowLabel", {
+              name: securityName(item.security),
+              status,
+              count: item.fill_count,
+            })}
+            onClick={() => onPick(item.security.security_id)}
+          >
+            <span className="holdings__security-cell">
+              <SecurityName security={item.security} />
+              <span className={`holdings__security-status${open ? " is-open" : ""}`}>
+                {tFill("backtest.holdings.securities.status", { status, count: item.fill_count })}
+              </span>
+            </span>
+            <span className="holdings__track" aria-hidden="true">
+              {first && last
+                ? item.holding_periods.map((period) => {
+                    const bar = periodBar(period, first, last);
+                    return (
+                      <span
+                        key={period.start}
+                        className={`holdings__track-bar${period.open ? " is-open" : ""}`}
+                        style={{ left: `${bar.left}%`, width: `${bar.width}%` }}
+                      />
+                    );
+                  })
+                : null}
+            </span>
+            <span className="holdings__security-pnl">
+              <SecurityPnl item={item} />
+            </span>
+          </button>
+        );
+      })}
+      <div style={{ height: range.paddingAfter }} aria-hidden="true" />
+    </div>
+  );
+};
+
+/** 보유 중이면 평가 수익률, 정리했으면 실현 손익. 청산 거래가 없으면(체결 없이 빠짐) 값이 없다. */
+const SecurityPnl = ({ item }: { item: SecuritySummary }) => {
+  if (isOpen(item)) {
+    return item.final_unrealized_return === null ? "—" : (
+      <>
+        {t("backtest.holdings.securities.unrealized")}{" "}
+        <SignedValue value={item.final_unrealized_return} magnitude={holdingPercent(item.final_unrealized_return)} />
+      </>
+    );
+  }
+  return item.realized_pnl === null ? "—" : (
+    <>
+      {t("backtest.holdings.securities.realized")}{" "}
+      <SignedValue value={item.realized_pnl} magnitude={holdingMoney(Math.abs(item.realized_pnl))} />
+    </>
   );
 };
 
@@ -203,41 +262,55 @@ const SecurityTrades = ({ runId, summary }: { runId: string; summary: SecuritySu
                 <th scope="col">{t("backtest.holdings.column.change")}</th>
               </tr>
             </thead>
-            <tbody>
-              {report.sessions.map((session) => (
-                <Fragment key={session.session}>
-                  {session.fills.map((fill, index) => (
-                    <tr key={fill.fill_id}>
-                      {index === 0 ? (
-                        <th scope="rowgroup" rowSpan={session.fills.length}>{session.session}</th>
-                      ) : null}
-                      <td>
-                        <span className={`holdings-side holdings-side--${fill.side}`}>{sideLabel(fill.side)}</span>
-                      </td>
-                      <td className="is-number">{holdingShares(fill.quantity)}</td>
-                      <td className="is-number">{holdingMoney(fill.price)}</td>
-                      <td className="is-number">{holdingMoney(fill.notional)}</td>
-                      {index === 0 ? (
-                        <td rowSpan={session.fills.length}>
-                          <span className={`holdings-change holdings-change--${session.change}`}>
-                            {changeText(session.change, null)}
-                          </span>
-                          {session.realized_pnl === null ? null : (
-                            <span className="holdings__realized">
-                              {t("backtest.holdings.securities.realized")}{" "}
-                              <SignedValue
-                                value={session.realized_pnl}
-                                magnitude={holdingMoney(Math.abs(session.realized_pnl))}
-                              />
-                            </span>
-                          )}
-                        </td>
-                      ) : null}
+            {/* 세션 하나가 행 묶음 하나다. 체결 없이 장부에서 빠진 날은 체결 칸이 빈 한 줄이다. */}
+            {report.sessions.map((session) => {
+              const rows = Math.max(1, session.fills.length);
+              const change = (
+                <td rowSpan={rows}>
+                  <span className={`holdings-change holdings-change--${session.change}`}>
+                    {changeText(session.change, null)}
+                  </span>
+                  {session.realized_pnl === null ? null : (
+                    <span className="holdings__realized">
+                      {t("backtest.holdings.securities.realized")}{" "}
+                      <SignedValue
+                        value={session.realized_pnl}
+                        magnitude={holdingMoney(Math.abs(session.realized_pnl))}
+                      />
+                    </span>
+                  )}
+                </td>
+              );
+              const date = (
+                <th scope="rowgroup" rowSpan={rows}>
+                  {session.session}
+                </th>
+              );
+              return (
+                <tbody key={session.session}>
+                  {session.fills.length === 0 ? (
+                    <tr>
+                      {date}
+                      <td colSpan={4}>—</td>
+                      {change}
                     </tr>
-                  ))}
-                </Fragment>
-              ))}
-            </tbody>
+                  ) : (
+                    session.fills.map((fill, index) => (
+                      <tr key={fill.fill_id}>
+                        {index === 0 ? date : null}
+                        <td>
+                          <span className={`holdings-side holdings-side--${fill.side}`}>{sideLabel(fill.side)}</span>
+                        </td>
+                        <td className="is-number">{holdingShares(fill.quantity)}</td>
+                        <td className="is-number">{holdingPrice(fill.price)}</td>
+                        <td className="is-number">{holdingMoney(fill.notional)}</td>
+                        {index === 0 ? change : null}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              );
+            })}
           </table>
         </div>
       ) : null}

@@ -117,6 +117,7 @@ const server = setupServer(
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
+  server.resetHandlers();
   requested.length = 0;
 });
 afterAll(() => server.close());
@@ -186,5 +187,99 @@ describe("BacktestHoldings", () => {
       "security:005930:1",
       "security:999999:1",
     ]);
+  });
+
+  it("keeps the sign of a short weight that the server reports", async () => {
+    server.use(
+      http.get(`${BASE}/sessions/:session`, ({ params }) => {
+        const report = sessionReport(String(params.session));
+        const holdings = report.holdings!;
+        return HttpResponse.json({
+          ...report,
+          holdings: {
+            ...holdings,
+            holdings: [{ ...holdings.holdings[0], quantity: "-10", market_value: -120_000, weight: -0.12 }],
+          },
+        });
+      }),
+    );
+    renderHoldings();
+    const table = await screen.findByRole("region", { name: "보유 종목 표" });
+    expect(within(table).getByText("−12.0%")).toBeInTheDocument();
+  });
+
+  it("does not steal focus from the date input after an arrow key at the list edge", async () => {
+    const user = userEvent.setup();
+    renderHoldings();
+    const first = await screen.findByRole("button", { name: /2024-01-02/ });
+    await user.click(first);
+    await waitFor(() => expect(first).toHaveAttribute("aria-pressed", "true"));
+    first.focus();
+    // 첫 매매일에서 ↑ 는 갈 곳이 없다.
+    await user.keyboard("{ArrowUp}");
+    const input = screen.getByLabelText("아무 날의 보유 보기");
+    input.focus();
+
+    fireEvent.change(input, { target: { value: "2024-02-01" } });
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /2024-02-01/ })).toHaveAttribute("aria-pressed", "true"),
+    );
+    expect(input).toHaveFocus();
+  });
+
+  it("moves from a non-trading day to the nearest trading day on either side", async () => {
+    const user = userEvent.setup();
+    renderHoldings();
+    const input = await screen.findByLabelText("아무 날의 보유 보기");
+    fireEvent.change(input, { target: { value: "2024-01-20" } });
+    await screen.findByText(/session=2024-01-20/);
+
+    screen.getByRole("button", { name: /2024-01-02/ }).focus();
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /2024-02-01/ })).toHaveAttribute("aria-pressed", "true"),
+    );
+
+    fireEvent.change(input, { target: { value: "2024-01-20" } });
+    await screen.findByText(/session=2024-01-20/);
+    screen.getByRole("button", { name: /2024-01-02/ }).focus();
+    await user.keyboard("{ArrowUp}");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /2024-01-02/ })).toHaveAttribute("aria-pressed", "true"),
+    );
+  });
+
+  it("scrolls a long trading-day list and renders only the rows in view", async () => {
+    // 60 매매일(2024-01-01 부터 하루씩). 칸에는 일부만 그려진다.
+    const many = Array.from({ length: 60 }, (_, index) => {
+      const day = new Date(Date.UTC(2024, 0, 1 + index)).toISOString().slice(0, 10);
+      return { session: day, holding_count: 1, opened_count: 0, closed_count: 0, fill_count: 1 };
+    });
+    server.use(
+      http.get(BASE, () =>
+        HttpResponse.json({
+          ...overview,
+          first_session: many[0].session,
+          last_session: many[59].session,
+          trade_sessions: many,
+        }),
+      ),
+    );
+    renderHoldings();
+    const list = await screen.findByRole("group", { name: /매매한 날/ });
+
+    // 처음에는 마지막 매매일 줄이 그려져 눌려 있고, 맨 앞 줄은 그려지지 않는다.
+    await waitFor(() =>
+      expect(within(list).getByRole("button", { name: /2024-02-29/ })).toHaveAttribute("aria-pressed", "true"),
+    );
+    expect(within(list).queryByRole("button", { name: /2024-01-01/ })).toBeNull();
+    expect(within(list).getAllByRole("button").length).toBeLessThan(60);
+
+    // 날짜로 맨 앞 날을 고르면 목록이 그 줄까지 스크롤해 그린다.
+    fireEvent.change(screen.getByLabelText("아무 날의 보유 보기"), { target: { value: "2024-01-01" } });
+    await waitFor(() =>
+      expect(within(list).getByRole("button", { name: /2024-01-01/ })).toHaveAttribute("aria-pressed", "true"),
+    );
   });
 });

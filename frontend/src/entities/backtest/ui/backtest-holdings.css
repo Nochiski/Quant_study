@@ -240,12 +240,14 @@
   vertical-align: middle;
 }
 
-.holdings-swatch--0 { background: var(--accent); }
-.holdings-swatch--1 { background: var(--heat-5); }
-.holdings-swatch--2 { background: var(--accent-hover); }
-.holdings-swatch--3 { background: var(--heat-3); }
-.holdings-swatch--4 { background: var(--focus-ring); }
-.holdings-swatch--5 { background: var(--heat-7); }
+/* 종목 구분 색은 차트 범주 색이다(heat 는 파라미터 지도의 순서형 색이라 쓰지 않는다). 7번째부터 되풀이되며
+   표의 종목 이름이 구분을 책임진다. */
+.holdings-swatch--0 { background: var(--chart-series-1); }
+.holdings-swatch--1 { background: var(--chart-series-2); }
+.holdings-swatch--2 { background: var(--chart-series-3); }
+.holdings-swatch--3 { background: var(--chart-series-4); }
+.holdings-swatch--4 { background: var(--chart-series-5); }
+.holdings-swatch--5 { background: var(--chart-series-6); }
 
 .holdings__table-wrap {
   /* 안의 화면 읽기용 글자(.sr-only, absolute)가 스크롤 칸 밖 조상을 기준 삼아 페이지 폭을 늘리지 않게 한다. */
@@ -425,30 +427,37 @@
   align-items: flex-start;
 }
 
-.holdings__security-list {
-  position: relative;
+/* 종목 목록: 축 머리는 고정하고 아래 줄만 세로로 스크롤한다(가상 스크롤이라 줄 높이는 고정이다). */
+.holdings__security-panel {
   flex: 1 1 420px;
   min-width: 0;
-  max-height: 560px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-medium);
   background: var(--surface-panel);
 }
 
+.holdings__security-list {
+  position: relative;
+  max-height: 520px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.holdings__security-list:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: calc(var(--focus-ring-offset) * -1);
+}
+
 .holdings__axis,
 .holdings__security-row {
   display: grid;
-  grid-template-columns: minmax(140px, 200px) minmax(0, 1fr) minmax(96px, 128px);
+  grid-template-columns: minmax(120px, 172px) minmax(0, 1fr) minmax(88px, 112px);
   gap: var(--space-3);
   align-items: center;
 }
 
 .holdings__axis {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
   background: var(--surface-subtle);
@@ -468,7 +477,6 @@
 
 .holdings__security-row {
   width: 100%;
-  min-height: 52px;
   box-sizing: border-box;
   padding: var(--space-2) var(--space-3);
   border: 0;
@@ -585,17 +593,22 @@
 }
 
 @media (max-width: 560px) {
+  /* 좁은 화면도 한 줄 높이를 지킨다(가상 스크롤). 칸을 좁히고 축은 그대로 막대 칸 양끝에 둔다. */
+  .holdings__axis,
   .holdings__security-row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1.2fr) minmax(48px, 1fr) auto;
+    gap: var(--space-2);
   }
 
-  .holdings__security-row .holdings__track {
-    grid-column: 1 / -1;
-    grid-row: 2;
+  .holdings__security-row .holdings__security-name,
+  .holdings__security-row .holdings__security-status {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  /* 좁은 화면은 막대가 행 아래로 내려가 축과 칸이 맞지 않으므로 축을 감춘다. */
-  .holdings__axis {
+  .holdings__security-row .holdings__security code,
+  .holdings__axis-range span:first-child {
     display: none;
   }
 }

@@ -21,6 +21,7 @@ from .backend_env import backend_process_environment, backend_uv_command, backen
 # 이 환경 변수를 1·true·yes·on 중 하나로 두면 자동 빌드를 건너뛴다.
 SKIP_ENV = "QUANT_STUDY_DEV_SKIP_RUST_BUILD"
 MANIFEST = "rust/backtest_core/Cargo.toml"
+BUILD_SCRIPT = "rust/backtest_core/build.rs"
 # 패키지가 이미 이 모듈을 import하므로 -m 대신 함수를 직접 부른다(runpy 이중 import 경고 회피).
 STATUS_SCRIPT = "from backtest_engine.engine.core_source import main; raise SystemExit(main(['status']))"
 INSTALL_HINT = "Rust 툴체인(https://rustup.rs)을 설치한 뒤 uv run dev를 다시 실행하면 자동으로 빌드합니다."
@@ -46,9 +47,10 @@ class Action(enum.Enum):
 
 
 # backend `core_source.CoreStatus`와 같은 값. 이 도구는 backend 패키지를 import하지 않는다.
-STATUSES = frozenset({"missing", "stale", "debug", "fresh", "unchecked"})
+STATUSES = frozenset({"missing", "broken", "stale", "debug", "fresh", "unchecked"})
 _REASONS = {
     "missing": "설치되어 있지 않습니다",
+    "broken": "설치돼 있지만 불러올 수 없습니다",
     "stale": "현재 Rust 소스보다 오래됐습니다",
     "debug": "디버그 빌드라 느립니다",
 }
@@ -114,6 +116,9 @@ def core_status(
 
 
 def build(uv: str, backend: Path, environment: Mapping[str, str], run: Runner) -> bool:
+    # build.rs는 존재하는 입력만 감시하므로 새로 생긴 설정 파일을 놓칠 수 있다. 수정 시각을 갱신해
+    # 지문을 늘 다시 계산하게 한다(어차피 낡아서 다시 빌드하는 중이다).
+    os.utime(backend / BUILD_SCRIPT)
     # 진행 상황은 cargo·maturin 출력을 그대로 터미널에 보인다.
     command = backend_uv_command(
         uv, backend, "maturin", "develop", "--manifest-path", MANIFEST, "--release"

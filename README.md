@@ -40,9 +40,11 @@ uv run dev
 
 기본 `Rust` core로 백테스트하려면 Rust 툴체인(<https://rustup.rs>)만 설치해 두면 된다. 확장에는 빌드할 때
 Rust 소스 지문이 들어가고(`backtest_core.SOURCE_DIGEST`), 엔진은 소스 트리가 있으면 이를 현재 소스와
-비교해 오래된 확장을 쓰지 않는다(`CoreUnavailable`: 다시 빌드한 뒤 서버를 재시작하라는 안내). 판정은
-프로세스마다 한 번이라 실행 중인 서버는 재시작해야 새 빌드를 쓴다. `uv run dev`는 시작 전에 backend에
-이 상태를 물어 없거나 오래됐거나 디버그 빌드면 release로 빌드한다. 처음 빌드는 몇 분 걸릴 수 있다. cargo를 찾지
+비교해 오래되거나 불러올 수 없는 확장을 쓰지 않는다(`CoreUnavailable`: 다시 빌드하라는 안내). 판정은
+프로세스마다 한 번이고 백테스트 run은 run마다 새 worker 프로세스라, 서버를 띄운 채 다시 빌드하면 다음
+run부터 새 코어를 쓴다. `uv run dev`는 시작 전에 backend에 이 상태를 물어 없거나 깨졌거나 오래됐거나
+디버그 빌드면 release로 빌드한다. 수동 빌드에서 crate 루트·상위 폴더에 `rust-toolchain`이나
+`.cargo/config.toml`을 새로 만들었다면 `build.rs`를 touch한 뒤 빌드한다(`dev`는 자동으로 한다). 처음 빌드는 몇 분 걸릴 수 있다. cargo를 찾지
 못하거나 빌드가 실패해도 경고만 내고 서버는 그대로 시작하며(다음 실행에서 다시 시도), 그동안은
 백테스트 실행 설정에서 `Python reference`를 선택한다. 자동 빌드를 끄려면 `uv run dev --no-rust-build`
 또는 환경 변수 `QUANT_STUDY_DEV_SKIP_RUST_BUILD=1`을 쓴다. `dev`를 거치지 않고 backend만 띄울 때는

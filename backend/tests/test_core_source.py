@@ -149,29 +149,76 @@ def test_unreadable_source_counts_as_stale(monkeypatch: pytest.MonkeyPatch, tmp_
     assert core_source.core_status(crate) == "stale"
 
 
-def test_process_status_is_decided_once(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_process_status_is_fixed_except_for_transient_read_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results = [("stale", False), ("fresh", True), ("stale", True)]
     calls: list[int] = []
 
-    def status() -> str:
+    def judge(_: Path) -> tuple[str, bool]:
         calls.append(1)
-        return "fresh"
+        return results.pop(0)
 
-    core_source.process_core_status.cache_clear()
-    monkeypatch.setattr(core_source, "core_status", status)
+    core_source.reset_process_core_status()
+    monkeypatch.setattr(core_source, "_judge", judge)
     try:
+        # 읽기 실패로 나온 낡음은 고정하지 않고 다시 판정한다.
+        assert core_source.process_core_status() == "stale"
         assert core_source.process_core_status() == "fresh"
         assert core_source.process_core_status() == "fresh"
-        assert len(calls) == 1
+        assert len(calls) == 2
     finally:
-        core_source.process_core_status.cache_clear()
+        core_source.reset_process_core_status()
+
+
+def test_extension_that_fails_to_load_is_broken(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    crate = _crate(tmp_path)
+    monkeypatch.setattr(core_source.importlib.util, "find_spec", lambda _: object())
+
+    class PanicException(BaseException):
+        """pyo3 PanicException처럼 Exception이 아닌 BaseException."""
+
+    for error in (PanicException("init panic"), SystemError("bad"), ImportError("dlopen")):
+
+        def fail(_: str, error: BaseException = error) -> object:
+            raise error
+
+        monkeypatch.setattr(core_source.importlib, "import_module", fail)
+        assert core_source.core_status(crate) == "broken"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="FIFO가 없다")
+def test_special_files_are_skipped_and_unreadable_directories_are_stale(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    crate = _crate(tmp_path)
+    before = core_source.source_digest(crate)
+    os.mkfifo(crate / "src" / "pipe")
+    assert core_source.source_digest(crate) == before
+    locked = crate / "src" / "locked"
+    locked.mkdir()
+    locked.chmod(0)
+    try:
+        if os.access(locked, os.R_OK):
+            pytest.skip("권한을 무시하는 사용자(root)")
+        _module(monkeypatch, SOURCE_DIGEST=before, BUILD_PROFILE="release")
+        assert core_source.core_status(crate) == "stale"
+    finally:
+        locked.chmod(0o755)
 
 
 def test_stale_core_is_unavailable_with_restart_guidance(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(core, "process_core_status", lambda: "stale")
     assert not core.core_available("rust_persistent")
     assert core.core_available("python")
-    with pytest.raises(CoreUnavailable, match="then restart the server"):
+    with pytest.raises(CoreUnavailable, match="older than the current Rust source"):
         core._require_core("rust_persistent")  # pyright: ignore[reportPrivateUsage]  # reason: 판정 경계 직접 시험
+    monkeypatch.setattr(core, "process_core_status", lambda: "broken")
+    assert not core.core_available("rust")
+    with pytest.raises(CoreUnavailable, match="failed to load"):
+        core._require_core("rust")  # pyright: ignore[reportPrivateUsage]  # reason: 판정 경계 직접 시험
     monkeypatch.setattr(core, "process_core_status", lambda: "missing")
     with pytest.raises(CoreUnavailable, match="not installed"):
         core._require_core("rust")  # pyright: ignore[reportPrivateUsage]  # reason: 판정 경계 직접 시험

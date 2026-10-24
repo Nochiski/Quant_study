@@ -97,11 +97,19 @@ def _require_core(core: str) -> None:
                 f"core extension not installed — core={core!r}; build with "
                 f"`{BUILD_COMMAND}` from the backend directory"
             )
+        # 백테스트 run은 run마다 새 worker 프로세스라 다시 빌드만 하면 다음 run에 반영된다. 서버
+        # 프로세스 자체가 확장을 이미 올렸다면(벤치마크 곡선 등) 그 프로세스는 재시작해야 한다.
+        if status == "broken":
+            raise CoreUnavailable(
+                f"core extension failed to load — core={core!r}; rebuild with "
+                f"`{BUILD_COMMAND}` from the backend directory and run again"
+            )
         if status == "stale":
             raise CoreUnavailable(
                 f"core extension is older than the current Rust source — core={core!r}; "
-                f"rebuild with `{BUILD_COMMAND}` from the backend directory, then restart the "
-                "server (`uv run dev` rebuilds on start)"
+                f"rebuild with `{BUILD_COMMAND}` from the backend directory and run again "
+                "(new runs pick up the rebuilt core; restart the server only if this process "
+                "already loaded the old one)"
             )
 
 

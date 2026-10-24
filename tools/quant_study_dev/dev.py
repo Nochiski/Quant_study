@@ -42,7 +42,8 @@ class OwnedServer:
     process: subprocess.Popen[bytes]
 
 
-def _servers(root: Path) -> tuple[DevServer, ...]:
+def _executables() -> tuple[str, str]:
+    """uv·npm을 한 번 찾는다. 서버 명령과 Rust 코어 준비가 같은 uv를 쓴다."""
     uv = shutil.which("uv")
     npm = shutil.which("npm")
     if uv is None or npm is None:
@@ -50,6 +51,13 @@ def _servers(root: Path) -> tuple[DevServer, ...]:
         raise RuntimeError(
             f"실행 파일을 찾지 못했습니다: {missing}. 개발 환경을 먼저 준비해 주세요."
         )
+    return uv, npm
+
+
+def _servers(
+    root: Path, executables: tuple[str, str] | None = None
+) -> tuple[DevServer, ...]:
+    uv, npm = executables or _executables()
     return (
         DevServer(
             BACKEND,
@@ -194,22 +202,16 @@ def _stop(servers: Sequence[OwnedServer]) -> None:
             )
 
 
-def _backend_uv(servers: Sequence[DevServer]) -> str | None:
-    """백엔드 명령이 찾은 uv를 Rust 코어 준비에도 그대로 쓴다."""
-    return next(
-        (server.command[0] for server in servers if server.name == BACKEND), None
-    )
-
-
 def run(root: Path, *, open_browser: bool, rust_build: bool = True) -> int:
     """두 서버의 준비와 생존을 감시하고 이 실행이 시작한 프로세스만 정리한다."""
     owned: list[OwnedServer] = []
     try:
-        servers = _servers(root)
+        uv, npm = _executables()
+        servers = _servers(root, (uv, npm))
         for server in servers:
             _require_available_port(server)
         # 포트를 먼저 확인해 이미 떠 있는 서버가 있으면 긴 빌드 없이 바로 거절한다.
-        ensure_core(root, uv=_backend_uv(servers), disabled=not rust_build)
+        ensure_core(root, uv=uv, disabled=not rust_build)
         # 빌드하는 동안 다른 프로세스가 포트를 잡았을 수 있어 시작 직전에 다시 확인한다.
         for server in servers:
             _require_available_port(server)

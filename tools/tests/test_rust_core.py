@@ -22,7 +22,7 @@ class DecideTest(unittest.TestCase):
             )
 
     def test_missing_stale_or_debug_builds_when_cargo_exists(self) -> None:
-        for status in ("missing", "stale", "debug"):
+        for status in ("missing", "broken", "stale", "debug"):
             self.assertIsNone(rust_core.decide(status, toolchain=True))
             self.assertIs(
                 rust_core.decide(status, toolchain=False), Action.WARN_NO_TOOLCHAIN
@@ -82,6 +82,11 @@ class EnsureCoreTest(unittest.TestCase):
         self.root = Path(directory.name)
         self.backend = self.root / "backend"
         (self.backend / ".venv").mkdir(parents=True)
+        build_script = self.backend / rust_core.BUILD_SCRIPT
+        build_script.parent.mkdir(parents=True)
+        build_script.write_text("fn main() {}", encoding="utf-8")
+        os.utime(build_script, (0, 0))
+        self.build_script = build_script
         self.calls: list[list[str]] = []
         self.logs: list[str] = []
         self.statuses = ["missing", "fresh"]
@@ -121,6 +126,8 @@ class EnsureCoreTest(unittest.TestCase):
         )
         self.assertEqual(status[-2:], ["-c", rust_core.STATUS_SCRIPT])
         self.assertIn("--release", build)
+        # 새 설정 파일을 놓치지 않게 빌드 전에 build.rs를 다시 돌게 한다.
+        self.assertGreater(self.build_script.stat().st_mtime, 0)
         self.assertEqual(recheck, status)
 
     def test_stale_core_is_rebuilt(self) -> None:

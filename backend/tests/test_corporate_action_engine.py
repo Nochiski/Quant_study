@@ -133,10 +133,7 @@ def run(
     return engine, strategy, result
 
 
-RUST_ONLY = RUST_CORE
-
-
-@RUST_ONLY
+@RUST_CORE
 def test_corporate_action_notifications_are_identical_across_cores() -> None:
     """GAP-1: 같은 세션에 사건이 둘이어도 알림 index ↔ side table 정합이 두 코어에서 같다.
 

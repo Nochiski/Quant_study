@@ -30,13 +30,17 @@ class DevTest(unittest.TestCase):
         patcher = patch.object(dev, "ensure_core")
         self.ensure_core = patcher.start()
         self.addCleanup(patcher.stop)
+        executables = patch.object(dev, "_executables", return_value=("uv", "npm"))
+        executables.start()
+        self.addCleanup(executables.stop)
 
     @patch.object(dev.shutil, "which", side_effect=lambda name: f"C:/bin/{name}.cmd")
     def test_reuses_canonical_commands_without_installing_dependencies(
         self, which: Mock
     ) -> None:
         root = Path("checkout")
-        backend, frontend = dev._servers(root)
+        # setUp이 _executables를 막아 두므로 같은 which 결과를 직접 넘긴다.
+        backend, frontend = dev._servers(root, (which("uv"), which("npm")))
         self.assertEqual(
             backend.command,
             (
@@ -196,6 +200,13 @@ class DevTest(unittest.TestCase):
 
 
 class DevRustBuildTest(unittest.TestCase):
+    def setUp(self) -> None:
+        executables = patch.object(
+            dev, "_executables", return_value=("C:/bin/uv.cmd", "npm")
+        )
+        executables.start()
+        self.addCleanup(executables.stop)
+
     @patch.object(dev, "_servers", return_value=())
     @patch.object(dev, "ensure_core")
     @patch.object(dev, "_wait_until_ready")
@@ -204,17 +215,12 @@ class DevRustBuildTest(unittest.TestCase):
         self, _running: Mock, _ready: Mock, ensure_core: Mock, _servers: Mock
     ) -> None:
         self.assertEqual(dev.run(CHECKOUT, open_browser=False), 130)
-        ensure_core.assert_called_once_with(CHECKOUT, uv=None, disabled=False)
+        ensure_core.assert_called_once_with(
+            CHECKOUT, uv="C:/bin/uv.cmd", disabled=False
+        )
         ensure_core.reset_mock()
         dev.run(CHECKOUT, open_browser=False, rust_build=False)
-        ensure_core.assert_called_once_with(CHECKOUT, uv=None, disabled=True)
-
-    def test_backend_uv_is_the_one_the_server_command_found(self) -> None:
-        servers = (
-            dev.DevServer("프런트엔드", ("C:/bin/npm.cmd",), CHECKOUT, 5173, "u"),
-            dev.DevServer(dev.BACKEND, ("C:/bin/uv.cmd", "run"), CHECKOUT, 8000, "u"),
-        )
-        self.assertEqual(dev._backend_uv(servers), "C:/bin/uv.cmd")
+        ensure_core.assert_called_once_with(CHECKOUT, uv="C:/bin/uv.cmd", disabled=True)
 
     @patch.object(dev, "_servers")
     @patch.object(dev, "_require_available_port", side_effect=RuntimeError("occupied"))
@@ -238,6 +244,17 @@ class DevRustBuildTest(unittest.TestCase):
         servers.return_value = (dev.DevServer("백엔드", ("c",), CHECKOUT, 8000, "u"),)
         self.assertEqual(dev.run(CHECKOUT, open_browser=False), 1)
         start.assert_not_called()
+
+
+class ExecutablesTest(unittest.TestCase):
+    @patch.object(dev.shutil, "which", side_effect=lambda name: f"C:/bin/{name}.cmd")
+    def test_finds_uv_and_npm_once(self, which: Mock) -> None:
+        self.assertEqual(dev._executables(), ("C:/bin/uv.cmd", "C:/bin/npm.cmd"))
+
+    @patch.object(dev.shutil, "which", return_value=None)
+    def test_missing_tool_is_reported(self, _which: Mock) -> None:
+        with self.assertRaisesRegex(RuntimeError, "uv"):
+            dev._executables()
 
 
 if __name__ == "__main__":

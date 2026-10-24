@@ -19,9 +19,9 @@ def require_rust_core() -> None:
     status = process_core_status()
     if status == "missing":
         pytest.skip(f"Rust 코어 확장 없음(core_status={status})")
-    if status == "stale":
+    if status in ("stale", "broken"):
         pytest.fail(
-            f"Rust 코어가 현재 소스보다 오래됨(core_status={status}) — 다시 빌드: "
+            f"Rust 코어가 낡았거나 불러올 수 없음(core_status={status}) — 다시 빌드: "
             f"`cd backend && {BUILD_COMMAND}`",
             pytrace=False,
         )

@@ -47,6 +47,27 @@ fn is_symlink(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// 일반 파일만 지문에 넣는다. 링크는 조용히, FIFO·소켓·장치는 경고하고 뺀다(Python과 같은 규칙).
+/// 메타데이터를 못 읽으면 실패로 남긴다.
+fn regular(path: &Path, inputs: &mut Inputs) -> bool {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_file() => true,
+        Ok(meta) => {
+            if !meta.file_type().is_symlink() && !meta.is_dir() {
+                println!(
+                    "cargo:warning=Rust 코어 지문에서 일반 파일이 아닌 항목을 건너뜁니다: {}",
+                    path.display()
+                );
+            }
+            false
+        }
+        Err(_) => {
+            inputs.failed = true;
+            false
+        }
+    }
+}
+
 /// UTF-8 이름만 받는다. Python 쪽도 같은 이름을 건너뛴다.
 fn utf8_name(path: &Path) -> Option<String> {
     let name = path.file_name()?;
@@ -81,6 +102,10 @@ fn walk(crate_dir: &Path, directory: &Path, inputs: &mut Inputs) {
     // 새 파일 추가에도 다시 돈다.
     println!("cargo:rerun-if-changed={}", directory.display());
     let Ok(reader) = fs::read_dir(directory) else {
+        println!(
+            "cargo:warning=Rust 코어 지문 입력 디렉터리를 읽지 못했습니다: {}",
+            directory.display()
+        );
         inputs.failed = true;
         return;
     };
@@ -103,18 +128,22 @@ fn walk(crate_dir: &Path, directory: &Path, inputs: &mut Inputs) {
             if !SKIPPED_DIRECTORIES.contains(&name.as_str()) {
                 walk(crate_dir, &path, inputs);
             }
-        } else if !skipped_file(&name) {
+        } else if !skipped_file(&name) && regular(&path, inputs) {
             inputs.entries.push((key_of(crate_dir, &path), path));
         }
     }
 }
 
+// 감시는 존재하는 경로에만 건다. cargo는 없는 경로를 늘 바뀐 것으로 봐 매 빌드 다시 컴파일한다.
+// crate 루트 디렉터리는 target/까지 훑어 같은 문제가 있어 감시하지 않는다. 그래서 루트·상위 폴더에
+// 후보 파일이나 .cargo/를 새로 만들면 수동 빌드는 이 스크립트를 다시 돌리지 않을 수 있다. 상위
+// 디렉터리를 대신 감시하면 저장소 전체를 훑게 되므로 택하지 않았다. `uv run dev`는 빌드 전에
+// build.rs 수정 시각을 갱신해 다시 돌리며, 수동 빌드는 build.rs를 touch한 뒤 빌드한다.
 fn crate_files(crate_dir: &Path, inputs: &mut Inputs) {
-    // crate 루트는 target/까지 훑으므로 통째로 감시하지 않는다. 지문에 드는 이름만 (없어도) 감시한다.
     for name in ROOT_FILES {
         let path = crate_dir.join(name);
-        println!("cargo:rerun-if-changed={}", path.display());
-        if path.is_file() && !is_symlink(&path) {
+        if path.exists() && regular(&path, inputs) {
+            println!("cargo:rerun-if-changed={}", path.display());
             inputs.entries.push((name.to_owned(), path));
         }
     }
@@ -122,9 +151,6 @@ fn crate_files(crate_dir: &Path, inputs: &mut Inputs) {
         let root = crate_dir.join(source);
         if root.is_dir() && !is_symlink(&root) {
             walk(crate_dir, &root, inputs);
-        } else {
-            // 아직 없는 디렉터리가 생겨도 다시 돌게 경로를 감시한다.
-            println!("cargo:rerun-if-changed={}", root.display());
         }
     }
 }
@@ -133,12 +159,10 @@ fn ancestors(crate_dir: &Path, inputs: &mut Inputs) {
     let mut directory = crate_dir.parent().map(Path::to_path_buf);
     let mut level = 1;
     while let Some(current) = directory {
-        // 새 설정·툴체인 파일이 생겨도 다시 돌게 디렉터리 대신 후보 경로를 감시한다. 상위
-        // 디렉터리를 통째로 감시하면 저장소 전체를 매번 훑는다.
         for name in ANCESTOR_FILES {
             let path = current.join(name);
-            println!("cargo:rerun-if-changed={}", path.display());
-            if path.is_file() && !is_symlink(&path) {
+            if path.exists() && regular(&path, inputs) {
+                println!("cargo:rerun-if-changed={}", path.display());
                 inputs
                     .entries
                     .push((format!("{}{}", "../".repeat(level), name), path));

@@ -40,7 +40,6 @@ from backtest_engine.types.tape import DeclarativeTapeStrategy, TapeFrame
 from tests.conftest import day, make_bar, make_instrument
 from tests.rust_core_guard import RUST_CORE
 
-RUST_ONLY = RUST_CORE
 SIGNAL = date(2018, 4, 27)
 A, B, C = make_instrument("000660:1"), make_instrument("005930:1"), make_instrument("000030:1")
 # 작은따옴표가 든 심볼. feed에 없어 미보유 no_bar 경로를 탄다.
@@ -282,7 +281,7 @@ def test_declarative_tape_requires_explicit_inheritance() -> None:
     assert not isinstance(object(), DeclarativeTapeStrategy)
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_look_alike_strategy_keeps_the_callback_path() -> None:
     """상속하지 않은 전략은 이름이 다 맞아도 콜백 경로로 실행된다."""
     strategy = _LookAlike(_delisting_frames())
@@ -293,7 +292,7 @@ def test_look_alike_strategy_keeps_the_callback_path() -> None:
     assert engine.event_store.decision_tape != ()
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_rust_tape_path_matches_python_trace_without_callbacks() -> None:
     engines: dict[str, BacktestEngine] = {}
     strategies: dict[str, _TapeStrategy] = {}
@@ -327,7 +326,7 @@ def test_rust_tape_path_matches_python_trace_without_callbacks() -> None:
     ]
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_no_bar_reason_quotes_symbols_containing_an_apostrophe() -> None:
     """작은따옴표가 든 심볼도 python `repr(tuple)` 표기 그대로 사유에 남는다.
 
@@ -353,7 +352,7 @@ def test_no_bar_reason_quotes_symbols_containing_an_apostrophe() -> None:
     ]
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_tape_routing_error_raises_the_same_engine_exception_in_both_cores() -> None:
     """tape 경로 라우팅 오류도 콜백 경로와 같은 엔진 예외로 올라온다 (문자열 인코딩 아님)."""
     frames = {day(1).date(): _delisting_frames()[day(1).date()]}
@@ -377,7 +376,7 @@ def test_tape_routing_error_raises_the_same_engine_exception_in_both_cores() -> 
     assert failures[0][1] == "action kind was not declared in requirements()"
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_rust_tape_path_makes_one_drive_call(monkeypatch: pytest.MonkeyPatch) -> None:
     from collections import Counter
 
@@ -416,7 +415,7 @@ def test_rust_tape_path_makes_one_drive_call(monkeypatch: pytest.MonkeyPatch) ->
     assert len(engine.event_store.decisions()) == 4
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_no_bar_reason_keeps_target_order_regardless_of_holdings() -> None:
     """GAP-3: 미보유 no_bar가 보유 no_bar보다 앞에 와도 reason 순서가 두 경로에서 같다.
 
@@ -443,7 +442,7 @@ def test_no_bar_reason_keeps_target_order_regardless_of_holdings() -> None:
     assert outcomes["python"] == outcomes["rust"]
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_rust_tape_applies_a_frame_to_every_session_on_that_date() -> None:
     """DEFECT-201: 같은 날짜에 세션이 둘(일중)이면 Python처럼 두 세션 모두 프레임을 받는다."""
 
@@ -478,7 +477,7 @@ def test_rust_tape_applies_a_frame_to_every_session_on_that_date() -> None:
     assert outcomes["python"] == outcomes["rust"]
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_tape_order_materialization_reads_each_kind_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -539,7 +538,7 @@ def test_tape_order_materialization_reads_each_kind_once(
     ]
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_columnar_feed_builds_no_market_snapshot_for_tape_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

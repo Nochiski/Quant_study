@@ -198,7 +198,6 @@ def test_no_benchmark_means_no_values_and_no_carry() -> None:
 # 벤치마크 지표가 사용 불가가 되는 이유를 경고로 알린다.
 DELIST_CODE = "benchmark.delisted_sessions_frozen"
 LEADING_CODE = "benchmark.no_bar_at_start"
-RUST_ONLY = RUST_CORE
 
 
 class _BenchmarkGaps:
@@ -381,7 +380,7 @@ class _BuyAndHold:
         )
 
 
-@pytest.mark.parametrize("core", ["python", pytest.param("rust", marks=RUST_ONLY)])
+@pytest.mark.parametrize("core", ["python", pytest.param("rust", marks=RUST_CORE)])
 def test_benchmark_curve_follows_the_engine_holder_through_suspension_split_and_delisting(
     core: str,
 ) -> None:

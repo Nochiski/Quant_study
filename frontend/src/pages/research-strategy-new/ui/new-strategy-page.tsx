@@ -311,14 +311,14 @@ export const NewStrategyPage = () => {
   const guidePanel: GuidePanel | null = search.assist ?? defaultPanel;
 
   // AI 대화·입력칸 상태는 화면이 한 벌 든다. 안내의 AI 탭과 편집기 AI 열이 같은 상태를 그려서, 안내를 닫고
-  // 편집기로 가도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4). 서버 조회는 AI 를 처음 보일 때
-  // 시작한다 — 안내에서 미리보기만 보는 동안에는 대화 목록을 읽지 않는다.
-  const [assistantShown, setAssistantShown] = useState(false);
-  if (!assistantShown && (!search.guide || guidePanel === "assistant")) setAssistantShown(true);
+  // 편집기로 가도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4). 서버 조회는 AI 가 보이는 동안만 돈다 —
+  // 안내에서 미리보기 탭을 보거나 편집기 AI 열을 접으면 멈추고, 입력 초안은 남는다(SoT 3차 경미 1). 편집기 AI 열의
+  // 펼침은 widget 이 소유하고 알려 준다.
+  const [ideAssistantOpen, setIdeAssistantOpen] = useState(false);
   const assistantState = useAssistSidebarState({
     documentRef: strategyAssistant.documentRef,
     readContext: strategyAssistant.readContext,
-    enabled: assistantShown,
+    enabled: search.guide ? guidePanel === "assistant" : ideAssistantOpen,
     // 추천 질문의 맥락은 안내 단계다. 편집기로 가면 고치지 않은 안내 추천 질문은 지워진다.
     suggestionsKey: search.guide ? (search.step ?? "document") : "editor",
   });
@@ -396,6 +396,9 @@ export const NewStrategyPage = () => {
               leaveGuide({ path: pointer, view: "graph", recipe: true })
             }
             onOpenEditor={() => leaveGuide({ view: "graph" })}
+            onOpenSourceAt={(pointer) =>
+              leaveGuide({ view: "yaml", path: pointer === "" ? undefined : pointer })
+            }
             onUndo={history.undo}
             canUndo={history.depth.undo > 0}
             review={
@@ -730,6 +733,7 @@ export const NewStrategyPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
+        onAssistantOpenChange={setIdeAssistantOpen}
         assistant={({ close }) => (
           <AssistStrategySidebar
             documentRef={strategyAssistant.documentRef}

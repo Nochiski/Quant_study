@@ -1,6 +1,6 @@
 import { ApiRequestError } from "../../../shared/api";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { strategyDocumentQuery } from "../../../entities/strategy";
 import { RunParameterSelection, useRunParameters } from "../../../entities/backtest";
@@ -57,7 +57,10 @@ import {
   type DocumentSource,
   type StrategyView,
 } from "../../../features/edit-strategy";
-import { AssistStrategySidebar } from "../../../features/assist-strategy";
+import {
+  AssistStrategySidebar,
+  useAssistSidebarState,
+} from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
   RunEnvironmentSummary,
@@ -260,6 +263,14 @@ export const StrategyRevisionPage = () => {
     draftId: serverDraftId,
     environment: runSettings.environment,
     backtest: { canRun, settling: backtest.settling, run: runBacktest },
+  });
+  // AI 대화·입력칸 상태는 새 전략 화면과 같이 화면이 든다. 편집기 AI 열의 펼침은 widget 이 알려 주고, 접힌 동안
+  // 대화 조회를 멈추되 입력 초안은 남긴다(SoT 3차 경미 1·2).
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const assistantState = useAssistSidebarState({
+    documentRef: strategyAssistant.documentRef,
+    readContext: strategyAssistant.readContext,
+    enabled: assistantOpen,
   });
   const selectSymbol = useCallback(
     (pointer: string): void => {
@@ -649,6 +660,7 @@ export const StrategyRevisionPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
+        onAssistantOpenChange={setAssistantOpen}
         assistant={({ close }) => (
           <AssistStrategySidebar
             documentRef={strategyAssistant.documentRef}
@@ -657,6 +669,7 @@ export const StrategyRevisionPage = () => {
             // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
             // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
             onClose={close}
+            state={assistantState}
           />
         )}
         debugger={

@@ -18,7 +18,9 @@ import {
 import { factorAddition, groupFactors, type FactorCategory } from "../model/guide-factors";
 import { changedLines } from "../model/guide-preview";
 import {
+  guideOutsideErrors,
   guideStepState,
+  leftStep,
   guideStepStatuses,
   guideSteps,
   type GuideStep,
@@ -71,6 +73,7 @@ export const StrategyGuide = ({
   onPanel,
   onOpenGraph,
   onOpenEditor,
+  onOpenSourceAt,
   onUndo,
   canUndo,
   review,
@@ -90,6 +93,8 @@ export const StrategyGuide = ({
   onOpenGraph: (pointer: string) => void;
   /** 안내를 닫고 같은 초안을 편집기 그래프 보기로 연다. */
   onOpenEditor: () => void;
+  /** 안내를 닫고 편집기 원문에서 그 pointer 를 연다(안내에 고칠 자리가 없는 칸의 진단). */
+  onOpenSourceAt?: (pointer: string) => void;
   onUndo: () => void;
   canUndo: boolean;
   /** 확인 단계에 붙는 화면 몫(진단·선정 미리보기·저장). */
@@ -149,7 +154,8 @@ export const StrategyGuide = ({
   // (`frontend-react-effects.md`, 가이드 재리뷰 6). 스키마가 오기 전의 임시 단계(문서 머리로 떨어진 것)는 세지 않는다.
   const [shownStep, setShownStep] = useState<string | null>(null);
   if (pipeline !== null && current.id !== shownStep) {
-    if (shownStep !== null) setVisited((previous) => new Set(previous).add(shownStep));
+    const left = leftStep(shownStep, steps);
+    if (left !== null) setVisited((previous) => new Set(previous).add(left));
     setShownStep(current.id);
   }
   const states = steps.map((candidate, position) =>
@@ -242,7 +248,12 @@ export const StrategyGuide = ({
                 {t(form.firstParsePending ? "form.panel.firstParsePending" : "form.panel.loading")}
               </p>
             ) : current.kind === "document" ? (
-              <DocumentStep pipeline={pipeline} context={context} />
+              <DocumentStep
+                pipeline={pipeline}
+                context={context}
+                onReview={() => onStep("review")}
+                onOpenSourceAt={onOpenSourceAt}
+              />
             ) : current.kind === "stage" ? (
               <StageStep
                 step={current}
@@ -356,14 +367,51 @@ const CheckIcon = () => (
 const DocumentStep = ({
   pipeline,
   context,
+  onReview,
+  onOpenSourceAt,
 }: {
   pipeline: PipelineProjection;
   context: CardContext;
+  onReview: () => void;
+  onOpenSourceAt: ((pointer: string) => void) | undefined;
 }) => {
   const section = pipelineDocumentProperties(pipeline);
+  // 이 단계가 세는, 안내에 고칠 자리가 없는 칸의 오류(SoT 3차 경미 3). 숫자만 세고 문장을 숨기면 "오류 N"이 왜
+  // 붙었는지 알 수 없다. 문장은 backend 진단 그대로다.
+  const outside = guideOutsideErrors(pipeline);
   return (
     <>
       <p className="strategy-guide__hint">{t("guide.document.description")}</p>
+      {outside.length === 0 ? null : (
+        <section className="strategy-guide__outside" aria-label={t("guide.document.outside.title")}>
+          <p className="strategy-guide__outside-title">{t("guide.document.outside.title")}</p>
+          <ul>
+            {outside.map((diagnostic, position) => (
+              <li key={`${diagnostic.pointer}:${diagnostic.code}:${position}`}>
+                {diagnostic.message}
+                {onOpenSourceAt === undefined ? null : (
+                  <>
+                    {" "}
+                    <Button
+                      size="small"
+                      tone="ghost"
+                      onClick={() => onOpenSourceAt(diagnostic.pointer)}
+                    >
+                      {t("guide.document.outside.editor")}
+                    </Button>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="strategy-guide__hint">
+            {t("guide.document.outside.hint")}{" "}
+            <Button size="small" tone="ghost" onClick={onReview}>
+              {t("guide.document.outside.review")}
+            </Button>
+          </p>
+        </section>
+      )}
       {section === null ? null : (
         <fieldset
           className="strategy-guide__properties"

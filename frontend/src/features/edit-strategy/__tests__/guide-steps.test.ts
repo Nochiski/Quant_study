@@ -14,7 +14,9 @@ import {
   guideStepState,
   guideStepStatuses,
   guideSteps,
+  guideOutsideErrors,
   guideSuggestionKeys,
+  leftStep,
   type GuideStep,
 } from "../model/guide-steps";
 import { projectPipeline } from "../model/pipeline-projection";
@@ -186,5 +188,32 @@ describe("requiresValue", () => {
 
   it("지금 설정에서 꺼진(applicable=false) 필수 칸은 채우지 않아도 된다(SoT 재리뷰 경미 2)", () => {
     expect(requiresValue({ ...title(), applicable: false })).toBe(false);
+  });
+});
+
+describe("leftStep", () => {
+  const steps = guideSteps(pipelineOf(NAMED));
+
+  it("목록에 있는 단계를 떠나면 그 단계를 방문으로 남긴다", () => {
+    expect(leftStep("eligibility", steps)).toBe("eligibility");
+    expect(leftStep(null, steps)).toBeNull();
+  });
+
+  it("목록에서 사라져 대체된 단계는 떠난 것이 아니라 남기지 않는다(SoT 3차 경미 4)", () => {
+    expect(leftStep("signal.removed", steps)).toBeNull();
+  });
+});
+
+describe("guideOutsideErrors", () => {
+  it("안내에 없는 칸의 오류 문장을 그대로 모으고, 안내 칸의 오류는 넣지 않는다(SoT 3차 경미 3)", () => {
+    const pipeline = pipelineOf(NAMED, [
+      { ...error("/parameters"), message: "파라미터 정의가 틀렸습니다." },
+      { ...error("/schema_version"), message: "지원하지 않는 버전입니다." },
+      error("/title"),
+    ]);
+    expect(guideOutsideErrors(pipeline).map((diagnostic) => diagnostic.message).sort()).toEqual([
+      "지원하지 않는 버전입니다.",
+      "파라미터 정의가 틀렸습니다.",
+    ]);
   });
 });

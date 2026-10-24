@@ -539,3 +539,26 @@
   color: var(--text-muted);
   font-size: var(--text-size-small);
 }
+
+/* 안내에 고칠 자리가 없는 칸(schema_version·parameters)의 오류: 이름 단계 몸통 위에서 오류 톤으로 알린다. */
+.strategy-guide__outside {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--status-error-border);
+  border-radius: var(--radius-medium);
+  background: var(--status-error-soft);
+}
+
+.strategy-guide__outside-title {
+  margin: 0;
+  color: var(--status-error);
+  font-weight: 600;
+}
+
+.strategy-guide__outside ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+}

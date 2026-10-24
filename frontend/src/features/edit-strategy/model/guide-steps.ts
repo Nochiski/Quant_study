@@ -6,7 +6,7 @@
  * 나누는 규칙: 한 단계(`x-stage`)에 최상위 목록 섹션(`factors`)이 있으면 그 목록이 단계 하나가 되고, 같은
  * 단계의 카드(신호 결합 칸)는 그 뒤 단계가 된다. 다른 목록(`eligibility.rules`)은 자기 단계 안에 남는다.
  */
-import { errorCount, listErrorCount, sectionErrorCount } from "./diagnostic-counts";
+import { errorCount, fieldErrors, listErrorCount, sectionErrors } from "./diagnostic-counts";
 import type { DocumentDiagnostic } from "./document-state";
 import { requiresValue, type FormField, type FormSection } from "./form-projection";
 import type { PipelineCard, PipelineProjection } from "./pipeline-projection";
@@ -138,6 +138,24 @@ const combine = (parts: readonly GuideStepStatus[]): GuideStepStatus => ({
 });
 
 /**
+ * 어느 단계 카드에도 없는 칸(`schema_version` 같은 const 칸, `parameters` 같은 단계 밖 섹션)의 오류 진단. 문서 머리
+ * 단계가 세고 보인다. 확인 단계는 완료로 세지 않으므로 그곳에 두면 "N / N 단계 완료"가 오류를 숨긴다
+ * (가이드 재리뷰 5). 안내에는 이 칸을 고칠 자리가 없어 화면은 확인 단계·편집기로 가는 길을 함께 보인다.
+ */
+export const guideOutsideErrors = (pipeline: PipelineProjection): DocumentDiagnostic[] => {
+  const root = pipeline.unstaged.find(
+    (section): section is Extract<FormSection, { kind: "object" }> =>
+      section.kind === "object" && section.pointer === "",
+  );
+  return [
+    ...fieldErrors((root?.fields ?? []).filter((field) => field.control.kind === "const")),
+    ...pipeline.unstaged
+      .filter((section) => section.pointer !== "")
+      .flatMap(sectionErrors),
+  ];
+};
+
+/**
  * 단계마다의 상태. 단계 섹션 자신의 진단(`PipelineStage.diagnostics`)은 그 단계의 카드 단계가 받고, 목록만 있는
  * 단계(카드 단계가 따로 없음)면 목록 단계가 받는다 — 같은 진단을 두 단계가 세지 않는다.
  */
@@ -148,25 +166,9 @@ export const guideStepStatuses = (
   steps.map((step) => {
     if (pipeline === null || step.kind === "review") return EMPTY;
     if (step.kind === "document") {
-      // 어느 단계 카드에도 없는 칸(`schema_version` 같은 const 칸, `parameters` 같은 단계 밖 섹션)의 진단도 문서
-      // 머리 단계가 받는다. 확인 단계는 완료로 세지 않으므로 그곳에 두면 "N / N 단계 완료"가 오류를 숨긴다
-      // (가이드 재리뷰 5). 채움·필수 판정은 화면에 보이는 칸(const 제외)만 본다.
       const root = pipelineDocumentProperties(pipeline);
-      const outside = pipeline.unstaged.filter((section) => section.pointer !== "");
-      const constFields = (
-        pipeline.unstaged.find(
-          (section): section is Extract<FormSection, { kind: "object" }> =>
-            section.kind === "object" && section.pointer === "",
-        )?.fields ?? []
-      ).filter((field) => field.control.kind === "const");
       const shown = fieldsStatus(root?.fields ?? [], root?.diagnostics ?? []);
-      return {
-        ...shown,
-        errors:
-          shown.errors +
-          constFields.reduce((sum, field) => sum + errorCount(field.diagnostics), 0) +
-          outside.reduce((sum, section) => sum + sectionErrorCount(section), 0),
-      };
+      return { ...shown, errors: shown.errors + guideOutsideErrors(pipeline).length };
     }
     const stage = pipeline.stages.find((candidate) => candidate.stage === step.stage);
     const ownsStage =
@@ -211,3 +213,14 @@ export const guideStepState = (
  */
 export const guideSuggestionKeys = (step: GuideStep): string[] =>
   [1, 2, 3].map((n) => `guide.assist.suggest.${step.id}.${n}`);
+
+/**
+ * 지금 단계가 `left`에서 바뀌었을 때 방문으로 남길 단계. 떠난 단계가 아직 단계 목록에 있으면 사용자가 떠난 것이다.
+ * 목록에서 사라져 다른 단계로 대체된 경우(문서·스키마가 바뀌어 단계가 없어짐)는 떠난 것이 아니므로 남기지 않는다
+ * (SoT 3차 경미 4).
+ */
+export const leftStep = (
+  left: string | null,
+  steps: readonly GuideStep[],
+): string | null =>
+  left !== null && steps.some((candidate) => candidate.id === left) ? left : null;

@@ -18,10 +18,27 @@ export const listErrorCount = (list: FormListSection): number =>
   errorCount(list.diagnostics) +
   list.items.reduce((sum, item) => sum + itemErrorCount(item), 0);
 
-/** 섹션 하나: object 섹션이면 섹션 자신·칸·중첩 목록, 목록 섹션이면 목록 전체. */
-export const sectionErrorCount = (section: FormSection): number =>
+const errorsOf = (diagnostics: readonly DocumentDiagnostic[]): DocumentDiagnostic[] =>
+  diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+
+const listErrors = (list: FormListSection): DocumentDiagnostic[] => [
+  ...errorsOf(list.diagnostics),
+  ...list.items.flatMap((item) => [
+    ...errorsOf(item.diagnostics),
+    ...item.fields.flatMap((field) => errorsOf(field.diagnostics)),
+  ]),
+];
+
+/** 섹션 하나의 오류 진단: object 섹션이면 섹션 자신·칸·중첩 목록, 목록 섹션이면 목록 전체. */
+export const sectionErrors = (section: FormSection): DocumentDiagnostic[] =>
   section.kind === "list"
-    ? listErrorCount(section)
-    : errorCount(section.diagnostics) +
-      section.fields.reduce((sum, field) => sum + errorCount(field.diagnostics), 0) +
-      section.lists.reduce((sum, list) => sum + listErrorCount(list), 0);
+    ? listErrors(section)
+    : [
+        ...errorsOf(section.diagnostics),
+        ...section.fields.flatMap((field) => errorsOf(field.diagnostics)),
+        ...section.lists.flatMap(listErrors),
+      ];
+
+/** 칸 여럿의 오류 진단. */
+export const fieldErrors = (fields: readonly { diagnostics: readonly DocumentDiagnostic[] }[]) =>
+  fields.flatMap((field) => errorsOf(field.diagnostics));

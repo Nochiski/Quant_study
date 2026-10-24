@@ -51,8 +51,9 @@ export type UseAssistChatOptions = {
    */
   readContext?: () => TurnContextPayload;
   /**
-   * 서버 조회(대화 목록·이력·스트림)를 시작할지. 상태를 화면 위쪽이 미리 만들어 두고 패널은 처음 열 때
-   * 보이는 경우(새 전략 안내의 숨은 AI 탭)에, 열기 전에는 조회하지 않게 한다. 기본은 켬이다.
+   * 패널이 보이는가. 꺼져 있으면 대화 목록·이력을 조회하지 않고, 새 스트림도 열지 않는다(진행 중 턴의 스트림은
+   * 끝까지 둔다). 상태를 화면 위쪽이 들고 패널이 접히거나 숨는 화면(안내의 AI 탭, 편집기 AI 열)이 쓴다.
+   * 기본은 켬이다.
    */
   enabled?: boolean;
 };
@@ -211,7 +212,8 @@ export const useAssistChat = ({
   }, []);
 
   const { status: streamStatus, retry: retryStream } = useAssistantEventStream({
-    target: enabled ? assistantStreamTarget(state) : null,
+    // 접힌 동안에도 진행 중인 턴의 스트림은 끊지 않는다(B-04 리뷰 P3) — 답이 끝나면 다시 열지 않는다.
+    target: enabled || runningNow !== null ? assistantStreamTarget(state) : null,
     lastSequence: state.lastSequence,
     onEvent,
     onHistory,

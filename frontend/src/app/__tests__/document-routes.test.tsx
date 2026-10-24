@@ -5126,6 +5126,102 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
   });
 });
 
+describe("편집기 AI 열의 대화 조회(SoT 3차 경미 1·2)", () => {
+  /** 대화 목록 조회 수를 센다. */
+  const countSessionReads = () => {
+    const counter = { reads: 0 };
+    server.use(
+      http.get(`${API}/api/v1/assistant/sessions`, () => {
+        counter.reads += 1;
+        return HttpResponse.json(assistantSessions);
+      }),
+    );
+    return counter;
+  };
+  const rail = () => screen.queryByRole("complementary", { name: "AI 어시스턴트" });
+
+  /** AI 열을 접으면 다시 읽어도 대화 목록을 조회하지 않고, 펼치면 치던 문장이 남아 있다. */
+  const expectCollapsePausesQueries = async (
+    queryClient: QueryClient,
+    counter: { reads: number },
+  ) => {
+    const user = userEvent.setup();
+    const input = await within(
+      await screen.findByRole("complementary", { name: "AI 어시스턴트" }),
+    ).findByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });
+    await waitFor(() => expect(counter.reads).toBeGreaterThan(0));
+    await user.type(input, "접어도 남을 문장");
+
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    await waitFor(() => expect(rail()).toBeNull());
+    const before = counter.reads;
+    await act(() => queryClient.invalidateQueries());
+    expect(counter.reads).toBe(before);
+
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    const reopened = await within(
+      await screen.findByRole("complementary", { name: "AI 어시스턴트" }),
+    ).findByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });
+    expect(reopened).toHaveValue("접어도 남을 문장");
+  };
+
+  it("새 전략 편집기: AI 열을 접으면 조회를 멈추고 입력 초안은 남긴다", async () => {
+    const counter = countSessionReads();
+    const { queryClient } = mountWithClient("/research/strategies/new");
+    await editor();
+    await expectCollapsePausesQueries(queryClient, counter);
+  });
+
+  it("리비전 편집기도 같은 방식으로 화면이 대화 상태를 들고 접으면 조회를 멈춘다", async () => {
+    server.use(...graphHandlers(), revisionDocumentHandler(GRAPH_SOURCE));
+    const counter = countSessionReads();
+    const { queryClient } = mountWithClient("/research/strategies/s1/revisions/2");
+    await editor();
+    await expectCollapsePausesQueries(queryClient, counter);
+  });
+});
+
+describe("안내에 없는 칸의 오류(SoT 3차 경미 3)", () => {
+  it("이름 단계가 그 진단 문장과 확인 단계·편집기로 가는 길을 보인다", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+        HttpResponse.json({
+          schema: RUNTIME_SCHEMA,
+          schema_hash: "h".repeat(64),
+          schema_version: "1.2",
+        }),
+      ),
+      graphCompileWith([
+        {
+          code: "strategy.parameter.bounds",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/parameters",
+          message: "파라미터 범위가 맞지 않습니다.",
+        },
+      ]),
+    );
+    const user = userEvent.setup();
+    const { history } = mountWithClient(
+      "/research/strategies/new?guide=true&assist=preview",
+      undefined,
+      false,
+    );
+    const outside = await screen.findByRole("region", { name: "안내에 없는 칸의 문제" });
+    expect(outside).toHaveTextContent("파라미터 범위가 맞지 않습니다.");
+    expect(
+      within(screen.getByRole("navigation", { name: "만드는 단계" })).getByRole("button", {
+        name: /^이름·의도/u,
+      }),
+    ).toHaveTextContent("오류 1");
+
+    await user.click(within(outside).getByRole("button", { name: "편집기에서 고치기" }));
+    await waitFor(() => expect(history.location.search).not.toContain("guide"));
+    expect(history.location.search).toContain("view=yaml");
+    expect(decodeURIComponent(history.location.search)).toContain("path=/parameters");
+  });
+});
+
 describe("내 팩터 라이브러리(US-CS-08)", () => {
   const LIBRARY_GRAPH = {
     nodes: [

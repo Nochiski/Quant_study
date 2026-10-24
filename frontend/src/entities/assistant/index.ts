@@ -8,6 +8,7 @@
 export {
   assistantProvidersKey,
   assistantProvidersQuery,
+  hasActiveAssistantProvider,
   refreshAssistantProviders,
   refreshIfProviderGone,
   useActivateAssistantProvider,

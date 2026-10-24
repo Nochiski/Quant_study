@@ -52,11 +52,15 @@ import {
   useStrategyDocument,
   useUpgradeDocument,
   type DocumentSource,
+  guideSuggestionKeys,
   type GuidePanel,
   type GuideStep,
   type StrategyView,
 } from "../../../features/edit-strategy";
-import { assistantProvidersQuery } from "../../../entities/assistant";
+import {
+  assistantProvidersQuery,
+  hasActiveAssistantProvider,
+} from "../../../entities/assistant";
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
@@ -87,9 +91,9 @@ const NEW_DRAFT: DocumentSource = {
   source: NEW_STRATEGY_STARTER,
 };
 
-/** 안내 단계마다 AI 도우미에 띄울 추천 질문(`guide.assist.suggest.<단계 id>.<n>`). 문구가 있는 것만 보인다. */
+/** 안내 단계마다 AI 도우미에 띄울 추천 질문. 문구가 있는 것만 보인다. */
 const guideSuggestions = (step: GuideStep): string[] =>
-  [1, 2, 3].flatMap((n) => tOptional(`guide.assist.suggest.${step.id}.${n}`) ?? []);
+  guideSuggestionKeys(step).flatMap((key) => tOptional(key) ?? []);
 
 /**
  * New-strategy entry (WORKFLOW P2-04): a draft with no base. Saving creates the strategy, after
@@ -286,11 +290,18 @@ export const NewStrategyPage = () => {
     });
   }, [leaving, document.strategyId, document.baseRevision, navigate]);
 
-  // 안내 오른쪽 칸의 기본 탭: AI 공급자가 연결돼 있으면 AI 도우미, 아니면 문서 미리보기. 사용자가 고르면 URL 이 이긴다.
+  // 안내 오른쪽 칸의 기본 탭: AI 공급자가 연결돼 있으면 AI 도우미, 아니면 문서 미리보기. 공급자 목록이 확정된
+  // 첫 순간에 한 번만 정하고(나중에 다시 읽혀도 탭이 저절로 바뀌지 않는다), 확정 전에는 정하지 않는다. URL 에
+  // 적힌 탭은 언제나 이긴다(가이드 리뷰 2).
   const providers = useQuery(assistantProvidersQuery());
-  const guidePanel: GuidePanel =
-    search.assist ??
-    (providers.data?.profiles.some((profile) => profile.active) ? "assistant" : "preview");
+  const [defaultPanel, setDefaultPanel] = useState<GuidePanel | null>(null);
+  if (defaultPanel === null && (providers.data !== undefined || providers.isError))
+    setDefaultPanel(
+      providers.data !== undefined && hasActiveAssistantProvider(providers.data)
+        ? "assistant"
+        : "preview",
+    );
+  const guidePanel: GuidePanel | null = search.assist ?? defaultPanel;
 
   // 단계별 안내(RD-04-D). 같은 문서·같은 트랜잭션을 쓰고, 편집기는 숨긴 채 살아 있어 되돌리기 이력이 이어진다.
   // 안내를 닫으면 같은 초안을 편집기 그래프 보기로 연다.
@@ -342,6 +353,8 @@ export const NewStrategyPage = () => {
                 onPreviewProposal={strategyAssistant.proposalHandlers.onPreviewProposal}
                 onApplyProposal={strategyAssistant.proposalHandlers.onApplyProposal}
                 suggestions={guideSuggestions(step)}
+                suggestionsKey={step.id}
+                layout="docked"
               />
             )}
             form={form}

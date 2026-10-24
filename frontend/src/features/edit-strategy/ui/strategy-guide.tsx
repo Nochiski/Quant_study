@@ -8,7 +8,7 @@ import { useId, useMemo, useState, type ReactNode } from "react";
 
 import type { FactorDefinition } from "../../../shared/api";
 import { t, tCode, tDescription, tFill, tName, tOptional } from "../../../shared/config";
-import { Badge, Button, panelId, Tabs } from "../../../shared/ui";
+import { Badge, Button, panelId, tabId, Tabs } from "../../../shared/ui";
 import { buildCanonicalSnippetCatalog, type SnippetCatalogSource } from "../model/canonical-snippets";
 import {
   catalogProfiles,
@@ -18,10 +18,10 @@ import {
 import { factorAddition, groupFactors, type FactorCategory } from "../model/guide-factors";
 import { changedLines } from "../model/guide-preview";
 import {
-  guideStepStatus,
+  guideStepState,
+  guideStepStatuses,
   guideSteps,
   type GuideStep,
-  type GuideStepStatus,
 } from "../model/guide-steps";
 import {
   pipelineDocumentProperties,
@@ -101,7 +101,8 @@ export const StrategyGuide = ({
    * 미리보기 하나다. AI 패널은 탭을 바꿔도 마운트를 유지한다 — 치던 문장·진행 중 답변을 잃지 않는다.
    */
   assistant?: (step: GuideStep) => ReactNode;
-  panel?: GuidePanel;
+  /** 열린 탭. null 이면 아직 정하지 못했다(공급자 연결 여부를 기다리는 중) — 오른쪽 칸은 불러오는 중이다. */
+  panel?: GuidePanel | null;
   onPanel?: (panel: GuidePanel) => void;
 }) => {
   const titleId = useId();
@@ -139,10 +140,20 @@ export const StrategyGuide = ({
           itemHeads: true,
         };
   const disabled = transactions.disabled;
-  const statuses = steps.map((candidate) => guideStepStatus(candidate, pipeline));
-  const done = statuses.filter(
-    (candidate, position) => steps[position]!.kind !== "review" && isDone(candidate),
+  const statuses = useMemo(() => guideStepStatuses(steps, pipeline), [steps, pipeline]);
+  // 사용자가 떠난 단계. 필수 칸이 없는 단계는 지나가면 기본값을 받아들인 것으로 본다(`guideStepState`).
+  // 안내 화면의 UI 상태라 문서·URL 에 두지 않는다.
+  const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set());
+  const states = steps.map((candidate, position) =>
+    guideStepState(candidate, statuses[position]!, visited.has(candidate.id)),
+  );
+  const done = states.filter(
+    (state, position) => steps[position]!.kind !== "review" && state === "done",
   ).length;
+  const go = (id: string) => {
+    if (id !== current.id) setVisited((previous) => new Set(previous).add(current.id));
+    onStep(id);
+  };
   const next = steps[index + 1];
   const changed = useChangedLines(source);
   const sideId = useId();
@@ -167,14 +178,14 @@ export const StrategyGuide = ({
       <nav className="strategy-guide__steps" aria-label={t("guide.steps")}>
         <ol>
           {steps.map((candidate, position) => {
-            const state = stepState(statuses[position]!);
+            const state = states[position]!;
             return (
               <li key={candidate.id}>
                 <button
                   type="button"
                   aria-current={position === index ? "step" : undefined}
                   data-state={state}
-                  onClick={() => onStep(candidate.id)}
+                  onClick={() => go(candidate.id)}
                 >
                   {/* 번호·체크는 목록 순서와 상태 문구가 이미 말한다. 버튼 이름은 단계 이름과 상태다. */}
                   <span className="strategy-guide__step-number" aria-hidden="true">
@@ -258,7 +269,7 @@ export const StrategyGuide = ({
             <Button
               tone="ghost"
               disabled={index === 0}
-              onClick={() => onStep(steps[index - 1]!.id)}
+              onClick={() => go(steps[index - 1]!.id)}
             >
               {t("guide.previous")}
             </Button>
@@ -267,7 +278,7 @@ export const StrategyGuide = ({
                 <span className="strategy-guide__hint" aria-hidden="true">
                   {tFill("guide.nextStep", { name: stepName(next) })}
                 </span>
-                <Button tone="primary" onClick={() => onStep(next.id)}>
+                <Button tone="primary" onClick={() => go(next.id)}>
                   {t("guide.next")}
                 </Button>
               </div>
@@ -276,6 +287,13 @@ export const StrategyGuide = ({
         </section>
         {assistant === undefined ? (
           <div className="strategy-guide__side">{preview}</div>
+        ) : panel === null ? (
+          // 기본 탭은 공급자 연결 여부가 정한다. 정해지기 전에 한쪽을 보였다가 바꾸면 화면이 뛴다.
+          <div className="strategy-guide__side">
+            <p className="strategy-guide__side-pending" role="status">
+              {t("page.loading")}
+            </p>
+          </div>
         ) : (
           <div className="strategy-guide__side">
             <Tabs
@@ -299,7 +317,7 @@ export const StrategyGuide = ({
             <div
               role="tabpanel"
               id={panelId(sideId, "assistant")}
-              aria-labelledby={`${sideId}-tab-assistant`}
+              aria-labelledby={tabId(sideId, "assistant")}
               className="strategy-guide__side-panel strategy-guide__side-panel--assistant"
               hidden={panel !== "assistant"}
             >
@@ -308,7 +326,7 @@ export const StrategyGuide = ({
             <div
               role="tabpanel"
               id={panelId(sideId, "preview")}
-              aria-labelledby={`${sideId}-tab-preview`}
+              aria-labelledby={tabId(sideId, "preview")}
               className="strategy-guide__side-panel"
               hidden={panel !== "preview"}
             >
@@ -320,11 +338,6 @@ export const StrategyGuide = ({
     </section>
   );
 };
-
-/** 단계 목록 표시: 오류가 먼저이고, 오류 없이 값을 썼으면 완료다. */
-const isDone = (status: GuideStepStatus): boolean => status.errors === 0 && status.filled;
-const stepState = (status: GuideStepStatus): "error" | "done" | "todo" =>
-  status.errors > 0 ? "error" : isDone(status) ? "done" : "todo";
 
 const CheckIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
@@ -407,8 +420,8 @@ const StageStep = ({
           key={list.pointer}
           list={list}
           context={context}
-          // 목록 항목끼리 어떻게 묶이는지(거르기 규칙은 모두 통과해야 남는다). 문구가 있는 목록만 보인다.
-          note={tOptional(`guide.list.${step.stage}.${list.key}.combine`)}
+          // 목록 설명(거르기 규칙이면 "모두 만족하는 종목만 남습니다.")은 스키마 설명 키가 정본이다.
+          note={tDescription(list.descriptionKey)}
         />
       ))}
       <Cards cards={step.primary} context={context} />

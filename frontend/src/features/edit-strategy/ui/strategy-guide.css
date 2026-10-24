@@ -533,16 +533,9 @@
   gap: var(--space-2);
 }
 
-/* AI 패널: 대화가 비어 있어도 추천 질문과 입력칸은 패널 바닥에 붙는다. */
-.strategy-guide__side-panel--assistant .assist__suggestions,
-.strategy-guide__side-panel--assistant .assist__composer {
-  margin-top: auto;
-}
-
-.strategy-guide__side-panel--assistant .assist__suggestions + .assist__composer {
-  margin-top: 0;
-}
-
-.strategy-guide__side-panel--assistant .assist__suggestion {
-  word-break: keep-all;
+.strategy-guide__side-pending {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
 }

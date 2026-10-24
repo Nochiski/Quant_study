@@ -4850,7 +4850,8 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     expect(within(steps()).getByRole("button", { name: "확인" })).toHaveAttribute("aria-current", "step");
     expect(source()).toBe(before);
 
-    await user.click(within(steps()).getByRole("button", { name: "결합" }));
+    // 지나온 단계는 완료 표시가 붙어 이름 뒤에 "(완료)"가 읽힌다.
+    await user.click(within(steps()).getByRole("button", { name: /^결합/u }));
     const combine = screen.getByRole("region", { name: "결합" });
     expect(within(combine).getByText(/^더 설정하기 \(\d+\)$/u)).toBeInTheDocument();
   });
@@ -4886,6 +4887,90 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     expect(
       await within(panel).findByRole("button", { name: "거르기 규칙에 쓸 수 있는 필드를 설명해 주세요" }),
     ).toBeInTheDocument();
+  });
+
+  it("공급자 목록이 오기 전에는 탭을 정하지 않고, 정한 뒤 다시 읽혀도 탭이 저절로 바뀌지 않는다(가이드 리뷰 2)", async () => {
+    useGuideCatalog();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let active = true;
+    server.use(
+      http.get(`${API}/api/v1/assistant/providers`, async () => {
+        await held;
+        return HttpResponse.json({
+          kinds: [],
+          profiles: [
+            {
+              profile_id: "p-1",
+              kind: "anthropic",
+              label: "작업용 Claude",
+              model: "claude-sonnet-5",
+              base_url: null,
+              secret_tail: "9876",
+              active,
+              created_at: "2026-09-20T00:00:00Z",
+            },
+          ],
+        });
+      }),
+    );
+    const { queryClient } = mountWithClient("/research/strategies/new?guide=true", undefined, false);
+    await screen.findByRole("heading", { name: "새 전략 만들기" });
+    expect(screen.queryByRole("tab", { name: "AI 도우미" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "전략 문서 미리보기" })).toBeNull();
+
+    release();
+    const assistantTab = await screen.findByRole("tab", { name: "AI 도우미" });
+    expect(assistantTab).toHaveAttribute("aria-selected", "true");
+
+    active = false;
+    await queryClient.invalidateQueries();
+    await waitFor(() =>
+      expect(screen.getByRole("tabpanel", { name: "AI 도우미" })).toHaveTextContent(
+        "연결된 AI 공급자가 없습니다",
+      ),
+    );
+    expect(screen.getByRole("tab", { name: "AI 도우미" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("URL 에 적힌 탭은 공급자 연결 여부보다 먼저다(가이드 리뷰 2)", async () => {
+    useGuideCatalog();
+    mountWithClient("/research/strategies/new?guide=true&assist=preview", undefined, false);
+    const previewTab = await screen.findByRole("tab", { name: "전략 문서 미리보기" });
+    expect(previewTab).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("단계를 옮기면 고치지 않은 앞 단계 추천 질문은 지우고, 고친 문장은 남긴다(가이드 리뷰 6)", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    mountWithClient("/research/strategies/new?guide=true&assist=assistant", undefined, false);
+    const panel = await screen.findByRole("tabpanel", { name: "AI 도우미" });
+    const input = await within(panel).findByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });
+    await user.click(
+      within(panel).getByRole("button", { name: "어떤 전략을 만들지 같이 정해 주세요" }),
+    );
+    await user.click(await within(steps()).findByRole("button", { name: "유니버스" }));
+    await waitFor(() => expect(input).toHaveValue(""));
+
+    await user.click(
+      within(panel).getByRole("button", { name: "거르기 규칙에 쓸 수 있는 필드를 설명해 주세요" }),
+    );
+    await user.type(input, " 특히 거래대금");
+    await user.click(within(steps()).getByRole("button", { name: /^알파 팩터/u }));
+    expect(input).toHaveValue("거르기 규칙에 쓸 수 있는 필드를 설명해 주세요 특히 거래대금");
+  });
+
+  it("필수 칸이 없는 단계는 한 번 지나가면 완료로 보이고, 거르기 규칙 안내는 스키마 설명을 쓴다(가이드 리뷰 5·SoT F2)", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    mountWithClient("/research/strategies/new?guide=true&step=eligibility&assist=preview", undefined, false);
+    expect(await screen.findByText("모두 만족하는 종목만 남습니다.")).toBeInTheDocument();
+    const universe = await within(steps()).findByRole("button", { name: /^유니버스/u });
+    expect(universe).not.toHaveTextContent("(완료)");
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await waitFor(() => expect(universe).toHaveTextContent("(완료)"));
   });
 
   it("공급자가 없으면 문서 미리보기 탭으로 열고, AI 탭은 설정으로 가는 길을 보인다", async () => {

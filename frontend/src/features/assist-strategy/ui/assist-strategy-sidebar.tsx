@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import {
   assistantProvidersQuery,
+  hasActiveAssistantProvider,
   type DocumentRefView,
   type StrategyProposalView,
   type TurnContextPayload,
@@ -82,6 +83,15 @@ export type AssistStrategySidebarProps = AssistScreenProps & {
    * 수 있어야 한다. 화면이 지금 맥락(안내 단계)에 맞춰 고른다.
    */
   suggestions?: readonly string[];
+  /**
+   * 추천 질문이 속한 맥락(안내 단계 id). 바뀌면 고치지 않은 채 남은 앞 맥락의 추천 질문을 입력칸에서 지운다.
+   */
+  suggestionsKey?: string;
+  /**
+   * 붙는 자리. `rail`은 전략 편집기의 세로 레일, `docked`는 고정 높이 칸 안에 들어가는 자리(새 전략 안내의
+   * 오른쪽 탭)로, 대화가 비어 있어도 추천 질문과 입력칸을 칸 바닥에 붙인다.
+   */
+  layout?: "rail" | "docked";
 };
 
 /**
@@ -100,18 +110,64 @@ export const AssistStrategySidebar = ({
   onApplyProposalAndBacktest,
   onClose,
   suggestions = [],
+  suggestionsKey,
+  layout = "rail",
 }: AssistStrategySidebarProps) => {
   const confirmTextId = useId();
   const suggestionsId = useId();
-  // 추천 질문을 누른 횟수가 nonce 다. 같은 문장을 두 번 눌러도 입력칸을 다시 채운다.
-  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
   const providers = useQuery(assistantProvidersQuery());
   const chat = useAssistChat({ documentRef, readContext });
   const [closeConfirm, setCloseConfirm] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  // 입력칸 문장은 사이드바가 소유한다. 되돌아온 질문·추천 질문은 여기서 한 번만 소비된다 — 입력칸이 다시
+  // 마운트돼도 옛 문장이 되살아나거나 초점을 빼앗지 않는다(가이드 리뷰 3).
+  const [draft, setDraft] = useState("");
+  const [restoredNonce, setRestoredNonce] = useState<number | null>(null);
+  // 마지막으로 넣은 추천 질문. 입력칸이 아직 그 문장 그대로면 사용자가 쓴 글이 아니다.
+  const [suggested, setSuggested] = useState<string | null>(null);
+  const [seenSuggestionsKey, setSeenSuggestionsKey] = useState(suggestionsKey);
+
+  // 되돌아온 질문을 렌더 중에 입력칸으로 옮긴다. effect로 미루면 빈 칸이 한 프레임 보이고,
+  // 그 사이 타이핑은 다음 렌더에 덮인다(`frontend-react-effects.md`).
+  //
+  // 왕복이 도는 동안 사용자가 이미 다른 문장을 치고 있으면 덮지 않는다 — 되돌려 받는 문장보다
+  // 지금 치고 있는 문장이 새 것이다. 보내지 못한 질문은 배너가 알린다(B-03 2차 리뷰 P3).
+  if (chat.draftRestore !== null && chat.draftRestore.nonce !== restoredNonce) {
+    setRestoredNonce(chat.draftRestore.nonce);
+    if (draft.trim() === "") {
+      setDraft(chat.draftRestore.text);
+      setSuggested(null);
+    }
+  }
+  // 맥락(안내 단계)이 바뀌면 고치지 않은 앞 단계 추천 질문을 지운다. 사용자가 고친 문장은 남긴다(가이드 리뷰 6).
+  if (suggestionsKey !== seenSuggestionsKey) {
+    setSeenSuggestionsKey(suggestionsKey);
+    if (suggested !== null && draft === suggested) setDraft("");
+    setSuggested(null);
+  }
+
+  /**
+   * 추천 질문을 입력칸에 넣는다. 보내지는 않는다. 사용자가 직접 쓴 미전송 문장이 있으면 덮지 않고 줄을 바꿔 뒤에
+   * 잇는다 — 쓴 글을 경고 없이 지우면 되돌릴 길이 없고, 확인 대화상자는 칩 한 번의 가벼운 동작에 비해 무겁다.
+   * 입력칸이 앞서 넣은 추천 질문 그대로이면 사용자의 글이 아니므로 바꿔 넣는다(가이드 리뷰 4).
+   */
+  const pickSuggestion = (suggestion: string) => {
+    const userText = draft.trim() !== "" && draft !== suggested;
+    setDraft(userText ? `${draft.trimEnd()}\n${suggestion}` : suggestion);
+    setSuggested(userText ? null : suggestion);
+    inputRef.current?.focus();
+  };
+
+  const submitDraft = () => {
+    if (chat.running !== null || chat.busy || draft.trim() === "") return;
+    chat.send(draft);
+    setDraft("");
+    setSuggested(null);
+  };
 
   const hasActiveProvider =
-    providers.data?.profiles.some((profile) => profile.active) ?? false;
+    providers.data === undefined ? false : hasActiveAssistantProvider(providers.data);
 
   const proposalAction = (
     proposal: StrategyProposalView,
@@ -169,7 +225,7 @@ export const AssistStrategySidebar = ({
   return (
     // 이름 없는 `<section>`은 landmark로 노출되지 않는다. 패널의 landmark·이름·제목은 이 feature를
     // 꽂는 슬롯이 소유하고 여기서는 그리지 않는다 — 계약은 WORKFLOW B-04 Acceptance에 있다.
-    <section className="assist">
+    <section className={layout === "docked" ? "assist assist--docked" : "assist"}>
       <header className="assist__head">
         <div className="assist__head-actions">
           {chat.sessions.length === 0 ? null : (
@@ -345,9 +401,9 @@ export const AssistStrategySidebar = ({
                     key={suggestion}
                     type="button"
                     className="assist__suggestion"
-                    onClick={() =>
-                      setPrefill({ text: suggestion, nonce: (prefill?.nonce ?? 0) + 1 })
-                    }
+                    // 답변이 진행 중이거나 질문을 보내는 중이면 넣지 않는다 — 그 사이 넣은 문장은 보낼 수 없다.
+                    disabled={chat.running !== null || chat.busy}
+                    onClick={() => pickSuggestion(suggestion)}
                   >
                     {suggestion}
                   </button>
@@ -356,12 +412,13 @@ export const AssistStrategySidebar = ({
             </div>
           )}
           <AssistComposer
-            prefill={prefill}
-            restore={chat.draftRestore}
+            text={draft}
+            onTextChange={setDraft}
+            inputRef={inputRef}
             running={chat.running !== null}
             busy={chat.busy}
             placeholder={t(COPY[copy].placeholder)}
-            onSend={chat.send}
+            onSubmit={submitDraft}
             onCancel={chat.cancel}
           />
         </>

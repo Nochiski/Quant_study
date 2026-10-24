@@ -16,6 +16,7 @@ import {
   type FormListItem,
   type FormListSection,
 } from "../model/form-projection";
+import { itemErrorCount } from "../model/diagnostic-counts";
 import { coversPointer } from "../model/diagnostic-navigation";
 import {
   draftOf,
@@ -457,12 +458,7 @@ const ListItemCard = ({
           </>
         ) : undefined
       }
-      invalid={
-        item.diagnostics.some((diagnostic) => diagnostic.severity === "error") ||
-        item.fields.some((field) =>
-          field.diagnostics.some((diagnostic) => diagnostic.severity === "error"),
-        )
-      }
+      invalid={itemErrorCount(item) > 0}
       label={label}
       rows={shown.map((field) => ({ field, section }))}
       template={cardTemplate(item.fields, list.descriptionKey)}

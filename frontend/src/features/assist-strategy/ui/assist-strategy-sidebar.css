@@ -378,3 +378,22 @@
   outline: 2px solid var(--focus-ring, currentColor);
   outline-offset: 2px;
 }
+
+.assist__suggestion:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* `layout="docked"`: 고정 높이 칸 안에서는 대화가 비어 있어도 추천 질문과 입력칸을 칸 바닥에 붙인다. */
+.assist--docked .assist__suggestions,
+.assist--docked .assist__composer {
+  margin-top: auto;
+}
+
+.assist--docked .assist__suggestions + .assist__composer {
+  margin-top: 0;
+}
+
+.assist--docked .assist__suggestion {
+  word-break: keep-all;
+}

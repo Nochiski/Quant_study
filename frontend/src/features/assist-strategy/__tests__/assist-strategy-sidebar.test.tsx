@@ -272,6 +272,7 @@ type MountOptions = {
   onApplyProposal?: (action: AssistProposalAction) => void;
   onApplyProposalAndBacktest?: (action: AssistProposalAction) => void;
   onClose?: () => void;
+  suggestions?: readonly string[];
 };
 
 const context = (): TurnContextPayload => ({
@@ -320,10 +321,13 @@ const mount = ({ result, ...options }: MountOptions = {}) => {
     routeTree: rootRoute.addChildren([homeRoute, settingsRoute]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
+  return Object.assign(
+    render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    ),
+    { client },
   );
 };
 
@@ -811,6 +815,61 @@ describe("AssistStrategySidebar", () => {
       await screen.findByText(/진행 중인 답변이 있어 보내지 못했습니다/),
     ).toBeInTheDocument();
     expect(input).toHaveValue("그 사이에 친 다른 질문");
+  });
+
+  it("추천 질문은 빈 입력칸을 채우고, 사용자가 쓴 미전송 문장은 덮지 않고 뒤에 잇는다(가이드 리뷰 4)", async () => {
+    const user = userEvent.setup();
+    mount({ suggestions: ["첫 추천", "둘째 추천"] });
+    const input = await screen.findByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    const chips = screen.getByRole("group", { name: "이 단계에서 자주 묻는 것" });
+
+    await user.click(within(chips).getByRole("button", { name: "첫 추천" }));
+    expect(input).toHaveValue("첫 추천");
+    expect(input).toHaveFocus();
+    // 고치지 않은 추천 질문은 사용자 글이 아니라 다른 추천으로 바뀐다.
+    await user.click(within(chips).getByRole("button", { name: "둘째 추천" }));
+    expect(input).toHaveValue("둘째 추천");
+
+    await user.clear(input);
+    await user.type(input, "내가 쓴 질문");
+    await user.click(within(chips).getByRole("button", { name: "첫 추천" }));
+    expect(input).toHaveValue("내가 쓴 질문\n첫 추천");
+    expect(startedTurns).toHaveLength(0);
+  });
+
+  it("답변이 진행 중이면 추천 질문을 넣을 수 없다(가이드 리뷰 4)", async () => {
+    const user = userEvent.setup();
+    mount({ suggestions: ["첫 추천"] });
+    await ask(user);
+    const chip = within(
+      screen.getByRole("group", { name: "이 단계에서 자주 묻는 것" }),
+    ).getByRole("button", { name: "첫 추천" });
+    expect(chip).toBeDisabled();
+  });
+
+  it("입력칸이 다시 마운트돼도 이미 넣은 추천 질문이 되살아나거나 초점을 빼앗지 않는다(가이드 리뷰 3)", async () => {
+    const user = userEvent.setup();
+    const { client } = mount({ suggestions: ["첫 추천"] });
+    const input = await screen.findByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    await user.click(screen.getByRole("button", { name: "첫 추천" }));
+    await user.clear(input);
+    await user.tab();
+
+    // 공급자가 잠시 꺼졌다 켜지면 입력칸이 사라졌다 다시 생긴다.
+    providers = providersView(false);
+    await client.invalidateQueries();
+    await screen.findByText("연결된 AI 공급자가 없습니다");
+    providers = providersView(true);
+    await client.invalidateQueries();
+    const again = await screen.findByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    expect(again).toHaveValue("");
+    expect(again).not.toHaveFocus();
   });
 
   it("출처 링크는 제목 옆에 실제 도착지 호스트를 보인다", async () => {

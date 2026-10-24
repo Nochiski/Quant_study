@@ -26,7 +26,7 @@
 `application.assistant_chat`이 공급자 프로파일, 채팅 세션·턴, 전략 제안과 백테스트 결과 설명을 맡는다.
 공급자 SDK(`anthropic`, `openai`)는 optional extra `llm`(`uv sync --extra llm`)이며 `adapters/outbound/llm_*`
 밖에서 import하지 않는다(architecture 테스트). extra가 없어도 서버는 뜨고 공급자는 "설치 필요"로 보인다.
-세션 이력은 `assistant_sqlite`, API 키는 `secrets_local`이 저장한다. 계약 정본은
+세션 이력은 `assistant_sqlite`, 공급자 연결과 API 키는 `secrets_local`이 내 문서 `auto_trading/.env`에 저장한다. 계약 정본은
 [AI 어시스턴트 설계 spec](../docs/superpowers/specs/2026-09-20-ai-assistant-design.md)과
 [결과 설명 spec](../docs/superpowers/specs/2026-09-27-ai-backtest-result-explain.md)이다.
 
@@ -214,7 +214,7 @@ backend/
    ├─ adapters/outbound/backtest_engine/   # TargetTape → Rust/Python engine
    ├─ adapters/outbound/artifact_local/    # atomic local result commit
    ├─ adapters/outbound/assistant_sqlite/  # 어시스턴트 세션·프로파일 저장
-   ├─ adapters/outbound/secrets_local/     # 공급자 API 키 로컬 저장
+   ├─ adapters/outbound/secrets_local/     # 공급자·키움 연결 로컬 저장(내 문서 auto_trading/.env)
    ├─ adapters/outbound/llm_anthropic/ · llm_openai/  # 공급자 SDK adapter(extra `llm`)
    ├─ adapters/outbound/llm_scripted/      # e2e용 대본 공급자
    └─ bootstrap/                           # adapter 조립
@@ -260,8 +260,9 @@ extra 없이 어시스턴트 계약 테스트와 architecture 테스트를 따�
 | `STRATEGY_WORKBENCH_ALLOWED_ORIGINS` | `http://localhost:5173` | CORS 허용 origin(쉼표로 구분) |
 | `STRATEGY_WORKBENCH_EQUITY_ADAPTER` | `mock` | `mock` 또는 `duckdb` |
 | `STRATEGY_WORKBENCH_EQUITY_ROOT` | 없음 | duckdb adapter가 읽을 equity 층 루트. `duckdb`면 필수 |
-| `STRATEGY_WORKBENCH_ASSISTANT_DB_PATH` | `.local/assistant.sqlite3` | 어시스턴트 프로파일·세션 저장소 |
-| `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH` | OS 기본 사용자 설정 위치 | 공급자 API 키 파일. 키움 모의 연결 키(S06)도 같은 파일에 둔다 |
+| `STRATEGY_WORKBENCH_ASSISTANT_DB_PATH` | `.local/assistant.sqlite3` | 어시스턴트 세션 저장소(예전 프로파일 표는 시작할 때 `.env`로 옮긴다) |
+| `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH` | OS 기본 사용자 설정 위치 | 예전 비밀 파일(`secrets.json`). 서버가 시작할 때 여기 남은 공급자를 아래 `.env`로 옮긴다 |
+| `STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH` | 내 문서 `auto_trading/.env` | AI 공급자 연결·API 키 저장 파일. OS "문서" 폴더(윈도우 알려진 폴더, 리눅스 XDG)를 쓰고 다른 도구의 줄은 건드리지 않는다. 테스트·e2e는 반드시 임시 경로로 바꾼다 |
 | `STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL` | 꺼짐 | 정확히 `1`일 때만 로컬 프록시용 비보안 base URL 허용 |
 | `STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER` | 꺼짐 | 정확히 `1`일 때만 공급자를 대본 adapter(`llm_scripted`)로 바꾼다. 브라우저 e2e 전용 |
 | `STRATEGY_WORKBENCH_BROKER_FAKE_PROBE` | 꺼짐 | 정확히 `1`일 때만 키움 모의 "연결 확인"을 대본 probe로 바꾼다(키움을 부르지 않는다). 브라우저 e2e 전용 |

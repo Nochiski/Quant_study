@@ -46,6 +46,10 @@ from strategy_workbench.adapters.outbound.assistant_sqlite.facade.repository imp
     SQLiteProviderProfileRepository,
 )
 from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import ScriptedLlmProvider
+from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import (
+    CredentialsEnvFile,
+    EnvFileProviderStore,
+)
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
     LocalFileProviderSecretStore,
 )
@@ -53,6 +57,8 @@ from strategy_workbench.application.assistant_chat.facade.chat import AssistantC
 from strategy_workbench.application.assistant_chat.facade.context import AssistantContextBuilder
 from strategy_workbench.application.assistant_chat.facade.ports import (
     LlmProviderPort,
+    ProviderProfileRepository,
+    ProviderSecretStore,
     ResultSelectionSnapshot,
     ResultValidationFacts,
 )
@@ -83,7 +89,12 @@ from strategy_workbench.domain.assistant.facade.models import (
 from strategy_workbench.domain.factor.facade.registry import FactorRegistry
 
 from ._file_guard import restrict_to_current_user
-from ._secrets import local_secret_store, repository_root
+from ._secrets import (
+    credentials_env_file,
+    local_secret_store,
+    migrate_provider_profiles,
+    repository_root,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -226,10 +237,17 @@ class AssistantSettings:
 
     `db_path=None`은 프로세스 안에서만 사는 in-memory DB다(전략 revision 저장소와 같은 관례).
     `secrets_path=None`이면 OS 규칙이 정하는 사용자 설정 디렉터리를 쓴다.
+
+    `credentials_env_path`는 내 문서 `auto_trading/.env`(2026-10-24 사용자 결정). 서버 실행 설정
+    (`runtime_assistant_settings`)은 늘 채운다. `None`이면 예전 저장(프로파일은 이 DB, 키는
+    `secrets_path`)을 그대로 쓴다 — 테스트가 직접 세우는 그래프가 사용자의 실제 문서 폴더에
+    쓰지 않게
+    하는 기본값이다.
     """
 
     db_path: str | Path | None = None
     secrets_path: str | Path | None = None
+    credentials_env_path: str | Path | None = None
     allow_insecure_base_url: bool = False
     # `MappingProxyType`은 불변이지만 dataclass가 mutable default로 보므로 factory로 준다.
     provider_factories: Mapping[ProviderKind, ProviderAdapterFactory] = field(
@@ -253,6 +271,9 @@ class AssistantServices:
     # 키움 모의 연결 설정(S06 ②-2)이 같은 secrets.json을 쓴다. 인스턴스를 하나로 둬야 그 잠금이
     # 두 쓰기를 막는다.
     secrets: LocalFileProviderSecretStore
+    # 내 문서 `auto_trading/.env`. 키움 모의 연결도 같은 인스턴스를 써야 잠금이 맞는다. 예전 저장을
+    # 쓰는 그래프(`credentials_env_path=None`)에서는 None이다.
+    credentials_file: CredentialsEnvFile | None = None
 
 
 class _LazyProviderRegistry(Mapping[ProviderKind, LlmProviderPort]):
@@ -338,14 +359,23 @@ def build_assistant_services(
         # in-memory DB는 파일이 없어 잠글 것도 없다. 실패는 삼키지 않는다 — 조용히 넘어가면
         # 이력이 느슨한 권한으로 남고 아무도 그 사실을 모른다.
         restrict_to_current_user(database.database_path)
-    profile_repository = SQLiteProviderProfileRepository(database)
+    legacy_profiles = SQLiteProviderProfileRepository(database)
     session_repository = SQLiteChatSessionRepository(database)
     secrets = local_secret_store(settings.secrets_path)
+    credentials_file: CredentialsEnvFile | None = None
+    profile_repository: ProviderProfileRepository = legacy_profiles
+    provider_secrets: ProviderSecretStore = secrets
+    if settings.credentials_env_path is not None:
+        credentials_file = credentials_env_file(settings.credentials_env_path)
+        env_store = EnvFileProviderStore(credentials_file)
+        migrate_provider_profiles(legacy_profiles, secrets, env_store)
+        profile_repository = env_store
+        provider_secrets = env_store.secrets()
     providers = _LazyProviderRegistry(settings.provider_factories)
     compiler = _AuthoringStrategyCompiler(strategy_authoring)
     profiles = ProviderProfileService(
         profile_repository,
-        secrets,
+        provider_secrets,
         providers,
         now=_now,
         new_id=_new_id,
@@ -361,7 +391,7 @@ def build_assistant_services(
     chat = AssistantChatService(
         session_repository,
         profiles,
-        secrets,
+        provider_secrets,
         providers,
         compiler,
         context_builder,
@@ -374,6 +404,7 @@ def build_assistant_services(
         turns=AssistantTurnRunner(chat, session_repository, now=_now, new_id=_new_id),
         database=database,
         secrets=secrets,
+        credentials_file=credentials_file,
     )
 
 

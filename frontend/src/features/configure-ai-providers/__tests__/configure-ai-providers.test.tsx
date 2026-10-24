@@ -50,7 +50,12 @@ let activated: string[];
 let deleted: string[];
 let createReply: () => Response;
 
+const ENV_PATH = "/Users/me/Documents/auto_trading/.env";
+
 const server = setupServer(
+  http.get(`${API}/api/v1/settings/credentials-file`, () =>
+    HttpResponse.json({ path: ENV_PATH }),
+  ),
   http.get(`${API}/api/v1/assistant/providers`, () => HttpResponse.json(view)),
   http.post(`${API}/api/v1/assistant/providers`, async ({ request }) => {
     createBodies.push((await request.json()) as Record<string, unknown>);
@@ -157,6 +162,13 @@ const fillNewProvider = async (
 };
 
 describe("AI 공급자 설정 섹션", () => {
+  it("연결이 저장되는 파일의 실제 경로를 보여 준다", async () => {
+    renderSettings(<AiProviderSettings />);
+
+    const location = await screen.findByTestId("credentials-file-location");
+    expect(location).toHaveTextContent(`저장 위치: ${ENV_PATH}`);
+  });
+
   it("프로파일 카드에 모델·키 꼬리·활성 배지를 그린다", async () => {
     renderSettings(<AiProviderSettings />);
 

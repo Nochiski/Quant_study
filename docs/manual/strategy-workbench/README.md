@@ -734,6 +734,7 @@ New-Item -ItemType Directory $manualRoot | Out-Null
 $env:STRATEGY_WORKBENCH_DB_PATH = Join-Path $manualRoot "strategy-workbench.sqlite3"
 $env:STRATEGY_WORKBENCH_ASSISTANT_DB_PATH = Join-Path $manualRoot "assistant.sqlite3"
 $env:STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH = Join-Path $manualRoot "assistant-secrets.json"
+$env:STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH = Join-Path $manualRoot "auto_trading.env"
 $env:STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER = "1"
 $env:STRATEGY_WORKBENCH_DB_PATH # 이 경로를 터미널 3에 넣는다
 uv run server

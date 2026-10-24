@@ -2804,7 +2804,10 @@ const ko = {
   "page.settings.description": "이 워크벤치의 연결과 동작을 설정합니다.",
   "settings.assistant.title": "AI 어시스턴트 공급자",
   "settings.assistant.description":
-    "Claude·Codex 연결을 등록하고 어느 연결을 쓸지 고릅니다. API 키는 서버에만 저장되고 화면에는 꼬리 4자리만 보입니다.",
+    "Claude·Codex 연결을 등록하고 어느 연결을 쓸지 고릅니다. 연결과 API 키는 이 PC의 아래 파일에만 저장되고 화면에는 꼬리 4자리만 보입니다.",
+  "settings.credentialsFile.location": "저장 위치: {path}",
+  "settings.credentialsFile.legacy": "저장 위치: 이 PC의 사용자 설정 폴더",
+  "settings.credentialsFile.unavailable": "저장 위치를 불러오지 못했습니다. 서버를 다시 켜 보세요.",
   "settings.kiwoom.title": "키움 모의투자 연결",
   "settings.kiwoom.description": "모의투자 앱 키·시크릿·계좌번호를 이 PC의 사용자 설정 폴더에만 저장합니다. 화면에는 저장 여부와 계좌번호 끝 4자리만 보이고, 키는 '연결 확인'을 누를 때만 키움에 씁니다. 이 화면에서는 주문하지 않습니다.",
   "settings.kiwoom.guide": "처음 연결한다면 저장소의 연결 안내(docs/manual/strategy-workbench/kiwoom-mock-connection.md)를 먼저 보세요. 신청, IP 등록, 키 받기 순서가 있습니다.",
@@ -5815,7 +5818,10 @@ export const messages = {
       "Configure how this workbench connects and behaves.",
     "settings.assistant.title": "AI assistant providers",
     "settings.assistant.description":
-      "Register Claude and Codex connections and choose which one to use. API keys stay on the server; only the last four characters are shown.",
+      "Register Claude and Codex connections and choose which one to use. Connections and API keys are stored only in the file below on this PC; only the last four characters are shown.",
+    "settings.credentialsFile.location": "Stored in: {path}",
+    "settings.credentialsFile.legacy": "Stored in: this PC's user settings folder",
+    "settings.credentialsFile.unavailable": "Could not load the storage location. Try restarting the server.",
     "settings.kiwoom.title": "Kiwoom mock trading connection",
     "settings.kiwoom.description": "Stores the mock-trading app key, secret and account number only in this PC's user settings folder. The screen shows only whether they are saved and the last 4 digits of the account; the key is sent to Kiwoom only when you press Check connection. This screen never places orders.",
     "settings.kiwoom.guide": "For a first connection, read the repository guide (docs/manual/strategy-workbench/kiwoom-mock-connection.md). It covers the application, IP registration and key download steps.",

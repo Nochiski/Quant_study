@@ -12,6 +12,7 @@ import {
   runtimeArtifactRoot,
   runtimeAssistantDatabasePath,
   runtimeAssistantSecretsPath,
+  runtimeCredentialsEnvPath,
   runtimeDatabasePath,
   runtimeResearchDatabasePath,
   runtimeContinuousDatabasePath,
@@ -27,6 +28,7 @@ const runtimeDatabase = runtimeDatabasePath();
 // 설정 디렉터리라, 넘기지 않으면 e2e가 개발자의 실제 대화 이력과 `secrets.json`에 쓴다.
 const runtimeAssistantDatabase = runtimeAssistantDatabasePath();
 const runtimeAssistantSecrets = runtimeAssistantSecretsPath();
+const runtimeCredentialsEnv = runtimeCredentialsEnvPath();
 const runtimeResearchDatabase = runtimeResearchDatabasePath();
 const runtimeContinuousDatabase = runtimeContinuousDatabasePath();
 const runtimeArtifacts = runtimeArtifactRoot();
@@ -154,6 +156,7 @@ export default defineConfig({
         STRATEGY_WORKBENCH_E2E_IDEAS_PREFIX: IDEAS_API_PREFIX,
         STRATEGY_WORKBENCH_ASSISTANT_DB_PATH: runtimeAssistantDatabase,
         STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH: runtimeAssistantSecrets,
+        STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH: runtimeCredentialsEnv,
         // 대본 공급자. 실 SDK·키·네트워크 없이 어시스턴트 시나리오가 돈다(WORKFLOW B-05).
         STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER: "1",
         // 대본 키움 probe. 키움·키·네트워크 없이 연결 설정 스토리가 돈다(S06 ②-3, US-SM-18).

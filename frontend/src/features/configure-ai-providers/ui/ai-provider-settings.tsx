@@ -9,6 +9,7 @@ import {
   type ProviderKindView,
   type ProviderProfileView,
 } from "../../../entities/assistant";
+import { CredentialsFileLocation } from "../../../entities/credentials-file";
 import { t } from "../../../shared/config";
 import { Badge, Button, EmptyState, Tooltip } from "../../../shared/ui";
 import { providerKindLabel, providerRejection } from "../model/provider-copy";
@@ -233,6 +234,7 @@ export const AiProviderSettings = () => {
       <p className="ai-providers__description">
         {t("settings.assistant.description")}
       </p>
+      <CredentialsFileLocation />
       {providers.isPending ? <p role="status">{t("page.loading")}</p> : null}
       {providers.isError ? (
         <p className="ai-providers__error" role="alert">

@@ -45,6 +45,13 @@ export const runtimeAssistantSecretsPath = (): string =>
   join(runtimeDirectory(), "assistant-secrets.json");
 
 /**
+ * AI 공급자·키움 모의 연결 저장 파일. 기본 경로는 내 문서 `auto_trading/.env`라, 넘기지 않으면 e2e가
+ * 등록한 가짜 공급자·키가 개발자의 실제 파일에 섞이고 실행이 끝나도 남는다.
+ */
+export const runtimeCredentialsEnvPath = (): string =>
+  join(runtimeDirectory(), "auto_trading.env");
+
+/**
  * 백테스트 실행 기록 DB. 기본 경로는 저장소 `.local/`이라, 넘기지 않으면 e2e 실행이 개발자의 실제 이력에
  * 쌓이고 개발 서버가 도는 run 을 재시작 때 `interrupted`로 닫는다.
  */

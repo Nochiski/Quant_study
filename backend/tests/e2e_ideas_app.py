@@ -69,6 +69,7 @@ def build_e2e_http_app() -> FastAPI:
         runtime_assistant_settings(),
         db_path=own / "assistant.sqlite3",
         secrets_path=own / "assistant-secrets.json",
+        credentials_env_path=own / "auto_trading.env",
     )
     # 조립 중에만 주입한다. 요청 처리 중 전역 patch나 adapter 교환은 없다.
     with patch.object(MockEquityDataAdapter, "demo", return_value=ideas_adapter()):

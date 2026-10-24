@@ -92,6 +92,8 @@ import type {
   GetContinuousAccountData,
   GetContinuousAccountErrors,
   GetContinuousAccountResponses,
+  GetCredentialsFileData,
+  GetCredentialsFileResponses,
   GetEquityCatalogData,
   GetEquityCatalogErrors,
   GetEquityCatalogResponses,
@@ -1364,6 +1366,18 @@ export const getRunEnvironmentSchema = <ThrowOnError extends boolean = false>(
     GetRunEnvironmentSchemaErrors,
     ThrowOnError
   >({ url: "/api/v1/run-environments/schema", ...options });
+
+/**
+ * Get Credentials File
+ */
+export const getCredentialsFile = <ThrowOnError extends boolean = false>(
+  options?: Options<GetCredentialsFileData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetCredentialsFileResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/settings/credentials-file", ...options });
 
 /**
  * List Strategies

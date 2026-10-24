@@ -101,6 +101,12 @@ test.describe("AI 어시스턴트", () => {
       await card.getByRole("button", { name: "연결 테스트" }).click();
       await expect(card.getByRole("status")).toContainText("연결 확인됨");
       expect(await page.content()).not.toContain(SECRET);
+
+      // 저장 위치는 서버가 해석한 실제 파일 경로다. e2e는 격리 런타임의 `auto_trading.env`를 쓴다
+      // (`e2e/runtime.ts`). 임시 폴더는 OS가 심볼릭 링크를 풀어 적으므로 파일 이름까지만 맞춘다.
+      const location = section.getByTestId("credentials-file-location");
+      await expect(location).toContainText("저장 위치:");
+      await expect(location).toContainText(/auto_trading\.env$/);
     },
   );
 

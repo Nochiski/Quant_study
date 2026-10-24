@@ -140,8 +140,8 @@ explains the Sharpe ratio in plain words (US-SM-09); anything else gets a short 
 무관하게 결과 설명 대본이 돈다. 서버가 그 턴에 `read_backtest_result` 도구를 제공했는지로 고른다(US-DM-08).
 
 Assistant history and secrets go to the same isolated runtime directory as the strategy database
-(`e2e/runtime.ts`); without that the run would write into the developer's real chat history and
-`secrets.json`.
+(`e2e/runtime.ts`); without that the run would write into the developer's real chat history,
+`secrets.json` and `Documents/auto_trading/.env` (AI provider and Kiwoom mock connections).
 
 The npm test/update commands atomically create a unique random directory under the operating
 system temp root, pass its SQLite path only to the backend process, and delete the whole directory

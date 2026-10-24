@@ -171,6 +171,8 @@ class BackendContainer:
     assistant_profiles: ProviderProfileService
     assistant_chat: AssistantChatService
     assistant_turns: AssistantTurnRunner
+    # 설정 화면에 보일 저장 파일(내 문서 `auto_trading/.env`). 예전 저장을 쓰는 그래프는 None이다.
+    credentials_file_path: Path | None = None
 
 
 EQUITY_ADAPTERS = ("mock", "duckdb")
@@ -357,6 +359,11 @@ def build_container(
         assistant_profiles=assistant_services.profiles,
         assistant_chat=assistant_services.chat,
         assistant_turns=assistant_services.turns,
+        credentials_file_path=(
+            assistant_services.credentials_file.path
+            if assistant_services.credentials_file is not None
+            else None
+        ),
     )
 
 
@@ -461,9 +468,7 @@ class _AuthoringLibraryCompiler:
         )
         return CompiledLibraryDocument(
             canonical=(
-                None
-                if compiled.canonical_json is None
-                else json.loads(compiled.canonical_json)
+                None if compiled.canonical_json is None else json.loads(compiled.canonical_json)
             ),
             diagnostics=tuple(
                 LibraryDiagnostic(

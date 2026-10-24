@@ -4,6 +4,7 @@ from pathlib import Path
 from strategy_workbench.adapters.inbound.http_api.facade.api import create_app
 from strategy_workbench.application.backtest_run.facade.runs import DEFAULT_RUN_SLOTS
 
+from . import _secrets
 from ._assistant import (
     DEFAULT_ASSISTANT_SETTINGS,
     PROVIDER_ADAPTER_FACTORIES,
@@ -36,6 +37,10 @@ ASSISTANT_DB_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_DB_PATH"
 ASSISTANT_SECRETS_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH"
 ASSISTANT_ALLOW_INSECURE_BASE_URL_ENV = "STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL"
 ASSISTANT_FAKE_PROVIDER_ENV = "STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER"
+# AI 공급자·키움 모의 연결을 저장하는 `.env` 경로. 없으면 내 문서 `auto_trading/.env`다.
+# 테스트·e2e는
+# 반드시 임시 경로로 바꾼다 — 그러지 않으면 실행이 개발자의 실제 문서 폴더에 쓴다.
+CREDENTIALS_ENV_PATH_ENV = "STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH"
 # 브라우저 e2e 전용. 키움 "연결 확인"을 대본 probe로 바꾼다. 정확히 "1"일 때만 켠다.
 BROKER_FAKE_PROBE_ENV = "STRATEGY_WORKBENCH_BROKER_FAKE_PROBE"
 
@@ -165,10 +170,17 @@ def runtime_assistant_settings() -> AssistantSettings:
     """
     configured_db = os.environ.get(ASSISTANT_DB_PATH_ENV)
     configured_secrets = os.environ.get(ASSISTANT_SECRETS_PATH_ENV)
+    configured_credentials = os.environ.get(CREDENTIALS_ENV_PATH_ENV)
     fake_provider = os.environ.get(ASSISTANT_FAKE_PROVIDER_ENV, "").strip() == "1"
     return AssistantSettings(
         db_path=Path(configured_db).expanduser() if configured_db else DEFAULT_ASSISTANT_DB_PATH,
         secrets_path=Path(configured_secrets).expanduser() if configured_secrets else None,
+        credentials_env_path=(
+            Path(configured_credentials).expanduser()
+            if configured_credentials
+            # 모듈 속성으로 부른다. 테스트 격리가 이 기본값을 tmp로 바꾼다(#211과 같은 방식).
+            else _secrets.default_credentials_env_path()
+        ),
         allow_insecure_base_url=(
             os.environ.get(ASSISTANT_ALLOW_INSECURE_BASE_URL_ENV, "").strip() == "1"
         ),
@@ -229,6 +241,7 @@ def build_http_app(
         assistant_profiles=container.assistant_profiles,
         assistant_chat=container.assistant_chat,
         assistant_turns=container.assistant_turns,
+        credentials_file_path=container.credentials_file_path,
         allowed_origins=allowed_origins,
     )
 

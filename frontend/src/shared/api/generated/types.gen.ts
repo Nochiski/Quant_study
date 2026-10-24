@@ -1897,6 +1897,18 @@ export type CreateSessionRequest = {
 };
 
 /**
+ * CredentialsFileBody
+ */
+export type CredentialsFileBody = {
+  /**
+   * Path
+   *
+   * AI 공급자·키움 모의 연결을 저장하는 `.env`의 절대 경로. 예전 저장(사용자 설정 폴더)을 쓰는 서버는 null이다.
+   */
+  path: string | null;
+};
+
+/**
  * CrossSectionalNode
  */
 export type CrossSectionalNode = {
@@ -11124,6 +11136,23 @@ export type GetRunEnvironmentSchemaResponses = {
 
 export type GetRunEnvironmentSchemaResponse =
   GetRunEnvironmentSchemaResponses[keyof GetRunEnvironmentSchemaResponses];
+
+export type GetCredentialsFileData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/settings/credentials-file";
+};
+
+export type GetCredentialsFileResponses = {
+  /**
+   * Successful Response
+   */
+  200: CredentialsFileBody;
+};
+
+export type GetCredentialsFileResponse =
+  GetCredentialsFileResponses[keyof GetCredentialsFileResponses];
 
 export type ListStrategiesData = {
   body?: never;

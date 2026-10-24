@@ -294,8 +294,8 @@ export const NewStrategyPage = () => {
           {autosave.recovery ? (
             <RecoveryBanner recovery={autosave.recovery} />
           ) : null}
-          <ServerDraftBanner sync={serverDraft} />
           <StrategyGuide
+            status={<ServerDraftBanner sync={serverDraft} />}
             form={form}
             schema={assist.schema}
             transactions={transactions}

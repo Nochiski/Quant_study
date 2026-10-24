@@ -659,6 +659,7 @@ export const FormFieldsEditor = ({
   sectionDiagnostics = true,
   names,
   showIdentifiers = true,
+  requirementTags = false,
 }: {
   section: ObjectSection;
   transactions: SourceTransactions;
@@ -674,6 +675,8 @@ export const FormFieldsEditor = ({
   sectionDiagnostics?: boolean;
   names?: SummaryNames;
   showIdentifiers?: boolean;
+  /** 필수 별표 대신 "필수"·"선택" 표식을 라벨 옆에 둔다(새 전략 안내). */
+  requirementTags?: boolean;
 }) => (
   <>
     {/* 그래프 노드 진단은 노드 **객체** pointer로 오므로 어느 필드도 흡수하지 않는다. 그런 진단이
@@ -686,6 +689,7 @@ export const FormFieldsEditor = ({
         key={field.pointer}
         names={names}
         showIdentifiers={showIdentifiers}
+        requirementTags={requirementTags}
         section={section}
         field={field}
         transactions={transactions}
@@ -761,6 +765,7 @@ const FormFieldRow = ({
   selectedPointer,
   names,
   showIdentifiers = true,
+  requirementTags = false,
 }: {
   section: ObjectSection;
   field: FormField;
@@ -771,6 +776,7 @@ const FormFieldRow = ({
   selectedPointer?: string;
   names?: SummaryNames;
   showIdentifiers?: boolean;
+  requirementTags?: boolean;
 }) => {
   const id = useId();
   const labelId = `${id}-label`;
@@ -826,7 +832,19 @@ const FormFieldRow = ({
           trim해 "이름key"로 붙어 읽힌다(P1-03 리뷰). */}
       {name === null ? null : " "}
       {showIdentifiers ? <code className="strategy-form__key">{field.key}</code> : null}
-      {field.required ? <span aria-hidden="true"> *</span> : null}
+      {requirementTags ? (
+        <>
+          {" "}
+          <span
+            className="strategy-form__requirement"
+            data-required={field.required ? "true" : undefined}
+          >
+            {t(field.required ? "form.field.required" : "form.field.optional")}
+          </span>
+        </>
+      ) : field.required ? (
+        <span aria-hidden="true"> *</span>
+      ) : null}
       {(field.displayUnit ?? field.unit) ? (
         <>
           {/* 키와 단위 사이 공백도 형제 text node다 — 요소 안에 두면 "key· %"로 붙어 읽힌다. */}

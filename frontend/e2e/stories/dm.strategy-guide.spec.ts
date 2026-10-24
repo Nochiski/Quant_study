@@ -42,16 +42,17 @@ test(
     await page.getByRole("link", { name: "새 전략 만들기" }).first().click();
     await expect(page).toHaveURL(/guide=true/u);
     const steps = page.getByRole("navigation", { name: "만드는 단계" });
+    // 단계 이름 뒤에는 상태(오류 N·완료)가 붙을 수 있다. 빈 이름은 처음부터 오류다.
     await expect(steps.getByRole("button")).toHaveText([
-      "1이름·의도",
-      "2유니버스",
-      "3알파 팩터",
-      "4결합",
-      "5포트폴리오 구성",
-      "6리스크 제약",
-      "7확인",
+      /^1이름·의도/u,
+      /^2유니버스/u,
+      /^3알파 팩터/u,
+      /^4결합/u,
+      /^5포트폴리오 구성/u,
+      /^6리스크 제약/u,
+      /^7확인/u,
     ]);
-    await expect(steps.getByRole("button", { name: "이름·의도" })).toHaveAttribute(
+    await expect(steps.getByRole("button", { name: /^이름·의도/u })).toHaveAttribute(
       "aria-current",
       "step",
     );
@@ -134,3 +135,4 @@ test(
     expect(fromGuide.spec_hash).toBe(fromHand.spec_hash);
   },
 );
+

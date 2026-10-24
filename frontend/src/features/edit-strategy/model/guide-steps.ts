@@ -6,9 +6,10 @@
  * 나누는 규칙: 한 단계(`x-stage`)에 최상위 목록 섹션(`factors`)이 있으면 그 목록이 단계 하나가 되고, 같은
  * 단계의 카드(신호 결합 칸)는 그 뒤 단계가 된다. 다른 목록(`eligibility.rules`)은 자기 단계 안에 남는다.
  */
-import type { FormField } from "./form-projection";
+import type { DocumentDiagnostic } from "./document-state";
+import type { FormField, FormListSection } from "./form-projection";
 import type { PipelineCard, PipelineProjection } from "./pipeline-projection";
-import { cardTemplate } from "./pipeline-projection";
+import { cardTemplate, pipelineDocumentProperties } from "./pipeline-projection";
 
 export type GuideStep =
   | { kind: "document"; id: "document" }
@@ -89,4 +90,58 @@ export const guideSteps = (pipeline: PipelineProjection | null): GuideStep[] => 
   }
   steps.push({ kind: "review", id: "review" });
   return steps;
+};
+
+/**
+ * 단계 목록에 보일 단계 상태. `errors`는 그 단계 칸·목록에 붙은 backend 오류 진단 수이고, `filled`는 그
+ * 단계에서 문서에 값을 하나라도 썼는가(목록이면 항목이 있는가)다. 화면은 오류가 있으면 오류, 오류 없이
+ * 채웠으면 완료, 아니면 미작성으로 그린다. 확인 단계는 고를 칸이 없어 늘 미작성이다.
+ */
+export type GuideStepStatus = { errors: number; filled: boolean };
+
+const errorCount = (diagnostics: readonly DocumentDiagnostic[]): number =>
+  diagnostics.filter((diagnostic) => diagnostic.severity === "error").length;
+
+/** 기본값이 아니라 문서에 실제 값을 적었는가. 빈 문자열(`title: ""`)과 null 은 적지 않은 것으로 본다. */
+const holdsValue = (field: FormField): boolean =>
+  field.written && field.value !== "" && field.value !== null;
+
+const listStatus = (list: FormListSection): GuideStepStatus => ({
+  errors:
+    errorCount(list.diagnostics) +
+    list.items.reduce(
+      (sum, item) =>
+        sum +
+        errorCount(item.diagnostics) +
+        item.fields.reduce((inner, field) => inner + errorCount(field.diagnostics), 0),
+      0,
+    ),
+  filled: list.items.length > 0,
+});
+
+const fieldsStatus = (fields: readonly FormField[]): GuideStepStatus => ({
+  errors: fields.reduce((sum, field) => sum + errorCount(field.diagnostics), 0),
+  filled: fields.some(holdsValue),
+});
+
+export const guideStepStatus = (
+  step: GuideStep,
+  pipeline: PipelineProjection | null,
+): GuideStepStatus => {
+  if (pipeline === null || step.kind === "review") return { errors: 0, filled: false };
+  if (step.kind === "document")
+    return fieldsStatus(pipelineDocumentProperties(pipeline)?.fields ?? []);
+  const stage = pipeline.stages.find((candidate) => candidate.stage === step.stage);
+  const parts = [
+    fieldsStatus(
+      [...step.primary, ...step.more].flatMap((card) => card.rows.map((row) => row.field)),
+    ),
+    ...(stage?.lists ?? [])
+      .filter((list) => step.listPointers.includes(list.pointer))
+      .map(listStatus),
+  ];
+  return {
+    errors: parts.reduce((sum, part) => sum + part.errors, 0),
+    filled: parts.some((part) => part.filled),
+  };
 };

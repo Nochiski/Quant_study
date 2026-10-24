@@ -17,7 +17,12 @@ import {
 } from "../model/form-projection";
 import { factorAddition, groupFactors, type FactorCategory } from "../model/guide-factors";
 import { changedLines } from "../model/guide-preview";
-import { guideSteps, type GuideStep } from "../model/guide-steps";
+import {
+  guideStepStatus,
+  guideSteps,
+  type GuideStep,
+  type GuideStepStatus,
+} from "../model/guide-steps";
 import {
   pipelineDocumentProperties,
   pipelineNames,
@@ -57,6 +62,7 @@ export const StrategyGuide = ({
   source,
   step: stepId,
   onStep,
+  status,
   onOpenGraph,
   onOpenEditor,
   onUndo,
@@ -82,6 +88,8 @@ export const StrategyGuide = ({
   canUndo: boolean;
   /** 확인 단계에 붙는 화면 몫(진단·선정 미리보기·저장). */
   review: ReactNode;
+  /** 머리 띠 오른쪽의 초안 저장 상태(서버 초안 동기화 문장). */
+  status?: ReactNode;
 }) => {
   const titleId = useId();
   const pipeline: PipelineProjection | null = useMemo(
@@ -115,16 +123,24 @@ export const StrategyGuide = ({
           onOpenGraph,
           onOpenAdvanced: undefined,
           librarySave: true,
+          itemHeads: true,
         };
   const disabled = transactions.disabled;
+  const statuses = steps.map((candidate) => guideStepStatus(candidate, pipeline));
+  const done = statuses.filter(
+    (candidate, position) => steps[position]!.kind !== "review" && isDone(candidate),
+  ).length;
+  const next = steps[index + 1];
+  const changed = useChangedLines(source);
   return (
     <section className="strategy-guide" aria-labelledby={titleId}>
       <header className="strategy-guide__header">
-        <div>
+        <div className="strategy-guide__heading">
           <h2 id={titleId}>{t("guide.title")}</h2>
           <p>{t("guide.description")}</p>
         </div>
         <div className="strategy-guide__header-actions">
+          {status}
           <Button size="small" tone="ghost" onClick={onUndo} disabled={!canUndo}>
             {t("guide.undo")}
           </Button>
@@ -135,89 +151,132 @@ export const StrategyGuide = ({
       </header>
       <nav className="strategy-guide__steps" aria-label={t("guide.steps")}>
         <ol>
-          {steps.map((candidate, position) => (
-            <li key={candidate.id}>
-              <button
-                type="button"
-                aria-current={position === index ? "step" : undefined}
-                onClick={() => onStep(candidate.id)}
-              >
-                {/* 번호는 목록 순서가 이미 말한다. 버튼 이름은 단계 이름만이다. */}
-                <span className="strategy-guide__step-number" aria-hidden="true">
-                  {position + 1}
-                </span>
-                {stepName(candidate)}
-              </button>
-            </li>
-          ))}
+          {steps.map((candidate, position) => {
+            const state = stepState(statuses[position]!);
+            return (
+              <li key={candidate.id}>
+                <button
+                  type="button"
+                  aria-current={position === index ? "step" : undefined}
+                  data-state={state}
+                  onClick={() => onStep(candidate.id)}
+                >
+                  {/* 번호·체크는 목록 순서와 상태 문구가 이미 말한다. 버튼 이름은 단계 이름과 상태다. */}
+                  <span className="strategy-guide__step-number" aria-hidden="true">
+                    {state === "done" ? <CheckIcon /> : position + 1}
+                  </span>
+                  <span className="strategy-guide__step-name">{stepName(candidate)}</span>
+                  {state === "done" ? (
+                    <span className="sr-only">{t("guide.stepState.done")}</span>
+                  ) : null}
+                  {state === "error" ? (
+                    <span className="strategy-guide__step-tag">
+                      {tFill("guide.stepState.error", {
+                        count: statuses[position]!.errors,
+                      })}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
         </ol>
+        <p className="strategy-guide__progress">
+          {tFill("guide.progress", {
+            done,
+            total: steps.filter((candidate) => candidate.kind !== "review").length,
+          })}
+        </p>
       </nav>
       <div className="strategy-guide__body">
         <section
           className="strategy-guide__step"
-          aria-label={stepName(current)}
+          aria-labelledby={`${titleId}-step`}
         >
-          <h3>
-            {index + 1}. {stepName(current)}
-          </h3>
-          {disabled !== null ? (
-            <Badge tone="warn">{t(`form.disabled.${disabled}`)}</Badge>
-          ) : null}
-          {context === null || pipeline === null ? (
-            <p className="strategy-guide__hint" role="status">
-              {t(form.firstParsePending ? "form.panel.firstParsePending" : "form.panel.loading")}
+          <header className="strategy-guide__step-head">
+            <p className="strategy-guide__step-position">
+              {tFill("guide.stepPosition", { current: index + 1, total: steps.length })}
             </p>
-          ) : current.kind === "document" ? (
-            <DocumentStep pipeline={pipeline} context={context} />
-          ) : current.kind === "stage" ? (
-            <StageStep
-              step={current}
-              pipeline={pipeline}
-              context={context}
-              snippetSource={snippetSource}
-              projection={form.projection}
-            />
-          ) : (
-            <>
-              <p className="strategy-guide__summary">
-                <strong>{t("graph.pipeline.summary")}</strong>{" "}
-                {strategySummary(pipeline, catalogName)}
+            <h3 id={`${titleId}-step`}>{stepName(current)}</h3>
+            {disabled !== null ? (
+              <Badge tone="warn">{t(`form.disabled.${disabled}`)}</Badge>
+            ) : null}
+          </header>
+          <div className="strategy-guide__step-body">
+            {context === null || pipeline === null ? (
+              <p className="strategy-guide__hint" role="status">
+                {t(form.firstParsePending ? "form.panel.firstParsePending" : "form.panel.loading")}
               </p>
-              {review}
-            </>
-          )}
-          <TransactionFeedbackNote
-            feedback={transactions.feedbackFor(GUIDE_OWNER)}
-            owner={GUIDE_OWNER}
-          />
-          <TransactionFeedbackNote
-            feedback={transactions.feedbackFor("pipeline")}
-            owner="pipeline"
-          />
-          <TransactionFeedbackNote
-            feedback={transactions.feedbackFor("library")}
-            owner="library"
-          />
+            ) : current.kind === "document" ? (
+              <DocumentStep pipeline={pipeline} context={context} />
+            ) : current.kind === "stage" ? (
+              <StageStep
+                step={current}
+                pipeline={pipeline}
+                context={context}
+                snippetSource={snippetSource}
+                projection={form.projection}
+              />
+            ) : (
+              <>
+                <p className="strategy-guide__summary">
+                  <strong>{t("graph.pipeline.summary")}</strong>{" "}
+                  {strategySummary(pipeline, catalogName)}
+                </p>
+                {review}
+              </>
+            )}
+            <TransactionFeedbackNote
+              feedback={transactions.feedbackFor(GUIDE_OWNER)}
+              owner={GUIDE_OWNER}
+            />
+            <TransactionFeedbackNote
+              feedback={transactions.feedbackFor("pipeline")}
+              owner="pipeline"
+            />
+            <TransactionFeedbackNote
+              feedback={transactions.feedbackFor("library")}
+              owner="library"
+            />
+          </div>
           <footer className="strategy-guide__footer">
             <Button
-              tone="secondary"
+              tone="ghost"
               disabled={index === 0}
               onClick={() => onStep(steps[index - 1]!.id)}
             >
               {t("guide.previous")}
             </Button>
-            {index < steps.length - 1 ? (
-              <Button tone="primary" onClick={() => onStep(steps[index + 1]!.id)}>
-                {t("guide.next")}
-              </Button>
-            ) : null}
+            {next === undefined ? null : (
+              <div className="strategy-guide__next">
+                <span className="strategy-guide__hint" aria-hidden="true">
+                  {tFill("guide.nextStep", { name: stepName(next) })}
+                </span>
+                <Button tone="primary" onClick={() => onStep(next.id)}>
+                  {t("guide.next")}
+                </Button>
+              </div>
+            )}
           </footer>
         </section>
-        <YamlPreview source={source} />
+        <div className="strategy-guide__side">
+          <YamlPreview source={source} changed={changed} />
+        </div>
       </div>
     </section>
   );
 };
+
+/** 단계 목록 표시: 오류가 먼저이고, 오류 없이 값을 썼으면 완료다. */
+const isDone = (status: GuideStepStatus): boolean => status.errors === 0 && status.filled;
+const stepState = (status: GuideStepStatus): "error" | "done" | "todo" =>
+  status.errors > 0 ? "error" : isDone(status) ? "done" : "todo";
+
+const CheckIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
+    <path d="M5 12l5 5L20 7" />
+  </svg>
+);
 
 const DocumentStep = ({
   pipeline,
@@ -243,6 +302,7 @@ const DocumentStep = ({
             owner={GUIDE_OWNER}
             names={context.names}
             showIdentifiers={false}
+            requirementTags
           />
         </fieldset>
       )}
@@ -289,7 +349,13 @@ const StageStep = ({
           ))
         : null}
       {lists.map((list) => (
-        <StageList key={list.pointer} list={list} context={context} />
+        <StageList
+          key={list.pointer}
+          list={list}
+          context={context}
+          // 목록 항목끼리 어떻게 묶이는지(거르기 규칙은 모두 통과해야 남는다). 문구가 있는 목록만 보인다.
+          note={tOptional(`guide.list.${step.stage}.${list.key}.combine`)}
+        />
       ))}
       <Cards cards={step.primary} context={context} />
       {step.more.length === 0 ? null : (
@@ -489,17 +555,26 @@ const FactorRow = ({
   );
 };
 
-/** 만들어지는 YAML 을 읽기 전용으로 보이고, 방금 바뀐 줄을 표시한다. */
-const YamlPreview = ({ source }: { source: string }) => {
+/**
+ * 방금 바뀐 줄. 원문이 바뀌면 렌더 중에 직전 원문을 갈아 끼운다(effect 로 미루면 한 프레임 옛 강조가 남는다).
+ * 미리보기 본문과 미리보기 탭의 "N줄 바뀜" 표식이 같은 집합을 읽는다.
+ */
+const useChangedLines = (source: string): ReadonlySet<number> => {
   const [tracked, setTracked] = useState({ previous: source, current: source });
-  // 원문이 바뀌면 렌더 중에 직전 원문을 갈아 끼운다(effect 로 미루면 한 프레임 옛 강조가 남는다).
   if (tracked.current !== source)
     setTracked({ previous: tracked.current, current: source });
   const { previous, current } = tracked;
-  const changed = useMemo(
-    () => changedLines(previous, current),
-    [previous, current],
-  );
+  return useMemo(() => changedLines(previous, current), [previous, current]);
+};
+
+/** 만들어지는 YAML 을 읽기 전용으로 보이고, 방금 바뀐 줄을 표시한다. */
+const YamlPreview = ({
+  source,
+  changed,
+}: {
+  source: string;
+  changed: ReadonlySet<number>;
+}) => {
   const lines = source.split("\n");
   return (
     <aside className="strategy-guide__preview" aria-label={t("guide.preview")}>

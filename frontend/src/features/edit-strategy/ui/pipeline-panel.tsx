@@ -82,6 +82,11 @@ export type CardContext = {
   onOpenAdvanced: ((pointer: string) => void) | undefined;
   /** 팩터 카드에 "내 팩터로 저장"을 둔다(US-CS-08). 라이브러리 API 가 있는 화면만 켠다. */
   librarySave: boolean;
+  /**
+   * 목록 항목 카드 머리에 항목 이름과 삭제를 둔다(새 전략 안내). 캔버스는 끈 채 카드 끝에 삭제 버튼을
+   * 두고, 안내는 규칙마다 머리 띠가 있어야 규칙끼리 나뉘어 보인다.
+   */
+  itemHeads?: boolean;
 };
 
 export const PipelinePanel = ({
@@ -313,9 +318,12 @@ const ExecutionGuide = ({
 export const StageList = ({
   list,
   context,
+  note,
 }: {
   list: FormListSection;
   context: CardContext;
+  /** 제목 아래 한 줄 안내(항목끼리 어떻게 묶이는지 등). 없으면 그리지 않는다. */
+  note?: string | null;
 }) => {
   const notesId = useId();
   const addReasonId = `${notesId}-add`;
@@ -339,6 +347,9 @@ export const StageList = ({
       }
     >
       <p className="pipeline__list-title">{title}</p>
+      {note === undefined || note === null ? null : (
+        <p className="pipeline__hint">{note}</p>
+      )}
       <DiagnosticNotes id={notesId} diagnostics={list.diagnostics} />
       {list.items.length === 0 ? (
         <p className="pipeline__hint">{t("form.list.empty")}</p>
@@ -369,6 +380,7 @@ export const StageList = ({
                 NO_FOCUS,
               );
           }}
+          className="pipeline__add"
           aria-label={`${title} · ${t("form.list.add")}`}
         >
           {t("form.list.add")}
@@ -424,8 +436,33 @@ const ListItemCard = ({
   const shown = item.fields.filter(
     (field) => field !== graph && field !== identity,
   );
+  const removeButton = (
+    <Button
+      size="small"
+      tone={context.itemHeads ? "ghost" : "danger"}
+      onClick={remove}
+      disabled={context.transactions.settling}
+      aria-label={`${label} · ${t("form.list.remove")}`}
+    >
+      {t("form.list.remove")}
+    </Button>
+  );
   return (
     <SentenceCard
+      head={
+        context.itemHeads ? (
+          <>
+            <span className="pipeline__card-name">{label}</span>
+            {removeButton}
+          </>
+        ) : undefined
+      }
+      invalid={
+        item.diagnostics.some((diagnostic) => diagnostic.severity === "error") ||
+        item.fields.some((field) =>
+          field.diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+        )
+      }
       label={label}
       rows={shown.map((field) => ({ field, section }))}
       template={cardTemplate(item.fields, list.descriptionKey)}
@@ -472,17 +509,9 @@ const ListItemCard = ({
           ) : null}
         </div>
       )}
-      <div className="pipeline__actions">
-        <Button
-          size="small"
-          tone="danger"
-          onClick={remove}
-          disabled={context.transactions.settling}
-          aria-label={`${label} · ${t("form.list.remove")}`}
-        >
-          {t("form.list.remove")}
-        </Button>
-      </div>
+      {context.itemHeads ? null : (
+        <div className="pipeline__actions">{removeButton}</div>
+      )}
       {blocked === null ? null : (
         <p className="strategy-form__invalid" role="alert">
           {t("graph.pipeline.removeBlocked").replace(
@@ -568,9 +597,15 @@ export const SentenceCard = ({
   context,
   notes = [],
   owner,
+  head,
+  invalid = false,
   children,
 }: {
   label: string;
+  /** 카드 머리 띠(항목 이름·삭제). 없으면 머리 없이 문장부터 그린다. */
+  head?: ReactNode;
+  /** 카드 안에 오류 진단이 있는가. 머리 띠가 오류 톤이 된다. */
+  invalid?: boolean;
   rows: readonly PipelineRow[];
   template: string | null;
   context: CardContext;
@@ -607,7 +642,10 @@ export const SentenceCard = ({
       aria-label={label}
       className="pipeline__card"
       aria-current={selected ? "true" : undefined}
+      data-headed={head === undefined ? undefined : "true"}
+      data-invalid={invalid ? "true" : undefined}
     >
+      {head === undefined ? null : <div className="pipeline__card-head">{head}</div>}
       {pieces.length === 0 ? null : (
         <p className="pipeline__sentence">
           {pieces.map((piece, index) =>

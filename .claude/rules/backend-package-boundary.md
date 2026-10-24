@@ -28,7 +28,7 @@ bootstrap ─> application + adapters
   concrete adapter를 import하지 않는다.
 - domain·application은 numpy(core 의존성)를 순수 배열 계산에만 쓴다. pyarrow·duckdb는 adapter에만
   둔다. pyarrow는 optional extra `parquet`이라 그 extra 없는 운영 설치에서 import가 깨지고, duckdb는
-  IO다(columnar-tape spec D2). CI `backend-no-extras` job은 dev 그룹으로 pyarrow를 설치하므로 이 경계를
+  IO다(columnar-tape spec D2). CI backend job의 extra 없는 단계(`Assistant contract tests without extras`)는 dev 그룹으로 pyarrow를 설치하므로 이 경계를
   잡지 못하고, 아래 `test_forbidden_imports.py`가 막는다.
 - application → application 화살표는 한 유스케이스가 **다른 유스케이스의 outgoing port를
   소비할 때만** 허용하며, port owner는 그 계약을 먼저 정의한 유스케이스다. 현재 선언된 6개는

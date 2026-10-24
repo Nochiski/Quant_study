@@ -234,8 +234,8 @@ uv run server
 uv run python scripts/export_openapi.py openapi.json
 ```
 
-extra 목록과 ruff 대상은 CI(`.github/workflows/ci.yml` backend job)와 같다. CI의 `backend-no-extras` job은
-extra 없이 어시스턴트 계약 테스트와 architecture 테스트를 따로 돌린다. `database/tests`는 저장소 루트에서
+extra 목록과 ruff 대상은 CI(`.github/workflows/ci.yml` backend job)와 같다. 같은 job의 마지막 단계
+(`Assistant contract tests without extras`)는 extra를 지운 뒤 어시스턴트 계약 테스트와 architecture 테스트를 따로 돌린다. `database/tests`는 저장소 루트에서
 `uv run --project backend pytest database/tests -q`로 돈다.
 
 `uv run server`의 전략 revision 저장소는 기본적으로 `.local/strategy-revisions.sqlite3`이며

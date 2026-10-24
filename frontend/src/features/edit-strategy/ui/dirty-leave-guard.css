@@ -1,7 +1,7 @@
 .leave-guard {
   position: fixed;
   inset: 0;
-  z-index: 25; /* above drawers (15) and tooltips (20), below the skip link (30) */
+  z-index: var(--layer-modal); /* 층 순서는 tokens.css `--layer-*` 주석이 정본이다 */
   display: grid;
   place-items: center;
   background: var(--overlay-scrim);

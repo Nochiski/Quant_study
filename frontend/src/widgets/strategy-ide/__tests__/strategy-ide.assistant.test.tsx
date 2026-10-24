@@ -53,13 +53,11 @@ const matchMedia = (matches: boolean) =>
     })),
   );
 
-/** 제품과 같은 모양의 슬롯: 손잡이를 받아 자기 닫기를 그리는 함수. */
-const sidebarSlot = ({ close }: { close: () => void }) => (
+/** 제품과 같은 모양의 슬롯: 지금 펼쳤는지를 받는 함수. */
+const sidebarSlot = ({ open }: { open: boolean }) => (
   <section>
-    <button type="button" onClick={close}>
-      사이드바 닫기
-    </button>
     <p>AI 사이드바</p>
+    <p>{open ? "보임" : "숨김"}</p>
   </section>
 );
 
@@ -357,9 +355,17 @@ describe("StrategyIde assistant 슬롯", () => {
     matchMedia(true);
     localStorage.clear();
     vi.stubGlobal("innerWidth", 390);
-    mount();
+    const first = mount();
     expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
     expect(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false })).toBeVisible();
+    // 좁은 화면의 기본값(닫힘)은 저장하지 않는다 — 넓은 화면에서 다시 열면 기본값(열림)이다(리뷰 2).
+    expect(
+      JSON.parse(localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY) ?? "{}"),
+    ).not.toHaveProperty("open");
+    first.unmount();
+    vi.stubGlobal("innerWidth", 1440);
+    mount();
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
   });
 
   it("옛 판의 AI 열 폭 기록이 있어도 깨지지 않고 열린다", () => {
@@ -410,28 +416,26 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
   });
 
-  it("좁은 화면에서 계약 서랍을 열어 둔 채 AI 창을 열어도 서랍은 그대로다(창은 자리를 다투지 않는다)", async () => {
+  it("좁은 화면에서는 계약 서랍과 AI 창 중 나중에 연 쪽만 남는다(같은 자리를 덮는다, 리뷰 6)", async () => {
     matchMedia(true);
     const user = userEvent.setup();
     mount();
     await user.click(screen.getByRole("button", { name: "계약" }));
     fireEvent.keyDown(window, { key: "a", altKey: true });
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
+    expect(screen.queryByRole("complementary", { name: "계약" })).toBeNull();
+
+    // 계약을 다시 열면 AI 창은 최소화된다(본문은 마운트된 채라 진행 중 답변은 이어진다).
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     expect(screen.getByRole("complementary", { name: "계약" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).toBeNull();
+    expect(screen.getByText("AI 사이드바")).toBeInTheDocument();
   });
 
-  it("슬롯이 손잡이를 받으면 슬롯의 닫기로도 접고, 창 제목은 위젯이 그린다", async () => {
+  it("창 제목은 위젯이 그리고, 접는 손잡이는 창의 최소화 하나다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
-    mount({
-      assistant: ({ close }) => (
-        <section>
-          <button type="button" onClick={close}>
-            사이드바 닫기
-          </button>
-        </section>
-      ),
-    });
+    mount();
     fireEvent.keyDown(window, { key: "a", altKey: true });
 
     const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
@@ -439,8 +443,8 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(
       within(panel).getByRole("heading", { name: "AI 어시스턴트" }),
     ).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
+    await waitFor(() => expect(panel).toHaveFocus());
+    await user.click(within(panel).getByRole("button", { name: "AI 어시스턴트 접기" }));
     expect(
       screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
     ).not.toBeInTheDocument();

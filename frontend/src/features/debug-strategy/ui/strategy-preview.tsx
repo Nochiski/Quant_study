@@ -70,9 +70,18 @@ export const StrategyPreview = ({
             disabled={factors.length === 0}
             onChange={(event) => setFactorId(event.target.value)}
           >
-            {/* 팩터가 없으면 빈 선택 상자 대신 그 사실을 보인다. */}
+            {/* 팩터가 없으면 빈 선택 상자 대신 까닭을 보인다: 문서를 아직 읽는 중인지, 미리볼 수 없는지, 정말
+                팩터가 없는지. 문맥이 없을 때 "팩터 없음"이라 하면 거짓이 된다(리뷰 7). */}
             {factors.length === 0 ? (
-              <option value="">{t("strategy.preview.factor.none")}</option>
+              <option value="">
+                {t(
+                  context !== null
+                    ? "strategy.preview.factor.none"
+                    : unavailableReason === "preparing"
+                      ? "strategy.preview.factor.loading"
+                      : "strategy.preview.factor.unavailable",
+                )}
+              </option>
             ) : null}
             {factors.map((factor) => (
               <option key={factor.factorId} value={factor.factorId}>

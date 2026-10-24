@@ -520,3 +520,12 @@ describe("strategySummaryParts", () => {
     expect(parts.map((stage) => stage.stage)).toEqual(pipeline.stages.map((stage) => stage.stage));
   });
 });
+
+describe("sentenceItems — 그려지지 않는 칸", () => {
+  it("칸이 그려지지 않는 자리의 괄호 조각은 도움말로 묶지 않고 글자로 남긴다(리뷰 8)", () => {
+    expect(sentenceItems(sentencePieces("{value}(0.2가 20%)"), () => false)).toEqual([
+      { key: "value", slider: false, hint: null },
+      { text: "(0.2가 20%)" },
+    ]);
+  });
+});

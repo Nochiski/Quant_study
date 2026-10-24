@@ -1,6 +1,6 @@
 .run-environment-summary {
   position: relative;
-  z-index: 18;
+  z-index: var(--layer-sticky);
   display: flex;
   flex: none;
   flex-wrap: wrap;

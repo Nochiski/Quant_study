@@ -242,7 +242,11 @@ const PARENTHETICAL = /^\s*\(([^()]+)\)\s*$/u;
  * 칸 바로 뒤에 괄호 하나로만 된 글자 조각("(0.2가 20%)")은 그 칸의 도움말로 묶는다. 화면은 도움말을 입력칸 아래
  * 보조 문구로 두고, 입력칸 설명(`aria-describedby`)으로도 잇는다. 문구는 틀 그대로이고 뜻을 바꾸지 않는다.
  */
-export const sentenceItems = (pieces: readonly SentencePiece[]): SentenceItem[] => {
+export const sentenceItems = (
+  pieces: readonly SentencePiece[],
+  /** 그 자리에 칸이 실제로 그려지는가. 그려지지 않는 자리의 괄호 조각은 도움말로 묶지 않고 글자로 남긴다. */
+  rendered: (key: string) => boolean = () => true,
+): SentenceItem[] => {
   const items: SentenceItem[] = [];
   for (let index = 0; index < pieces.length; index += 1) {
     const piece = pieces[index]!;
@@ -251,7 +255,10 @@ export const sentenceItems = (pieces: readonly SentencePiece[]): SentenceItem[] 
       continue;
     }
     const next = pieces[index + 1];
-    const hint = next !== undefined && "text" in next ? PARENTHETICAL.exec(next.text) : null;
+    const hint =
+      next !== undefined && "text" in next && rendered(piece.key)
+        ? PARENTHETICAL.exec(next.text)
+        : null;
     items.push({ ...piece, hint: hint === null ? null : hint[1]!.trim() });
     if (hint !== null) index += 1;
   }

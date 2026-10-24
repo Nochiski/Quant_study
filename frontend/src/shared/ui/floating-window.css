@@ -1,7 +1,7 @@
 /* 화면 위에 떠 있는 비모달 창(FloatingWindow). 위치·크기는 인라인 연속값이고 나머지는 토큰이다. */
 .floating-window {
   position: fixed;
-  z-index: 30;
+  z-index: var(--layer-floating);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -175,7 +175,7 @@
   position: fixed;
   right: var(--space-5);
   bottom: var(--space-5);
-  z-index: 30;
+  z-index: var(--layer-floating);
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);

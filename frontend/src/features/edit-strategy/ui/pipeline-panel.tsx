@@ -615,8 +615,8 @@ export const SentenceCard = ({
 }) => {
   const cardId = useId();
   const pieces = template === null ? [] : sentencePieces(template);
-  const items = sentenceItems(pieces);
   const byKey = new Map(rows.map((row) => [row.field.key, row]));
+  const items = sentenceItems(pieces, (key) => byKey.has(key));
   const placed = new Set(
     pieces.flatMap((piece) =>
       "key" in piece && byKey.has(piece.key) ? [piece.key] : [],

@@ -79,6 +79,12 @@ type Gesture = {
   last: WindowRect;
 };
 
+const DefaultLauncherIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" />
+  </svg>
+);
+
 export type FloatingWindowProps = {
   /** 창(aside) id. 여는 조작이 초점을 옮길 자리·`aria-controls` 대상으로 쓴다. */
   id?: string;
@@ -94,6 +100,8 @@ export type FloatingWindowProps = {
   launcherId?: string;
   /** 최소화 버튼 접근 이름. */
   minimizeLabel: string;
+  /** 런처 버튼 앞 아이콘(장식). 없으면 기본 반짝임 아이콘이다. */
+  launcherIcon?: ReactNode;
   /** 창 본문. 처음 열 때 마운트하고, 최소화해도 유지한다(진행 중 대화·입력이 남는다). */
   children: ReactNode;
   limits?: WindowLimits;
@@ -118,19 +126,18 @@ export const FloatingWindow = ({
   children,
   limits = DEFAULT_LIMITS,
   defaultSize = DEFAULT_SIZE,
+  launcherIcon = <DefaultLauncherIcon />,
 }: FloatingWindowProps) => {
   const titleId = useId();
   const moveHintId = useId();
   const windowRef = useRef<HTMLElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const gesture = useRef<Gesture | null>(null);
-  const [rect, setRect] = useState<WindowRect>(() => {
-    const viewport = viewportNow();
-    const stored = readRect(storageKey);
-    return stored === null
-      ? initialRect(defaultSize, viewport, limits)
-      : fitRect(stored, viewport, limits);
-  });
+  // 기억한 자리·크기(사용자가 옮기거나 크기를 바꾼 값). 창 크기 변경 보정은 이 값을 덮지 않고 표시용으로만 한다 —
+  // 다시 넓어지면 기억한 자리로 돌아오고, 보정값은 저장하지 않는다.
+  const [rect, setRect] = useState<WindowRect>(
+    () => readRect(storageKey) ?? initialRect(defaultSize, viewportNow(), limits),
+  );
   // 본문은 처음 열 때 마운트하고 그 뒤로는 최소화해도 유지한다.
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
@@ -139,19 +146,15 @@ export const FloatingWindow = ({
   // 좁은 화면에서는 하단 시트다(폭 100%, 높이 상한). 끌어 옮기기·크기 조절은 없고, 넓은 화면의 자리·크기는 그대로
   // 기억해 둔다 — 다시 넓어지면 그 자리로 돌아온다.
   const sheet = isSheetViewport(viewport);
-  const shown = sheet ? sheetRect(viewport, limits) : rect;
+  const shown = sheet ? sheetRect(viewport, limits) : fitRect(rect, viewport, limits);
 
-  // 창(브라우저) 크기가 바뀌면 뷰포트 안으로 보정한다. window 리스너는 layout effect 로 설치한다
-  // (`frontend-react-effects.md`).
+  // 창(브라우저) 크기만 따라간다 — 표시 보정은 렌더에서 `fitRect` 로 한다. window 리스너는 layout effect 로 한 번
+  // 설치한다(`frontend-react-effects.md`). `limits` 를 의존성에 두지 않아 인라인 객체가 리스너를 흔들지 않는다.
   useLayoutEffect(() => {
-    const onResize = () => {
-      const next = viewportNow();
-      setViewport(next);
-      setRect((current) => fitRect(current, next, limits));
-    };
+    const onResize = () => setViewport(viewportNow());
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [limits]);
+  }, []);
 
   const commit = (next: WindowRect) => {
     setRect(next);
@@ -169,9 +172,9 @@ export const FloatingWindow = ({
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      start: rect,
+      start: shown,
       edges,
-      last: rect,
+      last: shown,
     };
   };
 
@@ -209,7 +212,7 @@ export const FloatingWindow = ({
       return;
     event.preventDefault();
     commit(
-      nudgeRect(rect, event.key, event.shiftKey ? NUDGE_STEP * 4 : NUDGE_STEP, viewportNow(), limits),
+      nudgeRect(shown, event.key, event.shiftKey ? NUDGE_STEP * 4 : NUDGE_STEP, viewportNow(), limits),
     );
   };
 
@@ -270,7 +273,7 @@ export const FloatingWindow = ({
                     onChange={(event) => {
                       const next = event.target.value as WindowSizePreset | "";
                       setPreset(next);
-                      if (next !== "") commit(presetRect(rect, next, viewportNow(), limits));
+                      if (next !== "") commit(presetRect(shown, next, viewportNow(), limits));
                     }}
                   >
                     <option value="" disabled>
@@ -320,9 +323,7 @@ export const FloatingWindow = ({
           aria-controls={mounted ? id : undefined}
           onClick={restore}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" />
-          </svg>
+          {launcherIcon}
           {launcherLabel}
         </button>
       )}

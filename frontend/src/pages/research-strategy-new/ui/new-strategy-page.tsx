@@ -312,6 +312,7 @@ export const NewStrategyPage = () => {
         : readGuideAssistantOpen(),
   );
   // 좁은 화면(창이 하단 시트가 되는 폭)에서는 기록이 없으면 최소화한 채 시작한다 — 시트가 단계 카드를 거의 다 덮는다.
+  // 판정은 이 결정 순간 한 번이다. 시작 상태일 뿐이라 창 폭이 바뀌어도 열린 창을 저절로 닫거나 열지 않는다.
   if (guideAssistantOpen === null && (providers.data !== undefined || providers.isError))
     setGuideAssistantOpen(
       providers.data !== undefined &&
@@ -324,6 +325,17 @@ export const NewStrategyPage = () => {
     setGuideAssistantOpen(open);
     writeGuideAssistantOpen(open);
   };
+  // 옛 주소 값 `assist` 는 처음 한 번만 반영하고 주소에서 지운다 — 남겨 두면 새로고침·뒤로 가기마다 사용자가 마지막에
+  // 고른 열림 기록을 덮는다(리뷰 9). 처음 값은 위 `useState` 초기화가 이미 읽었다.
+  useEffect(() => {
+    if (search.assist === undefined) return;
+    void navigate({
+      to: ROUTE,
+      search: (prev) => ({ ...prev, assist: undefined }),
+      replace: true,
+      resetScroll: false,
+    });
+  }, [navigate, search.assist]);
 
   // AI 대화·입력칸 상태는 화면이 한 벌 든다. 안내의 AI 탭과 편집기 AI 열이 같은 상태를 그려서, 안내를 닫고
   // 편집기로 가도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4). 서버 조회는 사이드바가 보이는 동안만 돈다 —

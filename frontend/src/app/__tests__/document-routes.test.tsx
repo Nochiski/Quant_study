@@ -5229,6 +5229,24 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     }
   });
 
+  it("옛 주소 값 assist 는 처음 한 번만 반영하고 주소에서 지워, 이후에는 사용자가 고른 열림 기록이 이긴다(리뷰 9)", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    const { history } = mountWithClient(
+      "/research/strategies/new?guide=true&assist=preview",
+      undefined,
+      false,
+    );
+    await waitFor(() => expect(launcher()).not.toBeNull());
+    await waitFor(() => expect(history.location.search).not.toContain("assist="));
+    await user.click(launcher()!);
+    const reload = `${history.location.pathname}${history.location.search}`;
+    cleanup();
+    useGuideCatalog();
+    mountWithClient(reload, undefined, false);
+    expect(await findAiWindow()).toBeVisible();
+  });
+
   it("사용자가 마지막으로 최소화했으면 다음 안내도 최소화한 채 연다", async () => {
     useGuideCatalog();
     const user = userEvent.setup();

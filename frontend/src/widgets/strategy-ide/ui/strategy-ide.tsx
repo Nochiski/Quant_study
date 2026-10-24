@@ -124,11 +124,9 @@ export type StrategyIdeProps = {
   /** 실제 중간 결과 슬롯. */
   debugger: ReactNode;
   /**
-   * 우측 AI 어시스턴트 사이드바 슬롯(B-04). 넘기지 않으면 패널도 토글도 만들지 않는다 — 어시스턴트를
-   * 붙이지 않은 화면의 배치는 그대로다. 내용은 페이지가 주입한다(widget은 채팅을 알지 않는다).
-   *
-   * 함수를 넘기면 패널을 접는 손잡이를 받는다. 사이드바의 "닫기"가 진행 중 턴 취소를 확인한 뒤 패널을
-   * 접는 경로다(spec D7). 패널 헤더의 접기 버튼은 대화를 끝내지 않는 패널 조작이라 확인을 거치지 않는다.
+   * AI 어시스턴트 창 슬롯(B-04). 넘기지 않으면 창도 런처도 만들지 않는다 — 어시스턴트를 붙이지 않은 화면의
+   * 배치는 그대로다. 내용은 페이지가 주입한다(widget은 채팅을 알지 않는다). 창을 접는 손잡이는 창의 최소화
+   * 하나이고 대화를 끝내지 않는다(spec D7). 함수를 넘기면 지금 펼쳤는지(`open`)를 받는다.
    */
   assistant?: ReactNode | ((controls: AssistantSlotControls) => ReactNode);
 };
@@ -137,7 +135,7 @@ export type StrategyIdeProps = {
  * 슬롯 함수가 받는 패널 손잡이. `open`은 지금 펼쳐졌는지다 — 한 번 펼친 뒤에는 접어도 내용이 마운트된 채
  * 남으므로, 접힌 동안 조회를 멈출 내용은 이것을 읽는다. 펼침의 정본은 이 widget 이다.
  */
-export type AssistantSlotControls = { close: () => void; open: boolean };
+export type AssistantSlotControls = { open: boolean };
 
 const NARROW_QUERY = "(max-width: 1279px)";
 
@@ -234,7 +232,9 @@ export const StrategyIde = ({
   const narrow = useMediaQuery(NARROW_QUERY);
   const compact = useMediaQuery("(max-width: 767px)");
   // 좁은 화면(창이 하단 시트가 되는 폭)에서는 열림 기록이 없으면 AI 창을 최소화한 채 시작한다 — 시트가 편집기를
-  // 거의 다 덮는다. 기록이 있으면 기록이 이긴다(`usePanelLayout` 이 저장값을 기본값 위에 덮는다).
+  // 거의 다 덮는다. 기록이 있으면 기록이 이긴다(`usePanelLayout` 이 저장값을 기본값 위에 덮는다). 이 기본값은
+  // 저장하지 않는다(사용자가 고른 열림만 저장). 판정은 첫 마운트 때 한 번만 한다 — 기본값은 시작 상태일 뿐이라
+  // 창 폭이 바뀌어도 열린 창을 저절로 닫거나 열지 않는다.
   const { layout, resize, toggle, close } = usePanelLayout({
     ...DEFAULT_LAYOUT,
     assistantOpen:
@@ -273,14 +273,18 @@ export const StrategyIde = ({
       const opening = !layout[panel];
       if (opening && panel === "outlineOpen") close(["debuggerOpen"]);
       if (opening && panel === "debuggerOpen") close(["outlineOpen", "inspectorOpen"]);
-      // 작은 화면의 보조 서랍은 하나만 펼쳐 가려진 내용이 탭 순서에 남지 않게 한다. AI 창은 떠 있는 창이라
-      // 서랍과 자리를 다투지 않는다.
+      // 작은 화면의 보조 서랍은 하나만 펼쳐 가려진 내용이 탭 순서에 남지 않게 한다.
       if (opening && compact && panel !== "assistantOpen") {
         close((["outlineOpen", "inspectorOpen"] as const).filter((key) => key !== panel));
       }
+      // 계약이 서랍으로 뜨는 화면(좁은 화면·추적 작업공간)에서는 계약 서랍과 AI 창이 같은 자리를 덮는다. 나중에 연
+      // 쪽만 남긴다 — AI 창을 접는 것은 최소화라 진행 중 답변은 끝까지 받는다(리뷰 6 결정).
+      const inspectorDrawer = narrow || layout.debuggerOpen;
+      if (opening && inspectorDrawer && panel === "inspectorOpen") close(["assistantOpen"]);
+      if (opening && inspectorDrawer && panel === "assistantOpen") close(["inspectorOpen"]);
       toggle(panel);
     },
-    [close, compact, layout, toggle],
+    [close, compact, layout, narrow, toggle],
   );
   const openTraceWorkspace = useCallback(() => {
     if (!layout.debuggerOpen) togglePanel("debuggerOpen");
@@ -288,12 +292,14 @@ export const StrategyIde = ({
   const inspect = useCallback((focusInspector = true) => {
     if (!layout.inspectorOpen) toggle("inspectorOpen");
     if (compact) close(["outlineOpen"]);
+    // 계약이 서랍으로 뜨면 AI 창과 같은 자리라 창을 접는다(진행 중 답변은 이어진다).
+    if (narrow || layout.debuggerOpen) close(["assistantOpen"]);
     queueMicrotask(() => {
       const body = document.getElementById(`${inspectorId}-body`);
       if (body !== null) body.scrollTop = 0;
       if (compact && focusInspector) document.getElementById(`${inspectorId}-collapse`)?.focus({ preventScroll: true });
     });
-  }, [close, compact, layout.inspectorOpen, toggle, inspectorId]);
+  }, [close, compact, layout.debuggerOpen, layout.inspectorOpen, narrow, toggle, inspectorId]);
 
   // 슬롯 함수는 렌더 중에 불리므로 이 손잡이는 ref를 닫지 않는다(`react-hooks/refs`). 접은 뒤 돌아갈
   // 자리는 창의 최소화 런처이고, 그 자리는 id로 찾는다.
@@ -312,10 +318,6 @@ export const StrategyIde = ({
     (): HTMLElement | null => document.getElementById(assistantToggleId),
     [assistantToggleId],
   );
-  const closeAssistant = useCallback((): void => {
-    close(["assistantOpen"]);
-    queueMicrotask(() => document.getElementById(assistantToggleId)?.focus());
-  }, [assistantToggleId, close]);
   const theme = useThemePreference();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const commands = useMemo<CommandPaletteItem[]>(() => {
@@ -641,8 +643,8 @@ export const StrategyIde = ({
    * 멈춘다. 창은 처음 열 때 본문을 마운트하고 최소화해도 유지한다 — 진행 중 턴의 스트림이 끊기지 않는다. 위치·크기는
    * 새 전략 안내의 AI 창과 같은 보관함 키로 기억한다.
    *
-   * 닫기는 두 곳이다: 창의 최소화 버튼은 대화를 끝내지 않는 패널 조작이고, 슬롯이 손잡이를 받는 함수면 그쪽의
-   * 닫기가 진행 중 작업을 확인한 뒤 접는다(spec D7).
+   * 창을 접는 손잡이는 최소화 하나이고 대화를 끝내지 않는 패널 조작이다. 답을 멈추는 일은 대화창 안의 "중지"가
+   * 한다(spec D7).
    */
   const assistantNode = hasAssistant ? (
     <FloatingWindow
@@ -658,7 +660,7 @@ export const StrategyIde = ({
       minimizeLabel={t("ide.collapseAssistant")}
     >
       {typeof assistant === "function"
-        ? assistant({ close: closeAssistant, open: layout.assistantOpen })
+        ? assistant({ open: layout.assistantOpen })
         : assistant}
     </FloatingWindow>
   ) : null;

@@ -234,6 +234,8 @@ const ko = {
     "지금 문서로 어떤 종목이 뽑히는지 미리 봅니다. 문서를 바꾼 뒤에는 \"미리보기 새로고침\"을 눌러 다시 조회하세요.",
   "strategy.preview.date.hint": "비워 두면 마지막 리밸런싱일로 봅니다.",
   "strategy.preview.factor.none": "담은 팩터가 없어요",
+  "strategy.preview.factor.loading": "팩터를 확인하는 중",
+  "strategy.preview.factor.unavailable": "지금은 고를 수 없어요",
   "strategy.preview.loading": "미리보기를 불러오는 중입니다.",
   "strategy.preview.discarded":
     "문서 또는 실행 설정과 맞지 않는 응답입니다. 다시 조회하세요.",
@@ -967,7 +969,6 @@ const ko = {
     "확인하는 동안 문서가 또 바뀌어 적용을 멈췄습니다. 다시 적용하세요.",
   "ide.assistant": "AI 어시스턴트",
   "ide.collapseAssistant": "AI 어시스턴트 접기",
-  "ide.resizeAssistant": "AI 어시스턴트 크기 조절",
   "ide.resizeOutline": "전략 구조 크기 조절",
   "ide.resizeInspector": "계약 크기 조절",
   "ide.resizeDebugger": "중간 결과 크기 조절",
@@ -3262,6 +3263,8 @@ export const messages = {
       "See which stocks the current document picks. After changing the document, press \"Refresh preview\" to look again.",
     "strategy.preview.date.hint": "Leave blank to use the last rebalance date.",
     "strategy.preview.factor.none": "No factors added yet",
+    "strategy.preview.factor.loading": "Checking factors",
+    "strategy.preview.factor.unavailable": "Not available right now",
     "strategy.preview.loading": "Loading preview.",
     "strategy.preview.discarded":
       "The response does not match the document or run settings. Refresh again.",
@@ -3987,7 +3990,6 @@ export const messages = {
       "The document changed again while you were confirming, so applying stopped. Apply again.",
     "ide.assistant": "AI assistant",
     "ide.collapseAssistant": "Collapse AI assistant",
-    "ide.resizeAssistant": "Resize AI assistant",
     "ide.resizeOutline": "Resize outline",
     "ide.resizeInspector": "Resize contract panel",
     "ide.resizeDebugger": "Resize intermediate results",

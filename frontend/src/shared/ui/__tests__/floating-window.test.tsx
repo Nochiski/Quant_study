@@ -113,4 +113,22 @@ describe("FloatingWindow", () => {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: innerWidth });
     }
   });
+
+  it("창 크기 보정은 표시만 바꾸고 기억한 자리를 덮지 않는다 — 다시 넓어지면 돌아오고 보정값은 저장하지 않는다", () => {
+    localStorage.setItem(KEY, JSON.stringify({ x: 600, y: 100, width: 400, height: 500 }));
+    const innerWidth = window.innerWidth;
+    try {
+      render(<Harness initiallyOpen />);
+      expect(windowBox().style.left).toBe("600px");
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 900 });
+      fireEvent(window, new Event("resize"));
+      expect(windowBox().style.left).toBe(`${900 - 8 - 400}px`);
+      expect(JSON.parse(localStorage.getItem(KEY)!)).toMatchObject({ x: 600 });
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 1200 });
+      fireEvent(window, new Event("resize"));
+      expect(windowBox().style.left).toBe("600px");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: innerWidth });
+    }
+  });
 });

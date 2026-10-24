@@ -124,6 +124,21 @@
   --shadow-card: 0 1px 3px rgb(23 32 51 / 8%);
   --shadow-popover: 0 8px 24px rgb(16 24 40 / 16%);
 
+  /*
+   * 화면 전체에서 겹치는 층(z-index). 값은 여기 한 곳에서만 정한다. 아래에서 위로: 편집기 서랍 → 고정 띠 →
+   * 떠 있는 AI 창·런처 → 툴팁·팝오버·완료 알림 → 펼친 메뉴 → 이탈 확인(모달) → 본문 건너뛰기 링크 → 대화상자.
+   * 떠 있는 창은 서랍·띠 위에 뜨되, 사용자가 연 팝오버·알림과 모달 뒤에 있다 — 모달 배경이 창을 덮어 모달이 열린
+   * 동안 창을 조작할 수 없다. 컴포넌트 안쪽 쌓임(1~5)은 이 층과 무관하게 그 요소 안에서만 쓴다.
+   */
+  --layer-drawer: 15;
+  --layer-sticky: 18;
+  --layer-floating: 19;
+  --layer-popover: 20;
+  --layer-menu: 21;
+  --layer-modal: 25;
+  --layer-skip-link: 30;
+  --layer-dialog: 40;
+
   /* spacing scale */
   --space-1: 4px;
   --space-2: 8px;

@@ -287,7 +287,7 @@ textarea.ui-input {
   position: absolute;
   bottom: calc(100% + 6px);
   left: 50%;
-  z-index: 20;
+  z-index: var(--layer-popover);
   max-width: 280px;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-small);
@@ -304,7 +304,7 @@ textarea.ui-input {
 .ui-command-palette__backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: var(--layer-dialog);
   display: grid;
   place-items: start center;
   padding: min(14vh, 120px) var(--space-4) var(--space-4);

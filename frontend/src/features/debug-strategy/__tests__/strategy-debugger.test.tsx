@@ -1647,9 +1647,10 @@ describe("선정 미리보기 조작 안내(확인 단계 UI)", () => {
     expect(refresh).toHaveAccessibleDescription(
       "미리보기와 추적에는 실행 설정(기간·유니버스)이 필요해요. 실행 설정을 먼저 채우세요.",
     );
+    // 문맥이 없으면 "팩터 없음"이 아니라 지금 고를 수 없다고 말한다(리뷰 7).
     const factor = screen.getByRole("combobox", { name: "팩터" });
     expect(factor).toBeDisabled();
-    expect(factor).toHaveDisplayValue("담은 팩터가 없어요");
+    expect(factor).toHaveDisplayValue("지금은 고를 수 없어요");
   });
 
   it("기준일 칸은 비워 두면 마지막 리밸런싱일로 본다는 안내를 설명으로 읽는다", () => {
@@ -1658,5 +1659,10 @@ describe("선정 미리보기 조작 안내(확인 단계 UI)", () => {
       "비워 두면 마지막 리밸런싱일로 봅니다.",
     );
     expect(screen.getByRole("button", { name: "미리보기 새로고침" })).toBeEnabled();
+  });
+
+  it("문맥이 있고 팩터가 비었을 때만 \"담은 팩터가 없어요\"라고 말한다(리뷰 7)", () => {
+    renderDebugger(<StrategyPreview context={{ ...context(), factors: [] }} unavailableReason={null} />);
+    expect(screen.getByRole("combobox", { name: "팩터" })).toHaveDisplayValue("담은 팩터가 없어요");
   });
 });

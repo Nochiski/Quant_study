@@ -167,18 +167,20 @@ describe("StrategyIde", () => {
     expect(screen.getByRole("textbox", { name: "추적 종목" })).toHaveValue("SEC001,SEC002");
   });
 
-  it("추적 중 AI 창과 계약을 함께 열어도 추적과 범위 입력을 유지한다", async () => {
+  it("추적 중 계약 서랍을 열면 AI 창은 접히고, 추적과 범위 입력은 유지된다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     mount({ assistant: <p>AI 대화</p>, debugger: <input aria-label="추적 범위" defaultValue="SEC001" /> });
-    // AI 창은 처음부터 떠 있고, 추적 작업공간으로 가도 닫히지 않는다(본문 자리를 다투지 않는다).
+    // AI 창은 처음부터 떠 있고, 추적 작업공간으로 가도 닫히지 않는다.
     await user.click(screen.getByRole("button", { name: "중간 결과" }));
     expect(screen.getByRole("region", { name: "중간 결과" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
+    // 추적 중 계약은 서랍으로 떠 AI 창과 같은 자리를 덮으므로 창을 접는다(리뷰 6).
     await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     expect(screen.getByRole("region", { name: "중간 결과" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "추적 범위" })).toHaveValue("SEC001");
-    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).not.toBeInTheDocument();
+    expect(screen.getByText("AI 대화")).toBeInTheDocument();
   });
 
   it("추적 중 표현 열기 단축키는 원문을 보존하며 편집으로 복귀한다", async () => {
@@ -270,13 +272,12 @@ describe("StrategyIde", () => {
     await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "계약 접기" })).toHaveFocus();
-    // AI 는 떠 있는 창이라 서랍 전환에 끼지 않는다 — Alt+A 는 창만 여닫고 계약 서랍은 그대로다.
-    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
-    await user.keyboard("{Alt>}a{/Alt}");
+    // 계약 서랍과 AI 창은 같은 자리를 덮으므로 나중에 연 쪽만 남는다(리뷰 6).
     expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).not.toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: "계약" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    await user.keyboard("{Alt>}a{/Alt}");
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
     expect(screen.queryByRole("complementary", { name: "계약" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
     expect(screen.getByRole("button", { name: "전략 구조 접기" })).toHaveFocus();
   });
 
@@ -750,10 +751,9 @@ describe("StrategyIde", () => {
         outlineWidth: 256,
         inspectorWidth: 320,
         debuggerHeight: 220,
-        assistantWidth: 360,
       },
-      // 기록이 없던 첫 화면은 AI 열을 연 채로 뜨고 그 상태를 저장한다(RD-04-A).
-      open: { assistant: true },
+      // 기록이 없던 첫 화면은 AI 창을 연 채로 뜨지만, 사용자가 고르지 않은 열림은 저장하지 않는다 — 좁은 화면의
+      // 기본값(닫힘)이 넓은 화면으로 따라오지 않는다(리뷰 2).
     });
   });
 

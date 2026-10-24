@@ -28,6 +28,11 @@ from strategy_workbench.domain.backtest.facade.account_report import (
     AccountReportStatus,
     AccountReportSummary,
 )
+from strategy_workbench.domain.backtest.facade.holdings import (
+    HoldingsOverview,
+    SecurityTradesReport,
+    SessionHoldingsReport,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestCancelResult,
     BacktestRunResult,
@@ -50,6 +55,9 @@ __all__ = [
     "AccountReportProvenance",
     "AccountReportStatus",
     "AccountReportSummary",
+    "HoldingsOverview",
+    "SecurityTradesReport",
+    "SessionHoldingsReport",
     "RunLaneControls",
     "DEFAULT_RUN_SLOTS",
     "BacktestParameterValueError",

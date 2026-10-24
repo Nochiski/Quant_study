@@ -2192,6 +2192,39 @@
         "title": "ChoiceParameter",
         "type": "object"
       },
+      "ClosedHolding": {
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/HoldingChange"
+          },
+          "previous_quantity": {
+            "title": "Previous Quantity",
+            "type": "string"
+          },
+          "realized_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Pnl"
+          },
+          "security": {
+            "$ref": "#/components/schemas/SecurityLabel"
+          }
+        },
+        "required": [
+          "security",
+          "change",
+          "previous_quantity",
+          "realized_pnl"
+        ],
+        "title": "ClosedHolding",
+        "type": "object"
+      },
       "ComparisonNode": {
         "properties": {
           "kind": {
@@ -6292,6 +6325,172 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HoldingChange": {
+        "description": "한 세션에서 한 종목의 보유가 어떻게 바뀌었나.",
+        "enum": [
+          "opened",
+          "added",
+          "reduced",
+          "held",
+          "sold",
+          "removed"
+        ],
+        "title": "HoldingChange",
+        "type": "string"
+      },
+      "HoldingPeriod": {
+        "description": "계좌 기록 세션에서 끊김 없이 들고 있던 구간(양끝 포함).",
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "open": {
+            "title": "Open",
+            "type": "boolean"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "open"
+        ],
+        "title": "HoldingPeriod",
+        "type": "object"
+      },
+      "HoldingRow": {
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/HoldingChange"
+          },
+          "filled_quantity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filled Quantity"
+          },
+          "market_value": {
+            "title": "Market Value",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security": {
+            "$ref": "#/components/schemas/SecurityLabel"
+          },
+          "unrealized_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unrealized Return"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          }
+        },
+        "required": [
+          "security",
+          "quantity",
+          "market_value",
+          "weight",
+          "unrealized_return",
+          "change",
+          "filled_quantity"
+        ],
+        "title": "HoldingRow",
+        "type": "object"
+      },
+      "HoldingsOverview": {
+        "properties": {
+          "fill_count": {
+            "title": "Fill Count",
+            "type": "integer"
+          },
+          "final_holding_count": {
+            "title": "Final Holding Count",
+            "type": "integer"
+          },
+          "first_session": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Session"
+          },
+          "last_session": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Session"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "securities": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityTradeSummary"
+            },
+            "title": "Securities",
+            "type": "array"
+          },
+          "trade_sessions": {
+            "items": {
+              "$ref": "#/components/schemas/TradeSessionSummary"
+            },
+            "title": "Trade Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "first_session",
+          "last_session",
+          "fill_count",
+          "final_holding_count",
+          "trade_sessions",
+          "securities"
+        ],
+        "title": "HoldingsOverview",
+        "type": "object"
+      },
       "ImpactModel": {
         "description": "체결가에 얹는 시장충격 모델(spec D7).\n\n`fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×\n√(Q / ADV)(`_impact.py`, Q = 참여 한도 적용 후·여력 제한 전 주문 수량)를 뜻한다.\n`sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.",
         "enum": [
@@ -10192,6 +10391,93 @@
         "title": "SearchSpec",
         "type": "object"
       },
+      "SecurityFillRow": {
+        "properties": {
+          "fee": {
+            "title": "Fee",
+            "type": "number"
+          },
+          "fill_id": {
+            "title": "Fill Id",
+            "type": "string"
+          },
+          "notional": {
+            "title": "Notional",
+            "type": "number"
+          },
+          "price": {
+            "title": "Price",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "sell_tax": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sell Tax"
+          },
+          "side": {
+            "title": "Side",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fill_id",
+          "side",
+          "quantity",
+          "price",
+          "notional",
+          "fee",
+          "sell_tax"
+        ],
+        "title": "SecurityFillRow",
+        "type": "object"
+      },
+      "SecurityLabel": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          }
+        },
+        "required": [
+          "security_id",
+          "ticker",
+          "name"
+        ],
+        "title": "SecurityLabel",
+        "type": "object"
+      },
       "SecurityRef": {
         "properties": {
           "name": {
@@ -10219,6 +10505,159 @@
         ],
         "title": "SecurityRef",
         "type": "object"
+      },
+      "SecurityTradeSession": {
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/HoldingChange"
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityFillRow"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "quantity_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity After"
+          },
+          "realized_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Pnl"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "change",
+          "quantity_after",
+          "fills",
+          "realized_pnl"
+        ],
+        "title": "SecurityTradeSession",
+        "type": "object"
+      },
+      "SecurityTradeSummary": {
+        "properties": {
+          "fill_count": {
+            "title": "Fill Count",
+            "type": "integer"
+          },
+          "final_quantity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Quantity"
+          },
+          "final_unrealized_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Unrealized Return"
+          },
+          "holding_periods": {
+            "items": {
+              "$ref": "#/components/schemas/HoldingPeriod"
+            },
+            "title": "Holding Periods",
+            "type": "array"
+          },
+          "realized_pnl": {
+            "title": "Realized Pnl",
+            "type": "number"
+          },
+          "security": {
+            "$ref": "#/components/schemas/SecurityLabel"
+          }
+        },
+        "required": [
+          "security",
+          "holding_periods",
+          "fill_count",
+          "realized_pnl",
+          "final_quantity",
+          "final_unrealized_return"
+        ],
+        "title": "SecurityTradeSummary",
+        "type": "object"
+      },
+      "SecurityTradesReport": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "security": {
+            "$ref": "#/components/schemas/SecurityLabel"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityTradeSession"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SecurityTradesStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "security",
+          "status",
+          "sessions",
+          "detail"
+        ],
+        "title": "SecurityTradesReport",
+        "type": "object"
+      },
+      "SecurityTradesStatus": {
+        "enum": [
+          "available",
+          "security_not_traded"
+        ],
+        "title": "SecurityTradesStatus",
+        "type": "string"
       },
       "SelectionMethod": {
         "enum": [
@@ -10312,6 +10751,154 @@
           "usage"
         ],
         "title": "SessionHistoryView",
+        "type": "object"
+      },
+      "SessionHoldings": {
+        "properties": {
+          "cash": {
+            "title": "Cash",
+            "type": "number"
+          },
+          "cash_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash Weight"
+          },
+          "closed": {
+            "items": {
+              "$ref": "#/components/schemas/ClosedHolding"
+            },
+            "title": "Closed",
+            "type": "array"
+          },
+          "equity": {
+            "title": "Equity",
+            "type": "number"
+          },
+          "holdings": {
+            "items": {
+              "$ref": "#/components/schemas/HoldingRow"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/SessionTradeTotals"
+          }
+        },
+        "required": [
+          "session",
+          "equity",
+          "cash",
+          "cash_weight",
+          "holdings",
+          "closed",
+          "totals"
+        ],
+        "title": "SessionHoldings",
+        "type": "object"
+      },
+      "SessionHoldingsReport": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "holdings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionHoldings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionHoldingsStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "session",
+          "status",
+          "holdings",
+          "detail"
+        ],
+        "title": "SessionHoldingsReport",
+        "type": "object"
+      },
+      "SessionHoldingsStatus": {
+        "enum": [
+          "available",
+          "session_not_recorded"
+        ],
+        "title": "SessionHoldingsStatus",
+        "type": "string"
+      },
+      "SessionTradeTotals": {
+        "properties": {
+          "buy_count": {
+            "title": "Buy Count",
+            "type": "integer"
+          },
+          "buy_notional": {
+            "title": "Buy Notional",
+            "type": "number"
+          },
+          "fees": {
+            "title": "Fees",
+            "type": "number"
+          },
+          "sell_count": {
+            "title": "Sell Count",
+            "type": "integer"
+          },
+          "sell_notional": {
+            "title": "Sell Notional",
+            "type": "number"
+          },
+          "taxes": {
+            "title": "Taxes",
+            "type": "number"
+          }
+        },
+        "required": [
+          "buy_count",
+          "buy_notional",
+          "sell_count",
+          "sell_notional",
+          "fees",
+          "taxes"
+        ],
+        "title": "SessionTradeTotals",
         "type": "object"
       },
       "SessionUsageView": {
@@ -12687,6 +13274,40 @@
         ],
         "title": "TraceValueStatus",
         "type": "string"
+      },
+      "TradeSessionSummary": {
+        "properties": {
+          "closed_count": {
+            "title": "Closed Count",
+            "type": "integer"
+          },
+          "fill_count": {
+            "title": "Fill Count",
+            "type": "integer"
+          },
+          "holding_count": {
+            "title": "Holding Count",
+            "type": "integer"
+          },
+          "opened_count": {
+            "title": "Opened Count",
+            "type": "integer"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "holding_count",
+          "opened_count",
+          "closed_count",
+          "fill_count"
+        ],
+        "title": "TradeSessionSummary",
+        "type": "object"
       },
       "TrialAttempt": {
         "description": "trial 의 실행 시도 하나. 배정되면 `run_id`, 접수가 거절되면 거절 코드와 문장이 있다.",
@@ -15216,6 +15837,232 @@
           }
         },
         "summary": "Get Backtest Factor Regression"
+      }
+    },
+    "/api/v1/backtests/{run_id}/holdings": {
+      "get": {
+        "operationId": "getBacktestHoldings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldingsOverview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Holdings"
+      }
+    },
+    "/api/v1/backtests/{run_id}/holdings/securities/{security_id}": {
+      "get": {
+        "operationId": "getBacktestSecurityTrades",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "security_id",
+            "required": true,
+            "schema": {
+              "title": "Security Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityTradesReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Security Trades"
+      }
+    },
+    "/api/v1/backtests/{run_id}/holdings/sessions/{session}": {
+      "get": {
+        "operationId": "getBacktestSessionHoldings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Session",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionHoldingsReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Session Holdings"
       }
     },
     "/api/v1/backtests/{run_id}/request": {

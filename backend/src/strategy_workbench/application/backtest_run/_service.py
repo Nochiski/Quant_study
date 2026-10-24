@@ -4,7 +4,7 @@ import logging
 from collections import OrderedDict, deque
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, fields, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from threading import Event, Lock, RLock, Thread
 from typing import TypeVar
 
@@ -16,6 +16,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioSnapshotMismatchError,
     RawObservationUnavailableError,
 )
+from strategy_workbench.application.portfolio_design.facade.ports import SecurityDirectoryPort
 from strategy_workbench.application.strategy_design.facade.ports import (
     Page,
     PageRequest,
@@ -40,6 +41,16 @@ from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
     environment_hash,
     require_environment,
+)
+from strategy_workbench.domain.backtest.facade.holdings import (
+    HoldingsOverview,
+    SecurityName,
+    SecurityTradesReport,
+    SessionHoldingsReport,
+    project_holdings_overview,
+    project_security_trades,
+    project_session_holdings,
+    result_security_ids,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     AdmissionRejectionCode,
@@ -305,6 +316,7 @@ class BacktestRunService:
         memory_reserve_gb: float | None = None,
         factor_registry: FactorRegistry | None = None,
         background: Callable[[Callable[[], None]], None] | None = None,
+        security_directory: SecurityDirectoryPort | None = None,
     ) -> None:
         """`run_execution` 은 run 계산을 돌릴 전송을 만든다(spec D10).
 
@@ -337,6 +349,8 @@ class BacktestRunService:
         # 팩터 회귀가 모멘텀·가치 기본 graph 를 읽는다(V4-05). 레지스트리는 순수 값이라 주입이
         # 없으면 기본 레지스트리를 만든다.
         self._factor_registry = factor_registry or build_default_factor_registry()
+        # 보유·매매 화면의 종목 이름. 없으면(테스트 조립) 이름 칸이 비고 id 만 보인다.
+        self._security_directory = security_directory
         self._records: dict[str, _RunRecord] = {}
         # 끝난 run 은 최근 것만 메모리에 둔다(끝난 순). 상태·요청·결과의 정본은 저장소·산출물이다.
         self._finished: deque[str] = deque()
@@ -675,6 +689,32 @@ class BacktestRunService:
     def account_report(self, run_id: str) -> AccountReport:
         """검증해 읽은 완료 결과를 초기자본 기준 계좌 평가손익으로 투영한다."""
         return project_account_report(self.result(run_id))
+
+    def holdings_overview(self, run_id: str) -> HoldingsOverview:
+        """검증해 읽은 완료 결과의 매매한 세션과 종목별 보유 구간(계좌 보고서와 같은 읽기 경로)."""
+        result = self.result(run_id)
+        return project_holdings_overview(result, self._security_names(result_security_ids(result)))
+
+    def session_holdings(self, run_id: str, session: date) -> SessionHoldingsReport:
+        """한 세션 끝 보유와 그 세션 매매. 계좌 기록이 없는 날은 보고서의 사유로 답한다."""
+        result = self.result(run_id)
+        return project_session_holdings(
+            result, session, self._security_names(result_security_ids(result))
+        )
+
+    def security_trades(self, run_id: str, security_id: str) -> SecurityTradesReport:
+        """한 종목의 매매한 세션별 체결."""
+        return project_security_trades(
+            self.result(run_id), security_id, self._security_names((security_id,))
+        )
+
+    def _security_names(self, security_ids: Collection[str]) -> dict[str, SecurityName]:
+        if self._security_directory is None or not security_ids:
+            return {}
+        return {
+            item.security_id: SecurityName(ticker=item.ticker, name=item.name)
+            for item in self._security_directory.describe_securities(security_ids)
+        }
 
     def validation_report(self, run_id: str) -> RunValidationReport:
         """검증된 완료 결과와 현재 계열 원장의 통계를 읽는다. 실행·선택 기록은 쓰지 않는다."""

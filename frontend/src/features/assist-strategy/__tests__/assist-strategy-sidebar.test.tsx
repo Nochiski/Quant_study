@@ -576,6 +576,27 @@ describe("AssistStrategySidebar", () => {
     expect(container.querySelector("b")).toBeNull();
   });
 
+  it("모델 답변의 마크다운 링크는 http만 링크가 되고 도착지 호스트를 함께 보인다", async () => {
+    // 서식 자체(굵게·목록·코드)는 e2e US-DM-02가 본다. 여기서는 렌더 안전 분기만 본다.
+    const user = userEvent.setup();
+    mount();
+    const connection = await ask(user);
+    connection.push(
+      textDelta(
+        0,
+        "[보고서](https://example.com/report) 와 [수상한 자료](javascript:alert(1))",
+      ),
+    );
+
+    const link = await screen.findByRole("link", { name: "보고서" });
+    expect(link).toHaveAttribute("href", "https://example.com/report");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByText("도착지 example.com")).toBeInTheDocument();
+    expect(screen.getByText("수상한 자료")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "수상한 자료" })).toBeNull();
+  });
+
   it("제안 카드의 버튼은 제안과 턴 시작 시점 원문을 콜백에 넘긴다", async () => {
     const user = userEvent.setup();
     const onPreviewProposal = vi.fn();
@@ -934,7 +955,8 @@ describe("AssistStrategySidebar", () => {
     connection.push(textDelta(0, "본문"));
 
     const body = await screen.findByText("본문");
-    expect(body).toHaveAttribute("aria-live", "off");
+    // 본문 문단을 감싼 가장 가까운 라이브 영역 설정이 끔이어야 한다(로그의 polite를 덮는다).
+    expect(body.closest("[aria-live]")).toHaveAttribute("aria-live", "off");
     expect(progressRegion()).toHaveTextContent("답변을 작성하는 중입니다");
 
     histories["s-new"] = {

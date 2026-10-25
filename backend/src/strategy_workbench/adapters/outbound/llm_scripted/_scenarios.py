@@ -1,8 +1,9 @@
-"""대본 시나리오 아홉 개와 질문 → 시나리오 선택 (WORKFLOW B-05, A-07 시나리오 fixture와 같은 내용).
+"""대본 시나리오 열 개와 질문 → 시나리오 선택 (WORKFLOW B-05, A-07 시나리오 fixture와 같은 내용).
 
 "새 전략"(`idea_to_new_strategy`)과 "샤프"(`concept_answer`)는 유저 스토리 e2e(US-DM-03·US-SM-09)가
 쓰려고 뒤에 더한 대본이라 A-07 골든에는 없다. "검색 상한"(`search_budget_answer`, C-03·US-CS-04)과
-결과 설명(`result_explanation`, US-DM-08)도 같다.
+결과 설명(`result_explanation`, US-DM-08)과 서식 있는 답(`markdown_answer`, US-DM-02 마크다운
+렌더)도 같다.
 
 ## 결과 설명 대본은 질문이 아니라 도구 목록으로 고른다
 
@@ -73,6 +74,7 @@ __all__ = [
     "search_budget_answer",
     "search_then_failure",
     "simple_answer",
+    "markdown_answer",
     "factor_window_proposal",
     "concept_answer",
     "idea_to_new_strategy",
@@ -184,6 +186,16 @@ _CONCEPT_ANSWER_PARTS = (
     "같은 수익이라도 덜 흔들리며 벌었다면 샤프 비율이 더 높습니다.",
 )
 
+# 실제 모델처럼 굵게·목록·인라인 코드를 섞은 답(US-DM-02). 굵게 표기를 두 조각에 걸쳐 끊어, 화면이
+# 닫히기 전의 `**`를 글자로 두었다가 닫힌 뒤 굵게로 바꾸는 스트리밍 경로를 지나게 한다.
+_MARKDOWN_ANSWER_PARTS = (
+    "**이어서 해볼",
+    " 것**\n",
+    "- **보유 종목 교체 줄이기**: `turnover_buffer_count`로 거래비용을 줄입니다.\n",
+    "- **하락장 방어**: 시장 상황이 나쁠 때 신호를 끕니다.\n\n",
+    "원하시는 방향을 말씀해 주세요.",
+)
+
 # 조각 수 × adapter의 조각당 지연 × `SLOW_ANSWER_DELAY_SCALE`이 이 턴의 길이다. 기본값으로 20초를
 # 넘겨, 브라우저가 새로고침하고 다시 붙는 데 드는 1~2초가 그 안에 넉넉히 들어오게 한다.
 SLOW_ANSWER_DELAY_SCALE = 4.0
@@ -220,6 +232,14 @@ def simple_answer(_execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
     yield TextDelta(text="모멘텀 전략은 ")
     yield TextDelta(text="최근 많이 오른 종목을 사는 전략입니다.")
     yield Usage(input_tokens=1840, output_tokens=120)
+    yield Done(stop_reason="end_turn")
+
+
+def markdown_answer(_execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
+    """도구 없이 마크다운 서식이 섞인 답을 흘린다. 화면이 서식대로 그리는지 보는 시나리오."""
+    for part in _MARKDOWN_ANSWER_PARTS:
+        yield TextDelta(text=part)
+    yield Usage(input_tokens=1880, output_tokens=140)
     yield Done(stop_reason="end_turn")
 
 
@@ -446,6 +466,7 @@ SCENARIO_KEYWORDS: tuple[tuple[str, ScenarioPlan], ...] = (
     ("검색", ScenarioPlan(search_then_failure)),
     ("천천히", ScenarioPlan(slow_answer, delay_scale=SLOW_ANSWER_DELAY_SCALE)),
     ("샤프", ScenarioPlan(concept_answer)),
+    ("정리", ScenarioPlan(markdown_answer)),
 )
 
 

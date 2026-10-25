@@ -408,8 +408,13 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 - AI 창은 그래프·YAML 어느 탭에서도 같은 세션이다. 턴을 시작할 때마다 현재 편집기 텍스트·진단·
   실행 설정을 실어 보낸다(서버가 문서를 따로 들지 않는다).
 - 제안 미리보기는 기존 diff 투영(`diff-projection.ts`)으로 현재 문서와의 차이를 보인다.
-- **렌더 안전**: 모델 텍스트·제안 본문은 평문(줄바꿈만)으로 렌더한다. 출처 URL은 `http`·`https`만
-  링크로 만들고 나머지는 텍스트로 둔다. 링크는 `target="_blank" rel="noopener noreferrer"`.
+- **렌더 안전**: 모델 텍스트·제안 본문은 마크다운으로 렌더한다(2026-10-25 사용자 결정 — 모델 답이 늘
+  굵게·목록을 쓰는데 평문으로 두면 `**`·`` ` `` 기호가 그대로 보였다). 파서
+  (`features/assist-strategy/model/assist-markdown.ts`)가 값 트리를 만들고 화면은 React 요소로만 그린다 —
+  원시 HTML은 해석하지 않고 글자 그대로 보이며 `dangerouslySetInnerHTML`을 쓰지 않는다. 새 의존성은 두지
+  않았다. 사용자 질문·검색어는 평문(줄바꿈만)이다. 출처 URL과 본문 링크는 `http`·`https`만 링크로 만들고
+  나머지는 텍스트로 두며, 이름 옆에 실제 도착지 호스트를 보인다. 링크는
+  `target="_blank" rel="noopener noreferrer"`.
 - 키 입력 필드는 `autocomplete="off"`, 붙여넣기 후 마스킹. 프론트 상태·localStorage에 키를 두지 않는다.
 
 ### D8. 프롬프트와 컨텍스트 원칙
@@ -445,7 +450,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 - 자체 웹 검색 adapter(후속), 백테스트 실행 도구(후속, application 도구로 추가).
 - 다중 사용자·권한·다중 워커. 로컬 단일 사용자 도구다(전제는 1절·D3·D9가 같은 문장을 가리킨다).
 - 채팅으로 문서를 부분 편집(레시피 단계 수정 등). v1은 전체 제안 적용만.
-- 마크다운·HTML 렌더. 모델 텍스트는 평문이다.
+- HTML 렌더. 모델 텍스트의 마크다운은 그리지만(D7) 원시 HTML은 글자로 둔다.
 
 ## 4. Phase와 PR
 

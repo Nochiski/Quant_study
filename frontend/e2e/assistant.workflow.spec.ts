@@ -126,6 +126,27 @@ test.describe("AI 어시스턴트", () => {
       );
       await expect(progress(page)).toHaveText("답변이 완료되었습니다.");
 
+      // 모델이 쓴 마크다운은 표기 기호 없이 서식대로 보인다(대본 `markdown_answer`). 굵게 표기는 두
+      // 조각에 걸쳐 오므로 스트리밍 중 닫히지 않은 `**`가 끝내 글자로 남지 않는지도 함께 본다.
+      await ask(page, "다음에 해볼 것을 정리해 줘");
+      await expect(progress(page)).toHaveText("답변이 완료되었습니다.");
+      const formatted = transcript(page).getByRole("article").last();
+      // 마지막 조각까지 온 뒤에 표기 기호가 없는지 본다. 앞 턴의 완료 문구가 아직 남아 있을 수 있어
+      // 진행 상태만으로는 이 턴이 끝났는지 알 수 없다.
+      await expect(formatted).toContainText("원하시는 방향을 말씀해 주세요.");
+      await expect(
+        formatted.locator("strong", { hasText: "이어서 해볼 것" }),
+      ).toBeVisible();
+      const items = formatted.getByRole("listitem");
+      await expect(items).toHaveCount(2);
+      // 항목이 list-item 이어야 점 기호(::marker)가 그려진다 — 개수만 보면 기호가 사라져도 통과한다.
+      await expect(items.first()).toHaveCSS("display", "list-item");
+      await expect(
+        items.first().locator("code", { hasText: "turnover_buffer_count" }),
+      ).toBeVisible();
+      await expect(formatted).not.toContainText("**");
+      await expect(formatted).not.toContainText("`");
+
       // 새로고침: 사이드바 열림은 배치에 남고 대화는 서버 이력에서 돌아온다.
       await page.reload();
       await expect(editor(page)).toBeVisible();
@@ -145,7 +166,10 @@ test.describe("AI 어시스턴트", () => {
       // 재연결은 멱등해야 한다: 끊기기 전에 받은 조각을 다시 받아도 본문이 늘어나지 않는다.
       // `toContainText`로는 중복이 보이지 않으므로 **정확 일치**로 못 박는다(리뷰 R1-005).
       await expect(
-        transcript(page).getByRole("article").last().locator("p.assist-text"),
+        transcript(page)
+          .getByRole("article")
+          .last()
+          .locator("p.assist-text, .assist-answer"),
       ).toHaveText([
         "모멘텀 전략을 천천히 설명해 줘",
         "천천히 설명하겠습니다. 모멘텀 전략은 최근 수익률이 높았던 종목이 당분간 더 오르는 경향에 기대는 전략입니다. KRX에서도 이 경향은 관측됩니다. 다만 그대로 쓰지는 않습니다. 12개월 수익률에서 최근 1개월을 빼는 형태를 많이 씁니다. 직전 한 달은 되돌림이 잦기 때문입니다. 순위를 매긴 뒤에는 상위 몇 종목을 담을지 정합니다. 종목 수가 적으면 변동이 커지고 많으면 지수에 가까워집니다. 리밸런싱 주기도 같이 봅니다. 자주 갈아탈수록 수수료와 슬리피지가 쌓입니다. 마지막으로 종목당 비중 상한을 두어 한 종목이 성과를 좌우하지 않게 합니다.",

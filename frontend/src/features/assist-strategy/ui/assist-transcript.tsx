@@ -10,6 +10,7 @@ import { t } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
 import { assistToolLabel } from "../model/assist-copy";
 import type { AssistTranscriptEntry } from "../model/transcript";
+import { AssistMarkdown } from "./assist-markdown";
 import { AssistProposalCard } from "./assist-proposal-card";
 import { AssistSourceList } from "./assist-source-list";
 
@@ -94,7 +95,10 @@ const AssistSearchList = ({
   </ul>
 );
 
-/** 사용자·어시스턴트 말풍선. 본문은 언제나 평문이고 줄바꿈만 CSS가 살린다(spec D7). */
+/**
+ * 사용자·어시스턴트 말풍선. 사용자 질문은 평문이고 줄바꿈만 CSS가 살린다. 모델이 쓴 본문은
+ * `AssistMarkdown`이 마크다운으로 그린다(spec D7 렌더 안전 — 원시 HTML은 해석하지 않는다).
+ */
 const AssistBubble = ({
   role,
   children,
@@ -151,8 +155,8 @@ const AssistTurnBlock = ({
             <AssistDisclosure label={t("assistant.chat.thinking")}>
               <ul className="assist-thinking">
                 {turn.thinking.map((text, index) => (
-                  <li className="assist-text" key={index}>
-                    {text}
+                  <li key={index}>
+                    <AssistMarkdown text={text} />
                   </li>
                 ))}
               </ul>
@@ -174,11 +178,10 @@ const AssistTurnBlock = ({
             </p>
           ) : null}
           {turn.text === "" ? null : (
-            // 델타마다 같은 텍스트 노드가 갈리므로 라이브 영역에서 뺀다 — 그러지 않으면 토큰 하나마다
-            // 누적된 문단 전체가 다시 낭독된다. 진행·완료는 사이드바의 status가 한 번씩 알린다.
-            <p className="assist-text" aria-live="off">
-              {turn.text}
-            </p>
+            // 델타마다 본문이 다시 그려지므로 라이브 영역에서 뺀다(`AssistMarkdown`의 aria-live="off") —
+            // 그러지 않으면 토큰 하나마다 누적된 문단 전체가 다시 낭독된다. 진행·완료는 사이드바의
+            // status가 한 번씩 알린다.
+            <AssistMarkdown text={turn.text} className="assist-answer" />
           )}
           {proposal === null ? null : (
             <AssistProposalCard
@@ -219,7 +222,8 @@ const AssistTurnBlock = ({
  * 하나마다 누적된 문단 전체가 다시 낭독된다(B-03 리뷰 P2). 진행과 완료는 사이드바의 `role="status"`
  * 영역이 한 번씩 알린다.
  *
- * 서버가 보낸 문자열은 전부 React 자식으로만 들어가므로 HTML로 해석될 자리가 없다.
+ * 서버가 보낸 문자열은 전부 React 자식으로만 들어가므로(마크다운도 값 트리를 거쳐 React 요소로만 그린다)
+ * HTML로 해석될 자리가 없다.
  */
 export const AssistTranscript = ({
   entries,

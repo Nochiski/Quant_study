@@ -133,7 +133,9 @@ plan before "apply then backtest" can run; 새 전략 keeps the editor's `schema
 proposes a whole strategy, so a blank new strategy can reach a backtest (user story US-DM-03); 제안 asks
 for a tool call followed by a proposal that only changes the title; 검색 shows search activity and then
 three rejected proposals; 천천히 streams a long answer so a mid-turn reload exercises resume; 샤프
-explains the Sharpe ratio in plain words (US-SM-09); anything else gets a short answer.
+explains the Sharpe ratio in plain words (US-SM-09); 정리 streams an answer that mixes bold, a list
+and inline code, splitting the bold marker across two deltas, so the sidebar's markdown rendering is
+checked (US-DM-02); anything else gets a short answer.
 
 대본 키워드는 순서대로 먼저 맞는 것이 이긴다(`SCENARIO_KEYWORDS`). "검색 상한"은 "검색"보다 앞에 있어,
 검색 한도를 다 쓴 뒤 찾은 자료로 답하는 대본을 고른다(US-CS-04). 백테스트 결과 화면의 세션은 질문과

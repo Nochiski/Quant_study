@@ -441,6 +441,16 @@ ROW_FILTERED_FIELDS: dict[str, tuple[str, int, int, float, str, str]] = {
     "consensus.forward_ni": ("grid_security", 5, 15, 33.333333, "2026-04-03", "2026-08-04"),
     "consensus.forward_op": ("grid_security", 5, 15, 33.333333, "2026-04-03", "2026-08-04"),
     "consensus.forward_sales": ("grid_security", 4, 15, 26.666667, "2026-04-03", "2026-09-02"),
+    # S26 WISE 13필드(e1.30.0) — 격자 축이라 #592 가 분모를 바꾸지 않는다. 절단본 WISE 매트릭스·
+    # 연간·재무비율은 15종목 중 5종목, 관측 창 2026-09-01~09-02 다.
+    **{
+        field_id: ("grid_security", 5, 15, 33.333333, "2026-09-01", "2026-09-02")
+        for field_id in (
+            *(f"wise.consensus_{metric}{suffix}" for metric in ("op", "ni")
+              for suffix in ("", "_1w_ago", "_1m_ago", "_3m_ago")),
+            "wise.fy0_op_estimate", "wise.fy0_ni_estimate",
+            "wise.per", "wise.pbr", "wise.dividend_yield")
+    },
 }
 
 

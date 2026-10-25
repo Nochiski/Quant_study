@@ -982,11 +982,6 @@ WB_WISE_FIELDS = (
     "wise.pbr",
     "wise.dividend_yield",
 )
-# 원장 선언이 아직 main 계보의 `database/src/equity` 에 없는 필드 — 서버 원장 계보(e1.30.0: S26 WISE
-# 3표·사모 순매수 선언)가 main 에 합쳐지기 전까지 원장 선언 대조에서 뺀다. 합쳐지면
-# `test_equity_field_contract_parity` 의 대기 필드 검사가 실패하니 이 목록을 지우고 전체 대조로
-# 돌아간다(#608).
-LEDGER_PENDING_FIELDS = frozenset({*WB_WISE_FIELDS, "flow.private_fund_net_buy"})
 WB_WISE_MATRIX_FETCHES = (
     date(2023, 12, 28), date(2024, 1, 3), date(2024, 1, 4), date(2024, 1, 6), date(2024, 1, 8)
 )

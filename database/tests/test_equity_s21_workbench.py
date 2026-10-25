@@ -111,7 +111,7 @@ CHAIN_NAMES = (
 CHAIN = (*(RULES[name] for name in CHAIN_NAMES), rules_s19.DATASET_PROFILE)
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 FIELDS = ("price.close", "price.adj_close", "price.market_cap")
-# 체인이 다 서면 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 33 + 내부 스코프 price.adj_close.
+# 체인이 다 서면 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 33 + 내부 스코프(price.adj_close · 사모 · WISE 13).
 # 남는 9 는 원천·컬럼이 없거나 굽지 않기로 한 것이라 여기서도 unavailable 이다(#421 이 네 필드를 연결).
 ALL_FIELDS = (
     "price.close", "price.open", "price.volume", "price.market_cap",
@@ -123,15 +123,17 @@ ALL_FIELDS = (
     "consensus.target_price", "consensus.recommendation", "consensus.analyst_count",
     "flow.foreign_net_buy", "flow.institution_net_buy", "flow.retail_net_buy",
     "flow.foreign_ownership", "flow.foreign_limit_exhaustion", "flow.pension_net_buy",
-    # 내부 스코프 — flow_daily.samo_fund_krw(#608). WISE 13필드는 원장 S26 표가 이 체인에 없어 unavailable 이다
+    # 내부 스코프 — flow_daily.samo_fund_krw(#608)
     "flow.private_fund_net_buy",
     "short.short_sale_value", "short.short_sale_volume", "short.borrowed_quantity",
     "credit.margin_balance",
     "event.dividend_per_share", "event.buyback_amount", "event.insider_net_buy",
+    # 내부 스코프 — S26 WISE 13필드(consensus_matrix·consensus_annual·fin_ratio_wise, e1.30.0 · #608)
+    "wise.consensus_op", "wise.consensus_op_1w_ago", "wise.consensus_op_1m_ago",
+    "wise.consensus_op_3m_ago", "wise.consensus_ni", "wise.consensus_ni_1w_ago",
+    "wise.consensus_ni_1m_ago", "wise.consensus_ni_3m_ago",
+    "wise.fy0_op_estimate", "wise.fy0_ni_estimate", "wise.per", "wise.pbr", "wise.dividend_yield",
 )
-# 원장 선언(`dataset_profile` 행)이 아직 main 계보에 없는 필드(#608) — 원장 S26·사모 선언(e1.30.0)이 서버 배포본
-# 계보에만 있다. 그 계보가 main 에 합쳐지면 어댑터가 대장 랙을 읽어 위 등식이 깨진다 — 그때 이 목록을 비운다.
-LEDGER_PENDING_FIELDS = frozenset({"flow.private_fund_net_buy"})
 SPLIT = date(2018, 5, 4)
 HALT_LAST = date(2018, 5, 3)
 AFTER_SPLIT = date(2018, 5, 8)  # 분할 적용일 다음 세션(05-07 대체공휴일) — 랙 1 필드가 05-04 행을 본다
@@ -197,11 +199,8 @@ def test_snapshot_id_앞부분은_카탈로그_meta_와_같다(adapter, built: P
     ledger, separator, _ = adapter.snapshot().snapshot_id.partition(SNAPSHOT_CONTRACT_SEPARATOR)
     assert (ledger, separator) == (meta["snapshot_id"], SNAPSHOT_CONTRACT_SEPARATOR)
     assert {p.field_id for p in adapter.list_fields()} == set(ALL_FIELDS)
-    # 체인이 `dataset_profile` 까지 지어 어댑터가 대장 경로를 밟는다 — 폴백 랙은 쓰지 않는다(#246).
-    # 예외는 원장 선언이 아직 main 계보에 없는 필드뿐이고, 선언이 들어오면 이 등식이 깨져 목록을 지운다
-    assert {
-        p.field_id for p in adapter.list_fields() if "fallback" in p.available_date_basis
-    } == LEDGER_PENDING_FIELDS
+    # 체인이 `dataset_profile` 까지 지어 어댑터가 대장 경로를 밟는다 — 폴백 랙은 쓰지 않는다(#246)
+    assert not [p.field_id for p in adapter.list_fields() if "fallback" in p.available_date_basis]
     # 카탈로그는 S21 본판이 요구하는 매크로 둘을 새로 싣는다(v_consensus·v_fin_latest)
     names = {sig.split("(", 1)[0] for sig in meta["macros"]}
     assert {"v_adj_price_fwd", "v_consensus", "v_fin_latest"} <= names

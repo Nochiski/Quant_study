@@ -224,6 +224,9 @@ def factor_table(
         "price_resolution": pa.array(
             ["factor" if r[5] else "unresolved" for r in rows], type=pa.string()
         ),
+        # 원장 S23 SQL(e1.26.0 ⑤)이 읽는 가격 전용 계수 — 'price_only' 가 아닌 행은 원장 게이트
+        # 규칙대로 1 이다(NULL 0). 이 손 픽스처에는 ⑤ 사건이 없다.
+        "price_only_factor": pa.array([1.0 for _ in rows], type=pa.float64()),
     }
     if apply_dates is not None:
         columns["apply_date"] = pa.array(apply_dates, type=pa.date32())

@@ -338,10 +338,10 @@ RULES_VERSION = "e1.31.0"                # BuildRecord.rules_version 에 실린�
 #         `estimated_coverage_pct` 가 바뀐다. 분자·창·S20 판정은 그대로다.
 # e1.31.0: 갈래 병합 2차(main 4859372f ↔ 서버 갈래 fc6c91eb + W 80102a79, 플랜
 #          `2026-10-24-ledger-merge`) — 브랜치 e1.30.0 판과 견줘 빌드 산출이 바뀌는 것은 main 계보
-#          둘이다: ① `corp_event` `treasury_buy` 주식 종류별 class-row(main e1.20.0) ② `dataset_profile`
-#          `table_rows` 커버율 분모의 `row_filter`(main e1.21.0) · 그 evidence 와 S20 문구. 브랜치 쪽 규칙은
-#          그대로 들어온다. 판본이 바뀌어 첫 빌드는 EG5a 가 skip 이므로 같은 입력으로 두 번 지어
-#          재현성을 확인한다(EQUITY_HANDOFF §6).
+#          둘이다: ① `corp_event` `treasury_buy` 주식 종류별 class-row(main e1.20.0)
+#          ② `dataset_profile` `table_rows` 커버율 분모의 `row_filter`(main e1.21.0) · 그
+#          evidence 와 S20 문구. 브랜치 쪽 규칙은 그대로 들어온다. 판본이 바뀌어 첫 빌드는 EG5a 가
+#          skip 이므로 같은 입력으로 두 번 지어 재현성을 확인한다(EQUITY_HANDOFF §6).
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

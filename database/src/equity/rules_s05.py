@@ -387,7 +387,8 @@ FIELDS_CORP_EVENT: tuple[FieldProfile, ...] = (
         recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
         disclosure_basis="자기주식취득결정 공시 접수일(rcept_dt)",
         evidence="corp_event.amount_krw WHERE event_type='treasury_buy' ← stg_event_tsstk_aq "
-                 "(e1.9.0 부터 적재). 금액은 주식 종류별 취득예정금액이다(e1.20.0, #589) — "
+                 "(e1.9.0 부터 적재). 금액은 주식 종류별 취득예정금액이다"
+                 "(e1.31.0 — main e1.20.0, #589) — "
                  "보통주 티커는 aqpln_prc_ostk, 우선주 티커는 aqpln_prc_estk 이다. 기타주식분은 "
                  "결정일에 상장돼 있던 우선주가 하나일 때만 싣고, 없으면 unlisted_class, 둘 "
                  "이상이면 어느 우선주인지 몰라 class_ambiguous 로 범위 밖이다. 사업보고서 "

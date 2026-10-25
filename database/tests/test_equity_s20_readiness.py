@@ -132,7 +132,7 @@ def test_자사주_매입_공시_레지스트리는_결정공시_축_E05에_잇�
     """레지스트리 `event.buyback_announcement` 의 재료는 결정 공시 금액(`event.buyback_amount`)이다.
 
     I03(자사주 순매입률)은 사업보고서 확정치(`event.treasury_acquired`·`treasury_disposed`)라 재료가
-    다르다 — 09-06 S20 이 I03 에 달았던 대응을 E05 로 옮겼다(e1.20.0).
+    다르다 — 09-06 S20 이 I03 에 달았던 대응을 E05 로 옮겼다(e1.31.0 — main e1.20.0).
     """
     by_id = {f.factor_id: f for f in rules_s20.FACTORS}
     assert by_id["E05"].registry_factor_id == "event.buyback_announcement"

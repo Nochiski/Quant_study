@@ -1222,10 +1222,11 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             "공시는 합하고, 다음 공시 전까지 같은 값이 이어집니다."
         ),
         disclosure_basis="DART 주요사항보고 접수일(announce_date)",
-        # 원장이 주식 종류별 class-row 로 싣는다(e1.20.0, #589) — 어댑터는 티커 축 그대로 옮긴다.
+        # 원장이 주식 종류별 class-row 로 싣는다(e1.31.0 — main e1.20.0, #589) — 어댑터는 티커 축
+        # 그대로 옮긴다.
         evidence=(
             "corp_event.amount_krw (event_type='treasury_buy' ← stg_event_tsstk_aq, e1.9.0; "
-            "보통주 aqpln_prc_ostk · 우선주 aqpln_prc_estk, e1.20.0)"
+            "보통주 aqpln_prc_ostk · 우선주 aqpln_prc_estk, e1.31.0 — main e1.20.0)"
         ),
     ),
     # DART 소유보고 API 가 롤링 2년 창만 주고 재수집이 불가능하다(DART_DESIGN P3e).

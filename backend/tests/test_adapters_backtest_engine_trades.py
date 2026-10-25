@@ -148,7 +148,8 @@ def test_repeating_decimal_reverse_split_settles_exactly_what_the_engine_settled
         actions=engine.event_store.corporate_actions_applied(),
     )
 
-    (action,) = artifacts.corporate_actions or ()
+    assert artifacts.corporate_actions is not None
+    (action,) = artifacts.corporate_actions
     assert (action.new_quantity, action.settled_quantity) == (new_quantity, settled)
     # 단주가 없으면 청산 거래는 남은 수량을 판 한 건뿐이다.
     expected = 1 if settled == "0" else 2

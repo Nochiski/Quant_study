@@ -2318,11 +2318,15 @@ def test_price_only_resolved_cells_keep_raw_price_and_historical_query_parity(
 
 
 @pytest.mark.parametrize("field_id", ["price.adj_close", "price.close"])
-def test_price_only_resolution_flows_into_research_and_pipeline_windows(
+def test_price_only_resolution_flows_into_pipeline_window(
     price_only_adapter: EquityDuckdbAdapter,
     field_id: str,
 ) -> None:
-    """사건일을 포함한 2세션 창은 보정가와 원주가 각각의 값을 그대로 소비한다."""
+    """사건일을 포함한 2세션 창은 보정가와 원주가 각각의 값을 그대로 소비한다.
+
+    팩터 미리보기는 전략 추적이 이 파이프라인의 `factor_evaluations` 를 투영한 값이라(P5-03,
+    `FactorResearchService.preview` 는 은퇴) 파이프라인 경로 하나로 두 화면을 함께 본다.
+    """
     adapter = price_only_adapter
     graph = FactorGraph(
         nodes=(
@@ -2332,9 +2336,6 @@ def test_price_only_resolution_flows_into_research_and_pipeline_windows(
         output_node_id="avg",
     )
     registry = build_default_factor_registry()
-    research = FactorResearchService(registry, adapter, adapter).preview(
-        FactorPreviewRequest(graph, START, END)
-    )
     spec = _momentum_spec(field_id)
     spec = replace(spec, factors=(replace(spec.factors[0], graph=graph),))
     pipeline = PortfolioDesignService(
@@ -2346,9 +2347,9 @@ def test_price_only_resolution_flows_into_research_and_pipeline_windows(
     expected = (wb_close("035420", WB_INCONSISTENT) + wb_close("035420", END)) / 2
     if field_id == "price.adj_close":
         expected *= 0.5 / 10
-    for values in (research.evaluation.values, pipeline.factor_evaluations[0].values):
-        [value] = [v.value for v in values if (v.as_of, v.security_id) == (END, "035420:1")]
-        assert value == pytest.approx(expected)
+    values = pipeline.factor_evaluations[0].values
+    [value] = [v.value for v in values if (v.as_of, v.security_id) == (END, "035420:1")]
+    assert value == pytest.approx(expected)
 
 
 def test_price_mask_body_change_invalidates_contract_without_rebuilding_sources(

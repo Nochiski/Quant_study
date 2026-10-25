@@ -25,6 +25,7 @@ from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import (
     concept_answer,
     factor_window_proposal,
     idea_to_new_strategy,
+    markdown_answer,
     result_explanation,
     result_explanation_with_proposal,
     scenario_for,
@@ -132,6 +133,7 @@ class _ToolRecorder:
         ("많이 오른 대형주를 사는 새 전략을 만들어 줘", idea_to_new_strategy),
         ("새 전략으로 제안해 줘", idea_to_new_strategy),
         ("샤프 비율이 무슨 뜻이야?", concept_answer),
+        ("다음에 해볼 것을 정리해 줘", markdown_answer),
         # "검색 상한"은 "검색"보다 앞이라 검색 실패 대본으로 새지 않는다.
         ("검색 상한까지 KRX 자료를 찾아 줘", search_budget_answer),
     ],

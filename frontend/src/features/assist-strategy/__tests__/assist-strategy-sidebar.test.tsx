@@ -576,6 +576,32 @@ describe("AssistStrategySidebar", () => {
     expect(container.querySelector("b")).toBeNull();
   });
 
+  it("모델 답변의 마크다운은 서식으로 보이고 http가 아닌 링크는 글자로 남는다", async () => {
+    const user = userEvent.setup();
+    const { container } = mount();
+    const connection = await ask(user);
+    // 굵게 표기가 두 델타에 걸쳐 온다. 닫히기 전에는 글자이고, 닫히면 굵게가 된다.
+    connection.push(textDelta(0, "**이어서 해볼"));
+    expect(await screen.findByText("**이어서 해볼")).toBeInTheDocument();
+    connection.push(
+      textDelta(
+        1,
+        " 것**\n- `turnover_buffer_count`로 교체를 줄입니다.\n- [자료](javascript:alert(1)) 확인",
+      ),
+    );
+
+    const strong = await screen.findByText("이어서 해볼 것");
+    expect(strong.tagName).toBe("STRONG");
+    const items = screen.getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(within(items[0]).getByText("turnover_buffer_count").tagName).toBe(
+      "CODE",
+    );
+    expect(screen.getByText("자료")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "자료" })).toBeNull();
+    expect(container.textContent).not.toContain("**");
+  });
+
   it("제안 카드의 버튼은 제안과 턴 시작 시점 원문을 콜백에 넘긴다", async () => {
     const user = userEvent.setup();
     const onPreviewProposal = vi.fn();
@@ -934,7 +960,8 @@ describe("AssistStrategySidebar", () => {
     connection.push(textDelta(0, "본문"));
 
     const body = await screen.findByText("본문");
-    expect(body).toHaveAttribute("aria-live", "off");
+    // 본문 문단을 감싼 가장 가까운 라이브 영역 설정이 끔이어야 한다(로그의 polite를 덮는다).
+    expect(body.closest("[aria-live]")).toHaveAttribute("aria-live", "off");
     expect(progressRegion()).toHaveTextContent("답변을 작성하는 중입니다");
 
     histories["s-new"] = {

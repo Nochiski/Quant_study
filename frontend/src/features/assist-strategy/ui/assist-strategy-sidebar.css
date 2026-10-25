@@ -143,14 +143,112 @@
   border: 1px solid var(--border);
 }
 
-/* 모델 텍스트는 평문이다 — 줄바꿈만 살리고 마크업으로 해석하지 않는다. */
+/* 사용자 질문·검색어는 평문이다 — 줄바꿈만 살리고 마크업으로 해석하지 않는다. */
 .assist-text {
   margin: 0;
   white-space: pre-wrap;
 }
 
+/* 모델이 쓴 본문은 마크다운으로 그린다(`assist-markdown.tsx`). 블록 사이 간격은 묶음의 gap 하나가 정한다. */
+.assist-md {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.assist-md p,
+.assist-md ul,
+.assist-md ol,
+.assist-md pre,
+.assist-md blockquote {
+  margin: 0;
+}
+
+.assist-md ul,
+.assist-md ol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-left: var(--space-5);
+}
+
+/* 목록 항목 안의 문단·중첩 목록도 같은 간격으로 쌓는다. */
+.assist-md li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.assist-md li::marker {
+  color: var(--text-subtle);
+}
+
+.assist-md__heading {
+  font-weight: 700;
+}
+
+.assist-md__heading--1 {
+  font-size: var(--text-size-subsection);
+}
+
+.assist-md__code,
+.assist-md__pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+  background: var(--surface-subtle);
+  border-radius: var(--radius-small);
+}
+
+.assist-md__code {
+  padding: 0 var(--space-1);
+}
+
+.assist-md__pre {
+  padding: var(--space-2);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.assist-md__quote {
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-muted);
+}
+
+.assist-md__rule {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* 표는 말풍선 폭을 밀어내지 않고 자기 안에서 가로로 넘긴다. */
+.assist-md__table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.assist-md__table table {
+  border-collapse: collapse;
+  font-size: var(--text-size-small);
+}
+
+.assist-md__table th,
+.assist-md__table td {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  overflow-wrap: normal;
+}
+
+.assist-md__table th {
+  background: var(--surface-subtle);
+  font-weight: 600;
+}
+
 /* 모델·도구·서버가 만든 문자열은 어디에 있든 줄을 바꾼다. 긴 무공백 한 줄이 폭을 밀어낸다. */
 .assist-text,
+.assist-md,
 .assist-proposal__title,
 .assist-tool__summary,
 .assist-sources__item,

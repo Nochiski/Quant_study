@@ -48,8 +48,8 @@ N_OVERLAP_KEYS = 45          # src 가 둘인 키 = 티커 5 × 월 5 × 202612 
 N_COVERAGE_DEGRADED = 36     # v3 collected_date 결측(2026-04-03·04-06·04-08) 행에서 고른 관측
 N_REVISED_POINTS = 12        # 두 판본의 consensus 가 실제로 다른 관측점 수 (기록형)
 N_FOLDED = 886 - N_WISE      # 410 — 접힌 wise 판본 수 (같은 키의 두 번째 fetched_date 행)
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_consensus_daily", "EG6_consensus_daily",
-              "EG8_consensus_daily", "EG9_consensus_daily", "EG4", "EG5a"]
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_consensus_daily",
+              "EG6_consensus_daily", "EG8_consensus_daily", "EG9_consensus_daily", "EG4", "EG5a"]
 
 # FX-5-001 — 뒤 판본이 덮어쓴 관측점(000660 · obs 2026-08-31 · 202812 · eps). stage 원자료 두 값
 REVISED_FIRST = Decimal("458131.6800")      # fetched_date 2026-09-01 (최초 관측)
@@ -404,8 +404,9 @@ def test_커버리지_기록은_상장_종목_대비_비율을_남긴다(
     assert 0 < m["cover_vs_span_min"] <= m["cover_vs_span_max"] < 1     # 선택편향 기록
 
 
-def test_baseline_미등재면_EG8_EG9가_skip_한다(tmp_path: Path) -> None:
-    """첫 서버 빌드 상태 — 임계 상수가 없으면 폐기하지 않고 측정치만 남긴다(GATES §7-3).
+def test_baseline_미등재면_EG8이_못_재고_판은_폐기된다(tmp_path: Path) -> None:
+    """첫 서버 빌드 상태 — 임계 상수가 없으면 skip(no_baseline) 이다(GATES §7-3). K1-7a 부터
+    허용표 밖 SKIP 이라 판을 폐기한다 — 뒤 EG9 는 upstream_failed.
 
     모듈 픽스처 root 를 쓰지 않는다 — 여기서 커밋하면 `published` 가 다른 build 를 굽는다.
     """
@@ -415,13 +416,13 @@ def test_baseline_미등재면_EG8_EG9가_skip_한다(tmp_path: Path) -> None:
                           Baseline({k: v for k, v in SEED.data.items()
                                     if k != "consensus_daily"}),
                           build_id="b_s17_nobl")
-    assert r.ok
-    for name, metric in (("EG8_consensus_daily", "n_match"),
-                         ("EG9_consensus_daily", "cover_drop_max_observed")):
-        g = _gate(r, name)
-        assert g.status is GateStatus.SKIP and g.detail == "no_baseline"
-        assert metric not in g.metrics          # 상수를 못 읽으면 측정 전에 멈춘다
-        assert str(g.metrics["missing_metric"]).startswith("consensus_daily.")
+    assert not r.ok
+    g = _gate(r, "EG8_consensus_daily")
+    assert g.status is GateStatus.FAIL and g.metrics["skip_reason"] == "no_baseline"
+    assert "n_match" not in g.metrics           # 상수를 못 읽으면 측정 전에 멈춘다
+    assert str(g.metrics["missing_metric"]).startswith("consensus_daily.")
+    g9 = _gate(r, "EG9_consensus_daily")
+    assert g9.status is GateStatus.SKIP and g9.detail == "upstream_failed"
 
 
 # ── 뷰 `v_consensus` (DESIGN §5) ─────────────────────────────────────────────

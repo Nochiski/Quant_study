@@ -1,0 +1,218 @@
+# model 판 빌드 — 점수 판 · 게이트 · 인계
+
+> 플랜 [`2026-09-24-v3-merge.md`](plans/2026-09-24-v3-merge.md) M2 W2-a(T2.5). 코드
+> `src/model/build.py`(판) · `src/model/gates.py`(MG0~MG5) · `src/model/__main__.py`(CLI), 테스트
+> `tests/test_model_build.py`. 입력 층은 [`FACTOR_INPUTS.md`](FACTOR_INPUTS.md), 출력 열 계약은
+> `src/model/contracts.py`(`score_columns(spec)`·`INDICATOR_COLUMNS`)가 정본이다.
+
+## 1. 목적
+
+- factor_inputs 판 **하나**를 읽어 레지스트리(`config/models/*.toml`)의 spec 을 전부(또는 고른 것만)
+  돌리고, 점수·지표를 spec 별 판으로 남긴다. 엔진은 `model.engines.ENGINES` 그대로다 — 이 층은
+  계산하지 않는다.
+- equity·factor_inputs 와 같은 판 규약(판 id · `stage.manifest` MANIFEST · 판 manifest · latest 포인터 ·
+  게이트 FAIL 이면 포인터 유지)을 따른다. 인계(`src/deliver/`, 엑셀·텔레그램)는 이 층의
+  `latest_<basis>.json` 만 보고 읽는다.
+
+## 2. 실행
+
+```bash
+python -m model build --date 20260928 --basis morning \
+    [--fi-build latest|<factor_inputs build_id>] [--specs all|<spec_id,…>] \
+    [--primary scope@2.0] [--root data/model] [--fi-root data/factor_inputs] \
+    [--min-prices-on-d 2000] [--min-ranked 100] [--keep 60]
+```
+
+| rc | 뜻 |
+|---|---|
+| 0 | 판 커밋 · `latest_<basis>.json` 갱신(MG5 warn 이 있어도 0 · 비교 모델이 FAIL·예외로 빠져도 0 — `excluded_specs`) |
+| 1 | 주 모델 게이트 FAIL — 아무 spec 도 올리지 않는다(`_failed/<build_id>.json`, MANIFEST·latest 는 직전 성공 판 유지) |
+| 2 | 입력·인자 오류(factor_inputs 판 없음 · 판의 date·basis 가 요청과 다름 · 모르는 spec · `--primary` 가 선택 밖 · 날짜 형식 · 주 모델 추정치 유예 > fi 판 유예 창) 또는 주 모델·입력 단계 예외 |
+
+- 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — factor_inputs CLI 와 같다.
+- `--date` 는 factor_inputs 판의 기준일 D 다. `--fi-build latest`(기본)는
+  `data/factor_inputs/latest_<basis>.json` 의 판을 쓰고, 그 판의 date·basis 가 `--date`·`--basis` 와
+  다르면 거절한다(어제 판으로 오늘 점수를 내지 않는다). id 를 주면 그 판의 8표 `_meta.json` 으로 같은
+  검사를 한다.
+- `--specs` 기본 `all` = 레지스트리 전부(지금 `scope@1.0` · `scope@2.0` · `v2_percentrank@1.0` · `v3_zscore@1.0` ·
+  `v4_rank@0.1` · `v4_rank@0.2`). `--primary`(기본 `scope@2.0` — 10-05 v4_rank@0.1 → scope@1.0, 10-12 scope@1.0 → scope@2.0
+  추정치 유예 5거래일 N-47)는 레지스트리와 무관한 인계 설정이고, 선택한 spec 안에
+  있어야 한다.
+- **추정치 유예 가드(N-47, mb1.7.0)**: fi 판의 유예 창(판 manifest `universe_rule.coverage_grace_days` — 그 판이
+  아니면 `fi_universe/v=<id>/_meta.json` 게이트 FG-fresh `grace_days`)보다 spec 유예(`universe.coverage_grace_days`)가
+  길면 엔진이 넓힐 수 없어 그 spec 이 조용히 짧은 유예로 채점된다. 그래서 주 모델이면 rc 2(판 없음), 비교 모델이면
+  엔진을 돌리지 않고 `excluded_specs` 에 `{error: "추정치 유예 부족 — …"}` 로 뺀다. 창을 알 수 없는 판(손으로 만든 판)은
+  로그 warn 만 남기고 대조를 건너뛴다.
+- 일부 spec 만 돌려도 latest 가 그 판으로 바뀐다(판 manifest 의 `specs` 에 그 spec 만 있다). 운영 루트는
+  `--specs all` 로만 돌리고, 과거 날짜·실험은 **별도 `--root`** 로 돌린다(factor_inputs 와 같은 규약).
+- **언제 돌리나**: 아침 체인에서 factor_inputs 바로 뒤(M3 에서 `build_chain.sh` 에 잇는다 —
+  `step "model"`, H_EQUITY ok 일 때만, rc 1 은 warn: equity·factor_inputs 판은 유효하고 점수 인계만
+  나가지 않는다). 지금은 체인에 없고 손으로 돌린다.
+
+서버(수동, 09-28 판):
+
+```bash
+cd ~/quant-ledger && QL_HOME=~/quant-ledger PYTHONPATH=~/quant-ledger/src \
+    .venv/bin/python -m model build --date 20260928 --basis morning
+```
+
+### E2 배포 직후(추정치 유예 5거래일 · scope_v2.0 — N-47) 알고 있을 것
+
+- **v4 비교 모델 점수가 바뀐다**: `v4_rank@0.1`·`@0.2` TOML 의 유예 5거래일이 처음으로 실제로 걸린다.
+  전에는 fi 가 유예 0 으로 먼저 걸러 TOML 값이 죽은 설정이었다(10-06 감사 D-03 — 이것으로 해소). 그날부터
+  v4 유니버스에 유예 1~5 종목이 들어와 점수·순위가 움직인다(정상 — 결함 아님).
+- **두 판 대조(`daily.board_compare`) 첫날 rc 2(알려진 일)**: 배포 뒤 첫 장 마감 판 T 의 대조는 연구 판 D'
+  가 배포 전 판(fi1.8.0 · mb1.6.0)이고 장 마감 판 T·연구 판 T 가 새 판(fi1.9.0 · mb1.7.0)이라 '규칙 판본이
+  다르다'(rules_version)로 rc 2(`verdict: error`)다. 다음 T 부터 세 판이 같은 판본이라 정상이다. 그날은
+  알려진 일로 기록하고 되돌리기 판단(`daily.window_judge` 의 대조 항목)의 근거로 쓰지 않는다.
+- **배포 전에 지은 날의 모델 판 다시 짓기**: 그날 fi 판이 옛 판(유예 창 0)이면 주 모델 scope@2.0(유예 5)이
+  유예 가드에 걸려 rc 2 다. fi 를 새 코드로 다시 지은 뒤(창 5) 모델을 짓거나, 그날 판으로 꼭 다시 지어야 하면
+  `--primary scope@1.0` 으로 짓는다(scope@2.0 · v4 는 `excluded_specs` 로 빠진다). compat 이 그런 날을 다시
+  내보내면 앞 주 모델 scope@1.0 점수로 채운다(`docs/COMPAT_LAYER.md` — warn 한 줄).
+
+## 3. 판 규약
+
+```
+data/model/
+  <spec_id>/MANIFEST.json                     # stage.manifest — current_build · keep=60 · builds[]
+  <spec_id>/v=<build_id>/scores.parquet       # 점수 표(열 = score_columns(spec))
+  <spec_id>/v=<build_id>/indicators.parquet   # 지표 긴 표(열 = INDICATOR_COLUMNS, v3·v2 는 0행)
+  _runs/<YYYYMMDD>_<basis>.json               # 판 manifest — 성공·실패 모두. 같은 날 재실행은 덮는다. 단 FAIL 재실행은 같은 날 성공 기록을 덮지 않는다(실패는 _failed/ 에만)
+  latest_<basis>.json                         # 마지막 성공 판(= 그 판의 _runs 내용)
+  _failed/<build_id>.json                     # 게이트 FAIL 보고서(판 manifest 와 같은 모양)
+  _tmp/<build_id>/                            # 쓰는 중 임시(끝나면 지운다)
+```
+
+- `<spec_id>` 는 `model_id@version` 그대로다(예: `v4_rank@0.1`).
+- 판 id 하나(`m_<UTC>` — `stage.model.make_build_id(basis)`)를 선택한 spec 이 공유한다. spec 마다
+  MANIFEST 포인터를 따로 바꾸므로 전환 순간에는 섞여 보일 수 있다 — **소비자는 `latest_<basis>.json` 의
+  `build_id` 로 `<spec_id>/v=<build_id>/` 를 연다**(keep=60 — 거래일 석 달. 10-06 전엔 3 이라 같은 날
+  재빌드 세 번에 전날 판이 지워졌다).
+- 쓰기는 원자적이다: 게이트를 전부 통과한 뒤에만 `_tmp/<build_id>/<spec_id>/` 에 쓰고
+  `<spec_id>/v=<build_id>/` 로 옮긴 다음 `stage.manifest.commit` → `_runs` → `latest` 순. FAIL 이면
+  parquet 을 쓰지 않는다. **판 전체가 실패하는 것은 주 모델(`primary_spec`)이 FAIL 일 때뿐이다.** 비교
+  모델만 FAIL 이면 그 spec 만 빼고(`excluded_specs`, MANIFEST·`v=<build_id>` 없음) 나머지를 올린다
+  (2026-10-05 사용자 결정 N-11 '격리', mb1.2.0). 비교 모델의 엔진 예외도 그 spec 만 뺀다(주 모델 예외는
+  전체 실패, D-01, mb1.3.0). 비교 모델의 직전 판 파일이 깨지면 그 모델은 판마다 계속 빠진다 — 손으로
+  복구해야 다시 올라온다(D-01 리뷰 M-4, 기록만).
+- MANIFEST `BuildRecord`: `n_rows` = 점수 행 수, `content_hash` = 점수 파일 해시(equity 와 같은 식),
+  `partitions[0]` = `{path: "v=<build_id>", n_rows, content_hash, n_indicators, indicators_content_hash}`,
+  `inputs` = `{"factor_inputs": <fi build_id>}`, `gates` = MG0~MG5(`name`·`status`·`detail`·`metrics`),
+  `rules_version` = `build.py` 의 `RULES_VERSION`.
+- parquet 은 `hive_partitioning=false` 로 읽는다(경로의 `v=` 가 열로 붙지 않게).
+
+## 4. 산출 파일
+
+**열은 계약 그대로이고 더한 열이 없다.** dtype 규칙(`gates.score_dtypes(spec)`·`INDICATOR_DTYPES`,
+골든 `score_history(_v2).parquet` 와 같다): 식별자·날짜·플래그·사유 = VARCHAR(`stock_code`·`ticker`·
+`score_date`('YYYY-MM-DD')·`spec_id`·`exclude_reason`·`sector_l1`·`sector_l2`·`coverage_state`·`key`·
+`bucket`·`role`·`flag`·`*_flag`) · `rank`·`n_buckets_used` = BIGINT · `excluded` = BOOLEAN · 나머지 DOUBLE.
+
+| spec | scores.parquet | indicators.parquet |
+|---|---|---|
+| `v3_zscore@1.0` | v3 `score_history` 48열(`stock_code` 키, 종합 `composite_score`). 전 행 순위(제외 없음), `(−종합, 코드)` 순. `growth_score`·`sentiment_score`·`volatility_score`·`size_score`·`foreign_score`·`shareholder_score` 는 항상 NULL | 0행(스키마만) |
+| `v2_percentrank@1.0` | v2 `score_history_v2` 21열(`stock_code` 키, 종합 `total_score`). 전 행 순위, `(−종합, 코드)` 순 | 0행 |
+| `v4_rank@*` | 기본 11열 + 버킷마다 `<bucket>_score`(0~100). 순위 행이 먼저(rank 순), 제외 행(`excluded`=true · `exclude_reason` · `rank` NULL)이 뒤에 종목코드 순. D-13 적격성 탈락은 버킷·종합이 NULL, 게이트 제외(`pull_gate`)는 점수가 남는다 | 종목 × 지표(spec 순서) 행 — `role` score/display, `raw`·`pct`(0~100, display 는 NULL)·`flag` |
+
+- 점수 대상은 `fi_universe.eligible` 종목뿐이다(v3 은 여기에 시총 ≥ 1,000억, v2 는 시총 > 0, v4 는
+  보통주·유예 재판정). **종목명·시장·업종 이름·시총은 점수 표에 없다** — 인계가 필요하면 판 manifest 의
+  `fi_build_id` 로 `data/factor_inputs/fi_universe/v=<fi_build_id>/part0.parquet` 를 조인한다.
+
+## 5. 판 manifest (`_runs/<YYYYMMDD>_<basis>.json` = `latest_<basis>.json`)
+
+| 키 | 뜻 |
+|---|---|
+| `layer` | `"model"` |
+| `status` | `"ok"` · `"gate_failed"`(latest 에는 ok 만 온다) |
+| `build_id` | 모델 판 id(`m_…`) |
+| `date` · `basis` | 판 기준일 D(ISO) · `morning`(장 마감 판 `evening` · 주말 보강판 `supplement` — N-45, 판 id `s_`, fi `latest_supplement.json` 을 읽고 MG5 는 보강판끼리만 견준다. 연구 루트를 같이 써서 한 연휴에 keep 한 칸 — keep 60 ≈ 거래일 판 50개 — 이고 spec MANIFEST `current_build` 는 다음 아침 확정판까지 `s_` 판을 가리킨다. 소비자는 basis 별 `latest_<basis>.json`·`_runs` 의 판 id 로 연다) |
+| `fi_build_id` | 읽은 factor_inputs 판 id |
+| `generated_at` | UTC(`…Z`) |
+| `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순. ok 판에는 올린 spec 만, gate_failed 판에는 고른 spec 전부(실행 예외 — 엔진 실행·재실행·직전 판 읽기·게이트 평가 — 를 낸 비교 모델은 `{error}` 하나). 엔진 메타(`EngineResult.meta`)는 같은 자리에 얹는다 — scope 의 `adj_jump_masked: {n_tickers, r1m, r3m, r6m, r9m, r12m, std_20d}` = 창 안 제한폭 초과 미해결 수정주가로 비운 종목 수·지표별 칸 수(규칙이 없었으면 값이 섰던 칸만, 0 도 싣는다 — T-9 · H1-4, mb1.6.0). GH1-c 의 '매 모델 빌드 반사실 대조 [차단]'(같은 fi 로 규칙 있음·없음을 돌려 판 공개를 막는 게이트)은 이 PR 범위 밖 — 후속이다 |
+| `excluded_specs` | 게이트 FAIL·실행 예외(엔진 실행·재실행·직전 판 읽기·게이트 평가)·추정치 유예 부족(N-47)으로 이번 판에서 뺀 비교 모델 — 게이트로 뺀 것은 `specs` 와 같은 모양, 예외로 뺀 것은 `{error: "<예외 클래스>: <메시지>"}`. 사유는 첫 줄만, model 루트 기준 상대 경로로 바꾼 뒤 500자에서 자른다(D-01, traceback 은 로컬 로그 경고에만). 없으면 `{}`(gate_failed 판도 `{}`) |
+| `primary_spec` | 인계 대표 모델(`--primary`) |
+| `elapsed_s` | 적재·엔진·게이트 소요(초) |
+
+게이트 `status` 는 `pass` · `fail` · `skip` · `warn`(MG5 만)이다. 예(합성 보드 40종목, 두 번째 판 —
+테스트 픽스처로 실제 생성, 게이트는 v2 하나만 펼쳤다):
+
+```json
+{
+ "layer": "model", "status": "ok", "build_id": "m_20260929T031515_775209Z",
+ "date": "2026-09-28", "basis": "morning", "fi_build_id": "m_20260929T000500_000000Z",
+ "generated_at": "2026-09-29T03:15:16Z",
+ "specs": {
+  "v2_percentrank@1.0": {"n_scores": 40, "n_ranked": 40, "n_excluded": 0, "gates": {
+   "MG0": {"status": "pass", "detail": "점수·지표 열이 계약과 같고 열마다 타입이 하나다",
+           "metrics": {"scores.columns_mismatch": 0, "indicators.columns_mismatch": 0,
+                       "n_type_violations": 0, "type_violations": {}}},
+   "MG1": {"status": "pass", "detail": "점수 40/40 = 1.0000 ≥ 0.95",
+           "metrics": {"coverage_below_min": 0, "n_scores": 40, "n_eligible": 40, "n_covered": 40,
+                       "n_outside_universe": 0, "coverage": 1.0, "coverage_min": 0.95}},
+   "MG2": {"status": "pass", "detail": "두 번 실행의 점수·지표 해시가 같다",
+           "metrics": {"scores_differ": 0, "indicators_differ": 0, "scores_sha256": "31f4…",
+                       "rerun_scores_sha256": "31f4…", "indicators_sha256": "4f53…",
+                       "rerun_indicators_sha256": "4f53…"}},
+   "MG3": {"status": "pass", "detail": "NaN·inf 없음 · 순위 1…n · 열 규약",
+           "metrics": {"n_nonfinite": 0, "duplicate_ticker": 0, "rank_not_1_to_n": 0,
+                       "unranked_rows": 0, "composite_null": 0, "n_ranked": 40}},
+   "MG4": {"status": "pass", "detail": "D 종가 종목 40 ≥ 10",
+           "metrics": {"prices_on_d_below_min": 0, "n_prices_on_d": 40, "min_prices_on_d": 10}},
+   "MG5": {"status": "pass",
+           "detail": "Spearman 1.0000 · 상위 30 겹침 30 (전판 m_20260929T031515_421900Z)",
+           "metrics": {"prev_build_id": "m_20260929T031515_421900Z",
+                       "prev_score_date": "2026-09-28", "n_common": 40, "spearman": 1.0,
+                       "spearman_warn": 0.8, "top30_overlap": 30, "top30_n": 30,
+                       "top30_prev_n": 30, "warn": false}}}},
+  "v3_zscore@1.0": {"n_scores": 40, "n_ranked": 40, "n_excluded": 0, "gates": {"…": "…"}},
+  "v4_rank@0.1": {"n_scores": 40, "n_ranked": 28, "n_excluded": 12, "gates": {"…": "…"}},
+  "v4_rank@0.2": {"…": "…"}
+ },
+ "primary_spec": "v4_rank@0.1",
+ "elapsed_s": 0.3
+}
+```
+
+## 6. 게이트 (spec 마다. 주 모델 FAIL 이면 판을 안 올리고, 비교 모델 FAIL 이면 그 spec 만 뺀다)
+
+엔진을 같은 FactorInputs 로 **두 번** 돌린 결과(메모리)에서 판정한다. MG0 이 FAIL 이면 MG1·MG2·MG3·MG5 는
+`skip(upstream_failed)`, MG4 는 입력 판정이라 그대로 돈다.
+
+| 게이트 | 판정 | FAIL 조건(임계) |
+|---|---|---|
+| MG0 스키마 | 점수·지표 행의 열(순서까지) = 계약, 값 타입 = 열 dtype | 열이 다른 행이 하나라도 · 타입 위반(예: rank 에 문자열, DOUBLE 에 bool) |
+| MG1 커버리지 | v3·v2: 자기 유니버스 규칙으로 센 종목(v3 = eligible ∧ D 가격 행 ∧ 시총 ≥ `min_market_cap` · v2 = eligible ∧ 시총 > 0) 중 점수가 나온 비율. v4 계열: 순위 종목 수(제외 사유별 수 기록) | v3·v2 비율 < **0.95**(유니버스 0 포함) · v4 순위 < **100**(`--min-ranked`, 09-28 서버 첫 판 317) |
+| MG2 결정성 | 두 실행의 점수·지표 직렬화(JSON, 부동소수 repr) sha256 | 해시가 다르면 |
+| MG3 온전성 | NaN·inf · 종목 중복 · 순위 = 순위 행의 1…n · v3·v2 전 행 순위·종합 있음 · v3 항상 NULL 6열 · v4: 종합·버킷 점수·지표 백분위 ∈ [0, 100], `excluded` ⇔ `exclude_reason` ⇔ rank NULL, 순위 행은 종합 있음, `spec_id` 일치 | 위반이 하나라도 |
+| MG4 신선도 | 전체 `fi_prices`(eligible 로 자르기 전)에서 D 종가가 있는 종목 수 — v3 원본 stale guard(`backend/scoring/engine.py:40-51`, `V3_MIN_DAILY_PRICES_THRESHOLD`)와 같은 하한 | < **2,000**(`--min-prices-on-d`) |
+| MG5 전판 대비 | 같은 spec·같은 basis 의 직전 성공 판(MANIFEST `builds` 중 basis 가 같은 마지막 판 — 아침판과 장 마감 판을 섞지 않는다, PR-6 · mb1.5.0)과 종합 Spearman(공통 종목, 동률 평균순위)·상위 30 겹침·공통 종목 수 기록 | **FAIL 없음** — Spearman < **0.8**(또는 셀 수 없음)이면 `warn`. 첫 판·전판 파일 없음은 `skip(no_previous)`(허용표 안). 그 밖의 MG5 skip 은 `warn`, MG0~MG4 의 skip 은 FAIL 이다(K1-7a, `src/stage/skip_allow.py`) |
+
+- 플랜 §3-4 원안(MG0 스키마 · MG1 행수 · MG2 NaN·rank · MG3 골든 · MG4 순위 상관 · MG5 manifest 완비)과
+  번호가 다르다 — 09-29 W2-a 지시가 정본이다. 골든 대조(G-M3 ②)는 테스트(`test_model_v3_port`·
+  `test_model_v2_port`·이 층 `test_golden_tree_reproduces_the_ported_engines`)가 맡는다.
+- MG5 는 전판이 **다른 날짜**여도(과거 날짜를 운영 루트에서 돌린 경우 등) 그대로 비교한다 —
+  `prev_score_date` 로 확인한다.
+
+## 7. 인계(deliver)가 읽는 법
+
+1. `data/model/latest_morning.json` → `status == "ok"` · `date` · `build_id` · `primary_spec` · `specs`.
+2. spec 마다 `data/model/<spec_id>/v=<build_id>/scores.parquet`(·`indicators.parquet`),
+   `read_parquet(…, hive_partitioning=false)`.
+3. 이름·시장·업종 이름·시총·거래대금은 `fi_build_id` 의 `fi_universe` 에서 조인한다.
+4. 경고는 `specs.<spec>.gates.MG5.status == "warn"`(순위가 전판과 크게 달라짐)이다. latest 에는 FAIL
+   판이 오지 않는다 — 그날 FAIL 이면 latest 의 `date` 가 D 보다 앞선다(인계가 날짜를 확인할 것).
+   `excluded_specs` 에 있는 비교 모델은 그날 판에 없다 — 엑셀은 그 모델 열을 빼고 메타에 사유를 적는다.
+5. 전일 순위·Δ순위 1W·1M·순위 흐름은 그날들의 `_runs/<YYYYMMDD>_morning.json` 의 `build_id` 로 같은
+   경로를 연다(keep=60. 판 파일이 없으면 그날은 비우거나 흐름에서 뺀다 — `deliver/trend.py`).
+
+## 8. 테스트
+
+`tests/test_model_build.py` — 합성 보드 트리(`test_model_v4_rank.Board`, 40종목 · 네 spec) 왕복(판 규약·
+열·dtype·엔진 직접 실행과 비트 일치·MANIFEST·판 manifest·latest), 골든 트리(`tests/tools/compat_to_fi`
+→ v3 579·v2 619 행 = 이식 엔진 = v3 원본 순위), 실제 factor_inputs 판(`test_factor_inputs.make_roots`)
+→ v2, 게이트마다 엔진을 감싸 한 가지씩 망가뜨린 FAIL 경로(MG0 열·타입 · MG1 v3 비율·시총 하한·v4 100 ·
+MG2 비결정 · MG3 6가지 · MG4 골든 618 < 2,000) · FAIL 이면 latest·MANIFEST 유지 · 비교 모델 FAIL 격리 ·
+주 모델 FAIL 이면 전부 미공개 · 비교 모델 실행 예외 격리(첫 실행·재실행·직전 판 파일 깨짐 — 사유는
+첫 줄·model 루트 상대 경로·500자, 경고 로그에 traceback)·주 모델 예외 전파·주 모델 FAIL 이면 실패
+보고서 `specs` 에 `{error}`(D-01) · FAIL 재실행이 같은 날 ok `_runs` 보존(그 밖의 기록은 덮고, 못
+읽으면 오류 — D-09) · MG5 기록·warn · keep GC · spec 선택·primary · 입력 판 거절 · CLI rc.

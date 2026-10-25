@@ -59,18 +59,29 @@ STG_CONSENSUS_MONTHLY = TableRule(
 # ── 공통 조각 ─────────────────────────────────────────────────────────────────────────────────────
 _WS = SourceRef("wise", "ws_raw", "ws_raw")
 _FETCHED_MEASURED = AvailableRule("column", column="fetched_date", basis="measured")
+# 수집 시각(UTC 무표기, 원장 ws_raw.fetched_at) — stage 2.10.0(#608). observed_date 는 이 값의 KST 날짜만 남겨
+# 장 전(06:00) 수집과 장 뒤(18:05) 수집을 가를 수 없었다. equity 가 행마다 가용일을 세는 축이다(S26).
+_FETCHED_AT_UTC = ExtraColumn("fetched_at_utc", 'TRY_CAST(s."fetched_at" AS TIMESTAMP)')
 
 
 def _blob_table(name: str, columns: tuple[ColumnRule, ...], natural_key: tuple[str, ...],
                 parser: str, eps: tuple[str, ...],
-                extras: tuple[ExtraColumn, ...] = ()) -> TableRule:
-    """ws_raw blob 언네스트 테이블의 공통 골격 (§1 예외 c). 파티션·시각·가용은 monthly 와 동일."""
+                extras: tuple[ExtraColumn, ...] = (), fold: bool = False) -> TableRule:
+    """ws_raw blob 언네스트 테이블의 공통 골격 (§1 예외 c). 파티션·시각·가용은 monthly 와 동일.
+
+    `fold` = 연속 판 접기(§1 예외 f)와 아침 재사용(묶음 7-3)을 함께 켠다 — 원장 sha256 열을 G0 계약에 더한다.
+    모든 표가 수집 시각 `fetched_at_utc` 를 싣는다(2.10.0) — 접는 표는 그 원문을 처음 본 blob 의 시각이다.
+    """
+    bs = BlobSource("wise", "ws_raw", eps, parser)
+    if fold:
+        bs = BlobSource("wise", "ws_raw", eps, parser,
+                        required_columns=bs.required_columns + ("sha256",), fold_consecutive=True)
     return TableRule(
         name=name, sources=(_WS,), columns=columns, natural_key=natural_key,
         partition_class="date_axis", partition_expr="substr(fetched_date, 1, 4)",
         partition_src="fetched_date", observed_src="fetched_at", write_mode="append_only",
         fanout=1, payload_exclude=("fetched_at",), lag_known=True, available=_FETCHED_MEASURED,
-        key_unique=True, extras=extras, blob_source=BlobSource("wise", "ws_raw", eps, parser),
+        key_unique=True, extras=(_FETCHED_AT_UTC, *extras), blob_source=bs, morning_reuse=fold,
     )
 
 
@@ -126,6 +137,12 @@ STG_CONSENSUS_MATRIX = _blob_table(
 )
 
 # ── stg_fin_wise (cF3002 재무제표 · cF4002 재무비율, pkey='Y') — ACCODE 기준 wide, Decimal(38,6) ──
+#
+# DQ-10(2026-09-26 실측, 기록만): **2026-09-26 이전에 수집한 `fs_basis` 라벨은 신뢰 구간 밖이다.**
+# 수집기가 요청 파라미터(IFRSL)를 그대로 라벨로 적어 실제 주재무제표와 무관하게 같은 값이 박혔다.
+# **값 자체는 주재무제표라 쓸 수 있다**(141종목 교차검증에서 값 동일) — 못 믿는 것은 라벨뿐이다.
+# 09-26 이전 84종목의 cF3002 는 NULL 이고 **복구 불가**다(원장에 원문이 없다). 라벨로 연결/별도를
+# 가르는 소비는 09-26 이후 수집분에서만 하고, 그 전 구간은 라벨을 무시한다.
 _FIN_WISE_P, _FIN_WISE_S = 38, 6
 
 
@@ -165,6 +182,35 @@ STG_FIN_WISE = _blob_table(
     ),
     ("ticker", "fetched_date", "ep", "seq"),
     "parse_fin_wise", ("cF3002", "cF4002"),
+    fold=True,              # 2.7.0 — fetched_date = 그 원문을 처음 본 날(A→B→A 는 남김)
+)
+
+# ── stg_fin_wise_q (cF3002 pkey Q:IS 분기 손익 · Y:BS 연간 재무상태 · Y:CF 연간 현금흐름) ─────────────
+# 플랜 2026-09-30 T-Q3. 열은 stg_fin_wise 와 같고 키에 pkey 가 더해진다(같은 날 같은 cF3002 여러 요청).
+# 실시간 모델의 분기·현금흐름 원천(DART 대체 — 원화 환산·분기 4번째 칸 포함, 플랜 §1). 기간 이름표에서
+# 기간(YYYYMM)·추정 여부·연결/별도를 칸마다 파생해 둔다 — 분기 응답은 칸마다 기준이 따로 붙는다
+# ('2025/12<br />(IFRS별도)' · '2026/09(E)<br />(IFRS연결)', 10-01 실측). 소비층이 이름표를 다시 파싱하지 않게.
+def _label_extras() -> tuple[ExtraColumn, ...]:
+    out: list[ExtraColumn] = []
+    for i in range(1, 7):
+        lab = f's."period_label_{i}"'
+        out += [
+            ExtraColumn(f"period_{i}", f"nullif(replace(regexp_extract({lab}, '^(\\d{{4}}/\\d{{2}})', 1), '/', ''), '')"),
+            ExtraColumn(f"is_est_{i}", f"CASE WHEN {lab} IS NULL THEN NULL ELSE {lab} LIKE '%(E)%' END"),
+            ExtraColumn(f"basis_{i}", f"nullif(regexp_extract({lab}, '\\(((IFRS|GAAP|K-IFRS)[^)]*)\\)', 1), '')"),
+        ]
+    return tuple(out)
+
+
+STG_FIN_WISE_Q = _blob_table(
+    "stg_fin_wise_q",
+    STG_FIN_WISE.columns[:3]
+    + (ColumnRule("pkey", "pkey", KIND_TEXT, key=True),)        # Q:IS | Y:BS | Y:CF
+    + STG_FIN_WISE.columns[3:],
+    ("ticker", "fetched_date", "pkey", "seq"),
+    "parse_fin_wise_q", ("cF3002",),
+    extras=_label_extras(),
+    fold=True,              # 2.7.0 — stg_fin_wise 와 같다
 )
 
 # ── stg_analyst_summary (c1010001 HTML cTB15 — 추정기관수) ────────────────────────────────────────
@@ -362,7 +408,7 @@ STG_CALLS_WISE = TableRule(
 
 TABLES: tuple[TableRule, ...] = (
     STG_CONSENSUS_MONTHLY, STG_CONSENSUS_ANNUAL, STG_CONSENSUS_QUARTERLY, STG_CONSENSUS_MATRIX,
-    STG_ANALYST_SUMMARY, STG_ANALYST_BROKER, STG_FIN_WISE, STG_V3_REVISION_DAILY,
+    STG_ANALYST_SUMMARY, STG_ANALYST_BROKER, STG_FIN_WISE, STG_FIN_WISE_Q, STG_V3_REVISION_DAILY,
     STG_V3_ANALYST_OPINIONS,
     STG_V3_CONSENSUS_ANNUAL, STG_V3_REVISION_COMPARE, STG_WISE_COVERAGE, STG_CALLS_WISE,
 )

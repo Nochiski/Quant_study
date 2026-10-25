@@ -2229,3 +2229,164 @@ def test_an_interrupt_lost_before_the_query_starts_is_sent_again() -> None:
         )
 
     assert info.value.__context__ is error
+
+
+@pytest.fixture
+def price_only_adapter(tmp_path: Path) -> EquityDuckdbAdapter:
+    """가격만 해결한 기준가 사건: 가격 표는 보정됐지만 수량 계수는 여전히 미해결이다."""
+    import duckdb
+
+    root = build_workbench_root(tmp_path / "price-only")
+    with duckdb.connect() as con:
+        factors = con.execute(
+            "SELECT * REPLACE (CASE WHEN ticker = '035420' "
+            "AND effective_date = DATE '2024-01-11' THEN 'price_only' "
+            "ELSE price_resolution END AS price_resolution) "
+            f"FROM read_parquet('{root}/adj_factor/v=b_test/**/*.parquet', "
+            "hive_partitioning=false)"
+        ).to_arrow_table()
+        # 표 소비자 검증용 입력이다. 가격 산출 SQL의 정답 검증은 database 테스트가 소유한다.
+        prices = con.execute(
+            "SELECT * REPLACE (CASE WHEN ticker = '035420' AND date >= DATE '2024-01-11' "
+            "THEN adj_close / 10 ELSE adj_close END AS adj_close) "
+            f"FROM read_parquet('{root}/price_adj_daily/v=b_test/**/*.parquet', "
+            "hive_partitioning=false)"
+        ).to_arrow_table()
+    write_equity_table(root, "adj_factor", factors, year_column="effective_date")
+    write_equity_table(root, "price_adj_daily", prices, year_column="date")
+    write_catalog(root)
+    return EquityDuckdbAdapter(root)
+
+
+def test_price_only_resolved_cells_keep_raw_price_and_historical_query_parity(
+    price_only_adapter: EquityDuckdbAdapter,
+) -> None:
+    """좁은 과거 질의와 긴 창, panel/raw 포트가 같은 보정값·공개일을 읽는다."""
+    adapter = price_only_adapter
+    expected = wb_close("035420", WB_INCONSISTENT) * 0.5 / 10
+    before = _raw(adapter, end=WB_HALT_DATE)
+    assert max(o.as_of for o in before.observations) == WB_HALT_DATE
+    assert _field(before, WB_HALT_DATE, "035420:1", "price.adj_close") == (
+        wb_close("035420", WB_HALT_DATE) * 0.5
+    )
+    for end in (WB_INCONSISTENT, END):
+        result = _raw(adapter, end=end)
+        adjusted = _cell(result, WB_INCONSISTENT, "035420:1", "price.adj_close")
+        assert (adjusted.value, adjusted.kind, adjusted.available_date) == (
+            expected,
+            CellKind.OBSERVED,
+            WB_INCONSISTENT,
+        )
+        assert _field(result, WB_INCONSISTENT, "035420:1", "price.close") == wb_close(
+            "035420", WB_INCONSISTENT
+        )
+        # 가격 해결과 무관한 지연 공개 사건은 계속 가린다.
+        assert _cell(result, WB_LATE_FACTOR, "035420:1", "price.adj_close").kind is CellKind.MASKED
+    panel = adapter.load_panel(
+        ResearchPanelQuery(WB_INCONSISTENT, END, ("035420:1",), ("price.adj_close",))
+    )
+    assert panel.ok
+    [cell] = [c for c in panel.cells if c.as_of == WB_INCONSISTENT]
+    assert (cell.value, cell.kind, cell.available_date) == (
+        expected,
+        CellKind.OBSERVED,
+        WB_INCONSISTENT,
+    )
+    lagged = adapter.load_panel(
+        ResearchPanelQuery(
+            END,
+            END,
+            ("035420:1",),
+            ("price.adj_close",),
+            lag_overrides=(FieldLag("price.adj_close", 1),),
+        )
+    )
+    assert lagged.ok
+    [cell] = lagged.cells
+    assert (cell.value, cell.kind, cell.available_date) == (
+        expected,
+        CellKind.OBSERVED,
+        WB_INCONSISTENT,
+    )
+    dataset = adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("035420:1",), None))
+    [shift] = [a for a in dataset.corporate_actions if a.session == WB_INCONSISTENT]
+    assert (shift.action_type, shift.ratio) == ("reverse_split", "0.1")
+    assert any(w.code == "equity.unfolded_level_shift" for w in dataset.warnings)
+    assert next(b.close for b in dataset.bars if b.session == WB_INCONSISTENT) == wb_close(
+        "035420", WB_INCONSISTENT
+    )
+
+
+@pytest.mark.parametrize("field_id", ["price.adj_close", "price.close"])
+def test_price_only_resolution_flows_into_pipeline_window(
+    price_only_adapter: EquityDuckdbAdapter,
+    field_id: str,
+) -> None:
+    """사건일을 포함한 2세션 창은 보정가와 원주가 각각의 값을 그대로 소비한다.
+
+    팩터 미리보기는 전략 추적이 이 파이프라인의 `factor_evaluations` 를 투영한 값이라(P5-03,
+    `FactorResearchService.preview` 는 은퇴) 파이프라인 경로 하나로 두 화면을 함께 본다.
+    """
+    adapter = price_only_adapter
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("px", field_id, "field"),
+            TimeSeriesNode("avg", TimeSeriesOperator.MEAN, "px", 2, "time_series"),
+        ),
+        output_node_id="avg",
+    )
+    registry = build_default_factor_registry()
+    spec = _momentum_spec(field_id)
+    spec = replace(spec, factors=(replace(spec.factors[0], graph=graph),))
+    pipeline = PortfolioDesignService(
+        adapter,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=adapter,
+        factor_registry_version=registry.version,
+    ).run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
+    expected = (wb_close("035420", WB_INCONSISTENT) + wb_close("035420", END)) / 2
+    if field_id == "price.adj_close":
+        expected *= 0.5 / 10
+    values = pipeline.factor_evaluations[0].values
+    [value] = [v.value for v in values if (v.as_of, v.security_id) == (END, "035420:1")]
+    assert value == pytest.approx(expected)
+
+
+def test_price_mask_body_change_invalidates_contract_without_rebuilding_sources(
+    tmp_path: Path, price_only_adapter: EquityDuckdbAdapter,
+) -> None:
+    """같은 원장 판·매크로 시그니처라도 가림 본문이 다르면 캐시 신원을 달리한다."""
+    import duckdb
+
+    root = tmp_path / "price-only"
+    before = price_only_adapter.snapshot().snapshot_id
+    before_builds = table_builds(root)
+    before_meta = (root / "_catalog_meta.json").read_text(encoding="utf-8")
+    assert _cell(
+        _raw(price_only_adapter), WB_INCONSISTENT, "035420:1", "price.adj_close"
+    ).kind is CellKind.OBSERVED
+    # 구판처럼 수량 미해결 사건까지 가격을 가린다. 표와 meta/시그니처는 손대지 않는다.
+    with duckdb.connect(str(root / "equity.duckdb")) as con:
+        row = con.execute(
+            "SELECT macro_definition FROM duckdb_functions() WHERE function_name = 'v_adj_close'"
+        ).fetchone()
+        assert row is not None
+        [body] = row
+        con.execute(
+            "CREATE OR REPLACE MACRO v_adj_close(as_of) AS TABLE "
+            "SELECT c.* REPLACE (CASE WHEN e.ticker IS NULL THEN c.adj_close END AS adj_close, "
+            "(c.adj_gap OR e.ticker IS NOT NULL) AS adj_gap) "
+            f"FROM ({body}) c LEFT JOIN v_unfolded_event(as_of) e "
+            "ON e.ticker = c.ticker AND e.apply_date = c.date"
+        )
+    after_adapter = EquityDuckdbAdapter(root)
+    after = after_adapter.snapshot().snapshot_id
+    assert table_builds(root) == before_builds
+    assert (root / "_catalog_meta.json").read_text(encoding="utf-8") == before_meta
+    before_ledger, _, before_contract = before.partition(SNAPSHOT_CONTRACT_SEPARATOR)
+    after_ledger, _, after_contract = after.partition(SNAPSHOT_CONTRACT_SEPARATOR)
+    assert after_ledger == before_ledger
+    assert before_contract and after_contract and after_contract != before_contract
+    assert _cell(
+        _raw(after_adapter), WB_INCONSISTENT, "035420:1", "price.adj_close"
+    ).kind is CellKind.MASKED

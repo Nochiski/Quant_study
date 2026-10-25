@@ -3,7 +3,7 @@
 > Jev 는 텍스트를 넣고 **타입이 정해진 질문**(noul 예/아니오 · choice ≤255 · score ≤10)에 확률·확신도가 붙은 답을 주는 모델이다.
 > 문장 생성·수치 추출은 없다. 엔드포인트 `POST https://api.typesafe.ai/v1/systemone`, 모델 `jev-latest`(=`jev-1.13.0`),
 > 입력 100만 토큰당 $0.042·출력 무료, 속도 제한 250,000 토큰/초·1,200 요청/분(동적), 요청당 64k 토큰(state 32k).
-> 키는 서버 `~/kael-system-v3/.env` `JEV_API_KEY`(quant-ledger 도 그 파일을 읽는다). 이 문서는 원장이 아니라 설계 근거다.
+> 키는 서버 `~/kael-system-v3/.env` `JEV_API_KEY`(10-10 RG-C7-4 뒤 quant-ledger 는 그 파일을 읽지 않는다 — 도입하면 `$HOME/quant-ledger/.env` 에 따로 넣는다). 이 문서는 원장이 아니라 설계 근거다.
 
 ## 1. 실험 설계
 

@@ -3,7 +3,7 @@
 S06 이 내는 4개: `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` + S21 후속(09-05, 전방
 조정) 2개: `v_adj_price_fwd`·`v_adj_volume_fwd` + S17 1개: `v_consensus` + S21 본판 1개:
 `v_fin_latest` + #249 1개: `v_credit_balance`(무상증자 척도 창을 가린 신용잔고) + #220·#369 2개:
-`v_unfolded_event`(원장이 접지 못한 사건) · `v_adj_close`(그 적용일을 가린 수정주가). 본문은 하나의
+`v_unfolded_event`(보유 수량 축 미해결 사건) · `v_adj_close`(가격 축 공백을 가린 수정주가). 본문은 하나의
 템플릿이고 읽는 자리(`{price_daily}` 등)만 두 방식으로 채운다 —
   카탈로그: `render_macros(equity_root)` 가 커밋된 테이블의 MANIFEST 파티션 경로(**절대경로**,
             P1c)를 `read_parquet([...])` 로 넣어 `catalog.write_catalog` 에 준다.
@@ -17,7 +17,9 @@ as-of 규칙 (DESIGN §5): `v_cum_adj(as_of, lag_override := NULL)` —
   S06 2차)이지 명목 효력일이 아니다.
   cutoff = as_of 에서 `lag` 세션 전 거래일(trading_calendar 역산). lag 기본값은 컬럼군 세션 랙인데
   `dataset_profile`(S19)이 아직 없으므로 **가격 계열 0 세션** 을 본문 상수(FACTOR_LAG_SESSIONS)로
-  둔다 — 근거: 계수의 available_date 는 min(공시 접수일, 효력일 다음 거래일) 이라 이미 '그날 알 수
+  둔다 — 근거: 계수의 available_date 는 min(공시 접수일, 효력일 다음 거래일)(KRX 기준가가 확정한
+  ok 계수 — 사건 교체·unknown_krx — 와 ⑤ 가격 전용 계수 행(e1.26.0)은 min(공시 접수일, 적용일),
+  C-07) 이라 이미 '그날 알 수
   있었던 날' 이고(stage 가격류 lag_known=true, 공표 시각 미제공 → S04 와 같은 규약), 랙을 더 두면
   분할 당일
   조정가가 하루 늦게 붙어 EG8 점프가 생긴다. 소비자는 `lag_override` 로 세션 단위로 늘릴 수 있다.
@@ -29,7 +31,9 @@ as-of 규칙 (DESIGN §5): `v_cum_adj(as_of, lag_override := NULL)` —
   `v_adj_price_fwd(as_of, lag_override := NULL)` —
   adj_close_fwd(d) = close(d) × Π(share_factor : factor_ok ∧ **같은 security_span 구간** ∧
                                                  apply_date ≤ d ∧ available_date ≤ d
-                                                 ∧ available_date ≤ cutoff),
+                                                 ∧ available_date ≤ cutoff)
+                    ÷ Π(price_only_factor : price_resolution='price_only' ∧ 같은 구간 ∧ 같은
+                                            fold·cutoff 규칙)   ← ⑤(e1.26.0, 별도 사슬),
   즉 종목의 **첫 관측 수준을 고정**하고 사건마다 이후 가격을 누적 배수로 올린다(시총 불변 사건은
   share_factor = 1/price_factor 라 위 `v_adj_price` 의 역수 축과 같은 값). 삼성전자 2018-05-03 =
   2,650,000(원주가 그대로) · 05-04 = 51,900 × 50 = 2,595,000. 접는 세션 fold_date =
@@ -101,6 +105,7 @@ SIGNATURES: dict[str, str] = {
     "v_credit_balance": "v_credit_balance(as_of)",
     "v_unfolded_event": "v_unfolded_event(as_of)",
     "v_adj_close": "v_adj_close(as_of)",
+    "v_sector": "v_sector(as_of)",                                  # S25 WICS 주간 스냅샷 as-of
 }
 MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_cum_adj": ("price_daily", "adj_factor", "trading_calendar"),
@@ -113,12 +118,12 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_fin_latest": ("fin_std", "disclosure_version", "trading_calendar"),
     "v_credit_balance": ("credit_daily", "corp_event", "trading_calendar"),
     "v_unfolded_event": ("adj_factor",),
-    "v_adj_close": ("price_adj_daily",),
+    "v_adj_close": ("price_adj_daily", "adj_factor"),
+    "v_sector": ("sector_snapshot",),
 }
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
-    "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",),
-    "v_adj_close": ("v_unfolded_event",)}
+    "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",)}
 # 뷰가 값이 틀려 일부러 가린 행의 표시 열 — 참이면 그 행 값이 NULL 이다. 워크벤치 어댑터는 이 열을
 # 셀 종류 MASKED 로 읽고(`SourceSpec.masked_expr`), 실행 결측 정책은 그 셀을 채우지 않는다(#298).
 # 무엇을 가리나는 뷰 본문이 정하고, 이 선언과 어댑터 배선이 같은지는 backend 계약 테스트가 본다.
@@ -137,6 +142,12 @@ MASK_COLUMNS: dict[str, str] = {"v_credit_balance": "bonus_window", "v_adj_close
 # **표 `price_adj_daily`(S23)가 같은 규칙의 저장본**이고, 그 표의 EG3_price_adj_daily 가 매 빌드
 # 기본 랙에서 두 산출의 동일성을 증명한다. 표를 읽는 얇은 매크로로 합치지 않은 이유는
 # `lag_override` 다 — 기본값 밖 랙에서는 계수 컷오프를 다시 계산해야 하는데 표에는 랙 축이 없다.
+# ⑤ 가격 전용 계수(e1.26.0, N-32 ②): `adj_factor.price_resolution='price_only'` 행의
+# `price_only_factor`(그날 기준가 ÷ 직전 행 종가)를 **별도 사슬**(po_*)로 같은 fold·구간 규칙에
+# 누적하고 조정 OHLC 를 그 누적으로 나눈다. ok 계수 사슬(vis·fac·pre)에 섞지 않는 이유: 섞으면
+# 창 곱의 결합 순서가 바뀌어 기존 누적계수가 끝자리에서 흔들릴 수 있고(거래량 축 불변 계약),
+# 표(price_adj_daily)도 같은 두 사슬 구조라 비트 동일성이 선다. 출력 열은 늘리지 않는다 —
+# `cum_price_only_factor` 는 CTE 안에서만 쓴다(`_asof/` 표본·EG5c 의 열 집합 불변).
 _FWD_CTE = """
 WITH cut AS (
     SELECT k.date AS cutoff
@@ -172,6 +183,33 @@ pre AS (
     WINDOW w AS (PARTITION BY ticker, span_seq ORDER BY fold_date
                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
 ),
+po_vis AS (
+    SELECT ticker, greatest(apply_date, available_date) AS fold_date,
+           price_only_factor, available_date
+    FROM {adj_factor}
+    WHERE price_resolution = 'price_only' AND apply_date <= as_of
+      AND available_date <= (SELECT cutoff FROM cut)
+),
+po_spn AS (
+    SELECT f.ticker, coalesce(s.span_seq, -1) AS span_seq, f.fold_date,
+           f.price_only_factor, f.available_date
+    FROM po_vis f
+    ASOF LEFT JOIN {security_span} s ON s.ticker = f.ticker AND f.fold_date > s.first_date
+),
+po_fac AS (
+    SELECT ticker, span_seq, fold_date, product(price_only_factor) AS pof,
+           max(available_date) AS available_date
+    FROM po_spn
+    GROUP BY ticker, span_seq, fold_date
+),
+po_pre AS (
+    SELECT ticker, span_seq, fold_date,
+           product(pof) OVER pw AS cum_price_only_factor,
+           max(available_date) OVER pw AS available_date
+    FROM po_fac
+    WINDOW pw AS (PARTITION BY ticker, span_seq ORDER BY fold_date
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+),
 px AS (
     SELECT p.*, coalesce(s.span_seq, 0) AS span_seq
     FROM (SELECT * FROM {price_daily} WHERE date <= as_of) p
@@ -182,14 +220,28 @@ fwd AS (
            p.basis, p.corp_action_pending,
            coalesce(c.cum_price_factor, 1) AS cum_price_factor,
            coalesce(c.cum_share_factor, 1) AS cum_share_factor,
-           greatest(p.date, coalesce(c.available_date, p.date)) AS available_date
+           coalesce(q.cum_price_only_factor, 1) AS cum_price_only_factor,
+           greatest(p.date, coalesce(c.available_date, p.date),
+                    coalesce(q.available_date, p.date)) AS available_date
     FROM px p
     ASOF LEFT JOIN pre c
       ON c.ticker = p.ticker AND c.span_seq = p.span_seq AND p.date >= c.fold_date
+    ASOF LEFT JOIN po_pre q
+      ON q.ticker = p.ticker AND q.span_seq = p.span_seq AND p.date >= q.fold_date
 )
 """
 
 TEMPLATES: dict[str, str] = {
+    # S25 — 종목별 `snapshot_date <= as_of` 최신 스냅샷 한 행 + 경과일(캘린더일). 주 1회 축이라
+    # 세션 랙 대신 경과일로 묵은 정도를 알린다. 스냅샷 전 날짜(2026-09-18 이전)는 0행 — 채우지 않는다.
+    "v_sector": """
+SELECT s.ticker, s.snapshot_date, s.wics_l1_cd, s.wics_l1_nm, s.wics_l2_cd, s.wics_l2_nm,
+       s.float_shares_shr, s.float_mktcap_krw, s.wgt_in_l2_pct,
+       datediff('day', s.snapshot_date, CAST(as_of AS DATE)) AS days_since_snapshot
+FROM {sector_snapshot} s
+WHERE s.snapshot_date <= CAST(as_of AS DATE)
+QUALIFY row_number() OVER (PARTITION BY s.ticker ORDER BY s.snapshot_date DESC) = 1
+""",
     # ticker·date 별 누적 계수. 계수는 (ticker, apply_date) 로 먼저 접어(같은 날 두 이벤트 = 곱,
     # 복합 성분) 뒤에서부터 누적한 뒤 ASOF JOIN 으로 '이 날 이후 첫 적용 세션' 의 누적값을
     # 붙인다 — 행별 GROUP BY 없음.
@@ -221,16 +273,38 @@ FROM (SELECT ticker, date FROM {price_daily} WHERE date <= as_of) p
 ASOF LEFT JOIN suf s ON s.ticker = p.ticker AND p.date < s.apply_date
 """,
     # 원주가 × 누적 가격계수 (FIELD_MAP price.adj_close). 원주가 컬럼은 그대로 함께 낸다(결정 6).
+    # ⑤(e1.26.0): 조정 OHLC 에 가격 전용 계수 r 의 후방 누적(d < apply_date ≤ as_of ∧ available ≤
+    # cutoff — `v_cum_adj` 와 같은 축)을 더 곱한다. 누적계수 열은 `v_cum_adj` 그대로 — 출력 열 불변.
     "v_adj_price": """
+WITH cut AS (
+    SELECT k.date AS cutoff
+    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
+          FROM {trading_calendar} WHERE date <= as_of) k
+    WHERE k.n = coalesce(lag_override, {lag_factor})
+),
+po AS (
+    SELECT ticker, apply_date, product(price_only_factor) AS pof
+    FROM {adj_factor}
+    WHERE price_resolution = 'price_only' AND apply_date <= as_of
+      AND available_date <= (SELECT cutoff FROM cut)
+    GROUP BY ticker, apply_date
+),
+po_suf AS (
+    SELECT ticker, apply_date,
+           product(pof) OVER (PARTITION BY ticker ORDER BY apply_date
+                              ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS cum_po
+    FROM po
+)
 SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_kind,
        p.basis, p.corp_action_pending,
        c.cum_price_factor, c.cum_share_factor,
-       p.open  * c.cum_price_factor AS adj_open,
-       p.high  * c.cum_price_factor AS adj_high,
-       p.low   * c.cum_price_factor AS adj_low,
-       p.close * c.cum_price_factor AS adj_close
+       p.open  * c.cum_price_factor * coalesce(s.cum_po, 1) AS adj_open,
+       p.high  * c.cum_price_factor * coalesce(s.cum_po, 1) AS adj_high,
+       p.low   * c.cum_price_factor * coalesce(s.cum_po, 1) AS adj_low,
+       p.close * c.cum_price_factor * coalesce(s.cum_po, 1) AS adj_close
 FROM {price_daily} p
 JOIN v_cum_adj(as_of, lag_override := lag_override) c ON c.ticker = p.ticker AND c.date = p.date
+ASOF LEFT JOIN po_suf s ON s.ticker = p.ticker AND p.date < s.apply_date
 """,
     # 원거래량 × 누적 주식수계수 — 곱셈이다(FX-2-010 · FX-N-006). 나눗셈이면 분할 전 거래량이
     # 1/2500 이 된다.
@@ -242,14 +316,15 @@ JOIN v_cum_adj(as_of, lag_override := lag_override) c ON c.ticker = p.ticker AND
 """,
     # 전방 조정가 = 원주가 × 그날까지 접힌 누적 주식수계수 (FIELD_MAP price.adj_close, S21 후속).
     # 곱셈이다 — 나눗셈이면 분할 뒤 가격이 1/2500 로 떨어진다(FX-N-006 류, test_equity_s06_views).
+    # ⑤(e1.26.0): ÷ 누적 가격 전용 계수 — 표 price_adj_daily 와 같은 식·같은 계산 순서.
     "v_adj_price_fwd": _FWD_CTE + """
 SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
        basis, corp_action_pending,
        cum_price_factor, cum_share_factor, available_date,
-       open  * cum_share_factor AS adj_open,
-       high  * cum_share_factor AS adj_high,
-       low   * cum_share_factor AS adj_low,
-       close * cum_share_factor AS adj_close
+       open  * cum_share_factor / cum_price_only_factor AS adj_open,
+       high  * cum_share_factor / cum_price_only_factor AS adj_high,
+       low   * cum_share_factor / cum_price_only_factor AS adj_low,
+       close * cum_share_factor / cum_price_only_factor AS adj_close
 FROM fwd
 """,
     # 전방 조정 거래량 = 원거래량 × 누적 가격계수(= ÷ 누적 주식수계수) — 분할 뒤 거래량을 분할 전
@@ -535,10 +610,10 @@ SELECT ticker, date,
        bonus_window, available_date, available_basis
 FROM bal
 """,
-    # 원장이 접지 못한 사건(#220·#369) — 원장 표(`price_adj_daily`)가 그날 층 이동을 접지 못한
-    # (ticker, 적용일)이다. "접지 못함" 술어의 정본이고, 소비자는 처리만 고른다: `v_adj_close` 는
-    # 적용일 행을 가리고(팩터 경로), 백테스트 데이터 포트(backend `equity_duckdb`)는 `factor_ok`
-    # 가 거짓인 행만 적용일 KRX 기준가 비로 보유 수량을 조정한다(손익 경로).
+    # 보유 수량 축에서 원장이 접지 못한 사건(#220·#369). 백테스트 데이터 포트는
+    # factor_ok 가 거짓인 행만 적용일 KRX 기준가 비로 보유 수량을 조정한다.
+    # 가격 전용 보정(⑤)은 factor_ok 를 바꾸지 않으므로 이 사건 집합도 바꾸지 않는다.
+    # 가격 축 가림은 v_adj_close 가 price_resolution 으로 별도로 판정한다.
     #   ① KRX 기준가로 적용일을 정한(`apply_basis = 'krx_base_price'`) ok 계수가 늦게 공개된
     #      사건(`available_date > apply_date`) — fold_date 가 적용일 다음 세션이라 적용일 하루에
     #      스파이크가 선다(실원장 2020-03-19 이후 57건, 최대 38배). 다음 행부터는 접혀 있다.
@@ -546,7 +621,8 @@ FROM bal
     #      낸 사건. 적용일에 층이 영구히 바뀐다(295건, 적용일 점프 중앙값 약 2.9배).
     #   `factor_ok` 는 그 (ticker, 적용일)에 ok 계수가 하나라도 있는가다. 참이면 층 이동은 그 계수가
     #   설명한다 — ① 이거나, 기준가가 반증해 ② 로 내려간 사건과 같은 날 그 기준가로 선 ok 계수다
-    #   (`sql/adj_factor.sql` 의 conflict·bp_new). 거짓이면 어떤 계수도 그날 층 이동을 접지 않는다.
+    #   (`sql/adj_factor.sql` 의 conflict·bp_new). 거짓이면 주식수 계수가 그날 층 이동을
+    #   설명하지 않는다(가격 전용 보정과 별개).
     #   `unknown_price_only`(유상 권리락 등 MVP 밖 기준가 변화, 적용일 점프 중앙값 약 6%)와 명목일
     #   사건(no_price_match·ratio_null 등 — 적용일에 점프가 거의 없다)은 싣지 않는다. 명목일·가격
     #   매칭으로 적용일을 정한 늦은 ok 계수도 싣지 않는다 — 그날 기준가 재설정이 없어 아래 PIT 근거가
@@ -564,20 +640,30 @@ HAVING bool_or((factor_ok AND available_date > apply_date AND apply_basis = 'krx
                OR (NOT factor_ok AND factor_source = 'krx_base_inconsistent'))
 """,
     # 수정주가의 조정 공백(#220). S23 표 `price_adj_daily` 의 adj_close 를 그대로 내되, 원장이
-    # 그날 사건을 접지 못한 **적용일 행**(`v_unfolded_event`)만 결측으로 낸다 — 그 행의 원주가는
+    # 가격 축 사건을 접지 못한 **적용일 행**만 결측으로 낸다 — 그 행의 원주가는
     # 이미 사건 뒤 척도인데 누적 계수는 사건 전이라 값이 틀린다. 표는 parquet 소비자와 조정 규칙의
     # 저장본이라 그대로 두고, 가림은 이 뷰(작은 사건 집합과의 조인)가 한다. 창 연산은 창 안에
     # 결측이 하나라도 있으면 결측이라, 가린 행을 품는 창이 모두 결측이 된다(틀린 값 대신 결측).
     # 가림은 값을 바꾸지 않고 결측만 만들어 그날 모르는 정보를 새지 않는다. 공개 전 계수를 접는 것은
     # 아니다(fold 규칙은 S23 그대로). as_of 는 행 절단으로만 작용한다. 사건 술어의 PIT 예외가 닿는
     # 셀은 적용일 as_of 에 랙 0 으로 그 행을 읽는 셀뿐이다(기본 12-1 모멘텀은 랙 21 이라 무관).
+    # ⑤로 가격이 해결된 not-ok 사건은 가리지 않는다. 늦은 ok 계수의 PIT 가림은 유지한다.
+    # 같은 날 여러 사건이 있어도 미해결 사건 하나면 가리며, 가격 행을 중복시키지 않는다.
     "v_adj_close": """
 SELECT a.ticker, a.date,
        CASE WHEN g.ticker IS NULL THEN a.adj_close END AS adj_close,
        g.ticker IS NOT NULL                             AS adj_gap,
        a.available_date
 FROM {price_adj_daily} a
-LEFT JOIN v_unfolded_event(as_of) g ON g.ticker = a.ticker AND g.apply_date = a.date
+LEFT JOIN (
+    SELECT ticker, apply_date
+    FROM {adj_factor}
+    WHERE apply_date <= as_of
+    GROUP BY ticker, apply_date
+    HAVING bool_or((factor_ok AND available_date > apply_date AND apply_basis = 'krx_base_price')
+                   OR (NOT factor_ok AND factor_source = 'krx_base_inconsistent'
+                       AND price_resolution = 'unresolved'))
+) g ON g.ticker = a.ticker AND g.apply_date = a.date
 WHERE a.date <= as_of
 """,
 }

@@ -50,6 +50,19 @@ def test_커밋된_빌드_없으면_예외(tmp_path: Path) -> None:
         inputs.resolve(tmp_path / "stage", "stg_none")
 
 
+def test_resolve는_build_id를_주면_builds에서_그_판을_고른다(tmp_path: Path,
+                                                       make_stage_tree) -> None:
+    """인계 이력이 가리킨 판으로 고정하는 경로(compat·fi `--builds-from`) — current 가 아니다."""
+    make_stage_tree(tmp_path, "stg_sample", ROWS, build_id="b_stage_0001")
+    new = make_stage_tree(tmp_path, "stg_sample", ROWS[:1], build_id="b_stage_0002")
+    pb = inputs.resolve(new.stage_root, "stg_sample", "b_stage_0001")
+    assert pb.build_id == "b_stage_0001"
+    assert pb.partition_paths == (new.table_root / "v=b_stage_0001",)
+    assert inputs.resolve(new.stage_root, "stg_sample").build_id == "b_stage_0002"
+    with pytest.raises(FileNotFoundError, match="build_id=b_stage_0000 .*b_stage_0002"):
+        inputs.resolve(new.stage_root, "stg_sample", "b_stage_0000")
+
+
 def test_pin은_하드링크다(tmp_path: Path, make_stage_tree) -> None:
     tree = make_stage_tree(tmp_path, "stg_sample", ROWS)
     equity_root = tmp_path / "equity"

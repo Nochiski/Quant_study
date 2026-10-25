@@ -1,7 +1,8 @@
 """원장 5개의 "D 일자 수집 완료" 판정. 플랜 P1 Task 1.7.
 
 기대치는 전부 2026-09-09 서버 실측(reviews/2026-09-09-daily-findings-A §6·B §7)이다. 판정 3등급:
-  required — 실패면 rc 2(뒤 단계로 안 넘어간다)
+  required — 실패면 rc 2(뒤 단계로 안 넘어간다). 필수 표(`REQUIRED_NO_SKIP`)의 검사는 SKIP 도 실패(K1-7b),
+             거래일에 리포트에서 빠져도 실패(K1-7c)
   warn     — 로그·알림만
   halt     — 중단 신호(DEFECT-A-01 휴장 오확정 · DEFECT-A-03 KIS 중복 증식 · v3 키 사용): rc 2 + crit
 종목 단위 테이블은 절대 하한이 아니라 **요청 유니버스 대비 비율**로 본다(리뷰 B2). 결과는 JSON 으로
@@ -15,10 +16,15 @@ import json
 import os
 import sqlite3
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import Enum
 
-from backfill_wise import REQ_COVERED, REQ_NONE  # 종목당 일일 요청 수의 정본
+from backfill_wise import (  # 종목당 일일 요청 수·실패 회복 규칙의 정본(커버는 런 날짜로 고른다)
+    REQ_NONE,
+    SUPPLEMENT_RUN_MODE,
+    last_call_status,
+    req_covered_on,
+)
 from daily import calendar as _cal
 
 KST = dt.timezone(dt.timedelta(hours=9))
@@ -76,6 +82,61 @@ class HealthReport:
         return head
 
 
+# ── 필수 검사 표(K1-7b · N-42 Q4 '필수 검사 SKIP = 실패') ───────────────────────────────────
+# 이 표의 검사가 판정을 못 하면(SKIP) 실패로 센다. 달력상 거래일에 리포트에서 아예 빠져도(원장 파일·표 부재로
+# 검사가 안 돎) 실패다(K1-7c). `run` 이 FAIL 행으로 싣는다 — 리포트 JSON 을 읽는 일일 리포트·워치독도 같은
+# 판정을 보게 한다. 운영 결정으로 뺄 때는 `--skip <소스>` 를 쓴다(그 소스는 판정하지 않고 `<소스>.skipped`
+# 기록만 남는다).
+# 기준: 모델이 쓰는 원천(KRX·키움·WISE·DART)의 완결성 검사 = 그 네 원천의 REQUIRED 검사 전부
+# (tests/test_daily_health.py 가 이 표와 실제 REQUIRED 검사 이름이 같은지 대조한다). 값 = 근거 한 줄.
+# 기준 밖이라 SKIP 이 종전대로 통과인 것: KIS `kis.credit.fresh` · WICS `wics.*` · WARN·HALT 등급 전부.
+REQUIRED_NO_SKIP: dict[str, str] = {
+    "krx.ingest_log": "KRX 7 엔드포인트 응답 — 가격·주식수·지수·종목정보의 정본(price_daily·universe_daily·"
+                      "trading_calendar)",
+    "krx.rows": "KRX 시장별 행수 — 빠진 종목은 fi_universe 에서 가격 없음(no_price)으로 조용히 빠진다",
+    "kiwoom.ka10060.rows": "투자자별 순매수 — equity flow_daily → fi_flows 수급 입력",
+    "kiwoom.ka10008.rows": "외국인 보유 — 08:10 머지의 게이트 TR 이고 stale_pct·krx_cross 의 모집단",
+    "kiwoom.ka20068.rows": "대차 — 06:00 키움 수집이 빠진 날을 08:10 에 막는 유일한 검사(TECH_DEBT B-62)",
+    "kiwoom.ka10008.stale_pct": "키움이 전날 값을 되풀이한 오염(08-24 99.0%)을 잡는다 — D-1 대조가 없으면 못 가린다",
+    "kiwoom.krx_cross": "키움 D 행이 KRX D 와 같은 날 값인지(거래량 전건 일치) — 대조 0건이면 날짜 오염을 못 가린다",
+    "kiwoom.master": "ka10099 마스터 → universe_daily 정지·관리 상태(fi_universe is_halted·is_admin)",
+    "dart.disclosure.rows": "공시 목록 → universe_daily 공시 신호·disclosure_version(fi filing_late)",
+    "dart.docs": "정기보고서·분할/병합 문서 → 문서층 → fin_std 재무 기간·판본",
+    "wise.run": "WISE 스냅샷 런 완결 — 컨센서스·추정기관 수(유니버스 규칙)·WISE 재무 입력",
+    "wise.req_identity": "요청 수 항등식 — 커버·무커버 종목 중 빠진 요청이 없다",
+    "wise.raw": "원장 행수 = 항등식 기대치 — 받은 응답이 원장에 다 실렸다",
+}
+
+
+def _skip_is_fail(c: Check) -> Check:
+    """필수 표의 검사가 SKIP 이면 FAIL 로 바꾼다(K1-7b) — 판정 못 한 날을 통과로 세지 않는다."""
+    why = REQUIRED_NO_SKIP.get(c.name)
+    if c.status is not Status.SKIP or why is None:
+        return c
+    note = (f"필수 검사를 판정하지 못했다(SKIP) — `--skip {c.name.split('.', 1)[0]}` 기록이 없어 실패로 "
+            f"센다(K1-7b · N-42 Q4). 근거: {why}")
+    return replace(c, status=Status.FAIL, expected=f"{c.expected} · 필수 검사 SKIP 불가(K1-7b)",
+                   detail=f"{note} | {c.detail}" if c.detail else note)
+
+
+def _not_run(checks: list[Check], skip: frozenset[str], no_file: dict[str, str]) -> list[Check]:
+    """필수 표 항목 중 리포트에 없는 것을 FAIL 행으로 만든다(K1-7c) — 원장 파일·표가 없어 검사가 아예 안 돈
+    날을 통과로 세지 않는다. `--skip` 한 소스는 뺀다. 거래일에 KRX 가 휴장 응답을 준 날은 시세가 없어
+    `krx.rows` 가 안 나오는데, 그날은 `krx.holiday_misfire` HALT 가 이미 세우므로 겹쳐 싣지 않는다."""
+    have = {c.name for c in checks}
+    misfire = any(c.name == "krx.holiday_misfire" and c.status is Status.FAIL for c in checks)
+    out: list[Check] = []
+    for name, why in REQUIRED_NO_SKIP.items():
+        src = name.split(".", 1)[0]
+        if name in have or src in skip or (misfire and name == "krx.rows"):
+            continue
+        reason = f"원장 파일 없음({no_file[src]})" if src in no_file else "원장 표 없음 또는 선행 조건 미충족"
+        out.append(Check(name, Level.REQUIRED, Status.FAIL, None,
+                         f"필수 검사가 리포트에 있어야 한다(K1-7c) — 운영 결정으로 뺄 때만 --skip {src}",
+                         f"실행되지 않음 — {reason}. 근거: {why}"))
+    return out
+
+
 @dataclass
 class Paths:
     krx: str
@@ -83,6 +144,7 @@ class Paths:
     kis: str
     dart: str
     wise: str
+    wiseindex: str = ""         # WICS 주간 스냅샷 원장(플랜 wics-weekly T1). 없으면 판정하지 않는다
     calendar: str = _cal.DEFAULT_PATH
     universe_state: str = ""
     prev_report: str = ""       # 전날 리포트(JSON) — KIS 중복쌍 증가분 비교용
@@ -92,7 +154,7 @@ class Paths:
         raw = os.path.join(home, "data", "raw")
         return cls(krx=os.path.join(raw, "krx.db"), kiwoom=os.path.join(raw, "kiwoom.db"),
                    kis=os.path.join(raw, "kis.db"), dart=os.path.join(raw, "dart.db"),
-                   wise=os.path.join(raw, "wisereport.db"),
+                   wise=os.path.join(raw, "wisereport.db"), wiseindex=os.path.join(raw, "wiseindex.db"),
                    calendar=os.path.join(home, "data", "calendar", "kis_holidays.json"),
                    universe_state=os.path.join(home, "data", "daily", "universe_kw.json"))
 
@@ -217,6 +279,37 @@ def check_krx_corp_actions(con: sqlite3.Connection, d: str, d_prev: str) -> Chec
                  f"후보 {len(items)}건 기록 — adj_factor·corp_event 가 매일 대조한다")
 
 
+# 08:10 `daily_build.sh` krx_step 의 재수집 창 폭(`prev_trading_day(D, n=10)` ~ D)과 같아야 한다 —
+# 그 창의 평일은 전부 KRX 를 다시 치므로(`backfill_krx.bdays`) 휴장 평일의 응답도 이 창 안에 남는다.
+KRX_RECHECK_SESSIONS = 10
+# K1-9 ② 가 보는 '시세' 엔드포인트 — `backfill_krx.EPS` 의 일별 매매(`*_trd`) 5개. 종목기본정보(`*_isu_base_info`)는
+# 시세가 아니라 휴장일에도 행을 줄 수 있어 뺀다. 정본은 backfill_krx.EPS(import 시점에 키를 요구해 여기서
+# 들여오지 못한다) — tests/test_daily_health.py 가 부분집합인지 대조한다.
+KRX_PRICE_ENDPOINTS = ("sto/stk_bydd_trd", "sto/ksq_bydd_trd", "idx/kospi_dd_trd", "idx/kosdaq_dd_trd",
+                       "etp/etf_bydd_trd")
+
+
+def check_krx_holiday_traded(con: sqlite3.Connection, d: str, cal: _cal.Calendar) -> Check:
+    """반대 방향 오판(K1-9 ②) — 달력상 휴장일에 KRX 시세 엔드포인트가 `status='ok'`·행 > 0 이면 중단.
+
+    `krx.holiday_misfire` 는 'KRX 휴장 응답 ↔ 달력 거래일' 한 방향만 본다. 달력이 거래일을 휴장으로
+    잘못 들고 있으면 체인은 그날을 건너뛰고(D 에서 빠짐) KRX 만 그날 시세를 남긴다 — 그 행이 달력이
+    틀렸다는 직접 증거다.
+    """
+    dd = dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))
+    lo = cal.prev_trading_day(dd, n=KRX_RECHECK_SESSIONS).strftime("%Y%m%d")
+    rows = con.execute("SELECT DISTINCT bas_dd FROM ingest_log WHERE bas_dd BETWEEN ? AND ? "
+                       f"AND status = 'ok' AND n_rows > 0 AND endpoint IN ({','.join('?' * len(KRX_PRICE_ENDPOINTS))}) "
+                       "ORDER BY 1", (lo, d, *KRX_PRICE_ENDPOINTS)).fetchall()
+    traded = [str(b) for (b,) in rows
+              if not cal.is_trading_day(dt.date(int(str(b)[:4]), int(str(b)[4:6]), int(str(b)[6:8])))]
+    return Check("krx.holiday_traded", Level.HALT, Status.FAIL if traded else Status.PASS, traded,
+                 f"0 KRX price ok rows on a calendar holiday in {lo}~{d} (K1-9 ②, 08:10 재수집 창, "
+                 f"시세 엔드포인트 {len(KRX_PRICE_ENDPOINTS)}개)",
+                 f"달력상 휴장일 {traded} 에 KRX 시세가 있다 — 달력 오판 의심, 원장 kis_holiday 원문과 "
+                 f"KRX 응답을 대조할 것" if traded else "")
+
+
 # ── KRX (A §6-1) ───────────────────────────────────────────────────────────
 def check_krx(con: sqlite3.Connection, d: str, d_prev: str, cal: _cal.Calendar) -> list[Check]:
     out: list[Check] = []
@@ -232,6 +325,7 @@ def check_krx(con: sqlite3.Connection, d: str, d_prev: str, cal: _cal.Calendar) 
     misfire = n_hol > 0 and cal.is_trading_day(dd)
     out.append(Check("krx.holiday_misfire", Level.HALT, Status.FAIL if misfire else Status.PASS,
                      n_hol, "0 holiday rows on a calendar trading day (DEFECT-A-01)"))
+    out.append(check_krx_holiday_traded(con, d, cal))
     if n_ok == 7:
         cnt = {}
         for tbl in ("krx_stk_bydd_trd", "krx_ksq_bydd_trd", "krx_stk_isu_base_info", "krx_ksq_isu_base_info",
@@ -326,18 +420,22 @@ def check_kis(con: sqlite3.Connection, d_prev: str, d_prev3: str, d_minus40: str
         out.append(Check("kis.credit.fresh", Level.REQUIRED, Status.FAIL, max_deal or None, expected,
                          f"신용잔고 수집이 멈춰 있다 — max(deal_date)={max_deal or '없음'}, "
                          f"두 세션 이상 뒤처졌다(kis_daily 의 status·rc 를 확인한다)"))
-    row = con.execute("SELECT COUNT(*), COUNT(DISTINCT req_ticker) FROM kis_credit_balance WHERE deal_date=?", (d_prev,)).fetchone()
-    n, tk = (int(row[0]), int(row[1])) if row else (0, 0)
-    if n_req <= 0:
-        out.append(Check("kis.credit.rows", Level.WARN, Status.SKIP, n, "요청 유니버스 크기 미상"))
-    else:
-        ratio = n / n_req
-        out.append(Check("kis.credit.rows", Level.WARN, Status.PASS if (ratio >= 0.95 and tk == n) else Status.FAIL,
-                         {"n": n, "distinct": tk, "requested": n_req, "ratio": round(ratio, 4)},
-                         f"deal_date={d_prev} rows/requested >= 0.95 and distinct = rows (D-2, 실측: 조회일 기준 T-3 까지 온다)"))
     from daily import (
-        kis_daily,  # payload 동일 중복만 센다(정정은 제외) — 정의를 한 곳에 둔다
+        kis_daily,  # 완료 판정·payload 동일 중복의 정의를 수집기와 한 곳에 둔다
     )
+    if n_req <= 0:
+        out.append(Check("kis.credit.rows", Level.WARN, Status.SKIP, None, "요청 유니버스 크기 미상"))
+    else:
+        # 수집기와 같은 판정(플랜 2026-09-30 T-K2). 사후 점검이라 "이번 런 응답" 이 없어 원장의 판정일 행으로
+        # 세고, 요청 종목 목록이 상태 파일에 없어 기대 집합을 요청 유니버스로 좁히지 않는다.
+        g = kis_daily.gate(con, d_prev, n_req)
+        out.append(Check("kis.credit.rows", Level.WARN, Status.PASS if g.ok else Status.FAIL,
+                         {"expected": g.n_expected, "got": g.n_hit, "ratio": round(g.ratio, 4),
+                          "distinct_ok": g.n_distinct_tickers == g.n_rows, "requested": n_req},
+                         f"deal_date={d_prev}(D-2) 받은 종목 / 직전 {kis_daily.EXPECTED_SESSIONS}세션 신용잔고 종목 "
+                         f">= {kis_daily.GATE_MIN_RATIO} · 종목당 1행 (이력이 없으면 요청 유니버스 대비 "
+                         f">= {kis_daily.BOOTSTRAP_MIN_RATIO})",
+                         "" if g.ok else g.detail))
     pairs = kis_daily.dup_pairs(con, d_minus40)
     if prev_pairs is None:
         out.append(Check("kis.credit.dup_growth", Level.HALT, Status.SKIP, pairs, "전날 리포트 없음 — 기준선 기록"))
@@ -376,40 +474,91 @@ def check_dart(con: sqlite3.Connection, d: str, trading_day: bool, kst_day_start
 
 # ── WISE (B §7-4) ──────────────────────────────────────────────────────────
 def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check]:
-    """WISE 스냅샷은 대상일 D 저녁 18:05 에 찍힌다(결정 V2-3) — 판정은 실행일이 아니라 D 의 KST 날짜로 한다.
+    """WISE 스냅샷은 대상일 D 의 06:00 체인에서 찍힌다(N-53 — V2-3 의 D 18:05 에서 되돌림. 기준일은 둘 다
+    전 거래일) — 판정은 실행일이 아니라 D 의 KST 날짜로 한다. D 의 확정판·그날 장 마감 판이 읽은 스냅샷이다.
 
-    전환기에는 옛 방식(D+1 아침 06:00) 스냅샷만 있을 수 있어, D 행이 없으면 next_iso(D+1) 로 폴백하고
-    어느 쪽을 읽었는지 `wise.snapshot_day` 에 남긴다. 둘 다 없으면 종전대로 FAIL.
+    D 행이 없으면 next_iso(D+1 아침 06:00) 로 폴백해 수집이 살아 있는지를 판정하되, `wise.snapshot_day` 를
+    FAIL(warn 등급)로 남긴다 — D 의 판들은 전날 수집분을 읽었다(N-12 허용 1거래일). 06:00 체인에선 D+1 아침 런이
+    판정 때 늘 있어, 폴백을 PASS 로 두면 D 수집 결손이 조용히 묻힌다. 둘 다 없으면 종전대로 FAIL.
+    주말 보강판 수집 런(런 로그 mode = `SUPPLEMENT_RUN_MODE`, N-45 — 휴장 연속 첫 휴일 = D+1 아침)은 세지 않는다.
+    세면 폴백이 휴일 보강 런을 D 의 수집으로 읽어 wise.run 이 그 런만으로 판정된다.
+
+    요청 항등식(covered·none)의 입력은 `ws_call_log`(append-only)다 — `ws_coverage` 는 종목당 1행
+    덮어쓰기라 이력이 없다(DQ-9, 2026-09-26 실측). 어느 표에서 셌는지는 검사 값의 `source` 에 남는다.
+
+    그날 런은 모두 합쳐 본다(A-03). 마지막 런 1행만 보면 중단 뒤 재실행 런의 n_req 가 남은
+    종목분뿐이라 항등식이 반드시 깨지고, 앞 런의 실패는 재실행으로 회복돼도 남았다. 런 로그 합이
+    그날 호출을 1:1 로 담으면(런이 하나뿐인 평소 날) 판정은 종전과 같다. 아니면 호출 원장으로
+    본다 — 실패는 키마다 마지막 호출(`last_call_status`), 항등식 실제값은 고유 (종목, ep, pkey) 수.
     """
     out: list[Check] = []
     if not _has_table(con, "ws_run_log"):
         return out
-    sql = ("SELECT run_at, mode, n_stocks, n_req, n_ok, n_bad FROM ws_run_log "
-           "WHERE date(run_at, '+9 hours') = ? ORDER BY run_at DESC LIMIT 1")
-    day, run = d_iso, con.execute(sql, (d_iso,)).fetchone()
-    if run is None:
-        day, run = next_iso, con.execute(sql, (next_iso,)).fetchone()
-    out.append(Check("wise.snapshot_day", Level.WARN, Status.SKIP if run is None else Status.PASS,
-                     None if run is None else ("target_day" if day == d_iso else "next_morning"),
-                     f"D({d_iso}) 저녁 스냅샷 — 없으면 D+1({next_iso}) 아침 스냅샷으로 폴백(전환기)"))
-    if run is None:
+    sql = ("SELECT mode, n_stocks, n_req, n_ok, n_bad FROM ws_run_log "
+           "WHERE date(run_at, '+9 hours') = ? AND coalesce(mode, '') <> ?")
+    day, runs = d_iso, con.execute(sql, (d_iso, SUPPLEMENT_RUN_MODE)).fetchall()
+    if not runs:
+        day, runs = next_iso, con.execute(sql, (next_iso, SUPPLEMENT_RUN_MODE)).fetchall()
+    status = Status.SKIP if not runs else (Status.PASS if day == d_iso else Status.FAIL)
+    out.append(Check("wise.snapshot_day", Level.WARN, status,
+                     ("target_day" if day == d_iso else "next_morning") if runs else None,
+                     f"D({d_iso}) 06:00 스냅샷 — 없으면 D+1({next_iso}) 아침 스냅샷으로 폴백(warn — D 의 판들은 "
+                     "전날 수집분을 읽었다)"))
+    if not runs:
         out.append(Check("wise.run", Level.REQUIRED, Status.FAIL, None,
                          f"{d_iso}(또는 폴백 {next_iso}) 실행 1건 (full, n_bad 0)"))
         return out
-    _, mode, n_stocks, n_req, n_ok, n_bad = run
-    out.append(Check("wise.run", Level.REQUIRED, Status.PASS if (mode == "full" and n_bad == 0 and n_ok == n_req) else Status.FAIL,
-                     {"mode": mode, "n_stocks": n_stocks, "n_req": n_req, "n_ok": n_ok, "n_bad": n_bad}, "mode=full, n_bad=0, n_ok=n_req"))
+    modes = sorted({str(r[0]) for r in runs})
+    n_stocks, n_req, n_ok, n_bad = (sum(int(r[i] or 0) for r in runs) for i in range(1, 5))
     cov = none = -1
-    if _has_table(con, "ws_coverage"):
-        # 그 런이 갱신한(checked_at = 스냅샷 날짜 KST) 커버리지 행만 센다 — 런 뒤에 상태가 바뀐 종목이 있으면
-        # 전체 집계로는 등식이 깨진다(09-09 실측: 전체 808/1758 vs 당일 807/1756, n_req 15,617 은 후자와 일치).
+    src = basis = None
+    last: dict[tuple[str, str, str], str] | None = None
+    n_calls = 0
+    if _has_table(con, "ws_call_log"):
+        # 항등식 입력은 append-only 호출 원장이다. `ws_coverage` 는 cmp_cd PK + INSERT OR REPLACE 라
+        # (backfill_wise.py:66-69·355) 나중 런이 checked_at 을 전건 덮어써 **판정 이력이 남지 않는다** —
+        # 09-26(토) 수동 full 뒤 `--date 20260923` 재판정이 covered 0·none 0 으로 FAIL 했다(DQ-9 실측).
+        # 재무 화면 cF3002 는 커버 종목만 요청하므로 그날 cF3002 를 부른 종목 수가 곧 covered 다
+        # (status 무관 — 커버 판정의 결과가 아니라 "요청했다"는 사실을 센다).
+        cov = _count(con, "SELECT COUNT(DISTINCT cmp_cd) FROM ws_call_log WHERE ep='cF3002' AND date(ts, '+9 hours')=?", (day,))
+        n_stocks_day = _count(con, "SELECT COUNT(DISTINCT cmp_cd) FROM ws_call_log WHERE date(ts, '+9 hours')=?", (day,))
+        none = n_stocks_day - cov
+        src, basis = "call_log", "ws_call_log 호출 원장(cF3002 종목=covered)"
+        last = last_call_status(con, day)
+        n_calls = _count(con, "SELECT COUNT(*) FROM ws_call_log WHERE date(ts, '+9 hours')=?",
+                         (day,))
+    elif _has_table(con, "ws_coverage"):
+        # 전환기 폴백 — 호출 원장이 없던 옛 원장 사본. 그 런이 갱신한(checked_at = 스냅샷 날짜 KST) 행만 센다
+        # (09-09 실측: 전체 808/1758 vs 당일 807/1756, n_req 15,617 은 후자와 일치).
         cov = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='covered' AND date(checked_at, '+9 hours')=?", (day,))
         none = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='none' AND date(checked_at, '+9 hours')=?", (day,))
-        expected = cov * REQ_COVERED + none * REQ_NONE
-        out.append(Check("wise.req_identity", Level.REQUIRED, Status.PASS if expected == n_req else Status.FAIL,
-                         {"expected": expected, "actual": n_req, "covered": cov, "none": none},
-                         f"{day} checked_at 기준 covered×{REQ_COVERED} + none×{REQ_NONE} == n_req "
-                         "(무커버 4 = 목록 1 + 3개년 cF5001, 09-10 검수 D H1 이후)"))
+        src, basis = "coverage", "ws_coverage.checked_at(호출 원장 없음 — 전환기 폴백)"
+    # 런 로그 합이 그날 호출의 1:1 장부인가 — 같은 키를 두 번 부르지 않았고(재수집 없음) 끝난 런들의
+    # 종목 수가 그날 종목 수와 같다(끊긴 런의 종목 없음). 그러면 종전대로 런 로그 합으로 판정한다.
+    n_keys = 0 if last is None else len(last)
+    by_calls = last is not None and not (n_stocks == cov + none and n_keys == n_calls)
+    unrecovered = None if last is None else sum(v != "ok" for v in last.values())
+    # 호출이 하나도 없는 날(유니버스 0 → 대상 0 런 로그만)은 완료가 아니다(종전엔 런 로그 없어 FAIL)
+    called = n_req > 0 or n_keys > 0
+    run_ok = called and (unrecovered == 0 if by_calls else (n_bad == 0 and n_ok == n_req))
+    out.append(Check("wise.run", Level.REQUIRED,
+                     Status.PASS if (modes == ["full"] and run_ok) else Status.FAIL,
+                     {"mode": ",".join(modes), "runs": len(runs), "n_stocks": n_stocks,
+                      "n_req": n_req, "n_ok": n_ok, "n_bad": n_bad, "unrecovered": unrecovered,
+                      "basis": "call_log" if by_calls else "run_log"},
+                     "그날 런 전부 mode=full · 호출 1건 이상 · 런 로그 합 n_bad=0, n_ok=n_req "
+                     "(재실행·끊긴 런이 있으면 호출 원장에서 키마다 마지막 호출 ok — 미회복 0)"))
+    req_cov = req_covered_on(day)          # 재무 추가 3콜(10-01~) 전 런은 15
+    if src is not None:
+        expected = cov * req_cov + none * REQ_NONE
+        actual = n_keys if by_calls else n_req
+        out.append(Check("wise.req_identity", Level.REQUIRED,
+                         Status.PASS if expected == actual else Status.FAIL,
+                         {"expected": expected, "actual": actual, "covered": cov, "none": none,
+                          "source": src},
+                         f"{day} {basis} 기준 covered×{req_cov} + none×{REQ_NONE} == n_req "
+                         "(무커버 4 = 목록 1 + 3개년 cF5001, 09-10 검수 D H1 이후) · n_req 는 런 "
+                         "로그 합, 재실행·끊긴 런이 있으면 그날 고유 (종목, ep, pkey) 수"))
         rate = cov / (cov + none) if (cov + none) else None
         out.append(Check("wise.cov_rate", Level.WARN, Status.SKIP if rate is None else (Status.PASS if rate >= 0.25 else Status.FAIL),
                          None if rate is None else round(rate, 3), ">= 0.25 (실측 0.315; 미만이면 페이지 개편 의심)"))
@@ -417,21 +566,81 @@ def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check
         row = con.execute("SELECT COUNT(*), COUNT(DISTINCT cmp_cd) FROM ws_raw WHERE fetched_date=?", (day,)).fetchone()
         n, s = (int(row[0]), int(row[1])) if row else (0, 0)
         # 절대 밴드(15,500~15,700 · 2,560~2,570)는 무커버 4콜 전환(09-10)과 규모구분 갱신(09-11: 2,563→2,610)에
-        # 모두 오탐을 냈다 — 기대치는 커버리지 항등식과 유니버스에서 유도한다. 커버리지 표가 없으면 하한만 본다.
+        # 모두 오탐을 냈다 — 기대치는 같은 covered·none(위 항등식과 동일 출처)에서 유도한다. 출처가 없으면 하한만 본다.
         if cov >= 0 and none >= 0:
-            exp_rows, exp_stocks = cov * REQ_COVERED + none * REQ_NONE, cov + none
+            exp_rows, exp_stocks = cov * req_cov + none * REQ_NONE, cov + none
             ok = n == exp_rows and s == exp_stocks and s >= 2400
-            expected = f"rows == covered×{REQ_COVERED} + none×{REQ_NONE} ({exp_rows:,}) · stocks == covered+none ({exp_stocks:,}) · stocks >= 2,400"
+            expected = (f"{basis} 기준 rows == covered×{req_cov} + none×{REQ_NONE} ({exp_rows:,}) · "
+                        f"stocks == covered+none ({exp_stocks:,}) · stocks >= 2,400")
         else:
             ok = n >= 15000 and s >= 2400
-            expected = "커버리지 표 없음 — rows >= 15,000 · stocks >= 2,400"
+            expected = "호출 원장·커버리지 표 없음 — rows >= 15,000 · stocks >= 2,400"
         out.append(Check("wise.raw", Level.REQUIRED, Status.PASS if ok else Status.FAIL, {"rows": n, "stocks": s}, expected))
+    return out
+
+
+WICS_FRESH_MAX_DAYS = 9          # 주 1회(토요일, dt=금요일) + 연휴 여유 — 다음 금요일 저녁 D 기준 7일
+WICS_COVERAGE_MIN = 0.85         # 09-18 실측 89.1% (WICS 는 관리·환기·우선주·외국주를 뺀다)
+
+
+def _wics_tickers(body: bytes) -> set[str]:
+    import zlib
+    rows = json.loads(zlib.decompress(body).decode("utf-8")).get("list") or []
+    return {str(r.get("CMP_CD")) for r in rows if r.get("CMP_CD")}
+
+
+def check_wics(con: sqlite3.Connection, krx: sqlite3.Connection | None, d: str, dd: dt.date) -> list[Check]:
+    """주간 WICS 원장(`wiseindex.db`) — 최신 스냅샷의 완결성(REQUIRED) · 나이(WARN) · KRX 커버리지(WARN).
+
+    일일 건전성이 주간 축을 매일 FAIL 로 보면 안 되므로 나이·커버리지는 WARN 이고, 완결성만 REQUIRED 다
+    (플랜 wics-weekly §5). 코드 목록의 정본은 수집기(`wics_snapshot.L1/L2`)다."""
+    from wics_snapshot import L1, L2
+    if not _has_table(con, "wics_raw"):
+        return [Check("wics.raw", Level.REQUIRED, Status.SKIP, None, "wics_raw 테이블 없음 — 첫 스냅샷 전")]
+    latest = _one(con, "SELECT max(dt) FROM wics_raw WHERE http_status = 200 AND n_rows > 0")
+    if latest is None:
+        return [Check("wics.integrity", Level.REQUIRED, Status.FAIL, None, "200·행>0 스냅샷이 하나도 없다")]
+    latest = str(latest)
+    have: dict[str, tuple[int, bytes]] = {}
+    for sec, n, body in con.execute("SELECT sec_cd, n_rows, body FROM wics_raw WHERE dt = ? AND http_status = 200 "
+                                    "AND n_rows > 0 ORDER BY collected_at", (latest,)):
+        have[str(sec)] = (int(str(n)), body if isinstance(body, bytes) else b"")   # 코드별 최신 판본
+    missing = sorted(set(L1 + L2) - set(have))
+    l1_cnt = {c: have[c][0] for c in L1 if c in have}
+    l2_sum: dict[str, int] = {}
+    for c in L2:
+        if c in have:
+            l2_sum[c[:3]] = l2_sum.get(c[:3], 0) + have[c][0]
+    l1_mismatch = [c for c in L1 if c in l1_cnt and l2_sum.get(c, 0) != l1_cnt[c]]
+    ok = not missing and not l1_mismatch and len(l1_cnt) == len(L1)
+    out = [Check("wics.integrity", Level.REQUIRED, Status.PASS if ok else Status.FAIL,
+                 {"dt": latest, "n_codes": len(have), "missing": missing, "l1_mismatch": l1_mismatch},
+                 f"최신 스냅샷 {len(L1) + len(L2)}/{len(L1) + len(L2)} 응답(행>0) · Σ L2 CNT = L1 CNT 10/10")]
+    age = (dd - dt.date(int(latest[:4]), int(latest[4:6]), int(latest[6:8]))).days
+    out.append(Check("wics.fresh", Level.WARN, Status.PASS if age <= WICS_FRESH_MAX_DAYS else Status.FAIL,
+                     {"dt": latest, "age_days": age}, f"최신 스냅샷이 D 기준 {WICS_FRESH_MAX_DAYS}일 이내(주 1회 + 연휴)"))
+    if krx is not None and _has_table(krx, "krx_stk_bydd_trd") and _has_table(krx, "krx_ksq_bydd_trd"):
+        krx_set = {str(r[0]) for r in krx.execute(
+            "SELECT ISU_CD FROM krx_stk_bydd_trd WHERE bas_dd_req = ? UNION SELECT ISU_CD FROM krx_ksq_bydd_trd "
+            "WHERE bas_dd_req = ?", (d, d))}
+        wics_set: set[str] = set()
+        for c in L1:
+            if c in have:
+                wics_set |= _wics_tickers(have[c][1])
+        if krx_set:
+            ratio = len(krx_set & wics_set) / len(krx_set)
+            out.append(Check("wics.coverage", Level.WARN, Status.PASS if ratio >= WICS_COVERAGE_MIN else Status.FAIL,
+                             {"ratio": round(ratio, 4), "krx": len(krx_set), "wics": len(wics_set), "dt": latest},
+                             f"KRX D 종목 대비 ≥ {WICS_COVERAGE_MIN:.0%} (09-18 실측 89.1%)"))
     return out
 
 
 def run(d: str, paths: Paths, *, today: dt.date | None = None,
         skip: frozenset[str] = frozenset()) -> HealthReport:
-    """skip 에 든 소스(krx·kiwoom·kis·dart·wise)는 판정하지 않고 SKIP 1건으로 기록한다(예: 앱키 분리 전 kiwoom)."""
+    """skip 에 든 소스(krx·kiwoom·kis·dart·wise·wics)는 판정하지 않고 SKIP 1건으로 기록한다(예: 앱키 분리 전 kiwoom).
+
+    skip 밖 소스에서 필수 표(`REQUIRED_NO_SKIP`)의 검사가 SKIP 이면 FAIL 로 싣는다(K1-7b). 달력상 거래일이면
+    리포트에 없는 필수 검사도 FAIL 행으로 더한다(K1-7c) — 휴장일 실행은 종전대로 둔다."""
     cal = _cal.load(paths.calendar)
     dd = dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))
     d_prev = cal.prev_trading_day(dd).strftime("%Y%m%d")
@@ -458,6 +667,7 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None,
     kis = _ro(paths.kis)
     dart = _ro(paths.dart)
     wise = _ro(paths.wise)
+    wics = _ro(paths.wiseindex) if paths.wiseindex else None
     try:
         for name in sorted(skip):
             checks.append(Check(f"{name}.skipped", Level.WARN, Status.SKIP, None, "--skip 로 판정 제외(운영 결정)"))
@@ -471,10 +681,18 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None,
             checks += check_dart(dart, d, cal.is_trading_day(dd), kst_start_utc)
         if wise is not None and "wise" not in skip:
             checks += check_wise(wise, dd.isoformat(), (dd + dt.timedelta(days=1)).isoformat())
+        if wics is not None and "wics" not in skip:
+            checks += check_wics(wics, krx, d, dd)
     finally:
-        for c in (krx, kw, kis, dart, wise):
+        for c in (krx, kw, kis, dart, wise, wics):
             if c is not None:
                 c.close()
+    checks = [_skip_is_fail(c) for c in checks]
+    if cal.is_trading_day(dd):
+        no_file = {src: os.path.basename(p) for src, p, con in (
+            ("krx", paths.krx, krx), ("kiwoom", paths.kiwoom, kw), ("dart", paths.dart, dart),
+            ("wise", paths.wise, wise)) if con is None}
+        checks += _not_run(checks, skip, no_file)
     return HealthReport(d, tuple(checks), n_req)
 
 
@@ -495,12 +713,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--home",
                     default=os.environ.get("QL_HOME", os.path.expanduser("~/quant-ledger")))
     ap.add_argument("--out", default=None, help="리포트 디렉터리 (기본 <home>/logs/health)")
-    ap.add_argument("--skip", default="", help="판정 제외 소스, 쉼표구분 (krx,kiwoom,kis,dart,wise)")
+    ap.add_argument("--skip", default="", help="판정 제외 소스, 쉼표구분 (krx,kiwoom,kis,dart,wise,wics)")
     a = ap.parse_args(argv)
     skip = frozenset(x.strip() for x in a.skip.split(",") if x.strip())
-    bad = skip - {"krx", "kiwoom", "kis", "dart", "wise"}
+    bad = skip - {"krx", "kiwoom", "kis", "dart", "wise", "wics"}
     if bad:
-        raise ValueError(f"unknown --skip source: {sorted(bad)} (allowed: krx,kiwoom,kis,dart,wise)")
+        raise ValueError(f"unknown --skip source: {sorted(bad)} (allowed: krx,kiwoom,kis,dart,wise,wics)")
     paths = Paths.from_home(a.home)
     out_dir = a.out or os.path.join(a.home, "logs", "health")
     cal = _cal.load(paths.calendar)

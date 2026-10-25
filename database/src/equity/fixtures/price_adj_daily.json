@@ -36,14 +36,37 @@
 
  {"case": "fx2_015_bonus_ex_date_close_scaled",
   "key": {"ticker": "247540", "date": "2022-06-27"}, "column": "adj_close",
-  "expect": "542074.2582197273",
-  "source": "hand — 135,900 × share_factor 3.988773055332799 (= 497,400 / 124,700, KRX 기준가 축 S06-2)",
+  "expect": "550018.3548189172",
+  "source": "hand — 135,900 × share_factor 3.988773055332799 (= 497,400 / 124,700, KRX 기준가 축 S06-2) ÷ ⑤ 누적 0.9855566700100301 (= 2022-05-09 기준가 491,300 / 직전 종가 498,500, e1.26.0)",
   "expect_source": "hand", "fixture_class": "positive",
-  "note": "FX-2-015. 권리락 전날 조정가 497,400 대비 +8.98% — 1주당 3주 무상증자의 실제 수익률이다. 4.0(배정비율)으로 곱하면 543,600 이 되어 KRX 기준가 산식(자기주식 신주 미배정)과 어긋난다"},
+  "note": "FX-2-015. 권리락 전날 조정가 대비 +8.98% — 1주당 3주 무상증자의 실제 수익률이다(⑤ 배수는 약분된다). 4.0(배정비율)으로 곱하면 KRX 기준가 산식(자기주식 신주 미배정)과 어긋난다. e1.25.0 까지는 542,074.258…(⑤ 없음)"},
 
- {"case": "fx2_015_bonus_eve_is_raw_close",
-  "key": {"ticker": "247540", "date": "2022-06-24"}, "column": "adj_close", "expect": "497400.0",
-  "source": "hand — 권리락 전날. 계수의 fold_date(2022-06-27)가 뒤라 원주가 그대로",
+ {"case": "fx2_015_bonus_eve_close",
+  "key": {"ticker": "247540", "date": "2022-06-24"}, "column": "adj_close", "expect": "504689.3954813759",
+  "source": "hand — 권리락 전날. 무상증자 계수의 fold_date(2022-06-27)가 뒤라 share 누적은 1, 05-09 ⑤ 계수가 앞서 접혀 497,400 ÷ 0.9855566700100301(= × 498,500/491,300)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "e1.25.0 까지는 원주가 497,400 그대로였다(05-09 unknown_price_only 미해결)"},
+
+ {"case": "fx2_018_price_only_unit_day_close",
+  "key": {"ticker": "247540", "date": "2022-05-09"}, "column": "adj_close", "expect": "488049.0535314472",
+  "source": "hand — 481,000 × share 누적 1 ÷ ⑤ 0.9855566700100301. 전날(05-06) 조정가 = 원주가 498,500 → 조정 수익률 481,000/491,300 − 1 = −2.10% (원수익률 481,000/498,500 − 1 = −3.51%)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "⑤ 연속성 칸(N-32 ②). 계수 = 그날 KRX 기준가 ÷ 직전 행 종가 — 키움 수정주가와 같은 방식(0단계 대조 148/150)"},
+
+ {"case": "fx2_018_price_only_unit_eve_is_raw_close",
+  "key": {"ticker": "247540", "date": "2022-05-06"}, "column": "adj_close", "expect": "498500.0",
+  "source": "hand — ⑤ 계수(fold 05-09) 전날. 전방 조정이라 원주가 그대로",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "fx2_018_price_only_cum",
+  "key": {"ticker": "247540", "date": "2022-05-09"}, "column": "cum_price_only_factor",
+  "expect": "0.9855566700100301",
+  "source": "hand — adj_factor 247540:krx_base:2022-05-09 price_only_factor, 접힌 ⑤ 1개",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "fx2_018_price_only_n_price_unresolved",
+  "key": {"ticker": "247540", "date": "2022-06-27"}, "column": "n_price_unresolved_events", "expect": "0",
+  "source": "hand — 247540 의 미해결 사건은 05-09 하나이고 ⑤ 계수 행이라 가격 축에서 해소(D6-4 — n_unadjusted_events 는 1 그대로, fx2_016)",
   "expect_source": "hand", "fixture_class": "positive"},
 
  {"case": "fx2_016_unadjusted_event_counted_in_same_span",

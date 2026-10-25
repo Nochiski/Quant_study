@@ -27,7 +27,7 @@ from pathlib import Path
 
 import duckdb
 
-from .rules_krx import CROSS_JOIN_PREDICATE_SQL
+from .rules_krx import CROSS_JOIN_PREDICATE_SQL, CROSS_VOLUME_SQL
 from .snapshot import Snapshot, load_snapshot
 
 
@@ -71,7 +71,7 @@ METRICS: tuple[Metric, ...] = (
        f"abs(TRY_CAST(f.cur_prc AS BIGINT))) / count(*) {_PRICE_JOIN}"),
     _m("stg_price_daily", "volume_match_ratio", "krx+kiwoom",
        "SELECT count(*) FILTER (WHERE TRY_CAST(p.ACC_TRDVOL AS BIGINT) = "
-       f"TRY_CAST(f.acc_trde_prica AS BIGINT)) / count(*) {_PRICE_JOIN}"),
+       f"TRY_CAST({CROSS_VOLUME_SQL.format(kw='f')} AS BIGINT)) / count(*) {_PRICE_JOIN}"),
     _m("stg_price_daily", "close_joined", "krx+kiwoom", f"SELECT count(*) {_PRICE_JOIN}"),
     _m("stg_etf_price_daily", "ohl_zero_vol_pos_rows", "krx",
        f"SELECT count(*) FROM krx.krx_etf_bydd_trd WHERE {_OHL_ZERO}"),

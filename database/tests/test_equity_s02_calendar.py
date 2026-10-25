@@ -60,7 +60,8 @@ def _gate(r: build.BuildResult, name: str):
 def test_절단본_빌드가_전_게이트를_통과한다(tmp_path: Path) -> None:
     r = _build(tmp_path)
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
-    assert [g.name for g in r.gates] == ["EG0", "EG7", "EG1", "EG2", "EG3", "EG17", "EG4", "EG5a"]
+    assert [g.name for g in r.gates] == ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG17", "EG4",
+                                         "EG5a"]
     assert not [g for g in r.gates if g.status is GateStatus.FAIL]
     assert _gate(r, "EG2").detail == "dimension_table"        # 캘린더는 차원표 — PIT 축 없음
     assert r.n_rows == N_TRADING_DAYS and r.n_reject == 0
@@ -179,12 +180,12 @@ def test_주말이_섞이면_EG17이_폐기한다(tmp_path: Path) -> None:
 
 # ── baseline 규약 ────────────────────────────────────────────────────────────
 
-def test_baseline_없으면_EG17은_skip_no_baseline(tmp_path: Path) -> None:
-    """첫 빌드 규약 — 상수 미등재는 폐기가 아니라 skip. 다만 통과로 세지 않는다(GATES §0-2)."""
+def test_baseline_없으면_EG17은_no_baseline_SKIP_이고_허용표_밖이라_폐기(tmp_path: Path) -> None:
+    """상수 미등재는 통과로 세지 않는다(GATES §0-2) — K1-7a 부터 판을 폐기하고 측정치는 남긴다."""
     r = _build(tmp_path, baseline=Baseline({}))
-    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert r.status is build.BuildStatus.GATE_FAILED
     eg17 = _gate(r, "EG17")
-    assert eg17.status is GateStatus.SKIP and eg17.detail == "no_baseline"
+    assert eg17.status is GateStatus.FAIL and eg17.metrics["skip_reason"] == "no_baseline"
     assert eg17.metrics["missing_metric"] == "trading_calendar.calendar_start"
 
 

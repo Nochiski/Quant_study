@@ -9,14 +9,18 @@ import requests
 
 warnings.filterwarnings("ignore")
 
-# 경로를 박아두면 서버에서 뜨지 않는다. 맥(~/Desktop/...)과 서버(~/...)가 다르므로 후보를 순회한다.
+# 비밀 파일은 QL_ENV 하나만 본다(RG-C7-4). 옛 시스템 폴더의 파일로 조용히 넘어가지 않는다 —
+# 비었거나 파일이 없으면 import 시점에 실패한다. 운영 체인 스크립트는 시작부에서
+# QL_ENV="$HOME/quant-ledger/.env" 로 고정한다.
 def _find_env():
-    for p in (os.environ.get("QL_ENV"),
-              os.path.expanduser("~/kael-system-v3/.env"),
-              os.path.expanduser("~/Desktop/kael-system-v3/.env")):
-        if p and os.path.exists(p):
-            return p
-    raise FileNotFoundError("kael .env 를 찾을 수 없다. QL_ENV 로 지정하라")
+    p = os.environ.get("QL_ENV")
+    if not p:
+        raise FileNotFoundError("QL_ENV 가 비어 있다 — quant-ledger 비밀 파일 경로"
+                                "(운영: $HOME/quant-ledger/.env)를 QL_ENV 로 지정하라")
+    if not os.path.isfile(p):
+        raise FileNotFoundError(f"QL_ENV 가 가리키는 비밀 파일이 없다: {p} — "
+                                "파일을 만들거나 QL_ENV 를 고쳐라")
+    return p
 ENV = _find_env()
 _K = {}
 with open(ENV, encoding="utf-8") as _env_f:
@@ -145,7 +149,12 @@ def kiwoom(api_id, url, body, cont=None, next_key=None):
         if next_key: h["next-key"] = next_key
         r = requests.post(f"{KW_BASE}{url}", json=body, headers=h, timeout=30)
         time.sleep(0.25)
-        return r.json(), r.headers
+        try:
+            return r.json(), r.headers
+        except ValueError as e:
+            # 비JSON 응답(09-23 21:20 실측: 두 스레드가 동시에 빈 본문) — 상태코드·본문 머리를 남겨야 다음에 원인을 안다.
+            # 호출자(kw_daily.call_tr)가 ValueError 를 재시도 뒤 ERROR 로 센다.
+            raise ValueError(f"non-json http={r.status_code} api={api_id} body={r.text[:80]!r}") from e
 
     j, hdr = _call()
     if j.get("return_code") == 3 and "8005" in str(j.get("return_msg", "")):

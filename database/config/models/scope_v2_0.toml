@@ -1,0 +1,85 @@
+# scope_v2.0 — 메인 모델(2026-10-11 사용자 결정 N-47, 컷오버 뒤 배포). scope_v1.0(`scope_v1_0.toml`)과
+# 정의가 같고 유니버스의 추정치 소멸 유예만 다르다: 0 → 5거래일. 사람이 부르는 이름은 `scope_v2.0`,
+# 레지스트리 id 는 `scope@2.0`. 유니버스 규칙이 바뀌어 모델 정의 변경이라 앞자리를 올렸다.
+#
+# 유예: 최신 WISE 스냅샷에서 당해 12월기 영업이익·순이익 추정치가 사라져도 5거래일 동안 유니버스에
+# 남기고, 리비전·WISE 재무·추정기관 수는 마지막 신선일 판 값으로 계산한다(factor_inputs 가 유예 창
+# 5 안의 grace 종목을 그 판으로 싣는다 — fi1.10.0). 6거래일째 빠진다. 근거: 사전 등록 IC 규칙으로는
+# 일수를 못 정했고(리비전 IC(0) 유의하지 않음) 짧은 공백 흡수(5일 안 복귀 약 15%, 하루 평균 약
+# 10종목)만 데이터와 맞았다 — `docs/DECISIONS.md` N-47 · §7 #9.
+#
+# 나머지(버킷·하위 가중·EV/EBITDA 제외·짧은 첫 사업연도·창 안 제한폭 초과 미해결 수정주가 규칙)는
+# scope_v1.0 과 글자 그대로 같다(테스트가 대조한다). scope@1.0 은 비교·이력용으로 계속 계산한다.
+
+model_id = "scope"
+version = "2.0"
+engine = "v3_zscore"
+
+[buckets]
+momentum = 0.30
+revision = 0.30
+flow = 0.20
+quality = 0.10
+valuation = 0.10
+
+[universe]
+require_estimates = true
+sec_types = ["common", "spac"]
+markets = ["KOSPI", "KOSDAQ"]
+min_market_cap = 1000.0
+# 추정치 소멸 유예 5거래일(N-47) — scope_v1.0 과 다른 줄은 이것뿐이다
+coverage_grace_days = 5
+
+# 창 안 제한폭 초과 미해결 수정주가(T-9, 컷오버 H1-4 — scope_v1.0 때 더했다): 모멘텀(r1m~r12m)·
+# 20일 변동성 창이 점프 행(가격 축 미해결 사건 적용일 앞뒤 6세션 안에서 수익률이 그날 가격제한폭을
+# 넘은 행)과 그 직전 행을 함께 품으면(fi `fi_adj_prices.adj_jump_ok` 계단이 바뀌면) 그 지표를 결측으로 둔다. 결측 뒤는 원본 규칙대로
+# (모멘텀은 남은 지표로 재정규화·다 비면 0.0, 퀄리티는 std_20d 없이 재정규화). 제한폭 안 미해결은
+# 그대로다. 판 메타 adj_jump_masked 에 비운 칸·종목 수. v3_zscore.toml 에는 이 키가 없다(원본 대조용).
+[params]
+adj_jump_missing = true
+
+[params.momentum.sub_weights]
+r1m = 0.35
+r3m = 0.25
+r6m = 0.20
+r9m = 0.12
+r12m = 0.08
+
+[params.revision.metrics]
+operating_profit = 0.4
+net_income = 0.6
+
+[params.revision.periods]
+"1w" = 0.25
+"1m" = 0.45
+"3m" = 0.30
+
+[params.flow.sub_weights]
+inst_5d = 0.25
+inst_20d = 0.15
+for_5d = 0.25
+for_20d = 0.15
+pe_5d = 0.10
+pe_20d = 0.10
+
+# 짧은 첫 사업연도(G-28, 2026-10-07 사용자 결정 N-25 Q5 — scope_v1.0 때 더했다): 연간 행 기간
+# (fi_fin_summary.period_months, 달력 달 수)이 12개월 미만이면 그 기를 퀄리티 손익 지표(gpa·roa·
+# fcf_assets·gpa_change)에서 뺀다. 부채비율·변동성은 그대로, 기간을 모르면(NULL) 빼지 않는다.
+# 결산월 변경·리츠 단기 결산도 걸린다 — 엑셀 비고는 후속(4-2a 병합 뒤)이고 문구는 '회계기간 N개월',
+# 문턱은 12 를 박지 말고 이 값을 읽는다. v3_zscore.toml 에는 이 키가 없다(원본 대조용 — 끈 상태).
+[params.quality]
+min_period_months = 12
+
+[params.quality.sub_weights]
+gpa = 0.20
+roa = 0.15
+fcf_assets = 0.15
+debt_ratio = 0.15
+gpa_change = 0.15
+std_20d = 0.20
+
+# ev_ebitda(.25) 삭제 — 남은 셋은 원본 가중 그대로, 엔진이 .75 로 나눠 PER .40·PBR .40·배당 .20 이 된다
+[params.valuation.sub_weights]
+per = 0.30
+pbr = 0.30
+dividend_yield = 0.15

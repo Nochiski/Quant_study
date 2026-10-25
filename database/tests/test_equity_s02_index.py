@@ -55,7 +55,7 @@ def _gate(r: build.BuildResult, name: str):
 def test_절단본_빌드가_전_게이트를_통과한다(tmp_path: Path) -> None:
     r = _build(tmp_path)
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
-    assert [g.name for g in r.gates] == ["EG0", "EG7", "EG1", "EG2", "EG3", "EG4", "EG5a"]
+    assert [g.name for g in r.gates] == ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG4", "EG5a"]
     assert not [g for g in r.gates if g.status is GateStatus.FAIL]
     assert _gate(r, "EG2").status is GateStatus.PASS          # 차원표가 아니라 팩트다
     assert r.n_rows == N_ROWS and r.n_reject == 0

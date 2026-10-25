@@ -1,0 +1,12 @@
+{
+ "_note": [
+  "T-F(parser p1.5 재파싱) 뒤 disclosure_version 재빌드용 예상 변경. 정정 접수(is_correction)에서만",
+  "최초제출일·정정사유가 NULL→값, date_check 가 unparsed→판정값으로 바뀌어야 한다. 연결(orig_rcept_no·candidate_status)은 불변이 원칙."
+ ],
+ "expect": [
+  {"column": "filed_date", "kind": "null_to_value", "where": "is_correction", "note": "T-F — 2025 서식 최초제출일 파싱"},
+  {"column": "reason_raw", "kind": "null_to_value", "where": "is_correction", "note": "T-F — 정정사유를 항목 열에서 유도(구서식의 빈 값도 채워질 수 있음)"},
+  {"column": "date_check", "kind": "value_changed", "where": "is_correction AND before_date_check = 'unparsed'", "note": "T-F — unparsed → exact/off_1d/off_2_7d/mismatch"},
+  {"column": "reason_raw", "kind": "value_changed", "where": "is_correction AND before_reason_raw IS NOT NULL", "note": "T-F — 구서식에서 앵커 뒤 값이 비었던 행이 항목 열로 채워지는 경우(값→값). 실제 발생 여부 기록"}
+ ]
+}

@@ -1,0 +1,108 @@
+"""factor_inputs CLI — `python -m factor_inputs build …`.
+
+    python -m factor_inputs build --date 20260929 --basis morning \\
+        [--root data/factor_inputs] [--stage-root data/stage] [--equity-root data/equity] \\
+        [--grace-days 5] [--min-eligible 300] [--keep 60] \\
+        [--builds-from data/deliver/history/20260928_morning.json]
+    python -m factor_inputs build --date 20260929 --basis evening \\
+        --root data/model_db/factor_inputs \\
+        --builds-from data/deliver/history/20260928_morning.json [--calendar-dir data/calendar] \\
+        [--postclose-stage-root data/model_db/stage] [--candidates-root data/factor_inputs]
+    python -m factor_inputs build --date 20261008 --basis supplement --wise-asof 20261009 \\
+        --builds-from data/deliver/history/20261008_morning.json
+    재생 전용 `--replay`(현판 세션 축을 asof 에서 자른다 — scripts/replay.sh --basis evening)
+
+rc 0 판 커밋 · 1 게이트 FAIL(판 안 올림, `_failed/<build_id>.json`) · 2 입력·인자 오류·예외.
+기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — equity CLI 와 같은 규약.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+from .build import (
+    KEEP_DEFAULT,
+    MIN_ELIGIBLE_DEFAULT,
+    FactorInputsError,
+    build,
+    default_postclose_stage_root,
+    research_root,
+)
+
+
+def _parser() -> argparse.ArgumentParser:
+    base = Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
+    p = argparse.ArgumentParser(prog="python -m factor_inputs")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    b = sub.add_parser("build", help="equity/stage 현재 판 → factor_inputs 8표 판")
+    b.add_argument("--date", required=True, help="판 기준일 D (YYYYMMDD, 거래일)")
+    b.add_argument("--basis", required=True, choices=("evening", "morning", "supplement"),
+                   help="morning = 아침 확정판 · evening = 장 마감 판(--date 는 오늘 T, "
+                        "--builds-from 필수 — 컷오버 T-2) · supplement = 주말 보강판(--date 는 D, "
+                        "--builds-from <D>_morning.json · --wise-asof 필수 — N-45)")
+    b.add_argument("--root", type=Path, default=research_root(),
+                   help="산출 루트(기본 연구 루트 — 장 마감 판은 "
+                        "data/model_db/factor_inputs 필수, T-3)")
+    b.add_argument("--stage-root", type=Path, default=base / "data" / "stage")
+    b.add_argument("--equity-root", type=Path, default=base / "data" / "equity")
+    b.add_argument("--grace-days", type=int, default=None,
+                   help="추정치 소멸 유예 창(거래일, 기본 FI_COVERAGE_GRACE_MAX = 5 — N-47). "
+                        "spec 유예가 더 짧으면 엔진이 다시 자른다")
+    b.add_argument("--min-eligible", type=int, default=MIN_ELIGIBLE_DEFAULT,
+                   help="FG1 eligible 종목 수 하한")
+    b.add_argument("--keep", type=int, default=KEEP_DEFAULT, help="표별 MANIFEST 에 남길 판 수")
+    b.add_argument("--builds-from", default=None, type=Path,
+                   help="인계 이력 JSON(data/deliver/history/<D>_<basis>.json) 의 판으로 고정 "
+                        "— 이력 없음·health 실패·판 소멸이면 rc 2(최신 판으로 대신하지 않는다)")
+    b.add_argument("--calendar-dir", type=Path, default=base / "data" / "calendar",
+                   help="장 마감 판 거래일 판정 달력(daily.calendar 연도 파일 폴더)")
+    b.add_argument("--postclose-stage-root", type=Path, default=default_postclose_stage_root(),
+                   help="장 마감 판 T 행 stage 루트(stg_flow_postclose_kiwoom — 기본 "
+                        "data/model_db/stage, T-29). 판이 없으면 rc 2")
+    b.add_argument("--candidates-root", type=Path, default=research_root(),
+                   help="장 마감 판 FG5 후보(직전 판 모델 후보 = _runs/<D'>_morning.json 의 eligible)"
+                        "를 읽을 연구 fi 루트(기본 연구 루트 — 수집기 순서 ① 과 같은 자리)")
+    b.add_argument("--replay", action="store_true",
+                   help="재생 전용(scripts/replay.sh --basis evening, 컷오버 PR-8b) — "
+                        "equity 세션 축 표를 asof(아침판 D · 장 마감 판 D')에서 잘라 현판으로 "
+                        "그날 판을 짓는다. 판 manifest 에 replay 표시. 운영 체인은 쓰지 않는다")
+    b.add_argument("--wise-asof", default=None,
+                   help="WISE 컨센서스 입력의 시점(YYYYMMDD) — 보강판은 휴일 수집일(D 보다 뒤) 필수, "
+                        "그 밖은 생략(= 판 날짜 — 장 마감 판 T, N-53. 주면 판 날짜와 같아야 한다). "
+                        "가격·수급·DART 등은 asof 그대로")
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    try:
+        result = build(args.date, args.basis, args.root, args.stage_root, args.equity_root,
+                       grace_days=args.grace_days, min_eligible=args.min_eligible,
+                       keep=args.keep, builds_from=args.builds_from,
+                       calendar_dir=args.calendar_dir,
+                       postclose_stage_root=args.postclose_stage_root,
+                       candidates_root=args.candidates_root, replay=args.replay,
+                       wise_asof=args.wise_asof)
+    except FactorInputsError as e:
+        print(f"factor_inputs 실패: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:  # noqa: BLE001  # reason: 체인이 rc 로만 보므로 어떤 예외든 원인을 남긴다
+        print(f"factor_inputs 실패(예상 밖): {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+    print(result.summary())
+    if not result.ok:
+        for g in result.gates:
+            if g.status.value == "fail":
+                print(f"  {g.name} FAIL: {g.detail}", file=sys.stderr)
+        print(f"  보고서 {result.failed_report}", file=sys.stderr)
+        if result.run_manifest_kept:
+            print(f"  같은 날 성공 기록 {result.run_manifest} 은 그대로 둔다(실패는 보고서에만)",
+                  file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

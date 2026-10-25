@@ -47,6 +47,17 @@ MISMATCH_5002 = _blob({    # 5001 과 다른 값 → G8 실패
     "chart1": c5002("EPS", "원", [L3], [1.0], [[0.0, 2.0]]),
     "chart2": c5002("매출액", "억원", [], [], []),
 })
+NULL_L3_5001 = _blob({     # 5001 이 L3 를 비움(10-08 474650 2026/09/30 실물 모양) — 5002 엔 값
+    "chart1": c5001("EPS", "원", [L1, L2, L3], [44699.61, 47928.74, None],
+                    [334000.0, 262500.0, 260000.0], [465208.0, 493542.0, 493958.0]),
+    "chart2": c5001("매출액", "억원", [L1, L2, L3], [7062391.00, 7378930.54, 7397267.52],
+                    [334000.0, 262500.0, 260000.0], [465208.0, 493542.0, 493958.0]),
+})
+NULL_L3_5002 = _blob({     # 5002 가 L3 를 비움 — 5001 엔 값
+    "chart1": c5002("EPS", "원", [L2, L3], [47928.74, None],
+                    [[40489.0, 77719.53], [43509.24, 77719.53]]),
+    "chart2": c5002("매출액", "억원", [], [], []),
+})
 UNKNOWN_5001 = _blob({     # 알 수 없는 항목명 → metric=parse_failed 로 보존, G8 카운트
     "chart1": c5001("PER", "배", [L3], [10.5], [100.0], [None]),
     "chart2": c5001("매출액", "억원", [L3], [1.0], [100.0], [None]),
@@ -149,6 +160,28 @@ def test_parser_counts_value_mismatch_and_unknown_metric() -> None:
     assert eps_l3["consensus"] == "48338.64"   # 불일치 시 5001 값 유지
 
 
+@pytest.mark.parametrize("order", ["5001_first", "5002_first"])
+def test_parser_counts_one_side_null_apart_from_value_mismatch(order: str) -> None:
+    # 10-08 저녁: 한쪽만 빈 칸(474650 2026/09/30 6칸)을 불일치로 세어 G8 이 빌드를 멈췄다.
+    # 한쪽 결측은 값 충돌이 아니다 — 따로 세고, 값은 5001 정본 그대로(빈 값이면 빈 값).
+    blobs = [_raw("005930", "cF5001", NULL_L3_5001), _raw("005930", "cF5002", SAMSUNG_5002)]
+    res = parsers.parse_consensus_monthly(blobs if order == "5001_first" else blobs[::-1])
+    assert res.metrics["n_value_mismatch"] == 0
+    assert res.metrics["n_one_side_null"] == 1
+    eps_l3 = next(x for x in res.rows if x["metric"] == "eps" and x["obs_label"] == L3)
+    assert eps_l3["consensus"] is None                 # 5001 정본 — 5002 값으로 채우지 않는다
+    assert eps_l3["in_5001"] == "true" and eps_l3["in_5002"] == "true"
+
+
+@pytest.mark.parametrize("order", ["5001_first", "5002_first"])
+def test_parser_one_side_null_keeps_5001_value_when_5002_is_empty(order: str) -> None:
+    blobs = [_raw("005930", "cF5001", SAMSUNG_5001), _raw("005930", "cF5002", NULL_L3_5002)]
+    res = parsers.parse_consensus_monthly(blobs if order == "5001_first" else blobs[::-1])
+    assert res.metrics["n_value_mismatch"] == 0 and res.metrics["n_one_side_null"] == 1
+    eps_l3 = next(x for x in res.rows if x["metric"] == "eps" and x["obs_label"] == L3)
+    assert eps_l3["consensus"] == "48338.64"
+
+
 def test_parser_reports_undecodable_blob_as_parse_failed() -> None:
     res = parsers.parse_consensus_monthly([_raw("005930", "cF5001", b"not zlib at all")])
     assert res.rows == [] and res.metrics["n_parse_failed"] == 1
@@ -212,6 +245,19 @@ def test_build_g8_fails_on_value_mismatch_between_endpoints(tmp_path: Path) -> N
     r = _build(s, tmp_path)
     assert r.status is build.BuildStatus.GATE_FAILED
     assert _gate(r, "G8").metrics["n_value_mismatch"] == 1
+
+
+def test_build_g8_passes_on_one_side_null_and_records_it(tmp_path: Path) -> None:
+    d = tmp_path / "raw3"
+    d.mkdir()
+    _write_wise(d / "wisereport.db", [_row("005930", "cF5001", NULL_L3_5001),
+                                      _row("005930", "cF5002", SAMSUNG_5002)])
+    s = snapshot.make_snapshot({"wise": d / "wisereport.db"}, tmp_path / "snapshots",
+                               snapshot_id="s3")
+    r = _build(s, tmp_path)
+    g = _gate(r, "G8")
+    assert g.status is gates.GateStatus.PASS, g.detail
+    assert g.metrics["n_value_mismatch"] == 0 and g.metrics["n_one_side_null"] == 1
 
 
 def test_ledger_file_map_matches_survey_targets() -> None:

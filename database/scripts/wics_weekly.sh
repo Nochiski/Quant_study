@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# WICS 주간 스냅샷 — 토요일 03:00 KST (재시도 10:00). 플랜 `docs/plans/2026-09-20-wics-weekly.md` T1.
+#   순서: raw 락 → dt = 직전 거래일(금요일, daily.calendar) → wics_snapshot(38콜, 멱등) → 알림
+#   크론(서버 TZ=UTC): 0 18 * * 5 … scripts/wics_weekly.sh            # 03:00 KST
+#                     0 1  * * 6 … scripts/wics_weekly.sh --retry    # 10:00 KST — 03:00 이 전부 빈 응답(rc 4)이었을 때만 콜
+#   rc: 0 완료(info) · 3 락 대기 실패(warn)·이미 대기 중인 실행 있음(info)·대기 중 날짜 바뀜(crit) · 4 빈 응답 있음(03:00 은 warn + 10:00 재시도, --retry 에서도 남으면 crit)
+#       · 5 L1 검산 불일치(crit) · 1/2 실패·연속 실패(crit). 어느 경로도 알림 없이 끝나지 않는다(결정 V2-7).
+#   토 11:30 `watchdog.sh wics_weekly` 가 원장에 금요일 스냅샷 38코드가 있는지 다시 본다(크론 자체가 안 돈 경우).
+#   원장 락: 다른 원장 작업(늦어진 토요일 08:10 확정 체인 등)이 쥐고 있으면 끝날 때까지 기다렸다 이어서 돈다(P9,
+#         배포 묶음 5-3 — 예전엔 rc 3 건너뜀이라 10:00 재시도가 확정 체인과 겹치면 빈 코드를 다시 받지 못했다, B-52 ②). 03:00 과 10:00 은 같은
+#         스크립트라 대기자는 하나다. 규칙(QL_RAW_LOCK_HELD · QL_RAW_LOCK_FILE 테스트 전용)은 scripts/raw_lock.sh 한 곳.
+#   사용: wics_weekly.sh [--date YYYYMMDD] [--retry] [--dry-run]
+set -uo pipefail
+cd "$HOME/quant-ledger" || { echo "quant-ledger 홈으로 이동 실패" >&2; exit 4; }
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
+export QL_ENV="$HOME/quant-ledger/.env"   # 비밀 파일 고정(RG-C7-4) — 배포 rsync --delete 밖, 바깥 값·옛 시스템 파일을 쓰지 않는다
+PY=.venv/bin/python
+DATE_ARG=""; DRY=""; RETRY=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --date) DATE_ARG="$2"; shift 2 ;;
+    --dry-run) DRY="--dry-run"; shift ;;
+    --retry) RETRY=1; shift ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
+. scripts/raw_lock.sh
+raw_lock_acquire wics_weekly "$DRY" || exit $?
+D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
+print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
+LOG="logs/wics_weekly_${D:-unknown}.log"
+RCF=$(mktemp)          # 파이프(`| tee`) 안의 RC 는 서브셸에 갇힌다 — 파일로 꺼낸다(09-20 자체 검수: 항상 0 으로 읽히던 결함)
+{
+echo "════ [$(kst)] wics_weekly 시작 dt=$D dry=${DRY:-no} retry=${RETRY:-no}${LOCK_WAITED:+ 원장 락 대기 $LOCK_WAITED} ════"
+if [ -z "$D" ]; then
+  echo "  ✗ 대상 거래일 산출 실패(캘린더 오류) — 중단"; RC=2
+else
+  [ -n "$RETRY" ] && echo "  재시도 모드 — 행>0 판본이 있는 코드는 건너뛰고(멱등) 빈 코드만 다시 부른다"
+  $PY -m wics_snapshot --dt "$D" --codes all --db data/raw/wiseindex.db $DRY
+  RC=$?
+  echo "──── wics_snapshot 종료 rc=$RC $(kst) ────"
+fi
+echo "════ 종료 rc=$RC $(kst) ════"
+echo "$RC" > "$RCF"
+} 2>&1 | tee -a "$LOG"
+RC=$(cat "$RCF" 2>/dev/null || echo 9); rm -f "$RCF"
+SUMMARY=$(grep -E "^WICS 스냅샷|L1 검산|차 [+-]|!!!|fail|empty=" "$LOG" | tail -6 | tr '\n' ' ' | cut -c1-900 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
+if [ -n "$DRY" ]; then exit "$RC"; fi
+case "$RC" in
+  0) scripts/notify.sh info "WICS 주간 스냅샷 dt=$D 완료" "$SUMMARY | 로그 $LOG" ;;
+  4) if [ -n "$RETRY" ]; then
+       scripts/notify.sh crit "WICS 주간 스냅샷 dt=$D 재시도 뒤에도 빈 응답" "구성 미공표·휴장일·코드 소멸 의심 — 수동 확인 필요 | $SUMMARY | 로그 $LOG"
+     else
+       scripts/notify.sh warn "WICS 주간 스냅샷 dt=$D 빈 응답 있음" "10:00 재시도 대기 | $SUMMARY | 로그 $LOG"
+     fi ;;
+  5) scripts/notify.sh crit "WICS 주간 스냅샷 dt=$D L1 검산 불일치" "L2 코드 목록·분류 변경 의심(WICS_PROBE §8 G5020 사례) | $SUMMARY | 로그 $LOG" ;;
+  *) scripts/notify.sh crit "WICS 주간 스냅샷 dt=$D 실패 rc=$RC" "$SUMMARY | 로그 $LOG" ;;
+esac
+exit "$RC"

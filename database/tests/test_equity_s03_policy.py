@@ -137,6 +137,7 @@ def test_빌드가_통과하고_EG1은_declaration_table_skip(built: build.Build
     assert {g.name: (g.status.value, g.detail) for g in built.gates
             if g.status is not GateStatus.PASS} == {
         "EG1": ("skip", "declaration_table"), "EG2": ("skip", "dimension_table"),
+        "EG13": ("skip", "dimension_table"),
         "EG5a": ("skip", "no_previous_build")}
     assert _gate(built, "EG1").metrics == {"n_out": len(_ROWS), "n_reject": 0}
     assert built.inputs == {"universe_daily": "b_universe_daily"}

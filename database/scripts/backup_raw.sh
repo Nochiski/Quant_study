@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 원장 온라인 백업 — `data/raw` 의 6개 SQLite 를 `sqlite3 .backup` 으로 `~/backups/quant-ledger/<YYYYMMDD>/` 에 뜬다.
+# 원장 온라인 백업 — `data/raw` 의 8개 SQLite(아래 DBS)를 `sqlite3 .backup` 으로 `~/backups/quant-ledger/<YYYYMMDD>/` 에 뜬다.
 #   크론 토요일 03:30 KST(`30 18 * * 5` UTC — 금요일 장마감분, v3 자기 DB 백업 03:00 뒤). 플랜 v1 §9 Task 6.2 / v2 §2-2 "백업" 행 · 페이즈 B B.3 ④.
 #   · 원장 18 GB(09-11 실측) 라 rsync·하드링크·cp 금지 — 반드시 `.backup`(온라인). 쓰는 중에도 일관된 사본이 나온다.
 #     단, 외부 쓰기가 계속되면 `.backup` 은 처음부터 재시작해 끝나지 않는다(검수 R4-04) — DB 마다 `timeout` 을 건다.
@@ -14,11 +14,13 @@
 #   환경: QL_BACKUP_ROOT (기본 $HOME/backups/quant-ledger)
 set -uo pipefail
 cd "${QL_HOME:-$HOME/quant-ledger}"
+export QL_ENV="$HOME/quant-ledger/.env"   # 비밀 파일 고정(RG-C7-4) — 배포 rsync --delete 밖, 바깥 값·옛 시스템 파일을 쓰지 않는다
 BACKUP_ROOT="${QL_BACKUP_ROOT:-$HOME/backups/quant-ledger}"
 MIN_FREE_GB=60
 KEEP_SETS=1     # 성공 뒤 남길 세트 수(사용자 결정 09-14: 최신 1세트)
-BACKUP_TIMEOUT="${QL_BACKUP_TIMEOUT:-25m}"   # DB 하나당. 6 DB 최악 150분 = 03:30→06:00 창
-DBS="krx kiwoom kis dart wisereport daily_run"
+BACKUP_TIMEOUT="${QL_BACKUP_TIMEOUT:-25m}"   # DB 하나당. 큰 원장 6개 최악 150분 = 03:30→06:00 창(daily_run·postclose 는 MB 단위)
+DBS="krx kiwoom kis dart wisereport wiseindex daily_run postclose"   # wiseindex = WICS 주간 스냅샷(09-20)
+# postclose = 15:41 장 마감 수집 원장(컷오버 PR-1) — 그날 16:00 창이 지나면 다시 받을 수 없다
 DATE_ARG=""; DRY=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -104,7 +106,7 @@ TOTAL=$([ -d "$DEST" ] && du -sh "$DEST" 2>/dev/null | cut -f1 || echo "-")
 echo "════ 종료 $(kst) 성공[${OK_LIST:- 없음}] 실패[${FAILED:- 없음}] 사본 $TOTAL · 보관 $KEPT 유지 / $PURGED 삭제 ════"
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"
-SUMMARY=$(grep -E "^  |^════ 종료" "$RUN" | tail -10 | tr '\n' ' ' | cut -c1-900)
+SUMMARY=$(grep -E "^  |^════ 종료" "$RUN" | tail -10 | tr '\n' ' ' | cut -c1-900 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
 if [ -n "$FAILED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "backup_raw 실패:$FAILED" "$SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 2

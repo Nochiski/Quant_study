@@ -1,0 +1,11 @@
+{
+ "_note": [
+  "T-H(e1.21.0) 재빌드용 예상 변경 — basis 어휘 재명명뿐이어야 한다(T-E 는 정규화 위치만 옮기므로 값 불변).",
+  "before = m_20260926T132656_683291Z(e1.20.0), after = 09-29 재빌드. 이 밖의 변경은 전부 unexplained."
+ ],
+ "expect": [
+  {"column": "capex_basis", "kind": "value_changed", "where": "capex_basis IN ('no_cf_statement', 'unmapped')", "note": "T-H — 'unavailable' 을 사유 두 갈래로 분할"},
+  {"column": "revenue_basis", "kind": "value_changed", "where": "revenue_basis IN ('no_is_statement', 'unmapped')", "note": "T-H — 'unavailable' 분할"},
+  {"column": "revenue_basis_prev", "kind": "value_changed", "where": "revenue_basis_prev IN ('no_is_statement', 'unmapped')", "note": "T-H — 직전 회계연도 라벨이 같은 재명명을 따라간다"}
+ ]
+}

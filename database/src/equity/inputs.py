@@ -36,6 +36,8 @@ class PinnedBuild:
     root: Path                          # v=<build_id> 디렉토리
     partition_paths: tuple[Path, ...]   # partitions[].path 를 절대경로로 푼 것
     meta: dict[str, object]             # 첫 파티션 _meta.json (gates·lag_known·coverage_from)
+    snapshot_id: str = ""               # BuildRecord.snapshot_id — 원장 스냅샷(equity 판은 "")
+    inputs: dict[str, str] = field(default_factory=dict)   # BuildRecord.inputs — equity 판의 입력
 
     @property
     def globs(self) -> tuple[str, ...]:
@@ -91,14 +93,27 @@ def _load_meta(partition_paths: tuple[Path, ...]) -> dict[str, object]:
 def _build(table_root: Path, table: str, rec: manifest.BuildRecord) -> PinnedBuild:
     paths = tuple(table_root / str(p["path"]) for p in rec.partitions)
     return PinnedBuild(table, rec.build_id, table_root / f"v={rec.build_id}", paths,
-                       _load_meta(paths))
+                       _load_meta(paths), rec.snapshot_id, dict(rec.inputs))
 
 
-def resolve(root: Path, table: str) -> PinnedBuild:
-    """`<root>/<table>/MANIFEST.json` 의 current_build 를 푼다(root = stage 또는 equity)."""
+def resolve(root: Path, table: str, build_id: str | None = None) -> PinnedBuild:
+    """`<root>/<table>/MANIFEST.json` 의 current_build 를 푼다(root = stage 또는 equity).
+
+    `build_id` 를 주면 current 가 아니라 `builds[]` 에서 그 판을 고른다 — 인계 이력이 가리킨 판으로
+    고정하는 경로(compat·factor_inputs `--builds-from`). 없으면(keep 밖으로 GC 됨 등)
+    `FileNotFoundError` — 최신 판으로 대신하지 않는다.
+    """
     table_root = root / table
     path = table_root / "MANIFEST.json"
-    return _build(table_root, table, _record(manifest.load(path), table, path))
+    m = manifest.load(path)
+    if build_id is None:
+        return _build(table_root, table, _record(m, table, path))
+    rec = next((b for b in m.builds if b.build_id == build_id), None)
+    if rec is None:
+        raise FileNotFoundError(
+            f"build not in MANIFEST builds[] (GC'd or never built): table={table} "
+            f"build_id={build_id} manifest={path} builds={[b.build_id for b in m.builds]}")
+    return _build(table_root, table, rec)
 
 
 def load_pinned(equity_root: Path, table: str, build_id: str) -> PinnedBuild:
@@ -136,7 +151,33 @@ def pin(stage_root: Path, equity_root: Path, table: str) -> PinnedBuild:
     _write_build_record(dst_table_root, table, manifest.load(
         from_root / table / "MANIFEST.json"), src.build_id)
     parts = tuple(dst_paths)
-    return PinnedBuild(table, src.build_id, dst_root, parts, _load_meta(parts))
+    return PinnedBuild(table, src.build_id, dst_root, parts, _load_meta(parts), src.snapshot_id,
+                       dict(src.inputs))
+
+
+def input_snapshot_ids(pinned: dict[str, PinnedBuild]) -> dict[str, str]:
+    """고정 입력의 전이 폐포에 있는 stage 판마다 그 판이 선 원장 스냅샷 id (GATES EG13 기준일 출처).
+
+    키는 `<stg 테이블>@<build_id>`. equity 내부 입력(`stg_` 아닌 것)은 그 판의
+    `BuildRecord.inputs` 를 따라 같은 `_pinned/` 에서 다시 연다 — S23 `price_adj_daily` 처럼
+    stage 입력을 직접 갖지 않는 표도 기준일이 있어야 한다. 위쪽 고정본이 GC 로 사라졌으면
+    `load_pinned` 의 FileNotFoundError 를 그대로 올린다(판정은 게이트 몫). 스냅샷 id 해석도
+    게이트 몫이라 값은 기록 그대로 싣는다.
+    """
+    out: dict[str, str] = {}
+    seen: set[tuple[str, str]] = set()
+    todo = list(pinned.values())
+    while todo:
+        pb = todo.pop()
+        if (pb.table, pb.build_id) in seen:
+            continue
+        seen.add((pb.table, pb.build_id))
+        if pb.table.startswith(STAGE_PREFIX):
+            out[f"{pb.table}@{pb.build_id}"] = pb.snapshot_id
+            continue
+        equity_root = pb.root.parents[2]            # <equity_root>/_pinned/<table>/v=<build_id>
+        todo += [load_pinned(equity_root, t, b) for t, b in sorted(pb.inputs.items())]
+    return dict(sorted(out.items()))
 
 
 def _write_build_record(dst_table_root: Path, table: str, m: manifest.Manifest,

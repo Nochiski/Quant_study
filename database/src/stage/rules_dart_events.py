@@ -28,17 +28,14 @@ from .model import (
     KIND_DATE_YMD8,
     KIND_NUMERIC,
     KIND_TEXT,
-    AvailableRule,
     ColumnRule,
     Invariant,
     SourceRef,
     TableRule,
     p_headroom,
 )
+from .rules_dart import RCEPT_LOOKUP
 
-# 공통 골격 — 원장 32테이블 중 rcept_dt 를 가진 5개에 DS005 는 없다(§4) → 참조표 유도
-_AVAILABLE = AvailableRule("lookup", table="stg_rcept_dt_map", local_key="rcept_no",
-                           lookup_key="rcept_no", lookup_value="rcept_dt")
 _PAYLOAD_EXCLUDE = ("row_hash", "dup_seq", "collected_at")   # req_* 는 빌더가 항상 제외
 # 선두 4컬럼은 DS005 36엔드포인트 공통(census). corp_cls·corp_name 은 수집 시점 값이라
 # `_current` 강제 — §3 temporality ⓐ(corp_cls='E' 의 26%가 과거 상장사)와 stg_disclosure 선례.
@@ -90,7 +87,7 @@ def _event(name: str, table: str, tag: str, columns: tuple[ColumnRule, ...],
         fanout=1,
         payload_exclude=_PAYLOAD_EXCLUDE,
         lag_known=False,             # 공개일은 참조표 유도(derived) — 랙 판단은 엔진 (§6)
-        available=_AVAILABLE,
+        available=RCEPT_LOOKUP,      # DS005 에 rcept_dt 가 없다 → 참조표 유도 + 접수번호 보정(J-41)
         key_unique=False,            # append_only: 재수집 판본은 G6 의 (키, observed_date) 축 (§7)
         invariants=invariants,
     )

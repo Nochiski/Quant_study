@@ -29,20 +29,46 @@ import time
 import urllib.parse
 import zlib
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 
 import requests
+from daily.universe import kiwoom_common
 
 BASE_DIR = os.environ.get("QL_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB   = os.path.join(BASE_DIR, "data", "raw", "wisereport.db")
 KRX  = os.path.join(BASE_DIR, "data", "raw", "krx.db")
 WISE = "https://navercomp.wisereport.co.kr"
+# cF3002/cF4002 재무 기준: 주재무제표(연결 우선, 없으면 별도). DQ-5 참조
+FIN_GUBUN = "MAIN"
+# 커버 종목의 재무 화면 요청 (ep, pkey, 파라미터). pkey 가 원장 `ws_raw` 키의 구분자다.
+#   Y    — cF3002 연간 손익(+ DATAQ1~6 분기 칸 동봉, 단 직전 4분기 칸 DATAQ3 은 797종목 전부 없다)
+#   Y    — cF4002 재무비율
+#   Q:IS — cF3002 분기 손익: 실적 5분기 + 추정 1분기, 기간별 연결/별도 이름표 (플랜 2026-09-30 T-Q2)
+#   Y:BS — cF3002 연간 재무상태: 자산총계·*CAPEX (FCF/자산 원천, 결정 D-Q2)
+#   Y:CF — cF3002 연간 현금흐름: 영업활동으로인한현금흐름
+# 09-30 실측: rpt 0 손익 244계정 · 1 재무상태 251 · 2 현금흐름 312, frq=1·frqTyp=1 이 분기(FRQ=분기).
+FIN_REQUESTS: tuple[tuple[str, str, dict[str, str]], ...] = (
+    ("cF3002", "Y", {"frq": "0", "rpt": "0", "frqTyp": "0"}),
+    ("cF4002", "Y", {"frq": "0", "rpt": "5", "frqTyp": "0"}),
+    ("cF3002", "Q:IS", {"frq": "1", "rpt": "0", "frqTyp": "1"}),
+    ("cF3002", "Y:BS", {"frq": "0", "rpt": "1", "frqTyp": "0"}),
+    ("cF3002", "Y:CF", {"frq": "0", "rpt": "2", "frqTyp": "0"}),
+)
 UA   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 WORKERS = 10
 JITTER  = (0.05, 0.25)
 YYMMS   = 3          # 대상연도: CK=1(당해) 포함 최근 3개 — 2026E·2027E·2028E
-REQ_COVERED = 15     # 커버 종목의 일일 요청 수: 목록 1 + cF5001·cF5002 ×3 + 대체 축 8. ledger_health 항등식이 읽는다
+REQ_COVERED = 18     # 커버 종목의 일일 요청 수: 목록 1 + cF5001·cF5002 ×3 + 대체 축 8 + 재무 추가 3(FIN_REQUESTS). ledger_health 항등식이 읽는다
+# 재무 추가 3콜(FIN_REQUESTS 의 Q:IS·Y:BS·Y:CF)은 이 KST 수집일부터다. 그 전 런은 15콜로 받았으므로
+# 항등식도 런 날짜로 고른다 — 상수 하나로 두면 전환 다음 날 아침의 전날 판정·과거 재판정이 거짓 FAIL 한다.
+FIN_EXT_SINCE = "2026-10-01"
+REQ_COVERED_BEFORE_FIN_EXT = 15
 REQ_NONE    = 4      # 무커버 종목: 목록 1 + cF5001 ×3 — 3개년을 다 본 뒤에만 none (검수 D H1)
+# 주말 보강판 수집 런(N-45 — 06:00 체인 끝, 휴장 연속 첫 휴일)의 런 로그 mode 표식. 수집 동작은 full 과 같고 런
+# 로그 한 줄만 이 값으로 남는다 — 건전성 wise.run 의 D+1 폴백(전환기 아침 스냅샷)이 휴일 보강 런을 D 의 정규
+# 수집으로 읽지 않게 가른다(ledger_health.check_wise)
+SUPPLEMENT_RUN_MODE = "supplement"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS ws_raw (
@@ -117,6 +143,26 @@ def fetch(cmp_cd: str, ep: str, pkey: str, url: str) -> tuple[str, str, bytes, i
         return cmp_cd, f"exc/{type(e).__name__}", b"", 0, int((time.time() - t0) * 1000)
     finally:
         time.sleep(random.uniform(*JITTER))
+
+
+def req_covered_on(day_iso: str) -> int:
+    """그 KST 수집일(YYYY-MM-DD) 런의 커버 종목당 요청 수 — ledger_health `wise.req_identity`·`wise.raw` 가 읽는다."""
+    return REQ_COVERED if day_iso >= FIN_EXT_SINCE else REQ_COVERED_BEFORE_FIN_EXT
+
+
+def last_call_status(con: sqlite3.Connection, day_iso: str) -> dict[tuple[str, str, str], str]:
+    """그 KST 날(YYYY-MM-DD)에 부른 (종목, ep, pkey) 마다 마지막 호출의 status (A-03).
+
+    ok 가 아닌 호출(http·exc·검증 실패 bad/*·notjson)은 같은 날 뒤 런에서 같은 키를 ok 로
+    다시 받으면 회복이다 — 마지막 호출이 ok 가 아닌 키만 미회복으로 남는다. 입력은 append-only
+    호출 원장이라 런 로그 없이 끊긴 런의 호출도 들어온다. 재실행 대상(`main`)과
+    ledger_health `wise.run` 이 이 규칙 하나를 같이 쓴다."""
+    last: dict[tuple[str, str, str], str] = {}
+    for cmp_cd, ep, pkey, status in con.execute(
+            "SELECT cmp_cd, ep, pkey, status FROM ws_call_log WHERE date(ts, '+9 hours') = ? "
+            "ORDER BY ts, rowid", (day_iso,)):
+        last[(cmp_cd, ep, pkey)] = status
+    return last
 
 
 def dt_today() -> str:
@@ -212,19 +258,23 @@ def universe(con_w: sqlite3.Connection) -> list[str]:
 
     키움 마스터는 master_daily.py 가 매일 적재한다 — KRX 원장(--to 하드코딩으로
     08-20 동결)보다 최신이라 신규상장이 다음 날 자동 편입된다 (2026-09-01 결정).
-    보통주 판정은 upSizeName(대/중/소형주) 채움 여부다 — 거래소 규모구분은 보통주에만
-    붙는다(실측: 코스피 827 ≈ KRX 보통주 832 · ETF/ETN/우선주/스팩/외국주는 빈값)."""
+    종목 선정은 키움 수집과 같은 규칙 하나(`daily.universe.kiwoom_common`)로 한다(A-07, 10-06):
+    규모구분(upSizeName)이 있거나, 없어도 거래소·코스닥에서 코드 6번째 자리가 '0' 인 종목.
+    규모구분은 상장 몇 주 뒤에야 붙어서 옛 규칙(`upSizeName<>''` 만)은 신규 상장 보통주
+    (예 0039P0 매드업, 07-01 상장)의 컨센서스를 몇 달씩 한 번도 받지 않았다.
+    규모구분이 없는 해외 DR·스팩도 같은 규칙으로 들어온다(N-21 승인).
+    마스터를 못 읽거나, 스냅샷이 없거나, 고른 종목이 0 이면 종전대로 KRX 폴백."""
     kw = os.path.join(BASE_DIR, "data", "raw", "kiwoom.db")
     try:
-        con = sqlite3.connect(f"file:{kw}?mode=ro", uri=True)
-        d = con.execute("SELECT MAX(snap_date) FROM ka10099_stock_master").fetchone()[0]
-        rows = con.execute(
-            "SELECT code FROM ka10099_stock_master WHERE snap_date=? AND upSizeName<>''",
-            (d,)).fetchall()
-        con.close()
-        if rows:
-            print(f"  · 유니버스 = 키움 마스터 {d} ({len(rows):,}종목)", flush=True)
-            return sorted(r[0] for r in rows)
+        with closing(sqlite3.connect(f"file:{kw}?mode=ro", uri=True)) as con:
+            try:
+                snap = kiwoom_common(con)
+            except ValueError:  # 스냅샷 없음 — 종전의 "행이 비면 KRX 폴백"과 같게 조용히 넘어간다
+                snap = None
+        if snap is not None and snap.tickers:
+            print(f"  · 유니버스 = 키움 마스터 {snap.snap_date} ({len(snap.tickers):,}종목)",
+                  flush=True)
+            return sorted(snap.tickers)
     except sqlite3.Error as e:
         print(f"  ! 키움 마스터 조회 실패({e!r}) — KRX 스냅샷으로 폴백", flush=True)
     con = sqlite3.connect(f"file:{KRX}?mode=ro", uri=True)
@@ -239,30 +289,51 @@ def universe(con_w: sqlite3.Connection) -> list[str]:
     return sorted(tks)
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """인자 파서 — 네트워크·DB 를 타지 않고 시험하려고 `main()` 에서 분리했다."""
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", default="daily", choices=("daily", "full"),
-                    help="daily=무커버 스킵 · full=전 종목 (초도·주 1회 재분류)")
-    ap.add_argument("--limit", type=int, default=0, help="종목 수 상한 (시험용)")
-    a = ap.parse_args()
+    ap.add_argument("--mode", default="full", choices=("full",),
+                    help="full=전 종목 (무커버도 매일 재프로브). daily(무커버 영구 스킵)는 제거 — "
+                         "건전성 검사 wise.run 이 mode=full 을 요구한다 (DQ-9)")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="종목 수 상한. 시험용 — 런 로그를 남기지 않는다"
+                         "(건전성 판정의 완료 증거가 아니다)")
+    ap.add_argument("--run-tag", default=None, choices=(SUPPLEMENT_RUN_MODE,),
+                    help="런 로그 mode 열에 --mode 대신 남길 표식. supplement = 주말 보강판 수집(N-45) — "
+                         "수집 동작은 full 그대로이고, 건전성 wise.run 이 정규 수집으로 세지 않는다")
+    return ap.parse_args(argv)
+
+
+def main() -> None:
+    a = _parse_args()
+    run_mode = a.run_tag or a.mode      # 런 로그 mode 열 — 보강판 수집은 표식(SUPPLEMENT_RUN_MODE)
 
     con = sqlite3.connect(DB, timeout=60)
     con.execute("PRAGMA busy_timeout=60000")
     con.executescript(DDL)
 
     tks = universe(con)
-    if a.mode == "daily":
-        skip = {r[0] for r in con.execute("SELECT cmp_cd FROM ws_coverage WHERE status='none'")}
-        tks = [t for t in tks if t not in skip]
-        print(f"  · daily — 무커버 {len(skip):,} 종목 스킵", flush=True)
     if a.limit:
         tks = tks[:a.limit]
     today = kst_today()
     done = {r[0] for r in con.execute(
         "SELECT DISTINCT cmp_cd FROM ws_raw WHERE fetched_date=? AND ep='cF5001'", (today,))}
+    # 오늘 실패가 남은 키(마지막 호출이 ok 아님)가 있는 종목은 다시 부른다(A-03).
+    # 성공만 한 종목은 종전대로 건너뛴다
+    retry = {k[0] for k, v in last_call_status(con, today).items() if v != "ok"}
+    done -= retry
     tks = [t for t in tks if t not in done]
-    print(f"  · 대상 {len(tks):,} 종목 (오늘 기수집 {len(done):,} 제외) · 스냅샷 {today}", flush=True)
+    print(f"  · 대상 {len(tks):,} 종목 (오늘 기수집 {len(done):,} 제외"
+          f" · 실패 재수집 {len(retry.intersection(tks)):,}) · 스냅샷 {today}", flush=True)
     if not tks:
+        # 대상 0 이어도 런 로그를 한 줄(n_req 0) 남긴다 — 건전성은 그날 런을 합쳐 보므로, 끝까지 돈
+        # 런이 있었다는 기록이 있어야 런 로그 없이 끊긴 앞 런 뒤의 하루도 판정된다(A-03).
+        # 불변식: 런 로그 1행 = --limit 없는 런 완주 = 그때 유니버스 전부가 done 이거나 이번에 받음
+        if not a.limit:
+            con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
+                        (now_utc(), run_mode, 0, 0, 0, 0, json.dumps({})))
+            con.commit()
+        con.close()
         return
 
     t0 = time.time()
@@ -314,17 +385,20 @@ def main() -> None:
             out.append(("c1010001", "", v, body, nb, ms))
             # 컨센서스의 나머지 항목 축 — cF3002(손익 8항목 E + 차기분기 E 동봉) · cF4002(지표 E).
             # 연간 호출 하나에 DATAQ1~6(분기)까지 실려 오므로 분기 별도 호출은 없다 (실측).
-            for ep, extra in (("cF3002", {"frq": "0", "rpt": "0", "frqTyp": "0"}),
-                              ("cF4002", {"frq": "0", "rpt": "5", "frqTyp": "0"})):
-                q = urllib.parse.urlencode({"cmp_cd": cmp_cd, "finGubun": "IFRSL", "cn": "",
+            # finGubun 은 MAIN(주재무제표) — 연결 재무제표가 있는 회사는 연결, 별도만 내는 회사는 별도가
+            # 온다. IFRSL(연결 고정)로 부르면 별도만 내는 회사(2026-09-26 실측 스테이지 808 중
+            # 84, 예 샘씨엔에스 252990)의 값이 전부 NULL 로 와서 조용히 결측이 된다(DQ-5). 기준은 YYMM
+            # 라벨의 "(IFRS연결)/(IFRS별도)" 로 stage `fs_basis` 에 그대로 남는다.
+            for ep, pk, extra in FIN_REQUESTS:
+                q = urllib.parse.urlencode({"cmp_cd": cmp_cd, "finGubun": FIN_GUBUN, "cn": "",
                                             "encparam": encparam(), **extra})
-                _, v, body, nb, ms = fetch(cmp_cd, ep, "Y", f"{WISE}/company/{ep}.aspx?{q}")
+                _, v, body, nb, ms = fetch(cmp_cd, ep, pk, f"{WISE}/company/{ep}.aspx?{q}")
                 if v == "ok" and body[:1] != b"{":
                     encparam(refresh=True)          # 토큰 만료 의심 — 1회 갱신 후 재시도
-                    q = urllib.parse.urlencode({"cmp_cd": cmp_cd, "finGubun": "IFRSL", "cn": "",
+                    q = urllib.parse.urlencode({"cmp_cd": cmp_cd, "finGubun": FIN_GUBUN, "cn": "",
                                                 "encparam": encparam(), **extra})
-                    _, v, body, nb, ms = fetch(cmp_cd, ep, "Y", f"{WISE}/company/{ep}.aspx?{q}")
-                out.append((ep, "Y", v if body[:1] == b"{" or v != "ok" else "notjson",
+                    _, v, body, nb, ms = fetch(cmp_cd, ep, pk, f"{WISE}/company/{ep}.aspx?{q}")
+                out.append((ep, pk, v if body[:1] == b"{" or v != "ok" else "notjson",
                             body, nb, ms))
         return cmp_cd, covered, out
 
@@ -359,9 +433,10 @@ def main() -> None:
     n_bad = sum(badkinds.values())
     print(f"\n  ④ 종료 — 종목 {n_cov+n_none:,} (커버 {n_cov:,} · 무커버 {n_none:,}) "
           f"· 요청 {n_req:,} · {el/60:.1f}분 · {n_req/max(el,1):.1f}req/s", flush=True)
-    con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
-                (now_utc(), a.mode, n_cov + n_none, n_req, n_ok, n_bad,
-                 json.dumps(badkinds, ensure_ascii=False)))
+    if not a.limit:          # 위 불변식 — --limit 런(시험용)은 런 로그를 남기지 않는다
+        con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
+                    (now_utc(), run_mode, n_cov + n_none, n_req, n_ok, n_bad,
+                     json.dumps(badkinds, ensure_ascii=False)))
     if n_bad:
         print(f"  ⚠⚠ 본문 검증 실패 {n_bad}건 — {badkinds}", flush=True)
         if badkinds.get("struct_changed") or badkinds.get("marker_missing"):

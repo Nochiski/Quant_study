@@ -14,14 +14,29 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
 
 import duckdb
 import pytest
+from conftest import allow_skips
 from equity import build, rules_s11
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _k17a_fixture_skips() -> Iterator[None]:
+    """K1-7a — 이 모듈의 픽스처가 표본이 작아 못 재는 게이트의 SKIP 만 테스트에서 허용한다
+    (운영 허용표 `src/stage/skip_allow.py` 는 그대로다)."""
+    with allow_skips(
+            ("equity", "EG6_disclosure_version", "no_coverage",
+             "합성·절단본 접수에 정정 모집단이 없어 정정 링크 성립률을 못 잰다"),
+            ("equity", "EG8_disclosure_version", "no_coverage",
+             "합성·절단본에 나중에 정정된 사업보고서가 없어 정정 도달률을 못 잰다")):
+        yield
+
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 DV = rules_s11.DISCLOSURE_VERSION
@@ -90,10 +105,10 @@ def rows(built: build.BuildResult) -> dict[str, dict[str, object]]:
 def test_절단본_빌드가_전_게이트를_통과한다(built: build.BuildResult) -> None:
     assert built.ok, [(g.name, g.status.value, g.detail) for g in built.gates]
     assert [g.name for g in built.gates] == [
-        "EG0", "EG7", "EG1", "EG2", "EG3", "EG3_disclosure_version",
+        "EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_disclosure_version",
         "EG6_disclosure_version", "EG8_disclosure_version", "EG4", "EG5a"]
     assert {g.name: g.status.value for g in built.gates if g.name != "EG5a"} == {
-        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "pass", "EG3": "pass",
+        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "pass", "EG13": "pass", "EG3": "pass",
         "EG3_disclosure_version": "pass", "EG6_disclosure_version": "pass",
         "EG8_disclosure_version": "pass", "EG4": "pass"}
     assert (built.n_rows, built.n_reject) == (N_OUT, N_REJECT)
@@ -117,7 +132,7 @@ def test_링크_상태와_날짜_확인축_분포(built: build.BuildResult) -> N
     assert m["n_by_date_check"] == DATE_CHECK
     assert m["n_by_kind"] == KIND_COUNTS
     assert m["n_linked_originals"] == 82
-    assert m["n_corr_has_fin_item"] == 39
+    assert m["n_corr_has_fin_item"] == 42     # 09-30 키워드 "재무에 관한" 추가로 39 → 42
 
 
 def test_E_G6a_와_E_G6b_비율(built: build.BuildResult) -> None:
@@ -210,6 +225,8 @@ def test_모집단_어휘가_sql_리터럴과_같다() -> None:
         assert f"'{c}'" in body, c
     for k in rules_s11.FIN_ITEM_KEYWORDS:
         assert f"LIKE '%{k}%'" in body, k
+    for k in rules_s11.FIN_REASON_KEYWORDS:              # C-11 — 사유는 공백 뗀 판으로 대조
+        assert f"reason_compact LIKE '%{k}%'" in body, k
 
 
 def test_EG1_우변은_sql_의_모집단_CTE_를_재사용한다() -> None:
@@ -246,15 +263,21 @@ OBSERVED = date(2026, 9, 1)          # 손 트리의 재수집 관측일(판본 
 def _disclosure(rcept_no: str, rcept_dt: date | None, corp: str, report_nm: str,
                 is_correction: bool, rm: bool = False,
                 observed: date = OBSERVED) -> dict[str, object]:
+    # `available_date` 는 가짜 stage 공개일 — stage E08 규칙(원천 rcept_dt 와 접수번호 앞 8자리 중
+    # 늦은 쪽)을 흉내 낸다. 정상 접수는 rcept_dt 와 같다.
+    pfx = date(int(rcept_no[:4]), int(rcept_no[4:6]), int(rcept_no[6:8]))
     return {"rcept_no": rcept_no, "rcept_dt": rcept_dt, "corp_code": corp,
             "report_nm": report_nm, "is_correction": is_correction,
-            "rm_corrected_later": rm, "observed_date": observed}
+            "rm_corrected_later": rm,
+            "available_date": None if rcept_dt is None else max(rcept_dt, pfx),
+            "observed_date": observed}
 
 
 def _correction(rcept_no: str, filed: date | None, status: str = "parsed",
-                page: bool = True, items: str = "") -> dict[str, object]:
+                page: bool = True, items: str = "",
+                reason: str = "단순 기재오류") -> dict[str, object]:
     return {"rcept_no": rcept_no, "page_found": page, "filed_date": filed,
-            "filed_date_status": status, "reason_raw": "단순 기재오류", "items": items}
+            "filed_date_status": status, "reason_raw": reason, "items": items}
 
 
 def _hand_tree(make_stage_tree, tmp_path: Path, disclosures: list[dict[str, object]],
@@ -302,6 +325,52 @@ def _build_hand(make_stage_tree, tmp_path: Path, disclosures: list[dict[str, obj
         DV, stage_root, tmp_path / "equity", base, build_id="b_hand",
         fixtures_path=_hand_fixture(tmp_path, "20200101000001", "available_basis", "derived"),
         gate_thresholds={"EG7": 1.0})
+
+
+@pytest.mark.parametrize("reason, expect", [
+    ("재무제표 수정에 따른 기재정정", True),     # 공백 낀 사유 — 공백을 떼고 대조한다(C-11)
+    ("단순 기재오류", False),                    # 대조군 — 비재무 항목·사유
+])
+def test_재무_정정_판정은_공백을_뗀_사유도_본다(make_stage_tree, tmp_path: Path,
+                                          reason: str, expect: bool) -> None:
+    disclosures = [
+        _disclosure("20200101000001", date(2020, 3, 30), "00000001",
+                    "사업보고서 (2019.12)", False),
+        _disclosure("20200101000003", date(2020, 5, 20), "00000001",
+                    "[기재정정]사업보고서 (2019.12)", True),
+    ]
+    items = json.dumps([{"항목": "VIII. 임원 및 직원 등에 관한 사항"}], ensure_ascii=False)
+    r = _build_hand(make_stage_tree, tmp_path, disclosures,
+                    [_correction("20200101000003", date(2020, 3, 30), items=items,
+                                 reason=reason)])
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    assert rows["20200101000003"]["corr_has_fin_item"] is expect
+
+
+def test_재제출본의_공개일과_최초_정정일은_접수번호_날짜다(make_stage_tree,
+                                                    tmp_path: Path) -> None:
+    """N-26 4.10(J-41 의 disclosure_version 몫) — 박셀바이오 재제출본은 원천 rcept_dt 가 원래
+    제출일이다. 공개일·원본 측 `first_correction_dt` 는 stage 공개일(접수번호 날짜)로, `rcept_dt`
+    열과 `delay_days`(원천 rcept_dt − 기한)는 원천 그대로 둔다. fi `filing_late` 가 이 공개일로
+    거른다."""
+    orig, corr = "20250828000446", "20250828000453"
+    disclosures = [
+        _disclosure("20200101000001", date(2020, 1, 1), "00000001",
+                    "사업보고서 (2019.12)", False),                  # 보통 행 — 불변
+        _disclosure(orig, date(2024, 3, 19), "01335851", "사업보고서 (2023.12)", False),
+        _disclosure(corr, date(2024, 8, 14), "01335851", "[기재정정]사업보고서 (2023.12)", True),
+    ]
+    r = _build_hand(make_stage_tree, tmp_path, disclosures,
+                    [_correction(corr, date(2024, 3, 19))])
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    o, c, n = rows[orig], rows[corr], rows["20200101000001"]
+    assert (o["rcept_dt"], o["available_date"]) == (date(2024, 3, 19), date(2025, 8, 28))
+    assert o["first_correction_dt"] == date(2025, 8, 28)     # 정정의 원천 rcept_dt 는 2024-08-14
+    assert o["delay_days"] == -11                            # 2024-03-19 − (2023-12-31 + 90일)
+    assert c["available_date"] == date(2025, 8, 28)
+    assert (n["rcept_dt"], n["available_date"]) == (date(2020, 1, 1), date(2020, 1, 1))
 
 
 def test_부정_후보_2건이면_multi_unresolved(make_stage_tree, tmp_path: Path) -> None:
@@ -465,19 +534,20 @@ def test_부정_링크_성립률_임계를_못_넘기면_폐기된다(make_stage
     assert g.metrics["link_rate"] == 0.0
 
 
-def test_baseline_미등재면_임계를_걸지_않고_기록만_한다(built: build.BuildResult,
-                                                     tmp_path: Path) -> None:
-    """WORKFLOW §3-4 — 사다리 baseline 등재 전에는 E-G6a·E-G7 이 skip(no_baseline)."""
+def test_baseline_미등재면_측정치는_남기고_판은_폐기한다(built: build.BuildResult,
+                                                    tmp_path: Path) -> None:
+    """WORKFLOW §3-4 — 사다리 baseline 등재 전에는 E-G6a 가 skip(no_baseline) 이다. K1-7a 부터
+    허용표 밖 SKIP 이라 판을 폐기하고(뒤 E-G7 은 upstream_failed) 측정치는 남긴다."""
     bare = Baseline({DV.name: {"deadline_days_annual": 90,
                                "deadline_days_interim": 45,
                                "date_check_near_days": 7}})
     r = build.build_table(DV, STAGE_SLICE, tmp_path / "equity", bare, build_id="b_s11_bare")
-    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
-    for name, metric in (("EG6_disclosure_version", "link_rate"),
-                         ("EG8_disclosure_version", "reach_rate")):
-        g = next(x for x in r.gates if x.name == name)
-        assert g.status is GateStatus.SKIP and g.detail == "no_baseline"
-        assert g.metrics[metric] == 1.0            # 판정은 안 해도 값은 남는다
+    assert not r.ok
+    g6 = next(x for x in r.gates if x.name == "EG6_disclosure_version")
+    assert g6.status is GateStatus.FAIL and g6.metrics["skip_reason"] == "no_baseline"
+    assert g6.metrics["link_rate"] == 1.0              # 판정은 안 해도 값은 남는다
+    g8 = next(x for x in r.gates if x.name == "EG8_disclosure_version")
+    assert g8.status is GateStatus.SKIP and g8.detail == "upstream_failed"
 
 
 # ── DEFECT-F02: 미파싱 정정은 `not_parsed` (감사 09-19) ───────────────────────
@@ -525,3 +595,80 @@ def test_문서층이_뒤처진_정정은_no_page가_아니라_not_parsed다(
     g3 = _gate(r, "EG3_disclosure_version")
     assert g3.status is GateStatus.PASS
     assert g3.metrics["n_date_check_material_mismatch"] == 0
+
+
+# ── 최근 창 정정 파싱률(서식 드리프트 감지, 2026-09-28) ──────────────────────
+
+
+def test_최근_창_정정_파싱률은_절단본에서_기록형이다(built: build.BuildResult) -> None:
+    """절단본의 최근 90일 정정은 1건(2026-08-31)이고 그 1건이 `unparsed` 다 — 2025 서식 드리프트.
+
+    표본이 `CORR_RECENT_MIN_N` 미만이면 판정하지 않는다(기록형). 비율은 그래도 남는다.
+    """
+    m = _gate(built, "EG3_disclosure_version").metrics
+    assert (m["n_corr_recent_page"], m["n_corr_recent_parsed"]) == (1, 0)
+    assert m["corr_recent_parse_ratio"] == 0.0
+    assert m["corr_recent_asof"] == "2026-08-31" and m["corr_recent_window_days"] == 90
+    assert m["n_corr_recent_parse_drift"] == 0        # 표본 1건 < 50 → 기록만
+    assert _gate(built, "EG3_disclosure_version").status is GateStatus.PASS
+
+
+def _drift_rows(n_corr: int, n_parsed: int) -> tuple[list[dict[str, object]],
+                                                     list[dict[str, object]]]:
+    """법인 n_corr 개 × (원본 1 + 정정 1). 정정은 전부 최근 창 안이고 앞 n_parsed 건만 파싱 성공."""
+    disclosures: list[dict[str, object]] = [
+        # `_build_hand` 의 EG4 손 픽스처가 이 접수번호를 본다
+        _disclosure("20200101000001", date(2020, 3, 30), "00099999",
+                    "사업보고서 (2019.12)", False),
+    ]
+    corrections: list[dict[str, object]] = []
+    for i in range(n_corr):
+        corp = f"{i:08d}"
+        orig = f"202603010{i:05d}"
+        corr = f"202607010{i:05d}"
+        disclosures.append(_disclosure(orig, date(2026, 3, 30), corp,
+                                       "사업보고서 (2025.12)", False, rm=True))
+        disclosures.append(_disclosure(corr, date(2026, 7, 15), corp,
+                                       "[기재정정]사업보고서 (2025.12)", True))
+        if i < n_parsed:
+            corrections.append(_correction(corr, date(2026, 3, 30)))
+        else:
+            corrections.append(_correction(corr, None, status="unparsed"))
+    return disclosures, corrections
+
+
+def test_최근_창_정정_파싱률이_절반_아래면_EG3_가_폐기한다(make_stage_tree,
+                                                        tmp_path: Path) -> None:
+    """서식이 통째로 바뀐 수준(20/60 = 0.333) — 표본 50건 이상이면 폐기형."""
+    disclosures, corrections = _drift_rows(60, 20)
+    r = _build_hand(make_stage_tree, tmp_path, disclosures, corrections)
+    g = _gate(r, "EG3_disclosure_version")
+    assert g.status is GateStatus.FAIL and "n_corr_recent_parse_drift=1" in g.detail
+    assert (g.metrics["n_corr_recent_page"], g.metrics["n_corr_recent_parsed"]) == (60, 20)
+    assert round(float(str(g.metrics["corr_recent_parse_ratio"])), 5) == 0.33333
+    assert g.metrics["corr_recent_parse_warn"] is True
+    assert not r.ok
+
+
+def test_최근_창_파싱률이_경고선_아래면_기록만_한다(make_stage_tree, tmp_path: Path) -> None:
+    """0.5 ≤ 비율 < 0.9 는 경고선 — `GateStatus` 에 WARN 이 없어 기록형으로만 남긴다."""
+    disclosures, corrections = _drift_rows(60, 40)
+    r = _build_hand(make_stage_tree, tmp_path, disclosures, corrections)
+    g = _gate(r, "EG3_disclosure_version")
+    assert g.status is GateStatus.PASS and r.ok
+    assert g.metrics["corr_recent_parse_warn"] is True
+    assert g.metrics["n_corr_recent_parse_drift"] == 0
+
+
+def test_최근_창_파싱률이_정상이면_경고도_없다(make_stage_tree, tmp_path: Path) -> None:
+    disclosures, corrections = _drift_rows(60, 55)
+    r = _build_hand(make_stage_tree, tmp_path, disclosures, corrections)
+    g = _gate(r, "EG3_disclosure_version")
+    assert g.status is GateStatus.PASS and r.ok
+    assert g.metrics["corr_recent_parse_warn"] is False
+    assert g.metrics["n_corr_recent_parse_drift"] == 0
+
+
+def test_최근_창_상수_선언() -> None:
+    assert (rules_s11.CORR_RECENT_WINDOW_DAYS, rules_s11.CORR_RECENT_MIN_N) == (90, 50)
+    assert (rules_s11.CORR_RECENT_FAIL_RATIO, rules_s11.CORR_RECENT_WARN_RATIO) == (0.5, 0.9)

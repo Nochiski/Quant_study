@@ -1,6 +1,7 @@
 """daily.calendar — 휴장 캐시 기반 거래일 판정. 플랜 P1 Task 1.1."""
 import datetime as dt
 import json
+import re
 
 import pytest
 
@@ -8,7 +9,7 @@ from daily import calendar as cal
 
 
 def _write(tmp_path, holidays, year=2026):
-    p = tmp_path / "kis_holidays.json"
+    p = tmp_path / f"kis_holidays_{year}.json"
     p.write_text(json.dumps({"year": year, "holidays": holidays}), encoding="utf-8")
     return p
 
@@ -38,19 +39,36 @@ def test_count_trading_days_is_exclusive_start_inclusive_end(tmp_path):
     assert c.count_trading_days(dt.date(2026, 9, 23), dt.date(2026, 9, 22)) == 0   # 역순도 0
 
 
-def test_missing_cache_assumes_business_days(tmp_path):
-    c = cal.load(tmp_path / "nope.json")
-    assert c.source == "weekend_only"
-    assert c.is_trading_day(dt.date(2026, 9, 24)) is True       # 캐시 없으면 평일 = 영업일 가정
-    assert c.is_trading_day(dt.date(2026, 9, 27)) is False
+# ── 달력을 못 읽으면 중단 (K1-9 ⑦ · N-31 ② — R7 '영업일 가정' 폴백 폐지) ─────────────────
+def test_missing_calendar_raises_instead_of_assuming_business_days(tmp_path):
+    # 옛 동작: weekend_only 폴백 → 10-09(한글날)·추석 같은 평일 휴장을 거래일로 판정하고 체인이 돌았다.
+    # 메시지는 옛 경로(nope.json)가 아니라 실제로 읽은 판정 디렉터리를 싣는다(error-messages.md)
+    with pytest.raises(cal.CalendarUnavailable, match=re.escape(f"dir={tmp_path}")):
+        cal.load(tmp_path / "nope.json")
 
 
-def test_invalid_cache_falls_back(tmp_path):
-    p = tmp_path / "bad.json"
-    p.write_text("{not json", encoding="utf-8")
-    c = cal.load(p)
-    assert c.source == "weekend_only"
-    assert c.detail  # 왜 폴백했는지 남긴다
+def test_corrupt_calendar_raises(tmp_path):
+    (tmp_path / "kis_holidays_2026.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(cal.CalendarUnavailable, match="JSONDecodeError"):
+        cal.load(tmp_path)
+
+
+def test_corrupt_year_file_is_named_with_its_full_path(tmp_path):
+    # 정지 메시지만 보고 어느 연도 파일이 깨졌는지 알아야 한다 — 연도 파일 전체 경로가 실린다
+    _write_year(tmp_path, 2026, ["20261225"])
+    bad = tmp_path / "kis_holidays_2027.json"
+    bad.write_text(json.dumps({"year": 2027}), encoding="utf-8")         # holidays 키 없음
+    with pytest.raises(cal.CalendarUnavailable) as e:
+        cal.load(tmp_path / "kis_holidays.json")
+    assert f"path={bad}" in str(e.value) and "KeyError" in str(e.value)
+    assert f"dir={tmp_path}" in str(e.value)
+
+
+def test_year_in_file_name_must_match_the_content(tmp_path):
+    (tmp_path / "kis_holidays_2027.json").write_text(
+        json.dumps({"year": 2026, "holidays": ["20261225"]}), encoding="utf-8")
+    with pytest.raises(cal.CalendarUnavailable, match="2027"):
+        cal.load(tmp_path)
 
 
 # ── 연 경계 (DEFECT-A07) ────────────────────────────────────────────────────
@@ -86,7 +104,95 @@ def test_year_without_a_cache_file_raises_instead_of_assuming_weekdays(tmp_path)
         c.prev_trading_day(dt.date(2027, 1, 4))
 
 
-def test_weekend_only_fallback_does_not_gain_a_year_check(tmp_path):
-    c = cal.load(tmp_path / "nope.json")
-    assert c.source == "weekend_only"
-    assert c.is_trading_day(dt.date(2027, 1, 4)) is True    # 캐시가 없을 때의 규약은 그대로(§4-1 0단계)
+# ── 주말 보강판 대상일(N-45) — 휴장 연속의 첫 휴일에만 직전 거래일 D ─────────────────────
+# 2026 실제 휴장일 일부: 추석 9/24(목)·9/25(금) · 개천절 대체 10/5(월) · 한글날 10/9(금) · 연말 12/31(목) · 신정 1/1(금)
+_HOLIDAYS_2026 = ["20260924", "20260925", "20261005", "20261009", "20261225", "20261231"]
+
+
+@pytest.mark.parametrize(("today", "want"), [
+    (dt.date(2026, 10, 17), dt.date(2026, 10, 16)),   # 보통 주말 — 토요일이 금요일 D
+    (dt.date(2026, 10, 18), None),                    # 일요일 — 연휴 둘째 날
+    (dt.date(2026, 10, 19), None),                    # 월요일 거래일
+    (dt.date(2026, 10, 16), None),                    # 금요일 거래일 자신
+    (dt.date(2026, 10, 3), dt.date(2026, 10, 2)),     # 월요일 공휴일 연휴(10/3~10/5) — 토요일 한 번
+    (dt.date(2026, 10, 4), None),
+    (dt.date(2026, 10, 5), None),                     # 대체공휴일 월요일 — 직전 달력일이 일요일
+    (dt.date(2026, 10, 9), dt.date(2026, 10, 8)),     # 금요일 한글날 — 그날이 첫 휴일(목요일 D)
+    (dt.date(2026, 10, 10), None),                    # 이어지는 토요일
+    (dt.date(2026, 9, 24), dt.date(2026, 9, 23)),     # 추석(목·금 + 주말) — 첫날 한 번
+    (dt.date(2026, 9, 25), None),
+    (dt.date(2026, 9, 26), None),
+])
+def test_supplement_target_is_the_first_holiday_of_a_streak(tmp_path, today, want):
+    c = cal.load(_write(tmp_path, _HOLIDAYS_2026))
+    assert c.supplement_target(today) == want
+
+
+def test_supplement_target_across_the_year_end(tmp_path):
+    # 연말 휴장 12/31(목) 이 첫 휴일(→ 12/30) · 신정 1/1(금) 은 이어지는 휴일이라 None(전 해 파일도 읽는다)
+    _write_year(tmp_path, 2026, _HOLIDAYS_2026)
+    _write_year(tmp_path, 2027, ["20270101"])
+    c = cal.load(tmp_path)
+    assert c.supplement_target(dt.date(2026, 12, 31)) == dt.date(2026, 12, 30)
+    assert c.supplement_target(dt.date(2027, 1, 1)) is None
+    assert c.supplement_target(dt.date(2027, 1, 2)) is None
+
+
+def test_supplement_target_needs_the_previous_year_file(tmp_path):
+    # 1/1 판정은 12/31 이 거래일인지 알아야 한다 — 전 해 파일이 없으면 영업일을 가정하지 않고 KeyError
+    _write_year(tmp_path, 2027, ["20270101"])
+    c = cal.load(tmp_path)
+    with pytest.raises(KeyError, match="2026"):
+        c.supplement_target(dt.date(2027, 1, 1))
+
+
+def test_supplement_target_with_no_calendar_stops(tmp_path):
+    # 달력이 없으면 load 단계에서 CalendarUnavailable — 휴장 아님(보강판 없음)으로 위장하지 않는다
+    with pytest.raises(cal.CalendarUnavailable):
+        cal.load(tmp_path).supplement_target(dt.date(2026, 10, 17))
+
+
+def test_legacy_unsuffixed_file_is_not_read(tmp_path):
+    # 옛 경로 `kis_holidays.json` 은 v3 사본 호환용으로 남는다. 판정에 섞으면(합집합) 직접 갱신이
+    # 지운 휴장일(지정 취소)이 옛 사본으로 되살아난다 — 판정은 연도 파일만 읽는다.
+    _write_year(tmp_path, 2026, ["20261225"])
+    (tmp_path / "kis_holidays.json").write_text(
+        json.dumps({"year": 2026, "holidays": ["20261225", "20261020"]}), encoding="utf-8")
+    c = cal.load(tmp_path / "kis_holidays.json")
+    assert c.is_trading_day(dt.date(2026, 10, 20)) is True
+    assert c.is_trading_day(dt.date(2026, 12, 25)) is False
+
+
+# ── 세션 예외 표(정규장 시각이 바뀌는 거래일 — 컷오버 PR-1 M2) ──────────────────────────
+def _write_exceptions(path, days):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"days": days}, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_session_exceptions_union_repo_default_and_ops_table(tmp_path):
+    default = _write_exceptions(tmp_path / "repo" / "session_exceptions.json",
+                                {"20261119": "수능(기본)"})
+    ops = tmp_path / "data" / "calendar"
+    # 운영 표가 없으면 기본 표만
+    assert cal.load_session_exceptions(ops, default=default) == {"20261119": "수능(기본)"}
+    # 운영 표가 있으면 합집합, 같은 날짜는 운영 표 사유 — 기본 표의 날이 가려지지 않는다
+    _write_exceptions(ops / cal.SESSION_EXCEPTIONS_FILE,
+                      {"20261119": "수능(KRX 공지 확인)", "20261231": "폐장일 시각 변경"})
+    assert cal.load_session_exceptions(ops, default=default) == {
+        "20261119": "수능(KRX 공지 확인)", "20261231": "폐장일 시각 변경"}
+
+
+@pytest.mark.parametrize("days", [{"2026-11-19": "형식"}, {"20261131": "없는 날"},
+                                  {"20261119": ""}, ["20261119"]])
+def test_session_exceptions_malformed_table_stops(tmp_path, days):
+    # 조용히 빈 표로 넘어가면 시각이 바뀐 날 장중 값을 첫 관측으로 굳힌다 — 멈춘다(P1)
+    default = tmp_path / "session_exceptions.json"
+    default.write_text(json.dumps({"days": days}), encoding="utf-8")
+    with pytest.raises(cal.CalendarUnavailable, match="session_exceptions"):
+        cal.load_session_exceptions(tmp_path / "ops", default=default)
+
+
+def test_session_exceptions_missing_repo_default_stops(tmp_path):
+    with pytest.raises(cal.CalendarUnavailable, match="session_exceptions"):
+        cal.load_session_exceptions(tmp_path, default=tmp_path / "nope.json")

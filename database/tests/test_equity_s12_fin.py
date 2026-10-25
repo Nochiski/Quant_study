@@ -4,7 +4,8 @@
 절단본 실측(`stg_fin` 41,740행 · 법인 9개):
   모집단 = (corp_code, bsns_year, reprt_code, fs_div) 중 표준계정 행이 있는 그룹 **226**
   → 산출 **220** · 격리 **6**(전부 `non_krw` = 중국원양자원 00722500, HKD 848행).
-  `period_end_basis` document 220 · inferred 1(격리된 00722500 2016 반기, 문서 없음).
+  `period_end_basis` 산출 220 전부 document. 격리된 00722500 2016 반기는 판(정정)에 문서가 없어
+  e1.24.0 까지 inferred 였고 e1.25.0 부터 같은 정정 사슬의 원본 문서로 document 다(같은 말일).
   `report_code` 11011 57 · 11012 56 · 11013 56 · 11014 51 — `doc_acode` 는 1·3분기를 둘 다
   11013 으로 적으므로 개월 수(3 vs 9)가 11014 51 건을 갈라낸다.
   접수 지연 p50 45일 · p99 216일 · **max 445일**(`api_restated` 축의 증거).
@@ -16,17 +17,37 @@
 """
 from __future__ import annotations
 
+import functools
 import json
+import re
+from collections.abc import Iterator
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 import duckdb
 import pytest
-from equity import build, rules_s01, rules_s11, rules_s12
+from conftest import allow_skips
+from equity import build, inputs, rules_s01, rules_s11, rules_s12
 from equity.baseline import Baseline, load
-from equity.gates import GateStatus
+from equity.gates import EquityGateContext, GateStatus
 from fin_map import FIN_MAP
+from stage import manifest as stage_manifest
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _k17a_fixture_skips() -> Iterator[None]:
+    """K1-7a — 이 모듈의 픽스처가 표본이 작아 못 재는 게이트의 SKIP 만 테스트에서 허용한다
+    (운영 허용표 `src/stage/skip_allow.py` 는 그대로다)."""
+    with allow_skips(
+            ("equity", "EG6_disclosure_version", "no_coverage",
+             "합성·절단본 접수에 정정 모집단이 없어 정정 링크 성립률을 못 잰다"),
+            ("equity", "EG8_disclosure_version", "no_coverage",
+             "합성·절단본에 나중에 정정된 사업보고서가 없어 정정 도달률을 못 잰다"),
+            ("equity", "EG6_fin_std", "no_coverage",
+             "절단본에 12월·비12월 결산 법인이 함께 있지 않아 결산월별 무매칭률 차이를 못 잰다")):
+        yield
+
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 FIN_STD = rules_s12.FIN_STD
@@ -35,6 +56,7 @@ N_SRC = 226
 N_OUT = 220
 N_REJECT = 6
 N_PREV_FILLED = 178                    # 직전 회계연도 같은 보고서를 찾은 행 (나머지 42 는 첫 해)
+N_ORIG_FILING = 8                      # 원본 공시일을 승계한 정정본 행 (09-30 규칙)
 REPORT_CODES = {"11011": 57, "11012": 56, "11013": 56, "11014": 51}
 SEC = "20190401004781"                 # 삼성전자 2018 사업보고서
 SEC_2Q = "20180814001113"
@@ -107,11 +129,12 @@ def rows(built: build.BuildResult) -> dict[str, dict[str, object]]:
 
 def test_절단본_빌드가_전_게이트를_통과한다(built: build.BuildResult) -> None:
     assert built.ok, [(g.name, g.status.value, g.detail) for g in built.gates]
-    assert [g.name for g in built.gates] == ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_fin_std",
-                                             "EG6_fin_std", "EG4", "EG5a"]
+    assert [g.name for g in built.gates] == ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3",
+                                             "EG3_fin_std", "EG8_fin_std", "EG6_fin_std", "EG4",
+                                             "EG5a"]
     assert {g.name: g.status.value for g in built.gates if g.name != "EG5a"} == {
-        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "pass", "EG3": "pass",
-        "EG3_fin_std": "pass", "EG6_fin_std": "skip", "EG4": "pass"}
+        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "pass", "EG13": "pass", "EG3": "pass",
+        "EG3_fin_std": "pass", "EG8_fin_std": "pass", "EG6_fin_std": "skip", "EG4": "pass"}
     assert (built.n_rows, built.n_reject) == (N_OUT, N_REJECT)
 
 
@@ -126,11 +149,13 @@ def test_비KRW_그룹은_격리된다(built: build.BuildResult) -> None:
     assert len(rej) == N_REJECT
     assert {r["reject_reason"] for r in rej} == {"non_krw"}
     assert {r["corp_code"] for r in rej} == {"00722500"}
-    # 문서 없는 그룹의 후보 규칙(inferred)이 실제로 돌았다는 증거 — 반기 말일을 스스로 찾았다
-    inferred = [r for r in rej if r["period_end_basis"] == "inferred"]
-    assert len(inferred) == 1
-    assert (inferred[0]["bsns_year"], inferred[0]["report_code"],
-            inferred[0]["period_end"]) == ("2016", "11012", date(2016, 6, 30))
+    # 2016 반기 그룹의 판(정정 20160830000761)은 문서가 없다. e1.25.0 부터는 같은 정정 사슬의
+    # 원본 20160829000543 문서(2016-01-01~06-30)로 기간을 잇는다(`chain_doc`) — 예전 후보
+    # 규칙(inferred)과 같은 말일이다. 후보 규칙 자체는 손 트리 시험
+    # (`test_결산월이_있으면_…`)이 본다.
+    half = [r for r in rej if (r["bsns_year"], r["report_code"]) == ("2016", "11012")]
+    assert len(half) == 1
+    assert (half[0]["period_end_basis"], half[0]["period_end"]) == ("document", date(2016, 6, 30))
 
 
 def test_보고서_종류_분포와_1Q_3Q_판정(built: build.BuildResult,
@@ -210,11 +235,14 @@ def test_현금흐름은_누계이고_분기_파생이_따로_붙는다(rows: di
     assert rows[SEC_3Q]["cf_q_available_date"] == rows[SEC_3Q]["rcept_dt"]
 
 
-def test_PIT_축은_접수일이다(rows: dict[str, dict[str, object]]) -> None:
+def test_PIT_축은_접수일이고_재무표_무관_정정만_원본일을_잇는다(
+        rows: dict[str, dict[str, object]]) -> None:
+    # 절단본 실측(09-30): 220 중 8행이 재무표를 안 건드린 정정본 — 공개일만 원본 접수일로 당겨진다
+    moved = [r for r in rows.values() if r["available_date"] != r["rcept_dt"]]
+    assert len(moved) == N_ORIG_FILING
     for r in rows.values():
-        assert r["available_date"] == r["rcept_dt"]
         assert r["available_basis"] == "derived"
-        assert r["period_end"] <= r["rcept_dt"]
+        assert r["period_end"] <= r["available_date"] <= r["rcept_dt"]
 
 
 def test_계정_커버율이_기록된다(built: build.BuildResult) -> None:
@@ -276,6 +304,16 @@ def test_계정_대응표는_fin_map_에서_유도된다() -> None:
     assert metrics == set(rules_s12.ACCOUNTS)
 
 
+def test_기간_문서_자격은_sql_doc_CTE_와_같다() -> None:
+    """EG3 기간 증인(`DOC_QUALIFIED_PRED`)과 `.sql` `doc` CTE 가 같은 자격을 써야 '자기 문서
+    우선'이 맞물린다. 조건 집합 등식 — 어느 쪽에 조건이 더해지거나 빠져도 걸린다."""
+    sql = rules_s12.SQL_PATH.read_text(encoding="utf-8")
+    doc = sql.split("\ndoc AS (", 1)[1].split("),", 1)[0]
+    where = " ".join(doc.split("WHERE", 1)[1].split("QUALIFY", 1)[0].split())
+    pred = rules_s12.DOC_QUALIFIED_PRED.format(a="m").replace("m.", "")
+    assert set(where.split(" AND ")) == set(pred.split(" AND "))
+
+
 def test_sql_의_acct_블록은_생성기_문자열과_같다() -> None:
     sql = rules_s12.SQL_PATH.read_text(encoding="utf-8")
     assert rules_s12.acct_values_sql() in sql
@@ -328,7 +366,8 @@ def test_매출_기준_두_축이_필드로_나간다() -> None:
         assert f.point_in_time is True
         assert column in FIN_STD.columns
     assert rules_s12.REVENUE_BASIS_VOCAB == ("standard", "banking_gross", "insurance_gross",
-                                             "consensus", "unavailable")
+                                             "consensus", "no_is_statement", "unmapped")
+    assert rules_s12.REVENUE_BASIS_NULL_REASONS == ("no_is_statement", "unmapped")
 
 
 def test_직전_회계연도_술어는_sql_과_같은_축이다() -> None:
@@ -365,15 +404,29 @@ def test_픽스처는_전부_positive_이고_키가_유일하다(built: build.Bu
 # ── 손 트리 부정 픽스처 ───────────────────────────────────────────────────────
 
 OBSERVED = date(2026, 9, 1)          # 손 트리의 재수집 관측일(판본 선택 축)
+# 손 트리 stage 판의 원장 스냅샷 — 시나리오의 가장 늦은 관측(G-21 정정 09-28) 뒤.
+# EG13 이 이 id 의 KST 날짜를 공개일 상한으로 읽는다.
+HAND_SNAPSHOT = "snap_20260930T000000Z"
+
+
+def _stage_available(rcept: str, rcept_dt: date) -> date:
+    """가짜 stage `stg_disclosure.available_date` — stage E08 규칙(원천 rcept_dt 와 접수번호 앞
+    8자리 중 늦은 쪽)을 그대로 흉내 낸다. 정상 접수는 rcept_dt 와 같다."""
+    return max(rcept_dt, date(int(rcept[:4]), int(rcept[4:6]), int(rcept[6:8])))
 
 
 def _fin_row(corp: str, year: str, reprt: str, rcept: str, *, sj: str, account_id: str,
-             account_nm: str, amount: float, is_krw: bool = True, currency: str = "KRW",
-             ord_: int = 1, observed: date = OBSERVED) -> dict[str, object]:
+             account_nm: str, amount: float | None, is_krw: bool = True, currency: str = "KRW",
+             ord_: int = 1, observed: date = OBSERVED,
+             account_std: bool = True) -> dict[str, object]:
+    # `account_std` = stage 의 `account_id <> '-표준계정코드 미사용-'`(rules_dart). 비표준 이름
+    # 폴백(capex 자산별 합)을 시험하려면 이 축을 손으로 내려야 한다.
+    # `account_nm_norm` 도 stage 파생 컬럼(T-E)이라 같은 규칙(공백 제거)으로 여기서 만든다.
     return {"corp_code": corp, "bsns_year": year, "reprt_code": reprt, "fs_div": "CFS",
             "sj_div": sj, "account_id": account_id, "account_detail": "",
             "ord": ord_, "account_nm": account_nm,
-            "thstrm_amount": amount, "account_std": True, "is_krw": is_krw,
+            "account_nm_norm": re.sub(r"\s+", "", account_nm),
+            "thstrm_amount": amount, "account_std": account_std, "is_krw": is_krw,
             "currency": currency, "rcept_no": rcept, "observed_date": observed}
 
 
@@ -390,26 +443,39 @@ def _hand_build(make_stage_tree, tmp_path: Path, corps: list[tuple[str, str | No
                 reports: list[tuple[str, str, str, str, date, date | None, str | None]],
                 fin: list[dict[str, object]], fixture: tuple[str, str, object],
                 duplicate_disclosure: bool = False,
-                period_from: dict[str, date] | None = None, **bl: object) -> build.BuildResult:
+                report_names: dict[str, str] | None = None,
+                extra_disclosures: list[tuple[str, str, str, date]] | None = None,
+                corrections: list[dict[str, object]] | None = None,
+                period_from: dict[str, date] | None = None,
+                **bl: object) -> build.BuildResult:
     """corps = [(corp_code, acc_mt)] · reports = [(rcept, corp, year, reprt, rcept_dt,
     period_to, doc_acode)] — period_to 가 None 이면 문서가 없는 그룹이다.
     `duplicate_disclosure` 는 첫 접수의 재수집 판본을 `stg_disclosure` 에 하나 더 실는다.
+    정정 판본 시험용: `report_names` 는 접수번호별 공시명(기본 '사업보고서 (YYYY.12)'),
+    `extra_disclosures` = [(rcept, corp, report_nm, rcept_dt)] 는 재무 행이 없는 공시(원본·중간 정정),
+    `corrections` 는 `stg_doc_correction` 행(기본 = 첫 접수 한 행).
     `period_from` 은 접수번호별 문서 기간 시작일이다 — 없으면 period_to 해의 1월 1일(12월 결산)."""
+    names = report_names or {}
+    make_stage_tree = functools.partial(make_stage_tree, snapshot_id=HAND_SNAPSHOT)   # EG13 기준일
     tree = make_stage_tree(tmp_path, "stg_corp_map",
-                           [{"corp_code": c, "ticker": f"00000{i}", "corp_name_current": c}
+                           [{"corp_code": c, "ticker": f"{i:06d}", "corp_name_current": c}
                             for i, (c, _) in enumerate(corps)])
     make_stage_tree(tmp_path, "stg_company",
                     [{"corp_code": c, "acc_mt": m, "induty_code_current": "26",
                       "observed_date": date(2026, 1, 1)} for c, m in corps])
-    disclosures = [{"rcept_no": r, "rcept_dt": dt, "corp_code": c,
-                    "report_nm": f"사업보고서 ({y}.12)", "is_correction": False,
-                    "rm_corrected_later": False, "observed_date": OBSERVED}
-                   for r, c, y, _rc, dt, _pt, _ac in reports]
+    listed = [(r, c, names.get(r, f"사업보고서 ({y}.12)"), dt)
+              for r, c, y, _rc, dt, _pt, _ac in reports] + list(extra_disclosures or [])
+    disclosures = [{"rcept_no": r, "rcept_dt": dt, "corp_code": c, "report_nm": nm,
+                    "is_correction": nm.startswith(("[기재정정]", "[첨부정정]")),
+                    "rm_corrected_later": False, "available_date": _stage_available(r, dt),
+                    "observed_date": OBSERVED}
+                   for r, c, nm, dt in listed]
     if duplicate_disclosure:
         disclosures.append({**disclosures[0], "observed_date": date(2026, 9, 3)})
     make_stage_tree(tmp_path, "stg_disclosure", disclosures,
                     partition_class="receipt_axis")
     make_stage_tree(tmp_path, "stg_doc_correction",
+                    corrections if corrections is not None else
                     [{"rcept_no": reports[0][0], "page_found": True,
                       "filed_date": reports[0][4], "filed_date_status": "parsed",
                       "reason_raw": "", "items": ""}], partition_class="receipt_axis")
@@ -559,6 +625,268 @@ def test_부정_같은_grain_으로_접히면_둘_다_격리된다(make_stage_tr
     assert dict(_gate(r, "EG7").metrics["reject_by_reason"]) == {"duplicate_vintage": 2}
 
 
+# ── 정정본의 원본 공시일 승계 (09-30, `docs/research/2026-09-30-gpt-layer-debate.md` ③) ──────
+# DART API 는 정정이 있으면 정정본만 돌려준다. 원본부터 그 판까지의 정정이 모두 재무표를 건드리지
+# 않았으면 재무 수치는 원본과 같으므로 공개일은 원본 접수일이다. 하나라도 건드렸거나 판단할 수
+# 없으면(정정 첫 장 미해석·원본 제출일 불일치) 정정 접수일을 지킨다.
+_ORIG = ("20210330000001", date(2021, 3, 30))
+_NONFIN = "VIII. 임원 및 직원 등에 관한 사항 1. 임원 및 직원의 현황"
+_FIN_SECTION = "III. 재무에 관한 사항 8. 기타 재무에 관한 사항"
+_EMPTY_ITEMS = "[]"          # 정정 첫 장에서 항목 표를 하나도 못 뽑았다(stage 원문 그대로)
+
+
+def _correction_row(make_stage_tree, tmp_path: Path,
+                    chain: list[tuple[str, date, str | None, date]],
+                    reason: str = "기재정정") -> dict[str, object]:
+    """chain = [(정정 접수번호, 접수일, 정정 항목, 첫 장의 원본 제출일)] — 정정 항목 None 은 첫 장
+    미해석, `_EMPTY_ITEMS` 는 빈 항목 표다. 마지막이 API 가 돌려준 판(재무 행의 접수번호)이다.
+    원본은 `_ORIG`.
+    `reason` 은 정정 첫 장의 정정 사유(`reason_raw`)다."""
+    corps = [("00000001", "12")]
+    last, last_dt = chain[-1][0], chain[-1][1]
+    reports = [(last, "00000001", "2020", "11011", last_dt, date(2020, 12, 31), "11011")]
+    fin = [_fin_row("00000001", "2020", "11011", last, sj="IS",
+                    account_id="ifrs-full_Revenue", account_nm="매출액", amount=100.0)]
+    corr_nm = "[기재정정]사업보고서 (2020.12)"
+    extra = [(_ORIG[0], "00000001", "사업보고서 (2020.12)", _ORIG[1])] + [
+        (r, "00000001", corr_nm, dt) for r, dt, _it, _fd in chain[:-1]]
+    corrections = [{"rcept_no": r, "page_found": True, "filed_date": fd,
+                    "filed_date_status": "parsed", "reason_raw": reason,
+                    "items": it if it in (None, _EMPTY_ITEMS)
+                    else json.dumps([{"항목": it}], ensure_ascii=False)}
+                   for r, _dt, it, fd in chain]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin, (last, "rcept_no", last),
+                    report_names={r: corr_nm for r, *_ in chain}, extra_disclosures=extra,
+                    corrections=corrections)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert r.out_dir is not None
+    out = _rows(r.out_dir)
+    assert len(out) == 1
+    return out[0]
+
+
+def test_재무표를_안_건드린_정정은_원본_공시일을_이어받는다(make_stage_tree, tmp_path: Path) -> None:
+    row = _correction_row(make_stage_tree, tmp_path,
+                          [("20210615000002", date(2021, 6, 15), _NONFIN, _ORIG[1])])
+    assert row["rcept_no"] == "20210615000002"
+    assert row["rcept_dt"] == date(2021, 6, 15)            # 판의 접수일은 그대로다
+    assert row["available_date"] == _ORIG[1]              # 공개일만 원본 접수일로 당겨진다
+    assert row["available_basis"] == "derived"
+
+
+def test_재무에_관한_사항을_고친_정정은_정정일을_지킨다(make_stage_tree, tmp_path: Path) -> None:
+    row = _correction_row(make_stage_tree, tmp_path,
+                          [("20210615000002", date(2021, 6, 15), _FIN_SECTION, _ORIG[1])])
+    assert row["available_date"] == date(2021, 6, 15)
+    assert row["available_basis"] == "derived"
+
+
+def test_중간_정정이_재무표를_고쳤으면_정정일을_지킨다(make_stage_tree, tmp_path: Path) -> None:
+    row = _correction_row(make_stage_tree, tmp_path, [
+        ("20210510000002", date(2021, 5, 10), "III. 재무에 관한 사항 2. 연결재무제표", _ORIG[1]),
+        ("20210615000003", date(2021, 6, 15), _NONFIN, _ORIG[1])])
+    assert row["rcept_no"] == "20210615000003"
+    assert row["available_date"] == date(2021, 6, 15)
+    assert row["available_basis"] == "derived"
+
+
+@pytest.mark.parametrize("items, filed, reason", [
+    (None, _ORIG[1], "기재정정"),             # 정정 첫 장 미해석 → 판단 불가
+    (_NONFIN, date(2021, 2, 1), "기재정정"),  # 첫 장의 원본 제출일이 연결된 원본과 어긋난다
+    # C-11(N-25 Q1) — 항목 표가 비었다(서술형·표만 있는 첫 장) → 판단 불가. 예전엔 FALSE 로 읽혀
+    # 재작성 값에 원본 공시일이 붙었다(20181129000580 개발비 판단오류 재작성 등)
+    (_EMPTY_ITEMS, _ORIG[1], "기재정정"),
+    # C-11 — 항목은 비재무(배당 지표)인데 사유가 재무제표 재작성이다(00287812 FY2015, 2018-09-07)
+    (_NONFIN, _ORIG[1], "2015~2017 연결재무제표 재작성 및 감사보고서 재발행"),
+])
+def test_판단할_수_없으면_정정일을_지킨다(make_stage_tree, tmp_path: Path,
+                                     items: str | None, filed: date, reason: str) -> None:
+    row = _correction_row(make_stage_tree, tmp_path,
+                          [("20210615000002", date(2021, 6, 15), items, filed)], reason=reason)
+    assert row["available_date"] == date(2021, 6, 15)
+    assert row["available_basis"] == "derived"
+
+
+def test_재제출본은_접수번호_날짜부터_보인다(make_stage_tree, tmp_path: Path) -> None:
+    """J-41(N-26 4.2) — 박셀바이오 재제출본. 목록 API 가 2025-08-28 접수번호에 원래 제출일
+    rcept_dt(2024-03-19)를 붙인다. 공개일은 stage 가 보정한 `stg_disclosure.available_date`
+    (접수번호 날짜)다 — 원천 rcept_dt 를 쓰면 527일 look-ahead. 판의 `rcept_dt` 는 원천 그대로
+    기간 판정·접수 지연 격리 축으로 남는다."""
+    rcept = "20250828000446"
+    corps = [("01335851", "12")]
+    reports = [(rcept, "01335851", "2023", "11011", date(2024, 3, 19), date(2023, 12, 31),
+                "11011")]
+    fin = [_fin_row("01335851", "2023", "11011", rcept, sj="IS",
+                    account_id="ifrs-full_Revenue", account_nm="매출액", amount=100.0)]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin, (rcept, "rcept_no", rcept))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    out = _rows(r.out_dir)                             # type: ignore[arg-type]
+    assert len(out) == 1
+    assert out[0]["rcept_dt"] == date(2024, 3, 19)
+    assert out[0]["available_date"] == date(2025, 8, 28)
+
+
+# ── 일일 재수집으로 원본·정정이 쌓인 재무 그룹 (G-21, N-25 Q2 — B-41 결정 A 와 같은 정책) ──────
+# 백필 구간은 API 가 정정본만 줘서 '정정 값 + 정정일'인데, 일일 수집은 같은 그룹에 원본 뒤에 정정을
+# 덧붙인다. 그룹의 **최신 판본(max rcept_no)** 값과 그 판의 공개일을 싣는다(오브젠 01472930 FY2025).
+_G21_ORIG = ("20260319001177", date(2026, 3, 19))      # 원본 — 백필이 08-26 에 관측
+_G21_CORR = ("20260928000253", date(2026, 9, 28))      # [기재정정] — 일일 수집이 09-28 에 덧붙였다
+_G21_SEEN = (date(2026, 8, 26), date(2026, 9, 28))
+_FY2025 = (date(2025, 12, 31), "11011")                  # 사업보고서 문서의 (period_to, doc_acode)
+# 그 접수의 기간 문서가 없다 — 손 트리는 stg_doc_meta 행을 period_to·doc_acode NULL 로 깔고
+# (stg_doc_index.zip_ok 는 TRUE) fin_std `doc` CTE 의 자격(기간 NULL 아님)에서 빠지게 만든다.
+# 실물의 ZIP 014(문서 자체 없음)와 fin_std 쪽 결과가 같다.
+_NO_DOC = (None, None)
+
+
+def _g21_build(make_stage_tree, tmp_path: Path, fin: list[dict[str, object]],
+               corrections: list[dict[str, object]] | None = None,
+               docs: tuple[tuple[date | None, str | None], ...] = (_FY2025, _FY2025)
+               ) -> tuple[build.BuildResult, dict[str, object]]:
+    """`docs` = (원본, 정정) 각 접수의 문서 (period_to, doc_acode). (빌드 결과, 산출 1행)."""
+    reports = [(rc, "01472930", "2025", "11011", dt, pt, ac)
+               for (rc, dt), (pt, ac) in zip((_G21_ORIG, _G21_CORR), docs, strict=True)]
+    r = _hand_build(make_stage_tree, tmp_path, [("01472930", "12")], reports, fin,
+                    (_G21_CORR[0], "rcept_no", _G21_CORR[0]),
+                    report_names={_G21_CORR[0]: "[기재정정]사업보고서 (2025.12)"},
+                    corrections=corrections)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    out = _rows(r.out_dir)                             # type: ignore[arg-type]
+    assert len(out) == 1
+    return r, out[0]
+
+
+def _g21_row(make_stage_tree, tmp_path: Path, fin: list[dict[str, object]],
+             corrections: list[dict[str, object]] | None = None,
+             docs: tuple[tuple[date | None, str | None], ...] = (_FY2025, _FY2025)
+             ) -> dict[str, object]:
+    return _g21_build(make_stage_tree, tmp_path, fin, corrections, docs)[1]
+
+
+def _g21_fin(sj: str, account_id: str, account_nm: str, amounts: tuple[float, float],
+             ords: tuple[int, int] = (1, 1)) -> list[dict[str, object]]:
+    return [_fin_row("01472930", "2025", "11011", rc, sj=sj, account_id=account_id,
+                     account_nm=account_nm, amount=amt, ord_=o, observed=seen)
+            for (rc, _dt), amt, o, seen in zip((_G21_ORIG, _G21_CORR), amounts, ords, _G21_SEEN,
+                                               strict=True)]
+
+
+def test_원본과_정정이_쌓이면_최신_판본_값과_정정일을_싣는다(make_stage_tree,
+                                                          tmp_path: Path) -> None:
+    row = _g21_row(make_stage_tree, tmp_path,
+                   _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 90.0)))
+    assert row["rcept_no"] == _G21_CORR[0]
+    assert _num(row["revenue"]) == Decimal("90")
+    assert row["rcept_dt"] == _G21_CORR[1]
+    assert row["available_date"] == _G21_CORR[1]       # 정정 첫 장 정보가 없다 → 정정일
+
+
+def test_정정이_줄_순서를_바꿔도_값이_모호해지지_않는다(make_stage_tree, tmp_path: Path) -> None:
+    """이오플로우 01274310 FY2024 — 정정이 `ifrs-full_Equity` 의 ord 를 24 → 26 으로 옮겼다.
+    자연키에 ord 가 들어 있어 두 판의 줄이 다 살아남으면 `pick` 이 갈려 total_equity 가 NULL 이
+    된다."""
+    row = _g21_row(make_stage_tree, tmp_path,
+                   _g21_fin("BS", "ifrs-full_Equity", "자본총계", (576.0, 457.0), ords=(24, 26)))
+    assert row["rcept_no"] == _G21_CORR[0]
+    assert row["total_equity"] is not None and _num(row["total_equity"]) == Decimal("457")
+
+
+def test_재무_무관_정정이_쌓이면_값은_정정본이고_공개일은_원본이다(make_stage_tree,
+                                                                tmp_path: Path) -> None:
+    """G-21 과 원본 공시일 승계(e1.22.0 · C-11)가 같은 판을 본다 — 최신 판본이 재무 무관 정정이고
+    첫 장 원본 제출일이 확인되면 공개일은 원본 접수일이다(백필 구간과 같은 정책)."""
+    corrections = [{"rcept_no": _G21_CORR[0], "page_found": True, "filed_date": _G21_ORIG[1],
+                    "filed_date_status": "parsed", "reason_raw": "기재정정",
+                    "items": json.dumps([{"항목": _NONFIN}], ensure_ascii=False)}]
+    row = _g21_row(make_stage_tree, tmp_path,
+                   _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 100.0)), corrections)
+    assert row["rcept_no"] == _G21_CORR[0]
+    assert row["rcept_dt"] == _G21_CORR[1]
+    assert row["available_date"] == _G21_ORIG[1]
+
+
+def test_최신_판본에_문서가_없으면_같은_정정_사슬의_문서로_기간을_잇는다(make_stage_tree,
+                                                                    tmp_path: Path) -> None:
+    """G-21 후속(명세 검토) — 정정 ZIP 이 없어(014) 최신 판본에 기간 문서가 없고 정정 접수일이 기간
+    말일에서 271일이라 추정 창(0~period_end_lag_max_days 200일) 밖이다. 사슬 보충이 없으면
+    `period_unresolved` 로 그룹이 통째로 격리된다(원본 고정 때는 보이던 재무가 사라진다)."""
+    r, row = _g21_build(make_stage_tree, tmp_path,
+                        _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 90.0)),
+                        docs=(_FY2025, _NO_DOC))
+    assert _gate(r, "EG3_fin_std").metrics["n_period_end_chain_doc"] == 1   # 보충 규모(기록형)
+    assert row["rcept_no"] == _G21_CORR[0]
+    assert _num(row["revenue"]) == Decimal("90")                 # 값은 정정본
+    assert (row["period_end"], row["period_start"]) == (date(2025, 12, 31), date(2025, 1, 1))
+    assert (row["period_end_basis"], row["report_code"]) == ("document", "11011")
+    assert row["available_date"] == _G21_CORR[1]                # 첫 장 정보 없음 → 정정일
+
+
+def test_정정_문서가_있으면_그_문서의_기간을_쓴다(make_stage_tree, tmp_path: Path) -> None:
+    """사슬 보충은 최신 판본에 문서가 **없을 때만**이다 — 원본 문서가 달라도 정정 문서가 이긴다."""
+    row = _g21_row(make_stage_tree, tmp_path,
+                   _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 90.0)),
+                   docs=((date(2025, 6, 30), "11012"), _FY2025))
+    assert (row["period_end"], row["report_code"]) == (date(2025, 12, 31), "11011")
+
+
+def test_부정_자기_문서가_있는데_사슬_문서_기간을_실으면_EG3_가_잡는다(make_stage_tree,
+                                                                  tmp_path: Path) -> None:
+    """품질 검토 — 판(정정)에 자기 문서(2025-12-31)가 있는데 산출이 사슬 원본 문서(2025-11-30)의
+    기간을 실은 회귀를 심는다. 증인을 '판 자신 ∪ 사슬 전체'로 받으면 원본 문서가 증언해 통과한다
+    — 자기 문서가 있으면 자기 문서만 증인이어야 한다."""
+    reports = [(rc, "01472930", "2025", "11011", dt, pt, "11011")
+               for (rc, dt), pt in zip((_G21_ORIG, _G21_CORR),
+                                       (date(2025, 11, 30), date(2025, 12, 31)), strict=True)]
+    r = _hand_build(make_stage_tree, tmp_path, [("01472930", "12")], reports,
+                    _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 90.0)),
+                    (_G21_CORR[0], "rcept_no", _G21_CORR[0]),
+                    report_names={_G21_CORR[0]: "[기재정정]사업보고서 (2025.12)"})
+    assert r.ok and r.out_dir is not None, [(g.name, g.status.value, g.detail) for g in r.gates]
+    root = tmp_path / "equity"
+    m = stage_manifest.load(root / FIN_STD.name / "MANIFEST.json")
+    rec = next(b for b in m.builds if b.build_id == m.current_build)
+    pinned = {t: inputs.load_pinned(root, t, b) for t, b in rec.inputs.items()}
+    con = duckdb.connect()
+    try:
+        inputs.create_views(con, pinned,
+                            {t: list(FIN_STD.declared_columns(t)) for t in FIN_STD.inputs})
+        glob = r.out_dir / "year=*" / "*.parquet"
+        con.execute("CREATE VIEW planted AS SELECT * EXCLUDE (v) REPLACE "
+                    "(DATE '2025-11-30' AS period_end) "
+                    f"FROM read_parquet('{glob}', hive_partitioning=true)")
+        ctx = EquityGateContext(con=con, rule=FIN_STD, out_view="planted", reject_view=None,
+                                pinned=pinned, n_out=1, n_reject=0, reject_by_reason={},
+                                inputs=dict(rec.inputs), partition_hashes={}, baseline=_seed())
+        g = rules_s12.eg3_fin_std(ctx)
+    finally:
+        con.close()
+    assert g.status is GateStatus.FAIL
+    assert (g.metrics["n_period_end_not_document"],
+            g.metrics["n_report_code_month_mismatch"]) == (1, 1)
+
+
+def test_부정_사슬이_아닌_다른_보고서의_문서는_빌리지_않는다(make_stage_tree,
+                                                         tmp_path: Path) -> None:
+    """한화리츠 01669226 — 반기 결산 리츠라 한 (bsns_year, 11012) 그룹에 서로 다른 반기보고서
+    (2026.01 · 2026.07)가 묶인다. 최신 접수에 문서가 없어도 남의 기간(2026-01-31)을 빌리면 틀린
+    기간이 되므로 종전대로 추정한다(결산월 12 → 2026-06-30, inferred)."""
+    old, new = ("20260320000101", date(2026, 3, 20)), ("20260914000202", date(2026, 9, 14))
+    reports = [(old[0], "01669226", "2026", "11012", old[1], date(2026, 1, 31), "11012"),
+               (new[0], "01669226", "2026", "11012", new[1], None, None)]
+    fin = [_fin_row("01669226", "2026", "11012", rc, sj="IS", account_id="ifrs-full_Revenue",
+                    account_nm="매출액", amount=amt)
+           for rc, amt in ((old[0], 10.0), (new[0], 20.0))]
+    r = _hand_build(make_stage_tree, tmp_path, [("01669226", "12")], reports, fin,
+                    (new[0], "rcept_no", new[0]),
+                    report_names={old[0]: "반기보고서 (2026.01)", new[0]: "반기보고서 (2026.07)"},
+                    fin_std_inferred_recent_ratio_max=None)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    out = _rows(r.out_dir)                                       # type: ignore[arg-type]
+    assert len(out) == 1
+    assert (out[0]["rcept_no"], out[0]["period_end_basis"]) == (new[0], "inferred")
+    assert out[0]["period_end"] == date(2026, 6, 30)
+
+
 def test_부정_접수지연_상한_밖은_격리된다(make_stage_tree, tmp_path: Path) -> None:
     corps = [("00000001", "12"), ("00000002", "12")]
     reports = [
@@ -637,7 +965,7 @@ def test_부정_pick_이_갈리면_값을_만들지_않는다(make_stage_tree, t
     rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
     row = rows["20210330000001"]
     assert row["revenue"] is None
-    assert row["revenue_basis"] == "unavailable"
+    assert row["revenue_basis"] == "unmapped"
     assert _num(row["total_asset"]) == Decimal("500")
 
 
@@ -805,6 +1133,549 @@ def test_추정_폴백이_임계_아래면_통과한다(make_stage_tree, tmp_pat
                     fin_std_inferred_recent_ratio_max=0.6, inferred_recent_days=30)
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
     assert _gate(r, "EG3_fin_std").metrics["n_period_end_inferred_recent_over_max"] == 0
+
+
+# ── DQ-8: 유형자산 취득을 자산별로 나눠 적는 회사 (2026-09-26 실측) ─────────────
+
+# DART 현금흐름표는 유형자산 취득을 집계 한 줄(2,218사) 또는 자산별 줄(`dart_PurchaseOf*` 9종 +
+# 비표준 이름)로 적고 **같은 회사가 둘 다 적는 경우는 0건**이다. FY2025 연간 2,631사 중 capex
+# 결측 311사이고 그중 211사가 자산별 합으로 살아난다.
+CAPEX_AGG_ID = "ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"
+NONSTD_ID = "-표준계정코드 미사용-"          # stage 가 account_std=false 로 적는 자리
+
+
+def _capex_corp() -> tuple[list[tuple[str, str | None]],
+                           list[tuple[str, str, str, str, date, date | None, str | None]]]:
+    """capex 시험용 1법인 1사업보고서(2025 연간)."""
+    return ([("00000001", "12")],
+            [("20260330000001", "00000001", "2025", "11011", date(2026, 3, 30),
+              date(2025, 12, 31), "11011")])
+
+
+def test_capex_자산별_줄만_있으면_합이_capex가_된다(make_stage_tree, tmp_path: Path) -> None:
+    """집계 줄이 없는 회사 — 자산별 줄(표준 4 + 비표준 이름 1)을 더해 capex 를 만든다.
+
+    `건설중인자산의 취득` 은 표준 태그(`dart_PurchaseOfConstructionInProgress`)의 계정명이자
+    비표준 이름 목록에도 있는 이름이라, 같은 tier 안에서 이름 쪽에 한 번 더 걸리면 50 이 두 번
+    더해진다. kind `nm_nonstd` 가 표준계정코드 미사용 행만 보게 해서 그것을 막는다.
+    """
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfLand", account_nm="토지의 취득",
+                 amount=100.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfMachinery", account_nm="기계장치의 취득",
+                 amount=200.0, ord_=2),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfConstructionInProgress",
+                 account_nm="건설중인자산의 취득", amount=50.0, ord_=3),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfVehicles", account_nm="차량운반구의 취득",
+                 amount=0.0, ord_=4),
+        # 표준계정코드 미사용 행 — 이름으로만 잡힌다
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="공구와기구의 취득", amount=30.0,
+                 ord_=5, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "ppe_parts"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("380")
+    assert row["capex_basis"] == "ppe_parts"
+    m = _gate(r, "EG3_fin_std").metrics
+    assert m["n_capex_basis_outside_vocab"] == 0
+    assert m["n_by_capex_basis"] == {"ppe_parts": 1}
+
+
+def test_capex_집계_줄이_있으면_자산별_줄을_더하지_않는다(make_stage_tree,
+                                                        tmp_path: Path) -> None:
+    """집계 줄(a tier)이 하나라도 있으면 `min(tier)` 이 거기서 끝난다 — 이중계상 불가."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=CAPEX_AGG_ID, account_nm="유형자산의 취득",
+                 amount=1000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfLand", account_nm="토지의 취득",
+                 amount=400.0, ord_=2),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfMachinery", account_nm="기계장치의 취득",
+                 amount=600.0, ord_=3),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "standard"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("1000")
+    assert row["capex_basis"] == "standard"
+
+
+def test_capex_사용권자산은_유형자산_취득이_아니다(make_stage_tree, tmp_path: Path) -> None:
+    """리스(사용권자산)·무형자산은 집계 줄의 정의(PPE) 밖이라 합에 넣지 않는다.
+
+    0 규칙(F-A3)은 여기서 서지 않는다 — 이 픽스처엔 영업·투자 소계가 없어 「현금흐름표가 있다」
+    는 판정 자체가 안 선다. 소계가 있으면 같은 구성이 0 · `none_in_cf` 가 된다
+    (test_capex_현금흐름표에_유형자산_취득_줄이_없으면_0이다).
+    """
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_AdditionsToRightofuseAssets",
+                 account_nm="사용권자산의 취득", amount=700.0, ord_=1),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "no_cf_statement"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert row["capex_ytd"] is None
+    assert row["capex_basis"] == "no_cf_statement"
+
+
+def test_capex_기준_어휘가_닫혀_있다(built: build.BuildResult,
+                                    rows: dict[str, dict[str, object]]) -> None:
+    """`capex_basis` 는 `revenue_basis` 와 같은 자리·같은 규약의 라벨이다(어휘 폐쇄)."""
+    assert rules_s12.CAPEX_BASIS_VOCAB == ("standard", "ppe_parts", "ppe_incl_invprop",
+                                          "none_in_cf", "no_cf_statement", "unmapped")
+    assert rules_s12.CAPEX_BASIS_NULL_REASONS == ("no_cf_statement", "unmapped")
+    m = _gate(built, "EG3_fin_std").metrics
+    assert m["n_capex_basis_outside_vocab"] == 0
+    assert set(m["n_by_capex_basis"]) <= set(rules_s12.CAPEX_BASIS_VOCAB)
+    # 절단본 9법인은 집계 줄을 쓴다
+    assert rows[SEC]["capex_basis"] == "standard"
+    fields = {f.field_id: f for f in rules_s12.FIELDS_FIN}
+    f = fields["financial.capex_basis"]
+    assert f.columns == ("capex_basis",)
+    assert f.value_type == "category" and f.unit == "" and f.scope == "internal"
+    assert "capex_basis" in FIN_STD.columns
+
+
+# ── F-A1·F-A2·F-A3: 합산 줄 · 이름 공백 정규화 · 취득 줄 부재 (2026-09-26 실측) ──
+
+# F-A1 7사는 유형자산과 투자부동산을 **한 줄로** 적는다(정규화 이름 `유형자산및투자부동산의취득`·
+# `투자부동산및유형자산의취득`, 유니버스 024110·030200 KT·000370·046890). 정의가 집계 줄(PPE)과
+# 달라 basis 를 따로 둔다. F-A2 계정명 공백은 회사마다 임의라(CF 90,456행에 공백) 양쪽을 공백
+# 제거 판으로 맞춘다. F-A3 현금흐름표는 있는데 유형자산 취득 줄이 아예 없는 92사 + 집계 줄이
+# 값 공란인 9사는 "안 샀다" 는 뜻이므로 0 이다.
+
+def test_capex_유형자산과_투자부동산을_한_줄로_적으면_기준이_다르다(make_stage_tree,
+                                                                  tmp_path: Path) -> None:
+    """합산 줄(F-A1) — 값은 채우고 `ppe_incl_invprop` 로 정의 차이를 표시한다.
+
+    이름에 공백이 섞여 있어도 잡힌다(F-A2) — `유형자산 및 투자부동산의 취득`.
+    """
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="ifrs-full_CashFlowsFromUsedInOperatingActivities",
+                 account_nm="영업활동현금흐름", amount=9000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="유형자산 및 투자부동산의 취득",
+                 amount=500.0, ord_=2, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "ppe_incl_invprop"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("500")
+    assert row["capex_basis"] == "ppe_incl_invprop"
+    m = _gate(r, "EG3_fin_std").metrics
+    assert m["n_capex_basis_outside_vocab"] == 0
+    assert m["n_by_capex_basis"] == {"ppe_incl_invprop": 1}
+
+
+def test_capex_자산별_줄이_합산_줄보다_앞선다(make_stage_tree, tmp_path: Path) -> None:
+    """tier d(자산별) < tier e(합산) — 투자부동산이 섞인 줄은 PPE 만 있는 합에 진다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfLand", account_nm="토지의 취득",
+                 amount=100.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfMachinery", account_nm="기계장치의 취득",
+                 amount=200.0, ord_=2),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="투자부동산 및 유형자산의 취득",
+                 amount=500.0, ord_=3, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "ppe_parts"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("300")
+    assert row["capex_basis"] == "ppe_parts"
+
+
+def test_영업활동_현금흐름_이름은_공백을_무시한다(make_stage_tree, tmp_path: Path) -> None:
+    """F-A2 — `영업활동으로 인한 순현금흐름`(146320 실측)이 공백 때문에 결측이었다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=1000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="영업활동으로 인한 순현금흐름",
+                 amount=900.0, ord_=2, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "period_end_basis", "document"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    assert _num(rows["20260330000001"]["cf_operating_ytd"]) == Decimal("900")
+
+
+def test_영업활동으로부터_창출된_현금흐름은_영업현금흐름이_아니다(make_stage_tree,
+                                                              tmp_path: Path) -> None:
+    """이자·법인세 **차감 전** 소계다 — 공백을 떼도 이 이름은 목록에 없다(F-A2 경계)."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=1000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="영업활동으로부터 창출된 현금흐름",
+                 amount=700.0, ord_=2, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "no_cf_statement"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert row["cf_operating_ytd"] is None
+    # 현금흐름표 소계가 하나도 안 잡혔으므로 「표가 있다」 판정이 서지 않는다 → 0 규칙 밖
+    assert row["capex_ytd"] is None
+    assert row["capex_basis"] == "no_cf_statement"
+
+
+def test_capex_현금흐름표에_유형자산_취득_줄이_없으면_0이다(make_stage_tree,
+                                                          tmp_path: Path) -> None:
+    """F-A3 — 리스·무형만 사고 유형자산은 안 산 회사(92사). 결측이 아니라 0 이다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="ifrs-full_CashFlowsFromUsedInOperatingActivities",
+                 account_nm="영업활동현금흐름", amount=900.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_AdditionsToRightofuseAssets",
+                 account_nm="사용권자산의 취득", amount=300.0, ord_=2),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="무형자산의 취득", amount=200.0,
+                 ord_=3, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "none_in_cf"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("0")
+    assert row["capex_basis"] == "none_in_cf"
+    m = _gate(r, "EG3_fin_std").metrics
+    assert m["n_capex_basis_outside_vocab"] == 0
+    assert m["n_by_capex_basis"] == {"none_in_cf": 1}
+
+
+def test_capex_집계_줄이_값_공란이어도_0이다(make_stage_tree, tmp_path: Path) -> None:
+    """F-A3 — 줄은 있는데 금액이 비었다(9사). 값 없는 줄은 「샀다」 는 증거가 아니다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="ifrs-full_CashFlowsFromUsedInOperatingActivities",
+                 account_nm="영업활동현금흐름", amount=900.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=CAPEX_AGG_ID, account_nm="유형자산의 취득",
+                 amount=None, ord_=2),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "none_in_cf"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("0")
+    assert row["capex_basis"] == "none_in_cf"
+
+
+def test_capex_현금흐름표가_없으면_결측이다(make_stage_tree, tmp_path: Path) -> None:
+    """0 규칙은 **현금흐름표가 있는** 그룹에만 선다 — 표가 없으면 안 샀다는 증거도 없다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=1000.0, ord_=1),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "no_cf_statement"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert row["capex_ytd"] is None
+    assert row["capex_basis"] == "no_cf_statement"
+
+
+# ── F-A4: 부호 혼재 · 평이한 이름 전부 · 공백 정규화가 만든 pick 모호 (서버 재빌드 실측) ──
+
+# m_20260926T130415 재빌드에서 나온 세 가지다.
+# ① 같은 회사 한 표 안에서 표준 태그 줄은 +, 비표준 줄은 − 로 적힌다(00402989 FY2016: 건물 +34.79억
+#    · 기계장치 +20.42 …)은 양수인데 비표준 줄(공구와 기구 −12.59 · 시설물 −9.11)은 음수다.
+#    그래서 자산별 합은 **크기의 합**이다.
+# ② 표준계정코드를 하나도 안 단 회사는 모든 자산 종류를 평이한 이름으로 적는다(00159971 FY2015:
+#    기계장치의취득 −123.97 · 건설중자산의취득 −121.41 · 구축물의취득 −26.26 …).
+# ③ 공백을 떼자 `영업활동으로인한 현금흐름` 과 `영업활동순현금흐름` 이 함께 걸려 pick 이 갈렸다
+#    (00364795 FY2018 · 00926522 2019 2행이 값에서 NULL 로 퇴행). 공백 없는 원문이 이긴다.
+
+def test_capex_자산별_줄은_부호가_섞여도_크기의_합이다(make_stage_tree, tmp_path: Path) -> None:
+    """표준 태그 줄 +100 · 비표준 줄 −30 → 130. 부호가 아니라 **취득 규모**를 더한다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfLand", account_nm="토지의 취득",
+                 amount=100.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="공구와 기구의 취득", amount=-30.0,
+                 ord_=2, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "ppe_parts"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("130")
+    assert row["capex_basis"] == "ppe_parts"
+
+
+def test_capex_표준태그_없는_회사의_평이한_이름도_전부_센다(make_stage_tree,
+                                                          tmp_path: Path) -> None:
+    """`기계장치의취득`·`토지의취득`·`건물의취득` — 자산 종류 × 접미어를 펼친 목록이 잡는다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=1000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="기계장치의취득", amount=-123.0,
+                 ord_=2, account_std=False),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="토지의취득", amount=-24.0,
+                 ord_=3, account_std=False),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="건물의취득", amount=-13.0,
+                 ord_=4, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "ppe_parts"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("160")
+    assert row["capex_basis"] == "ppe_parts"
+
+
+def test_pick_은_공백_없는_원문을_먼저_고른다(make_stage_tree, tmp_path: Path) -> None:
+    """공백 정규화 전에 쓰이던 값을 그대로 지킨다 — 공백 변형은 동점자일 때만 본다(F-A4)."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=1000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="영업활동으로인한현금흐름", amount=83.0,
+                 ord_=2, account_std=False),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="영업활동으로 인한 현금흐름", amount=-1230.0,
+                 ord_=3, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "period_end_basis", "document"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    assert _num(rows["20260330000001"]["cf_operating_ytd"]) == Decimal("83")
+
+
+# ── T-H 1단계: NULL 사유 어휘 · 예상 대상 기준 그룹별 커버리지 (2026-09-28) ────
+
+# DQ-6(금융 템플릿 순이익 전건 NULL)·DQ-8(capex 311사 NULL)이 전 게이트를 통과한 이유는 분모가
+# 「만들어진 행」이었기 때문이다. 여기서 보는 것은 둘이다: ① `unavailable` 한 라벨이 「표가 없다」
+# 와 「표는 있는데 못 잡았다」 를 구별하는가 ② 그룹별 유효 비율이 기록되고 직전 판보다 무너지면
+# 폐기되는가.
+
+def test_capex_현금흐름표가_있는데_못_잡으면_unmapped_이다(make_stage_tree,
+                                                          tmp_path: Path) -> None:
+    """0 규칙의 분모 밖 — 값 있는 유형자산 취득 줄이 있는데 대응표가 못 잡은 그룹.
+
+    `유형자산취득에 따른 현금유출` 은 목록에 없는 이름이지만 '유형자산'·'취득' 을 함께 갖고
+    금액이 있어 `capex_zero` 가 그룹을 제외한다(안 산 것이 아니다). 그래서 값은 NULL 이고
+    사유는 `no_cf_statement` 가 아니라 `unmapped` 다 — 고칠 대상이 대응표라는 뜻이다.
+    """
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="ifrs-full_CashFlowsFromUsedInOperatingActivities",
+                 account_nm="영업활동현금흐름", amount=900.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="유형자산취득에 따른 현금유출",
+                 amount=300.0, ord_=2, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "unmapped"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert row["capex_ytd"] is None
+    assert row["capex_basis"] == "unmapped"
+    m = _gate(r, "EG3_fin_std").metrics
+    assert m["n_capex_basis_outside_vocab"] == 0
+    assert m["n_by_capex_basis"] == {"unmapped": 1}
+
+
+def test_손익계산서가_없으면_매출_사유는_no_is_statement_이다(make_stage_tree,
+                                                            tmp_path: Path) -> None:
+    """재무상태표만 실린 그룹 — 매출 규칙이 못 잡은 것이 아니라 **볼 표가 없었다**."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="BS",
+                 account_id="ifrs-full_Assets", account_nm="자산총계", amount=500.0, ord_=1),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "revenue_basis", "no_is_statement"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert row["revenue"] is None
+    assert row["revenue_basis"] == "no_is_statement"
+    assert row["capex_basis"] == "no_cf_statement"
+    m = _gate(r, "EG3_fin_std").metrics
+    assert m["n_revenue_basis_outside_vocab"] == 0
+    assert m["n_revenue_basis_conflict"] == 0
+
+
+def test_템플릿_요구_태그는_fin_map_과_sql_에서_유도된다() -> None:
+    """템플릿 축(`banking`·`insurance`)의 태그는 `.sql` `req` CTE 와 같은 것이어야 한다."""
+    sql = rules_s12.SQL_PATH.read_text(encoding="utf-8")
+    assert rules_s12.TEMPLATE_TAGS == (("banking", "RevenueFromInterest"),
+                                       ("insurance", "InvestmentIncome"))
+    assert rules_s12.TEMPLATE_VOCAB == ("banking", "insurance", "standard")
+    for _name, tag in rules_s12.TEMPLATE_TAGS:
+        assert f"concept = '{tag}'" in sql, tag
+    # 게이트가 stg_fin 에서 되풀이 계산할 때 쓰는 태그 접두어 정규화도 `.sql` 과 같은 판이다
+    assert rules_s12.CONCEPT_PREFIX_PATTERN == "^(ifrs-full_|ifrs_|dart_)"
+    assert f"'{rules_s12.CONCEPT_PREFIX_PATTERN}'" in sql
+
+
+def test_커버리지가_예상_대상_기준으로_그룹별로_기록된다(built: build.BuildResult) -> None:
+    """분모는 **그룹의 예상 대상**(채택 + 격리)이다 — 「만들어진 행」이 아니다."""
+    g = _gate(built, "EG8_fin_std")
+    assert g.status is GateStatus.PASS
+    m = g.metrics
+    total = m["coverage_total"]
+    assert (total["n_expected"], total["n_adopted"]) == (N_SRC, N_OUT)
+    assert set(total["metrics"]) == set(rules_s12.COVERAGE_METRICS)
+    cov = m["coverage_by_group"]
+    assert isinstance(cov, dict) and cov
+    for key, entry in cov.items():
+        fs_div, template, report_code = key.split("|")
+        assert fs_div in rules_s12.FS_DIV_VOCAB
+        assert template in rules_s12.TEMPLATE_VOCAB
+        assert report_code in rules_s12.REPORT_CODE_VOCAB
+        assert entry["n_expected"] >= m["coverage_min_expected"]
+        assert set(entry["metrics"]) == set(rules_s12.COVERAGE_METRICS)
+        for metric, cell in entry["metrics"].items():
+            assert 0 <= cell["n_valid"] <= entry["n_adopted"], (key, metric)
+            assert cell["ratio"] == round(cell["n_valid"] / entry["n_expected"], 6)
+    # 절단본 실측 그룹 12 — CFS·OFS × 보고서 종류 넷 8 개에 **은행 템플릿 1법인**(이자수익
+    # 태그, CFS 4 종류 × 3행)이 더해진다. 그중 예상 대상 20 이상은 CFS·제조업 넷뿐이고
+    # 나머지 8(OFS 28행 · banking 12행)은 표본이 작아 기록하지 않는다.
+    assert (m["n_groups"], m["n_groups_recorded"]) == (12, 4)
+    assert {k: v["n_expected"] for k, v in cov.items()} == {
+        "CFS|standard|11011": 48, "CFS|standard|11012": 47,
+        "CFS|standard|11013": 49, "CFS|standard|11014": 42}
+    # 격리 6(non_krw)은 전부 예상 대상 분모에 들어 있다 — 값이 나와야 했던 대상이 사라진 것도
+    # 커버리지 손실이기 때문이다
+    assert sum(v["n_expected"] - v["n_adopted"] for v in cov.values()) == N_REJECT
+    # 직전 판이 없으므로 기록만 한다
+    assert m["coverage_compared"] is False
+    assert m["coverage_fail"] == [] and m["coverage_warn"] == []
+
+
+def _banking_tree(n: int) -> tuple[list[tuple[str, str | None]],
+                                   list[tuple[str, str, str, str, date, date | None,
+                                              str | None]],
+                                   list[dict[str, object]]]:
+    """은행 템플릿(이자수익 태그) 법인 n 개 — 순이익 계정은 **하나도 없다**(DQ-6 재현)."""
+    corps = [(f"{i + 1:08d}", "12") for i in range(n)]
+    reports = [(f"202603300{i + 1:05d}", c, "2025", "11011", date(2026, 3, 30),
+                date(2025, 12, 31), "11011") for i, (c, _) in enumerate(corps)]
+    fin = [_fin_row(c, "2025", "11011", f"202603300{i + 1:05d}", sj="IS",
+                    account_id="ifrs-full_RevenueFromInterest", account_nm="이자수익",
+                    amount=700.0 + i)
+           for i, (c, _) in enumerate(corps)]
+    return corps, reports, fin
+
+
+_BANKING_GROUP = "CFS|banking|11011"
+_BANKING_N = 21                      # 기록·판정 하한 20 을 넘기는 최소 크기
+
+
+def _previous_coverage(equity_root: Path, coverage: dict[str, object]) -> None:
+    """직전 커밋 빌드를 손으로 심는다 — 게이트가 판 사이를 견주는 유일한 통로다."""
+    root = equity_root / FIN_STD.name
+    root.mkdir(parents=True, exist_ok=True)
+    stage_manifest.commit(root, stage_manifest.BuildRecord(
+        build_id="b_hand_fin_prev", snapshot_id="", rules_version="e0.0.0-prev",
+        built_at_utc="2026-09-27T00:00:00+00:00", n_rows=_BANKING_N, content_hash="0:prev",
+        partitions=[], gates=[{"name": "EG8_fin_std", "status": "pass", "detail": "",
+                               "metrics": {"coverage_by_group": coverage}}]))
+
+
+def test_직전_판보다_순이익_커버리지가_무너지면_폐기한다(make_stage_tree,
+                                                      tmp_path: Path) -> None:
+    """DQ-6 재현 — 은행 템플릿의 순이익이 전건 NULL 이 되는 판은 통과하면 안 된다.
+
+    직전 판에서 0.9 이던 그룹이 0.0 이 되면 낙폭 0.9 ≥ 0.5 이고 0 이기도 하다. 경보에는
+    영향 건수와 대표 사례 3건이 같이 실린다(플랜 §11 공통 원칙).
+    """
+    corps, reports, fin = _banking_tree(_BANKING_N)
+    _previous_coverage(tmp_path / "equity", {
+        _BANKING_GROUP: {"n_expected": _BANKING_N, "n_adopted": _BANKING_N,
+                         "metrics": {"net_income": {"n_valid": 19, "ratio": 0.9},
+                                     "revenue": {"n_valid": _BANKING_N, "ratio": 1.0}}}})
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    (reports[0][0], "revenue_basis", "banking_gross"))
+    assert r.status is build.BuildStatus.GATE_FAILED
+    g = _gate(r, "EG8_fin_std")
+    assert g.status is GateStatus.FAIL
+    assert g.metrics["coverage_compared"] is True
+    assert g.metrics["previous_build"] == "b_hand_fin_prev"
+    fails = g.metrics["coverage_fail"]
+    assert [(e["group"], e["metric"]) for e in fails] == [(_BANKING_GROUP, "net_income")]
+    e = fails[0]
+    assert (e["ratio_before"], e["ratio_after"]) == (0.9, 0.0)
+    assert (e["n_expected"], e["n_valid"]) == (_BANKING_N, 0)
+    assert e["n_affected_est"] == 19
+    assert len(e["examples"]) == 3
+    for key in e["examples"]:
+        assert key.endswith("|2025-12-31|11011|CFS")
+    # 매출은 그대로라 경보도 안 난다
+    assert g.metrics["coverage_warn"] == []
+    # 뒤 게이트는 돌지 않는다(첫 FAIL 이후 skip 규약)
+    assert {x.name: x.status.value for x in r.gates if x.name in ("EG6_fin_std", "EG4")} == {
+        "EG6_fin_std": "skip", "EG4": "skip"}
+
+
+def test_직전_판이_없으면_같은_판이_기록만_하고_통과한다(make_stage_tree,
+                                                      tmp_path: Path) -> None:
+    """같은 데이터라도 견줄 판이 없으면 판정하지 않는다 — 첫 빌드를 폐기하면 못 짓는다."""
+    corps, reports, fin = _banking_tree(_BANKING_N)
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    (reports[0][0], "revenue_basis", "banking_gross"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    g = _gate(r, "EG8_fin_std")
+    assert g.status is GateStatus.PASS
+    assert g.metrics["coverage_compared"] is False
+    assert g.metrics["coverage_fail"] == []
+    entry = g.metrics["coverage_by_group"][_BANKING_GROUP]
+    assert entry["n_expected"] == _BANKING_N
+    assert entry["metrics"]["net_income"] == {"n_valid": 0, "ratio": 0.0}
+    assert entry["metrics"]["revenue"] == {"n_valid": _BANKING_N, "ratio": 1.0}
 
 
 def _march_fy(rcept_dt: dict[str, date] | None = None,

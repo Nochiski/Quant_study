@@ -22,7 +22,9 @@
 """
 
 # concept = account_id 에서 ifrs-full_ / ifrs_ / dart_ 접두어를 벗긴 것
-# nm      = account_nm 완전일치 폴백 (표준태그 미사용 행 대비)
+# nm      = account_nm 완전일치 폴백 (표준태그 미사용 행 대비). 대조는 **공백을 뗀 판**으로
+#           한다 — 계정명 공백이 회사마다 임의라서다(F-A2). 목록은 읽기 좋은 원문으로 두고
+#           정규화는 `rules_s12.acct_rows()`(토큰)와 `.sql`(account_nm) 이 같은 규칙으로 한다
 # sj      = 허용 재무제표. 앞에서부터 찾는다 (IS → CIS 순)
 # agg     = pick(하나 고름) | sum(합산)
 # concept_alt = concept 가 한 건도 안 잡힐 때만 쓰는 2차 태그 목록 (합산 이중계상 방지)
@@ -97,8 +99,13 @@ FIN_MAP = {
     # `_ytd` = 연초누계. 분기에서 11013 3개월 · 11012 6개월 · 11014 9개월 ·
     # 11011 12개월이다. 손익 컬럼(3개월)과 기간이 다르다 — DEFECT-C02.
     "cf_operating_ytd": dict(
+        # 이름 대조는 **공백을 뗀 판**으로 한다(F-A2) — 목록은 읽기 좋게 두고
+        # `rules_s12.acct_rows()` 가 토큰을, `.sql` 이 `account_nm` 을 같은 규칙으로 정규화한다.
+        # CF 90,456행에 공백이 있고 '영업활동으로 인한 순현금흐름' 처럼 위치가 회사마다 다르다.
+        # '영업활동으로부터 창출된 현금흐름' 은 **넣지 않는다** — 이자·법인세 차감 전 소계다.
         concept=["CashFlowsFromUsedInOperatingActivities"],
-        nm=["영업활동현금흐름", "영업활동으로인한현금흐름", "영업활동순현금흐름"],
+        nm=["영업활동현금흐름", "영업활동으로인한현금흐름", "영업활동순현금흐름",
+            "영업활동으로인한순현금흐름"],
         sj=["CF"], agg="pick"),
     "cf_investing_ytd": dict(
         concept=["CashFlowsFromUsedInInvestingActivities"],
@@ -146,6 +153,69 @@ REVENUE_FALLBACK = [
          concept=["RevenueFromInterest", "FeeAndCommissionIncome",
                   "OperatingIncomeInsurance"]),
 ]
+
+# 유형자산 취득 자산별 합 — FIN_MAP["capex_ytd"](집계 한 줄)이 값을 못 준 행에만 태운다(DQ-8).
+#
+# DART 현금흐름표는 유형자산 취득을 (a) 집계 한 줄
+# `PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities`(2,218사) 또는
+# (b) 자산별 줄(토지·건물·구축물·기계장치·차량운반구·비품·집기·건설중인자산·기타유형자산)로
+# 적는다. 2026-09-26 실측에서 **같은 회사가 둘 다 적는 경우는 0건**이라 (b) 의 합이 곧 (a) 다.
+# FY2025 연간 2,631사 중 capex 결측 311사이고 그중 211사가 이 합으로 살아난다
+# (09-23 유니버스 580 의 `qual_fcf_assets` 결측 34 중 32 가 이것).
+#
+# `nm` 은 **표준계정코드 미사용 행**(`account_id='-표준계정코드 미사용-'`)만 잡는다 — 표준 태그로
+# 적힌 줄은 위 `concept` 가 이미 잡으므로 이름까지 같이 보면 같은 줄이 두 번 더해진다
+# (`건설중인자산의 취득`·`기타유형자산의 취득`·`비품의 취득` 은 표준 태그의 계정명이기도 하다).
+# 이 규약 덕분에 이름 목록을 아래처럼 넓게 펼쳐도 표준 태그 줄이 두 번 세어지지 않는다.
+#
+# **제외**: 사용권자산(리스 — `AdditionsToRightofuseAssets`·`PurchaseOfFinanceLeaseAssets`,
+# 이름에 '사용권자산' 이 든 줄)·무형자산·투자부동산. 집계 줄의 정의가 유형자산(PPE) 뿐이므로
+# 대체도 같은 범위여야 한다 — 넣으면 (a) 를 쓰는 회사와 정의가 달라져 횡단면이 깨진다.
+# 투자부동산을 유형자산과 **한 줄로 합쳐** 적은 회사는 이 tier 가 아니라 CAPEX_COMBINED 가
+# 뒤에서 받는다(basis 가 달라 소비 측이 가를 수 있다).
+#
+# **부호(F-A4, 서버 재빌드 실측 정정)**: 한 회사 한 표 안에서도 부호가 섞인다 — 00402989 FY2016 은
+# 표준 태그 줄(`건물의 취득` +34.79억 · `기계장치의 취득` +20.42 …)은 양수인데 비표준 줄
+# (`공구와 기구의 취득` −12.59 · `시설물의 취득` −9.11)은 음수다. 그대로 더하면 취득을 **상계**해
+# 합이 줄어든다(361행 중 53행이 실제로 줄었다). 그래서 이 tier 의 `agg` 는 `sum_abs` 이고
+# `ppe_parts` capex 는 **언제나 양의 크기**다 — 집계 줄(`standard`)의 부호는 그대로 두지만 소비 측은
+# 어차피 abs() 한다(compat `mappings.py` · 팩터층 동일). 대체 tier 안에서만 크기로 맞춘다.
+#
+# 이름 목록은 **자산 종류 × 접미어의 곱집합을 펼친 것**이다(F-A4). 표준계정코드를 하나도 안 단
+# 회사는 모든 자산 종류를 평이한 이름으로 적는다 — 00159971 FY2015 는 `기계장치의취득` −123.97억 ·
+# `건설중자산의취득` −121.41 · `구축물의취득` −26.26 · `토지의취득` −24.25 … 전부 비표준이라
+# 좁은 목록으로는 두 줄만 세어졌다. 곱집합을 **펼쳐 놓는 것**이지 부분일치가 아니다(규칙 1 유지).
+# 제외는 그대로다: 사용권자산·리스자산(리스)·무형자산·투자부동산은 종류 목록에 없다.
+_PPE_CLASSES = ("토지", "건물", "구축물", "기계장치", "차량운반구", "비품", "집기", "집기비품",
+                "사무용비품", "공구", "공구와기구", "공구기구", "시설장치", "시설물", "금형",
+                "건설중인자산", "건설중자산", "건설중인유형자산", "건설중인자산(유형자산)",
+                "기타유형자산", "기타의유형자산", "건물부속설비", "임차자산개량", "리스개량자산")
+_PPE_SUFFIXES = ("의취득", "취득")
+CAPEX_FALLBACK = dict(
+    basis="ppe_parts", sj=["CF"], agg="sum_abs",
+    concept=["PurchaseOfLand", "PurchaseOfBuildings", "PurchaseOfStructure",
+             "PurchaseOfMachinery", "PurchaseOfVehicles", "PurchaseOfOfficeEquipment",
+             "PurchaseOfConstructionInProgress", "PurchaseOfOtherPropertyPlantAndEquipment",
+             "PurchaseOfFixturesAndFittings"],
+    nm=[c + suf for c in _PPE_CLASSES for suf in _PPE_SUFFIXES])
+
+# 유형자산과 투자부동산을 **한 줄로** 적는 회사 — CAPEX_FALLBACK 도 못 채운 행에만 태운다(F-A1).
+#
+# FY2025 실측 7사(유니버스 024110·030200 KT·000370·046890)가 정규화 이름
+# `유형자산및투자부동산의취득`·`투자부동산및유형자산의취득` 로 적는다. 표준 태그
+# (`PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities`)를 단 회사는 tier a 가
+# 이미 `standard` 로 잡고, 나머지는 `account_id='-표준계정코드 미사용-'` 라 이름으로만 잡힌다 —
+# 그래서 kind 는 `nm_nonstd` 다.
+#
+# **basis 를 따로 두는 이유**: 투자부동산이 섞여 있어 집계 줄(PPE)과 정의가 다르다. 값을 결측으로
+# 두는 것보다 싣는 편이 낫지만(FCF 가 통째로 비었다), `standard`·`ppe_parts` 와 섞어 횡단면을
+# 세우면 안 되므로 소비 측이 가를 수 있게 `ppe_incl_invprop` 로 표시한다.
+#
+# tier 는 `d_ppe_parts` **뒤**(`e_ppe_combined`)다 — 자산별 줄이 있으면 그 합이 PPE 정의에
+# 정확히 맞으므로 먼저 쓴다. `agg` 는 `pick`: 한 줄이므로 더할 것이 없다.
+CAPEX_COMBINED = dict(
+    basis="ppe_incl_invprop", sj=["CF"],
+    nm=["유형자산및투자부동산의취득", "투자부동산및유형자산의취득"])
 
 # DEFECT-S01 탐지용. 통합층 컬럼이 아니라 검사에만 쓴다 —
 # EquityAndLiabilities(자본과부채총계)는 회계상 Assets 와 원 단위로 같아야 한다.

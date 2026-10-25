@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from test_stage_doc_parsers import AUDIT_XML, FULL_G1, HTML_DOC
 
-from stage import doc_prepass
+from stage import doc_prepass, parsers_doc
 
 
 def _zip(members: dict[str, bytes]) -> bytes:
@@ -143,6 +143,62 @@ def test_repair_replaces_only_listed_documents_and_recomputes_summary(tmp_path: 
         doc_prepass.repair(db, docs, cache, "snap_t", {"20240100000000"}, workers=1)
 
 
+def _cache_counts(cache: Path) -> dict[str, int]:
+    """캐시 샤드의 실제 행 수 — summary.tables 와 같아야 한다(G8 등식)."""
+    return {t: sum(len([x for x in f.read_text(encoding="utf-8").splitlines() if x.strip()])
+                   for f in sorted((cache / t).glob("year=*.jsonl")))
+            for t in doc_prepass.TABLES}
+
+
+def test_repair_reparses_exactly_the_listed_receipts_across_two_shards(tmp_path: Path) -> None:
+    """파서 규칙이 바뀌었을 때의 표적 재파싱 — 목록 문서만 두 샤드에서 교체되고 G8 이 선다."""
+    docs, db = _setup(tmp_path)
+    cache = tmp_path / "cache"
+    s0 = doc_prepass.run(db, docs, cache, snapshot_id="snap_t", workers=1)
+    xml = FULL_G1.replace("</BODY>", '<SECTION-1><TITLE ATOC="Y">새 절</TITLE></SECTION-1></BODY>')
+    (docs / "2020" / "20200327001141.zip").write_bytes(
+        _zip({"20200327001141_00760.xml": AUDIT_XML.encode("cp949"),
+              "20200327001141.xml": xml.encode("cp949")}))
+    (docs / "2024" / "20240311901285.zip").write_bytes(
+        _zip({"20240311901285.xml": HTML_DOC.replace("<table></table>",
+                                                     "<table></table><table></table>").encode()}))
+    s1 = doc_prepass.repair(db, docs, cache, "snap_t",
+                            {"20200327001141", "20240311901285"}, workers=1)
+    assert s1.status == "ok" and s1.n_docs == 2 and s1.modes == {"ok": 1, "html": 1}
+    assert s1.tables["stg_doc_section"] == s0.tables["stg_doc_section"] + 1
+    assert s1.tables["stg_doc_meta"] == s0.tables["stg_doc_meta"] == 3
+    assert _cache_counts(cache / "snap_t") == s1.tables          # G8 — 캐시 행수 = summary 행수
+    assert s1.input_hash == s0.input_hash                        # 입력 집합은 그대로
+    assert len(s1.repairs) == 1 and s1.repairs[0]["n_docs"] == 2
+    assert s1.repairs[0]["parser_version"] == parsers_doc.PARSER_VERSION
+    html_row = json.loads((cache / "snap_t" / "stg_doc_meta"
+                           / "year=2024_q1.jsonl").read_text().splitlines()[0])
+    assert html_row["n_tables"] == "2"                           # 두 샤드 모두 새 파싱 결과
+    sec = (cache / "snap_t" / "stg_doc_section" / "year=2020_q1.jsonl").read_text().splitlines()
+    assert sum(1 for line in sec if "새 절" in line) == 1
+    assert [json.loads(line)["rcept_no"] for line in sec] == ["20200327001141"] * len(sec)
+
+
+def test_repair_cli_reparses_a_receipt_list_file(tmp_path: Path) -> None:
+    """서버 절차는 CLI 로 돈다 — `--repair LIST` 가 목록 파일을 읽어 같은 경로를 탄다."""
+    docs, db0 = _setup(tmp_path)
+    snap = tmp_path / "snapshots" / "snap_t"
+    snap.mkdir(parents=True)
+    shutil.copyfile(db0, snap / "dart.db")
+    stage_root = tmp_path / "stage"
+    args = ["--snapshot-id", "snap_t", "--snapshot-root", str(tmp_path / "snapshots"),
+            "--docs-dir", str(docs), "--stage-root", str(stage_root), "--workers", "1"]
+    assert doc_prepass.main(args) == 0
+    lst = tmp_path / "rcept.txt"
+    lst.write_text("20200327001141\n20240311901285\n", encoding="utf-8")
+    assert doc_prepass.main([*args, "--repair", str(lst)]) == 0
+    cache = stage_root / "_tmp" / "doc" / "snap_t"
+    summary = json.loads((cache / "summary.json").read_text())
+    assert summary["repairs"][0]["n_docs"] == 2 and summary["status"] == "ok"
+    assert summary["parser_version"] == parsers_doc.PARSER_VERSION
+    assert _cache_counts(cache) == summary["tables"]
+
+
 def _next_snapshot(tmp_path: Path, docs: Path, db: Path) -> Path:
     """base 스냅샷에 문서 1건(2024_q2)을 더하고 1건(2024_q1)을 뺀 새 스냅샷 DB."""
     (docs / "2024" / "20240515000001.zip").write_bytes(
@@ -238,3 +294,29 @@ def test_incremental_rejects_a_missing_base_and_its_own_snapshot(tmp_path: Path)
     doc_prepass.run(db, docs, root, snapshot_id="snap_base", workers=1)
     with pytest.raises(ValueError, match="same snapshot"):
         doc_prepass.incremental(db, docs, root, "snap_base", "snap_base", workers=1)
+
+
+def test_repair_on_an_incremental_cache_does_not_touch_the_hardlinked_base(
+        tmp_path: Path) -> None:
+    """증분 캐시는 base 샤드를 하드링크로 이어받는다 — 표적 재파싱이 링크를 끊고 써야 한다.
+
+    안 끊으면 `_replace_rows` 의 원자 교체가 base 스냅샷 캐시까지 바꿔 그 판의 G8(캐시 행수 =
+    summary 행수)이 조용히 깨진다. 서버 절차가 "일일 증분 → 파서 수리" 순서라 실제로 만난다.
+    """
+    docs, db = _setup(tmp_path)
+    root = tmp_path / "cache"
+    doc_prepass.run(db, docs, root, snapshot_id="snap_base", workers=1)
+    db2 = _next_snapshot(tmp_path, docs, db)
+    inc = doc_prepass.incremental(db2, docs, root, "snap_next", "snap_base", workers=1)
+    before = _cache_bytes(root / "snap_base")
+    xml = FULL_G1.replace("</BODY>", '<SECTION-1><TITLE ATOC="Y">새 절</TITLE></SECTION-1></BODY>')
+    (docs / "2020" / "20200327001141.zip").write_bytes(
+        _zip({"20200327001141_00760.xml": AUDIT_XML.encode("cp949"),
+              "20200327001141.xml": xml.encode("cp949")}))
+    s1 = doc_prepass.repair(db2, docs, root, "snap_next", {"20200327001141"}, workers=1)
+    assert s1.tables["stg_doc_section"] == inc.tables["stg_doc_section"] + 1
+    assert _cache_counts(root / "snap_next") == s1.tables
+    assert s1.repairs[0]["n_docs"] == 1 and s1.increments == inc.increments   # 이력 둘 다 남는다
+    assert _cache_bytes(root / "snap_base") == before        # base 캐시 불변
+    kept = root / "snap_base" / "stg_doc_section" / "year=2020_q1.jsonl"
+    assert "새 절" not in kept.read_text(encoding="utf-8")

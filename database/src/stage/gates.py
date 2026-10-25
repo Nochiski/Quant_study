@@ -86,7 +86,8 @@ def g0_declaration(ctx: GateContext) -> GateResult:
         elif ctx.rule.blob_source is not None:
             need = set(ctx.rule.blob_source.required_columns)   # 파서 입력 컬럼이 원장 실물 계약
         else:
-            need = {c.src for c in ctx.rule.columns}
+            # fallback_src 열은 옛 자리가 실물 계약이다 — 새 자리는 옛 판에 없을 수 있다(build._union_sql NULL)
+            need = {c.fallback_src or c.src for c in ctx.rule.columns}
             if ctx.rule.observed_src:
                 need.add(ctx.rule.observed_src)
         missing += [f"{s.db}.{s.table}.{c}" for c in sorted(need - cols)]
@@ -142,17 +143,34 @@ def g3_invariants(ctx: GateContext) -> GateResult:
 
 
 def g4_fixtures(ctx: GateContext) -> GateResult:
-    """골든 픽스처. unit_scale 선언 컬럼은 픽스처 없음 = 실패(§9 — ×1e6 오적용의 유일 방어)."""
+    """골든 픽스처. unit_scale 선언 컬럼은 픽스처 없음 = 실패(§9 — ×1e6 오적용의 유일 방어).
+
+    `rule.golden_from` 표와 **원천 TR(src_tag)이 같고 같은 ColumnRule** 인 unit_scale 열은 그 표의 골든이 지킨다
+    (물려받음 — 그 표의 빌드가 자기 G4 로 매번 대조한다). 이름이 같아도 규칙이 다르면 물려받지 않는다. TR 이
+    다르면 같은 헬퍼 ColumnRule 이어도 원문 단위가 다를 수 있어 물려받지 않는다. 물려받아 건너뛴 사유 코드는
+    `golden_inherited` — 일반 `no_fixtures` 와 갈라 허용표(K1-7a)가 표를 한정해 허용할 수 있게 한다.
+    """
     covered = {str(fx["column"]) for fx in ctx.fixtures or ()}
-    uncovered = [c.name for c in ctx.rule.columns if c.unit_scale is not None
-                 and c.name not in covered]
+    parent = ctx.rule.golden_from
+    rejected: dict[str, object] = {}
+    if parent is not None:
+        mine = sorted({s.src_tag for s in ctx.rule.sources})
+        theirs = sorted({s.src_tag for s in parent.sources})
+        if mine != theirs:
+            rejected = {"golden_from_rejected": f"{parent.name}: 원천 TR {mine} != {theirs}"}
+            parent = None
+    scaled = [c for c in ctx.rule.columns if c.unit_scale is not None and c.name not in covered]
+    inherited = [c.name for c in scaled if parent is not None and c in parent.columns]
+    uncovered = [c.name for c in scaled if c.name not in inherited]
+    via: dict[str, object] = ({"golden_from": parent.name, "unit_scale_inherited": inherited}
+                              if parent is not None and inherited else {})
     if uncovered:
         return GateResult("G4", GateStatus.FAIL,
                           f"unit_scale column without fixture: {uncovered}",
                           {"n_fixtures": len(ctx.fixtures or ()), "n_mismatch": 0,
-                           "unit_scale_uncovered": uncovered})
+                           "unit_scale_uncovered": uncovered, **via, **rejected})
     if not ctx.fixtures:
-        return GateResult("G4", GateStatus.SKIP, "no_fixtures", {})
+        return GateResult("G4", GateStatus.SKIP, "golden_inherited" if via else "no_fixtures", via)
     n_mismatch = 0
     detail: list[str] = []
     for fx in ctx.fixtures:
@@ -173,7 +191,7 @@ def g4_fixtures(ctx: GateContext) -> GateResult:
     ok = n_mismatch == 0
     return GateResult("G4", GateStatus.PASS if ok else GateStatus.FAIL,
                       "골든 픽스처 일치" if ok else "; ".join(detail[:10]),
-                      {"n_fixtures": len(ctx.fixtures), "n_mismatch": n_mismatch})
+                      {"n_fixtures": len(ctx.fixtures), "n_mismatch": n_mismatch, **via})
 
 
 def g5_regression_delta(ctx: GateContext) -> GateResult:
@@ -227,8 +245,16 @@ def g7_range(ctx: GateContext) -> GateResult:
                        "n_out_of_range_cells": n_cells, "ratio": ratio, "limit": lim})
 
 
+def _total(v: object) -> int:
+    """계상 값(정수 또는 키별 dict)의 합."""
+    if isinstance(v, dict):
+        return sum(int(str(n)) for n in v.values())
+    return int(str(v or 0))
+
+
 def g8_parse_equation(ctx: GateContext) -> GateResult:
-    """blob 테이블: 파서 계상 등식 — 실패 0 · 5001≡5002 · 방출 행수 = 원장 행수(n_src)."""
+    """blob 테이블: 파서 계상 등식 — 실패 0 · 5001≡5002 · 방출 행수 = 원장 행수(n_src).
+    연속 판 접기 표는 원장 blob 보존 등식과 sha 불일치 0 을 더 본다."""
     pm = ctx.parse_metrics
     if pm is None:
         return GateResult("G8", GateStatus.SKIP, "not_blob", {})
@@ -240,6 +266,17 @@ def g8_parse_equation(ctx: GateContext) -> GateResult:
         reasons.append(f"value_mismatch={pm['n_value_mismatch']}")
     if emitted != ctx.n_src:
         reasons.append(f"emitted {emitted} != n_src {ctx.n_src}")
+    if "n_ledger_blobs" in pm:
+        # §1 예외 (f) 연속 판 접기 표 — 원장 행 수(sqlite 별도 count)가 남긴·건너뛴·접은 blob 의 합과 같고,
+        # 남긴 blob 의 원장 sha256 이 압축 해제 원문과 모두 같아야 한다(build._ledger_metrics·fold.py)
+        ledger = int(str(pm["n_ledger_blobs"]))
+        kept, skipped = _total(pm.get("n_blobs")), int(str(pm.get("n_skipped_pkey", 0)))
+        folded = _total(pm.get("n_folded"))
+        if ledger != kept + skipped + folded:
+            reasons.append(f"n_ledger_blobs {ledger} != n_blobs {kept} + n_skipped_pkey {skipped} "
+                           f"+ n_folded {folded}")
+        if int(str(pm.get("n_sha_mismatch", 0))) > 0:
+            reasons.append(f"sha_mismatch={pm['n_sha_mismatch']}")
     ok = not reasons
     return GateResult("G8", GateStatus.PASS if ok else GateStatus.FAIL,
                       "파싱 등식 성립" if ok else "; ".join(reasons), dict(pm))

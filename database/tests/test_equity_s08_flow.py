@@ -68,7 +68,7 @@ GAP_TABLE = "stg_flow_split_daily"
 UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,
             rules_s01.CORP, rules_s01.CORP_TICKER, rules_s04.PRICE_DAILY, rules_s05.CORP_EVENT,
             rules_s06.ADJ_FACTOR, rules_s03.UNIVERSE_DAILY)
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG1_ledger", "EG3_flow_daily", "EG21",
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG1_ledger", "EG3_flow_daily", "EG21",
               "EG4", "EG5a"]
 
 N_GRID = 36972                       # universe_daily 41,066 − ETF 4,094
@@ -121,8 +121,11 @@ def _repaired_stage_root(base: Path) -> Path:
     table_root = root / GAP_TABLE
     if table_root.exists():
         return root
-    build_id = manifest.load(STAGE_SLICE / GAP_TABLE / "MANIFEST.json").current_build
+    src = manifest.load(STAGE_SLICE / GAP_TABLE / "MANIFEST.json")
+    build_id = src.current_build
     assert build_id is not None
+    # 되살린 판도 원래 판과 같은 원장 스냅샷에 선다 — EG13 이 이 id 의 KST 날짜를 기준일로 읽는다.
+    snapshot_id = next(b.snapshot_id for b in src.builds if b.build_id == build_id)
     part = f"year={date.today().year}"
     vdir = table_root / f"v={build_id}" / part
     vdir.mkdir(parents=True)
@@ -139,7 +142,7 @@ def _repaired_stage_root(base: Path) -> Path:
          "content_hash": "0:empty", "lag_known": False, "coverage_from": None, "gates": []},
         ensure_ascii=False), encoding="utf-8")
     manifest.commit(table_root, manifest.BuildRecord(
-        build_id=build_id, snapshot_id="snap_slice_repair", rules_version="2.2.3",
+        build_id=build_id, snapshot_id=snapshot_id, rules_version="2.2.3",
         built_at_utc="2026-09-06T00:00:00+00:00", n_rows=0, content_hash="0:empty",
         partitions=[{"path": f"v={build_id}/{part}", "n_rows": 0}], gates=[]))
     return root

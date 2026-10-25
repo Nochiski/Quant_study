@@ -1,0 +1,493 @@
+"""v3 `quant.db` 제자리 반영 — 스테이징 → 게이트 → 표 한 트랜잭션 (컷오버 트랙 QL-F).
+
+정본 `docs/plans/2026-10-10-cutover-track.md` §3 P4 QL-F·QL-F2·QL-I · T-16 · T-27 · T-31 · T-34 · T-35 · T-38 ·
+T-42, 로드맵 §8 K3-2·K3-3.
+`scripts/v3_post.sh` 가 단계마다 부른다(`python -m compat stage` · `v3-tables` · `export --in-place` · `apply`).
+
+왜 compat 을 v3 파일에 직접 돌리지 않는가:
+  · compat 은 표마다 따로 커밋한다(`quant_db._upsert`). v3 파일에 직접 쓰면 반영 도중 소비자(브리핑·export·
+    uni rsync)가 일부 표만 바뀐 상태를 읽고, 중간 표에서 실패하면 그 반쪽이 남는다(G9).
+  · 필수 열(NOT NULL ∪ PK)이 빈 행을 5% 까지 조용히 건너뛴다(G11, `MAX_SKIP_RATIO`).
+그래서 v3 파일의 온라인 백업 사본(스테이징)에 compat 을 돌리고, 게이트를 통과할 때만 표들을 v3 파일에
+**한 트랜잭션**으로 옮긴다. 그림자 compat(별도 파일 `data/compat/quant.db`)의 5% 허용은 그대로 둔다.
+
+반영 표(T-34 · T-38): 기본은 compat 9표 전부. 셸이 compat 에 넘기는 `--tables` 와 게이트·반영이 보는 표 목록은
+  같은 함수(`tables_for`)에서 나온다.
+  · `--basis morning`(다음 날 아침 KRX 확정 재반영)은 본 파일에 같은 D 의 **점수 두 표를 반영한** 장 마감
+    (evening) ok 기록이 있으면 점수 두 표를 뺀 7표다 — 저녁에 보낸 엑셀과 v3 DB 점수가 같게 두고, 가격 재반영이
+    아침 모델 판 실패에 묶이지 않게 한다. 그런 기록이 없으면 아침 모델 판 점수를 쓴다(T-7 대체 발송과 같은 뜻).
+    점수 표를 반영했는지는 기록의 `tables`(compat 이 쓴 표 → 결과) 키로 본다.
+  · 점수 없는 저녁 반영(`scores=False`, 셸 `--no-scores` — T-38): 21:05 원장 뒤 재반영(refill)은 늘 이 모드로
+    가격 등 7표만 반영한다 — 점수는 장 마감 반영(⑥)만 쓴다. compat 이 점수 표를 고르지 않으므로 장 마감 모델 판이
+    없는 날(판 실패일·세션 예외일 T-26)에도 돈다. 이 기록은 점수 표가 없으므로 그날 ⑥ 의 점수 포함 기록이 없으면
+    다음 날 아침 재반영이 점수를 채운다. 순서(T-35)는 (D, evening) 그대로다. `evening` 전용(아침은 T-34 가 정한다).
+
+반영 범위 — compat 이 쓴 범위와 정확히 같다(스테이징 `_compat_meta` 의 이번 실행 기록이 정본):
+  · `daily_prices`·`investor_detail_flows`: `trade_date` 가 기록의 창 `[from_date, to_date]` 안
+    (compat SQL 의 `date >= from_date AND date <= date` 와 같은 창).
+    `daily_prices` 는 여기에 **창 밖 다시 맞춘 종목의 창 앞 행**(`trade_date < from_date`)을 더한다 — compat 이 창 안에
+    KRX 기준가 단계가 든 종목의 옛 행 adj_close 를 v3 기준으로 다시 썼다(QL-E · T-40, 목록은 기록의
+    `tables.daily_prices.rebase.tickers`).
+  · `score_history`·`score_history_v2`: `score_date = date`(compat 이 그날 행을 지우고 넣는다 — T-16).
+  · 나머지 5표(`stocks`·컨센서스 3표·`financial_summary`): **표 전체**. 날짜 창이 없는 as-of 스냅샷이라
+    compat 이 쓰는 행이 날짜 범위로 묶이지 않는다(`stocks` 는 이번 유니버스 밖 행 전부를 `is_active=0`
+    으로 바꾼다). 스테이징은 같은 락 안에서 뜬 본 파일 사본이므로 compat 이 안 건드린 행은 같은 값으로
+    다시 들어간다.
+  compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등 — T-27)는 건드리지 않는다.
+  스테이징을 뜬 뒤 v3 가 그 표들에 쓴 행도 그대로 남는다(본 파일을 통째로 바꾸지 않는 이유).
+
+게이트(COMMIT 전 — 하나라도 걸리면 본 파일을 열어 쓰지 않는다):
+  · 스테이징 `_compat_meta` 에 이번 실행 기록이 정확히 1행(본 파일에 없던 `exported_at`) ·
+    status ok · date·basis 가 요청과 같다 · 창 끝 = D
+  · 순서(T-35): 본 파일에 이번보다 (날짜, basis — 같은 날은 morning > evening) 가 큰 ok 반영 기록이 없다.
+    락 대기가 길어 옛 D 가 나중에 반영되면 확정값이 조용히 옛 값으로 돌아간다. 재생은 `allow_older`
+  · 기록에 반영 표가 전부 있고 표마다 넣은 행 > 0 · **필수 열이 빈 행을 건너뛴 수 0**(P1 — 빈 행을 빼고
+    나머지만 넣으면 v3 소비자는 그 종목이 '없는' 줄로 읽는다)
+  · 기록에 반영 표 밖의 표가 없다 — 기록은 본 파일에 그대로 옮겨지고 T-34 가 그 표 목록으로 점수 반영 여부를
+    판정한다. 옮기지 않은 점수 표가 기록에 있으면 다음 날 아침이 점수를 건너뛴다(QL-F2)
+  · 신선도(T-31 ③): compat 이 이번에 `daily_prices` 에 **쓴** trade_date = D 행 ≥ 1(`metrics.n_on_date`).
+    스테이징은 본 파일 사본이라 'D 행이 있다' 만으로는 옛 D 행에도 참이 된다. 없으면 07:00 브리핑이 D−1 장을
+    오늘 장으로 보고한다(DEFECT-C02). 비율 하한은 두지 않는다(새 정지 조건이라)
+  · 표마다 반영 범위 행 > 0 — 점수 두 표는 `score_date = D` 행(점수 행 > 0)
+  · 복원 뒤 첫 제자리 반영은 사람이 준 표식(`first_after_restore`)이 있고 복원 뒤에 계산된 것만(QL-I · T-46 — 아래).
+    그림자는 본 파일에 쓰지 않으므로 보지 않는다. 표식은 그 반영 전용이다(오용 방지 — 아래)
+
+복원 기록(QL-I · T-42 — 되돌리기, `compat.v3_restore`): 표를 고정 백업으로 되돌린 COMMIT 은 `_compat_meta` 에
+  basis = `RESTORE_BASIS` 인 기록 1행을 함께 남긴다(되돌린 표는 기록의 `tables` — 기본은 점수 두 표를 뺀 7표). 이
+  기록은 장벽이다.
+  · 그 앞 반영 기록은 순서(T-35, `_newer`)·아침 반영 표(T-34, `_tables_for`) 판정에서 뺀다 — 그 기록들은 복원 뒤
+    본 파일을 설명하지 않는다. 가격 등 7표는 백업 시점으로 돌아갔고, 남겨 둔 점수 두 표는 복원 뒤 v3 스코어링이 같은
+    키를 `INSERT OR REPLACE` 로 덮는다. 기록 자체는 지우지 않는다(이력).
+  · 복원 기록은 반영 기록이 아니다 — 순서·7표 판정에 들지 않는다(basis 가 evening·morning 이 아니다).
+  · 그 뒤 첫 제자리 반영은 아래 셋을 모두 만족할 때만 받는다(T-42 · T-46). 창은 매일과 같은 증분이어도 된다 — v3
+    이력은 이미 KRX 기준가 사슬과 같다(QL-E). **새 정지 조건이라 사용자 확인 대기**(T-42, 구현은 한다).
+    ⓐ 사람의 표식 `first_after_restore`(셸·CLI `--first-after-restore`)가 있다. 장 마감 체인(close·refill·morning)·
+       `compat_export.sh`·아침 체인은 이 표식을 넘기지 않는다(`tests/test_v3_post_sh.py` 텍스트 검사). 그래서 덜 꺼진
+       체인이나 락을 기다리다 복원 뒤에 깬 체인 반영이 되돌린 표에 다시 쓰지 못한다 — `v3_post.sh` 는 락을 잡은 뒤에
+       스테이징을 뜨므로 그런 반영은 아래 ⓑ·ⓒ 만으로는 통과한다. 옛 규칙의 `--full` 요구가 하던 '의도 표식' 일이다.
+    ⓑ 이번 compat 기록 `exported_at` 이 그 복원 기록 `exported_at` 보다 뒤다(같은 시각·시각 없음·파싱 실패·시각대
+       없음은 거부, P1).
+    ⓒ 스테이징 `_compat_meta` 에 그 복원 기록이 있다 — 스테이징을 복원 COMMIT 뒤의 본 파일에서 떴다(온라인 백업은
+       한 시점 사본이라 복원 기록이 있으면 복원된 표도 있다). ⓑ·ⓒ 가 막는 것은 복원 앞 v3 파일로 계산한 기록이다 —
+       단계를 손으로 나눠 돌렸거나(`compat stage`·`export`·`apply`) 두 셸의 락 경로가 다를 때(`QL_V3_LOCK_FILE`) 생긴다.
+    표식은 이 반영 전용이다 — 복원 기록이 없는 본 파일(평상시)이나 복원 뒤 ok 반영이 이미 있는 본 파일에 주면 그림자
+    여부와 무관하게 거부한다(오용 방지, P1). 첫 컷오버(V3-C)에는 주지 않는다.
+  앞뒤는 `exported_at`(UTC ISO, compat 과 같은 형식)으로 가른다 — 제자리 반영은 v3 락 안에서 스테이징을 뜨고
+  export 를 시작하므로, 복원(같은 락)보다 뒤에 COMMIT 되는 기록은 시각도 뒤다.
+
+v3 파일은 열 때마다 읽기 전용 URI(`mode=ro`)거나 쓰기 전용(`mode=rw` — 없으면 만들지 않는다)이다.
+스테이징 경로가 v3 본 파일(또는 그 -wal/-shm/-journal)과 같은 파일이면 거부한다 — 스테이징을 뜨기 전에
+그 경로를 지우므로 본 파일이 사라진다(QL-F 리뷰 MAJOR-1).
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sqlite3
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+
+from .mappings import MAPPINGS
+from .quant_db import META_DDL, META_TABLE, CompatError, _ensure_meta_columns
+
+# 반영 대상 9표 — compat 매핑 선언이 정본이다(순서도 compat 이 쓰는 순서).
+TABLES: tuple[str, ...] = tuple(m.v3_table for m in MAPPINGS)
+# 날짜 창 표 → 창 열. 점수 표 → 날짜 열. 여기 없는 표는 표 전체(스냅샷).
+_WINDOW_COLUMN = {"daily_prices": "trade_date", "investor_detail_flows": "trade_date"}
+_DATE_COLUMN = {"score_history": "score_date", "score_history_v2": "score_date"}
+SCORE_TABLES = tuple(_DATE_COLUMN)
+# 같은 날짜 안 반영 순서(T-35) — 아침 KRX 확정이 장 마감 판보다 나중이다.
+_BASIS_RANK = {"evening": 0, "morning": 1}
+# 복원 기록의 basis(QL-I, `compat.v3_restore`) — 반영 기록이 아니라 장벽이다(모듈 머리 주석).
+RESTORE_BASIS = "restore"
+# 본 파일 쓰기 락 대기(ms). v3 의 짧은 쓰기(pipeline_runs·research_reports 등)가 끝나기를 기다린다.
+BUSY_TIMEOUT_MS = 60_000
+# 스테이징을 뜨기 전에 확보할 여유 — 본 파일(+ -wal) 크기의 배수. 사본 1 + compat 쓰기(WAL) 여유.
+DISK_FACTOR = 2
+_SIDECARS = ("", "-wal", "-shm", "-journal")
+# QL-E — 창 밖 다시 맞춘 종목 목록을 담는 연결 단위 임시 표(범위 WHERE 가 읽는다). 종목 수만큼 `?` 를 펼치면
+# 옛 sqlite 의 변수 한도(999)에 걸릴 수 있다.
+_REBASE_TABLE = "_v3_post_rebase"
+
+
+class V3PostGateError(CompatError):
+    """게이트 실패 — v3 본 파일에 쓰지 않았다."""
+
+    def __init__(self, report: GateReport) -> None:
+        self.report = report
+        super().__init__("게이트 실패(v3 본 파일 무변경): " + " · ".join(report.failures))
+
+
+@dataclass(frozen=True)
+class GateReport:
+    """게이트 결과. `failures` 가 비면 통과."""
+
+    date: str                                   # 요청 날짜 ISO
+    basis: str
+    tables: tuple[str, ...] = ()                # 반영 표(T-34)
+    exported_at: str | None = None              # 이번 compat 기록
+    window: tuple[str, str] | None = None       # (from_date, to_date) ISO
+    counts: dict[str, int] = field(default_factory=dict)   # 표 → 스테이징 반영 범위 행 수
+    failures: tuple[str, ...] = ()
+    rebase: tuple[str, ...] = ()                # daily_prices 창 앞 행도 옮길 종목(QL-E)
+    rebase_null: int = 0                        # 그 창 앞 행 중 equity 행이 없어 adj_close 를 NULL 로 둔 수(기록형)
+
+    @property
+    def ok(self) -> bool:
+        return not self.failures
+
+    def summary(self) -> str:
+        win = f"{self.window[0]}~{self.window[1]}" if self.window else "?"
+        counts = " ".join(f"{t}={n}" for t, n in self.counts.items())
+        head = "통과" if self.ok else "실패"
+        return (f"v3_post 게이트 {head} date={self.date} basis={self.basis} "
+                f"tables={len(self.tables)} exported_at={self.exported_at} window={win} "
+                f"rebase={len(self.rebase)} rebase_null={self.rebase_null} | {counts}")
+
+
+def _ro(path: Path) -> sqlite3.Connection:
+    return sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+
+
+def _require(path: Path, label: str) -> None:
+    if not path.is_file():
+        raise FileNotFoundError(f"{label} 이 없다: {path}")
+
+
+def _iso(date: str) -> str:
+    return datetime.strptime(date, "%Y%m%d").date().isoformat()
+
+
+def _same_file(a: Path, b: Path) -> bool:
+    """경로가 같은 파일인가 — 링크(심볼릭·하드)와 `..` 를 풀어 본다. 없는 경로는 문자열로만 비교."""
+    if os.path.realpath(a) == os.path.realpath(b):
+        return True
+    try:
+        return a.exists() and b.exists() and os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def guard_paths(v3_db: Path, staging: Path) -> None:
+    """스테이징이 v3 본 파일·그 사이드카와 같은 파일이면 `CompatError`(MAJOR-1).
+
+    스테이징을 뜨기 전에 스테이징 경로와 -wal/-shm 을 지우므로, 같은 파일이면 본 파일(또는 아직 체크포인트
+    안 된 -wal — 커밋된 데이터)이 사라진다.
+    """
+    for a in _SIDECARS:
+        for b in _SIDECARS:
+            if _same_file(Path(f"{staging}{a}"), Path(f"{v3_db}{b}")):
+                raise CompatError(f"스테이징 경로가 v3 본 파일과 같은 파일이다: {staging}{a} = "
+                                  f"{v3_db}{b} — 스테이징을 뜨기 전에 지우므로 거부한다")
+
+
+def _clear(out: Path) -> None:
+    for s in _SIDECARS:
+        Path(f"{out}{s}").unlink(missing_ok=True)
+
+
+def snapshot(v3_db: Path, out: Path) -> None:
+    """v3 본 파일 → 스테이징 사본(sqlite 온라인 백업 — CLI `.backup` 과 같은 API, 한 번에 전 페이지).
+
+    순서: 경로 가드 → 디스크 여유(본 파일 + -wal 크기 × `DISK_FACTOR`) → 앞 실행이 남긴 스테이징과 -wal/-shm
+    지우기(옛 -wal 이 새 사본에 다시 적용되면 사본이 깨진다) → 백업. 백업이 실패하면 부분 사본을 지운다.
+    본 파일은 읽기 전용으로 연다(닫을 때 체크포인트로 바이트가 바뀌지 않게).
+    """
+    v3_db, out = Path(v3_db), Path(out)
+    _require(v3_db, "v3 quant.db")
+    guard_paths(v3_db, out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    wal = Path(f"{v3_db}-wal")
+    need = (v3_db.stat().st_size + (wal.stat().st_size if wal.exists() else 0)) * DISK_FACTOR
+    # 곧 지울 앞 실행의 스테이징(같은 경로)은 여유로 친다 — 매일 같은 경로를 덮으므로
+    stale = sum(Path(f"{out}{s}").stat().st_size for s in _SIDECARS if Path(f"{out}{s}").exists())
+    free = shutil.disk_usage(out.parent).free + stale
+    if free < need:
+        raise CompatError(f"디스크 여유 부족: {out.parent} 여유 {free:,} bytes < 본 파일 크기 × "
+                          f"{DISK_FACTOR} = {need:,} bytes — 스테이징을 뜨지 않는다(본 파일 무변경)")
+    _clear(out)
+    try:
+        src, dst = _ro(v3_db), sqlite3.connect(str(out))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+    except BaseException:
+        _clear(out)
+        raise
+
+
+def _load_rebase(con: sqlite3.Connection, tickers: tuple[str, ...]) -> None:
+    """창 밖 다시 맞춘 종목을 이 연결의 임시 표에 싣는다 — `_scope(..., rebase=True)` 앞에 부른다."""
+    con.execute(f"CREATE TEMP TABLE IF NOT EXISTS {_REBASE_TABLE} (stock_code TEXT PRIMARY KEY)")
+    con.execute(f"DELETE FROM temp.{_REBASE_TABLE}")
+    con.executemany(f"INSERT INTO temp.{_REBASE_TABLE} VALUES (?)", [(t,) for t in tickers])
+
+
+def _scope(table: str, window: tuple[str, str], d_iso: str,
+           rebase: bool = False) -> tuple[str, tuple[str, ...]]:
+    """표의 반영 범위 WHERE 절과 인자(모듈 머리 주석). `rebase` 면 `daily_prices` 에 임시 표 종목의 창 앞
+    행을 더한다(QL-E)."""
+    if table in _WINDOW_COLUMN:
+        col = _WINDOW_COLUMN[table]
+        if rebase and table == "daily_prices":
+            where = (f'("{col}" >= ? AND "{col}" <= ?) OR ("{col}" < ? AND "stock_code" IN '
+                     f"(SELECT stock_code FROM temp.{_REBASE_TABLE}))")
+            return where, (*window, window[0])
+        return f'"{col}" >= ? AND "{col}" <= ?', window
+    if table in _DATE_COLUMN:
+        return f'"{_DATE_COLUMN[table]}" = ?', (d_iso,)
+    return "1", ()
+
+
+def _meta_rows(con: sqlite3.Connection) -> list[dict]:
+    if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                       (META_TABLE,)).fetchone():
+        return []
+    cur = con.execute(f"SELECT * FROM {META_TABLE}")
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
+
+
+def _since_restore(main_rows: list[dict]) -> tuple[list[dict], str | None]:
+    """(마지막 복원 기록 뒤의 기록, 그 복원 기록 exported_at) — 복원 기록이 없으면 (전부, None)(QL-I)."""
+    marks = [str(r["exported_at"]) for r in main_rows if r.get("basis") == RESTORE_BASIS]
+    if not marks:
+        return main_rows, None
+    last = max(marks)
+    return [r for r in main_rows if str(r["exported_at"]) > last], last
+
+
+def _tables_for(main_rows: list[dict], d_iso: str, basis: str,
+                scores: bool = True) -> tuple[str, ...]:
+    """반영 표 — 점수 없는 반영(T-38)은 7표. 아침 재반영은 같은 D 의 점수 두 표를 반영한 장 마감 ok 기록이 본
+    파일에 있으면 점수 두 표를 뺀다(T-34). 마지막 복원 기록 앞의 기록은 보지 않는다(QL-I)."""
+    seven = tuple(t for t in TABLES if t not in SCORE_TABLES)
+    if not scores:
+        if basis != "evening":
+            raise CompatError(f"점수 없는 반영은 evening 전용이다(받은 basis {basis}) — 아침 반영 표는 "
+                              "T-34 가 정한다(T-38)")
+        return seven
+    if basis == "morning" and any(
+            r.get("date") == d_iso and r.get("basis") == "evening" and r.get("status") == "ok"
+            and set(SCORE_TABLES) <= set(json.loads(r["tables"]))
+            for r in _since_restore(main_rows)[0]):
+        return seven
+    return TABLES
+
+
+def _main_rows(v3_db: Path) -> list[dict]:
+    con = _ro(v3_db)
+    try:
+        return _meta_rows(con)
+    finally:
+        con.close()
+
+
+def tables_for(v3_db: Path, date: str, basis: str, scores: bool = True) -> tuple[str, ...]:
+    """이번 반영 표 — 셸이 compat `--tables` 로 넘기는 목록(게이트·반영과 같은 판정)."""
+    v3_db = Path(v3_db)
+    _require(v3_db, "v3 quant.db")
+    return _tables_for(_main_rows(v3_db), _iso(date), basis, scores)
+
+
+def _newer(main_rows: list[dict], d_iso: str, basis: str) -> list[tuple[str, str]]:
+    """T-35 — 본 파일 ok 반영 기록 중 이번(d_iso, basis)보다 순서가 뒤인 것. 마지막 복원 기록 앞의 기록은 보지
+    않는다(QL-I)."""
+    mine = (d_iso, _BASIS_RANK[basis])
+    return sorted({(str(r["date"]), str(r["basis"])) for r in _since_restore(main_rows)[0]
+                   if r.get("status") == "ok" and r.get("basis") in _BASIS_RANK
+                   and (str(r["date"]), _BASIS_RANK[str(r["basis"])]) > mine})
+
+
+def _first_after_restore(main_rows: list[dict]) -> str | None:
+    """본 파일 마지막 복원 기록 뒤에 ok 반영 기록이 아직 없으면 그 복원 기록 exported_at, 아니면 None(QL-I)."""
+    after, mark = _since_restore(main_rows)
+    if mark is None or any(r.get("status") == "ok" and r.get("basis") in _BASIS_RANK
+                           for r in after):
+        return None
+    return mark
+
+
+def _instant(value: object) -> datetime | None:
+    """기록 시각(UTC ISO) → 시각대 있는 datetime. 없음·파싱 실패·시각대 없음은 None — 앞뒤를 가를 수 없다(T-46)."""
+    try:
+        t = datetime.fromisoformat(str(value)) if value else None
+    except ValueError:
+        return None
+    return t if t is not None and t.tzinfo is not None else None
+
+
+# 복원 뒤 첫 반영 거부 메시지의 안내(T-46) — 사람이 하는 명령과 절차서 자리
+_FIRST_HOW = ("복원 뒤 첫 반영은 사람이 `v3_post.sh … --first-after-restore` 로 한다"
+              "(CUTOVER_ROLLBACK §5 다시 컷오버 순서)")
+
+
+def _after_restore_failures(meta: dict, restored_at: str, stg_rows: list[dict],
+                            first_after_restore: bool) -> list[str]:
+    """T-42 · T-46 — 복원 뒤 첫 제자리 반영은 표식이 있고 복원 뒤에 계산된 기록만(모듈 머리 주석 ⓐ·ⓑ·ⓒ)."""
+    out: list[str] = []
+    if not first_after_restore:
+        out.append(f"복원 뒤 첫 반영(QL-I·T-42·T-46): 본 파일 마지막 기록이 복원({restored_at})이다 — 표식 없는 반영"
+                   f"(체인)은 받지 않는다(덜 꺼진 체인이 되돌린 표에 다시 쓰지 않게). {_FIRST_HOW}")
+    mine, mark = _instant(meta.get("exported_at")), _instant(restored_at)
+    if mine is None or mark is None or mine <= mark:
+        out.append(f"복원 뒤 첫 반영(QL-I·T-46): 이번 compat 기록 시각 {meta.get('exported_at')!r} 이 본 파일 마지막 "
+                   f"복원 기록 시각 {restored_at!r} 보다 뒤가 아니다(같음·없음·읽을 수 없음 포함) — 복원 앞 대상으로 "
+                   f"계산한 반영일 수 있다. {_FIRST_HOW}")
+    if not any(r.get("basis") == RESTORE_BASIS and str(r.get("exported_at")) == restored_at
+               for r in stg_rows):
+        out.append(f"복원 뒤 첫 반영(QL-I·T-46): 스테이징에 본 파일 마지막 복원 기록({restored_at})이 없다 — "
+                   f"스테이징을 복원 앞 v3 파일에서 떴다. {_FIRST_HOW}")
+    return out
+
+
+def _flag_misuse(main_rows: list[dict], pending: str | None) -> str | None:
+    """표식 오용(P1) — 복원 뒤 첫 반영을 기다리는 본 파일이 아니면 거부 사유, 맞으면 None."""
+    if pending is not None:
+        return None
+    why = ("본 파일에 복원 기록이 없다(평상시)" if _since_restore(main_rows)[1] is None
+           else "복원 뒤 ok 반영 기록이 이미 있다")
+    return (f"--first-after-restore 는 복원 뒤 첫 반영 전용이다(QL-I·T-46) — {why}. 표식 없이 돌린다"
+            "(오용 방지, P1)")
+
+
+def gate(staging: Path, v3_db: Path, date: str, basis: str,
+         allow_older: bool = False, scores: bool = True, shadow: bool = False,
+         first_after_restore: bool = False) -> GateReport:
+    """스테이징을 읽어 게이트를 판정한다(쓰기 없음). 본 파일은 반영 기록 확인에만 읽는다.
+    `shadow` 면 복원 뒤 첫 반영 조건(QL-I · T-46)을 보지 않는다 — 그림자는 본 파일에 쓰지 않는다. 표식
+    `first_after_restore` 의 오용 검사는 그림자에서도 한다."""
+    staging, v3_db = Path(staging), Path(v3_db)
+    _require(staging, "스테이징")
+    _require(v3_db, "v3 quant.db")
+    d_iso = _iso(date)
+    main_rows = _main_rows(v3_db)
+    tables = _tables_for(main_rows, d_iso, basis, scores)
+    seen = {r["exported_at"] for r in main_rows}
+    fails: list[str] = []
+    newer = [] if allow_older else _newer(main_rows, d_iso, basis)
+    pending = _first_after_restore(main_rows)
+    misuse = _flag_misuse(main_rows, pending) if first_after_restore else None
+    if misuse:
+        fails.append(misuse)
+    if newer:
+        fails.append(f"순서(T-35): 본 파일에 이번({d_iso} {basis})보다 나중 반영 기록 {newer[-1]} 이 "
+                     "있다 — 옛 D 를 늦게 반영하면 확정값이 옛 값으로 돌아간다(재생은 --allow-older)")
+    stg = _ro(staging)
+    try:
+        stg_rows = _meta_rows(stg)
+        new = [r for r in stg_rows if r["exported_at"] not in seen]
+        if len(new) != 1:
+            fails.append("compat 기록 없음 — 스테이징 _compat_meta 에 이번 실행 행이 없다(compat 이 안 "
+                         "돌았다)" if not new else
+                         f"compat 기록이 {len(new)}행이다(이번 실행 1행이어야 한다)")
+            return GateReport(d_iso, basis, tables, failures=tuple(fails))
+        meta = new[0]
+        win = json.loads(meta["window"])
+        window = (str(win["from_date"]), str(win["to_date"]))
+        if meta["status"] != "ok":
+            fails.append(f"compat 실패 기록(status={meta['status']}, "
+                         f"failed_table={meta['failed_table']})")
+        if meta["date"] != d_iso:
+            fails.append(f"compat 기록 날짜 {meta['date']} ≠ 요청 {d_iso}")
+        if meta["basis"] != basis:
+            fails.append(f"compat 기록 basis {meta['basis']} ≠ 요청 {basis}")
+        if window[1] != d_iso:
+            fails.append(f"compat 창 끝 {window[1]} ≠ 요청 {d_iso}")
+        if pending is not None and not shadow:
+            fails += _after_restore_failures(meta, pending, stg_rows, first_after_restore)
+        written = json.loads(meta["tables"])
+        extra = sorted(set(written) - set(tables))
+        if extra:
+            fails.append(f"compat 이 반영 표 밖의 표 {extra} 를 썼다 — 기록이 본 파일에 옮긴 표와 달라진다"
+                         "(다음 날 아침 T-34 판정이 기록의 표 목록을 본다)")
+        rb = (written.get("daily_prices") or {}).get("rebase") or {}
+        rebase = tuple(str(t) for t in rb.get("tickers") or ())
+        rebase_null = int(rb.get("n_null") or 0)
+        _load_rebase(stg, rebase)
+        counts: dict[str, int] = {}
+        for table in tables:
+            res = written.get(table)
+            if res is None:
+                fails.append(f"{table}: 이번 compat 실행에 없다 — 반영 표를 한 실행으로 반영해야 한다")
+                continue
+            if int(res["n_rows"]) <= 0:
+                fails.append(f"{table}: compat 이 넣은 행 0")
+            if int(res["n_skipped"]) != 0:
+                fails.append(f"{table}: 필수 열(NOT NULL·PK)이 빈 행 {res['n_skipped']}건을 "
+                             "건너뛰었다 — 제자리 반영은 0건이어야 한다(P1)")
+            if table == "daily_prices":
+                n_on = int((res.get("metrics") or {}).get("n_on_date", 0))
+                if n_on < 1:
+                    fails.append(f"신선도(T-31 ③): 이번 compat 이 daily_prices 에 쓴 {d_iso} 행 0 — "
+                                 "07:00 브리핑이 D−1 장을 오늘로 보고한다(DEFECT-C02)")
+            where, params = _scope(table, window, d_iso, bool(rebase))
+            n = int(stg.execute(f'SELECT count(*) FROM "{table}" WHERE {where}',
+                                params).fetchone()[0])
+            counts[table] = n
+            if n == 0:
+                fails.append(f"{table}: 점수 행 0(score_date={d_iso})" if table in SCORE_TABLES
+                             else f"{table}: 반영 범위 행 0")
+        return GateReport(d_iso, basis, tables, meta["exported_at"], window, counts, tuple(fails),
+                          rebase, rebase_null)
+    finally:
+        stg.close()
+
+
+def _move(staging: Path, v3_db: Path, report: GateReport,
+          commit_flag: Path | None = None) -> None:
+    """반영 표를 본 파일에 한 트랜잭션으로 옮긴다 — 표별 범위 DELETE → 스테이징 범위 INSERT → 기록 1행.
+
+    `commit_flag` 를 주면 COMMIT 직후 그 파일을 만든다 — 셸이 '본 파일 무변경' 과 'COMMIT 뒤 실패' 를 가른다.
+    """
+    assert report.window is not None and report.exported_at is not None
+    con = sqlite3.connect(f"{v3_db.resolve().as_uri()}?mode=rw", uri=True,
+                          isolation_level=None)
+    try:
+        con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        con.execute("ATTACH DATABASE ? AS stg", (f"{staging.resolve().as_uri()}?mode=ro",))
+        _load_rebase(con, report.rebase)
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            for table in report.tables:
+                where, params = _scope(table, report.window, report.date, bool(report.rebase))
+                cols = ", ".join(f'"{r[1]}"' for r in
+                                 con.execute(f'PRAGMA stg.table_info("{table}")'))
+                con.execute(f'DELETE FROM main."{table}" WHERE {where}', params)
+                con.execute(f'INSERT INTO main."{table}" ({cols}) '
+                            f'SELECT {cols} FROM stg."{table}" WHERE {where}', params)
+            con.execute(META_DDL)
+            _ensure_meta_columns(con)
+            cols = ", ".join(f'"{r[1]}"' for r in
+                             con.execute(f"PRAGMA stg.table_info({META_TABLE})"))
+            con.execute(f"INSERT INTO main.{META_TABLE} ({cols}) "
+                        f"SELECT {cols} FROM stg.{META_TABLE} WHERE exported_at = ?",
+                        (report.exported_at,))
+            con.execute("COMMIT")
+        except BaseException:
+            # 원래 원인을 남긴다 — 트랜잭션이 이미 풀렸는데 ROLLBACK 하면 그 오류가 원인을 덮는다
+            if con.in_transaction:
+                con.execute("ROLLBACK")
+            raise
+        if commit_flag is not None:
+            Path(commit_flag).touch()
+    finally:
+        con.close()
+
+
+def apply(staging: Path, v3_db: Path, date: str, basis: str, shadow: bool = False,
+          allow_older: bool = False, commit_flag: Path | None = None,
+          scores: bool = True, first_after_restore: bool = False) -> GateReport:
+    """게이트 → (그림자가 아니면) 한 트랜잭션 반영. 게이트 실패는 `V3PostGateError`(본 파일 무변경).
+    `scores=False` 는 점수 없는 반영(T-38 — 7표). `first_after_restore` 는 복원 뒤 첫 반영의 사람 표식(T-46)."""
+    guard_paths(Path(v3_db), Path(staging))
+    report = gate(staging, v3_db, date, basis, allow_older, scores, shadow, first_after_restore)
+    if not report.ok:
+        raise V3PostGateError(report)
+    if not shadow:
+        _move(Path(staging), Path(v3_db), report, commit_flag)
+    return report

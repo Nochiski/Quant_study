@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.21.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.31.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -148,22 +148,180 @@ RULES_VERSION = "e1.21.0"                # BuildRecord.rules_version 에 실린�
 #            스코프로 선언(DEFECT-E02) → `dataset_profile` 79 → 83행.
 #         산출 자체가 안 바뀌는 항목(카탈로그·계약 자원 제한 C04 · rebase 승인 기록 C08 ·
 #         롤백 C03 · 빌드 순서 파일 C09)도 같은 판에 들어간다.
-# e1.17.0: 2026-09-27 재무 흐름 필드 TTM(#212·#227). `factor_readiness`(S20)의 evidence·caveat
+# e1.17.0: S25 `sector_snapshot` 신설(WICS 주간 판) — 표가 하나 늘고 매크로 `v_sector(as_of)` 가
+#          붙는다(플랜 wics-weekly T3).
+# e1.18.0: DQ-8 — `fin_std` capex 자산별 합 tier `d_ppe_parts`(kind concept + nm_nonstd, `sum`) 와
+#          `capex_basis` 열 신설. 집계 줄을 안 쓰고 유형자산 취득을 자산별로 나눠 적는 회사의
+#          `capex_ytd` 가 NULL 에서 값으로 바뀐다(FY2025 연간 211사).
+# e1.19.0: DQ-8 후속 F-A1·F-A2·F-A3 — `fin_std` 의 세 가지가 산출을 바꾼다:
+#          ① tier `e_ppe_combined` 신설 — 유형자산과 투자부동산을 **한 줄로** 적는 7사
+#             (024110·030200 KT·000370·046890 …)를 `capex_basis='ppe_incl_invprop'` 로 싣는다.
+#             자산별 합(tier d)이 있으면 그것이 이긴다. 자산별 비표준 이름도 3종 늘었다.
+#          ② **이름 대조를 공백 뗀 판으로** 바꿨다(`fin.account_nm_norm` ↔ `_acct` 토큰,
+#             `rules_s12.norm_nm`). 계정명 공백이 회사마다 임의라(CF 90,456행) `영업활동으로 인한
+#             순현금흐름` 같은 줄이 결측이었다. `cf_operating_ytd` 이름 목록에
+#             `영업활동으로인한순현금흐름` 을 더했고 `영업활동으로부터창출된현금흐름`(이자·법인세
+#             차감 전 소계)은 **넣지 않는다**. 계정명 폴백(tier c)으로 값을 받는 행이 늘어난다.
+#          ③ **capex 0 규칙**(`capex_zero` CTE) — 현금흐름표는 있는데(영업·투자 소계 존재)
+#             유형자산 취득 줄이 아예 없거나 집계 줄이 값 공란인 그룹은 `capex_ytd = 0` ·
+#             `capex_basis='none_in_cf'`. 현금흐름표는 현금흐름을 다 적으므로 줄이 없다는 것은
+#             안 샀다는 뜻이다(FY2025 92사 + 9사). 표가 없는 그룹은 NULL(`unavailable`) 이다.
+#          어휘가 3 → 5종(`CAPEX_BASIS_VOCAB`)으로 늘어 EG3_fin_std 의 어휘 폐쇄 판정도 바뀐다.
+# e1.20.0: e1.19.0 서버 재빌드(m_20260926T130415)에서 드러난 회귀 둘 + 목록 확장(F-A4):
+#          ① `d_ppe_parts` 의 `agg` 를 `sum` → **`sum_abs`**(크기의 합). 한 표 안에서 표준 태그
+#             줄은 +, 비표준 줄은 − 로 적는 회사가 있어(00402989 FY2016) 공백 정규화로 음수 줄이
+#             새로 걸리자 합이 상계됐다(ppe_parts 361행 중 53행 감소). `ppe_parts` capex 는 이제
+#             **언제나 양의 크기**다. `sum`(금융업 매출 대체·lease_liab)은 그대로 부호를 지킨다.
+#          ② `pick` 이 **공백 없는 원문**(`hit.nm_exact=0`)을 먼저 본다. 정규화 뒤 공백 변형이
+#             함께 걸려 값이 갈리면서 `cf_operating_ytd` 2행이 값 → NULL 로 퇴행했다
+#             (00364795 FY2018 · 00926522 2019). 정규화가 없던 때 뽑히던 값이 그대로 남는다.
+#          ③ `CAPEX_FALLBACK` 이름 목록을 **자산 종류 24 × 접미어 2 = 48종**으로 펼쳤다 —
+#             표준계정코드를 하나도 안 단 회사는 모든 종류를 평이한 이름으로 적는다(00159971
+#             FY2015 는 8줄 중 2줄만 세어졌다). 완전일치 규칙은 그대로다(곱집합을 펼칠 뿐).
+# e1.21.0: T-H 1단계(플랜 2026-09-26-layer-fixes §11) — **NULL 사유 어휘 + 예상 대상 기준
+#          커버리지**.
+#          ① `capex_basis`·`revenue_basis` 의 `unavailable` 을 각각 둘로 갈랐다:
+#             `no_cf_statement`(영업·투자 소계가 둘 다 없어 현금흐름표를 읽은 적이 없다 = F-A3
+#             0 규칙의 분모 밖) / `unmapped`(표는 있는데 대응표가 못 잡았다), 매출은
+#             `no_is_statement`(IS·CIS 행 없음) / `unmapped`. **값은 그대로고 라벨만 갈린다** —
+#             재빌드 diff 에서 값 변경은 이 라벨 재명명뿐이어야 한다. 어휘가 5 → 6종(capex) ·
+#             5 → 6종(revenue)으로 늘어 EG3 의 어휘 폐쇄·`n_revenue_basis_conflict` 판정도 바뀐다.
+#             `wide_acct` 는 이제 `val` 이 아니라 **`grp`(그룹 축)** 에서 출발한다 — 24 계정이
+#             하나도 안 걸린 그룹도 행을 가져야 사유를 말할 수 있다.
+#          ② T-E(플랜 §9) 동승 — `fin_std` 가 계정명 공백 제거를 스스로 하지 않고 stage 의
+#             `stg_fin.account_nm_norm`(stage RULES_VERSION 2.4.0)을 **선언 입력**으로 읽는다.
+#             산출값은 불변이고 선언면만 늘었다(EQUITY_HANDOFF §6 의 인상 사유). e1.21.0 을 실은
+#             판이 서버에 아직 없어(최신 e1.20.0) 같은 판본에 묶는다 — EG5a 비교축이 갈리지 않는다.
+#          ② 새 게이트 **EG8_fin_std** — 그룹(`fs_div` × 템플릿(banking·insurance·standard) ×
+#             `report_code`)마다 6 계정의 **예상 대상(채택 + 격리) 대비** 유효 비율을
+#             `coverage_by_group` 으로 기록하고, 직전 커밋 빌드의 같은 metric 과 견줘 예상 대상
+#             20 이상인 그룹의 비율이 0.5 이상 떨어지거나 0 이 되면 FAIL 한다(0.05 이상·영향
+#             5건 이상은 기록형 warn). DQ-6(금융 템플릿 순이익 전건 NULL)·DQ-8(capex 311사
+#             NULL)이 EG7 3% 를 안 넘은 이유는 분모가 「만들어진 행」이었기 때문이다.
+# e1.22.0: 정정본의 원본 공시일 승계(09-30, `docs/research/2026-09-30-gpt-layer-debate.md` ③ · 사용자 승인).
+#          DART API 는 정정본만 돌려주므로 `fin_std` 공개일이 정정 접수일이 되어 2016~ 행의 5%(사업보고서
+#          13.9%)가 법정 기한을 한참 넘겨 찍혔다(백테스트에서 정정일까지 재무가 안 보이는 편향). 원본부터
+#          그 판까지 정정이 모두 재무표를 건드리지 않았고 첫 장 원본 제출일이 확인되면 공개일 = 원본 접수일
+#          (판 `rcept_dt` 는 그대로 — 그 행만 `available_date < rcept_dt`, basis 어휘는 derived 그대로).
+#          파생 공개일(q4·cf_q)도 같은 축. `disclosure_version.corr_has_fin_item` 키워드에 '재무에 관한'
+#          추가(보수화). 게이트: `n_available_ne_rcept_dt`(늦게 찍힘 금지)·`n_orig_filing_unwitnessed`(0 필수)
+#          · `n_available_orig_filing`(기록형).
+# e1.23.0: `security.name_abbrv_current`(KRX 약명) 추가(10-05 사용자 지적 — 엑셀이 정식명 '삼화콘덴서공업'을
+#          보였다). 정식명 `name_current` 는 그대로고, fi_universe 이름·compat stock_name 이 약명을 쓴다.
+# e1.24.0: opinion_daily EG8 추정기관수 비교가 wise 0 ≡ v3 NULL(10-06 G-42). 게이트 변경, 산출 불변.
+# e1.25.0: 배포 묶음 4 갈래 4-1(플랜 `docs/plans/2026-10-07-batch4-inputs-excel.md`).
+#          [기업행위 — 4-1a]
+#          C-07(N-26 4.1) `adj_factor` — KRX 기준가가 확정한 ok 계수(사건 교체·unknown_krx)의
+#          available_date = min(announce, apply_date)(정정 공시가 늦거나 신규 행이면 다음 세션으로
+#          접혀 그 세션 가짜 급락·다음 날 급반등, 002070 2026-07-31) + EG3 재계산.
+#          C-04(N-25 Q3) `corp_event` — 기준일이 캘린더 끝 D 뒤인 무상증자는 D 의 KRX 기준가가
+#          비율을 확인할 때만 효력일 D, 아니면 대기(out_of_calendar); 입력 `price_daily`·`security`
+#          (ETF 제외 — 기준가 후보 정합)·상수 `adj_factor.{base_price_tol_rel, price_match_tol_rel,
+#          price_match_tol_abs}` 추가.
+#          C-01(N-25 Q4) 아침 패스 실패 롤백 = latest_morning.json 의 확정판, before 의 모든 표
+#          (산출 불변).
+#          [공시일·정정 — 4-1b, stage 2.6.0 동반]
+#          ① J-41(N-26 4.2) `fin_std` 공개일 원천을 `stg_disclosure.available_date`로 —
+#             stage 보정 공개일(원천 rcept_dt 와 접수번호 날짜 중 늦은 쪽). 박셀바이오
+#             재제출본이 최대 654일 앞당겨 보였다. 그 행은 `available_date > rcept_dt`
+#             (rcept_dt 는 원천 그대로 기간 판정 축). stage 2.6.0 동반.
+#          ② C-11(N-25 Q1) `disclosure_version.corr_has_fin_item` — 정정 사유가 재작성·
+#             재감사·재발행·소급·재무제표수정이면 TRUE, 항목 표가 빈('[]') 정정은 NULL.
+#             원본 공시일 승계가 그 정정에서 멈춘다(재작성 값에 원본 공시일이 붙던
+#             look-ahead).
+#          ③ G-21(N-25 Q2) `fin_std` 그룹 판본을 첫 접수 → **최신 접수**(max rcept_no)로,
+#             값 줄도 그 접수 것만. 일일 수집이 덧붙인 정정 값이 반영되고 ord 가 바뀐
+#             계정의 모호 NULL 이 사라진다. 그 판에 문서가 없으면 같은 정정 사슬
+#             (disclosure_version 링크)의 최신 문서로 기간을 잇는다(`chain_doc` — 없으면 문서
+#             없는 정정이 추정 창 밖일 때 그룹이 통째로 period_unresolved). EG3 기간 증인은 판
+#             자신이고 자기 문서가 없을 때만 같은 사슬(자기 문서 우선 검증), 보충 규모는 기록형
+#             `n_period_end_chain_doc`.
+#          ④ N-26 4.10 `disclosure_version.available_date`·`first_correction_dt` 도 stage 공개일
+#             축으로(J-41 — 재제출본 17행이 최대 654일 앞당겨 보였고 fi filing_late 가 이 축을
+#             쓴다).
+#             `rcept_dt`·`delay_days`·`date_check` 는 원천 rcept_dt 그대로.
+#          게이트: EG3_fin_std 의 `n_available_ne_rcept_dt`·`n_orig_filing_unwitnessed` 와
+#          EG3_disclosure_version 의 `n_available_ne_rcept_dt`·`n_corrections_mismatch` 가 stage
+#          공개일 축으로(이름은 그대로), EG8 그룹 조인 키가 max(rcept_no) 로.
+# e1.26.0: 배포 묶음 6 갈래 6-1·6-2 — Q-5 고침 ⑤(N-32 ②·N-33, 플랜
+#          `docs/plans/2026-10-08-batch6-q5-price-only.md`). 미해결 사건의 KRX 기준가
+#          비율을 가격 축에만 접는다(키움 수정주가 방식, 0단계 대조 148/150).
+#          `adj_factor` 열 2개 신설: `price_only_factor`(⑤ 단위 (ticker, d) 마다 한 행에만
+#          그날 기준가 ÷ 직전 행 종가, 나머지 1) · `price_resolution`(factor · price_only ·
+#          price_only_dup · factor_near · price_only_near · unresolved). 계수 행의
+#          available_date = min(announce, apply_date)(C-07 확장). factor_ok·price_factor·
+#          share_factor·factor_source·apply_date·행 수는 그대로 — 두 백테스트 어댑터·EGC-04 의
+#          사건 집합 불변. D6-1 주식 계열만(fund·ship_fund·reit 제외) · D6-2 price_only_near
+#          ((c) 가드) · D6-3 factor_near = C-05 원안(형제 ok 억제 중복본 · 창 안 ok 적용일 ·
+#          ok 접힘일의 not-ok 행, ② 사유 행·capred_paid 제외) ·
+#          EG3_adj_factor ⑤ 폐기형 + EG8 계수 행 수정수익률 기록형(D6-5 승격 대기).
+#          `price_adj_daily` 열 3개 신설(`cum_price_only_factor`·`n_price_only_applied`·
+#          `n_price_unresolved_events`, D6-4 — `n_unadjusted_events` 뜻 유지) · 조정 OHLC =
+#          원주가 × 누적 share ÷ 누적 ⑤ · 거래량·기존 누적계수 열 불변. 매크로
+#          `v_adj_price_fwd`·`v_adj_price` 도 같은 ⑤ 누적(출력 열 불변) — `_asof/` 표본
+#          (v_adj_price·v_adj_price_fwd)이 ⑤ 종목에서 바뀌어 EG5c 는 `catalog --rebase-asof`
+#          승인이 필요하다(D6-6).
+# ── main 계보(#227·#248·#259, 2026-09-27~28) — 위 e1.17.0~e1.19.0 과 **같은 번호가 다른 규칙**이다.
+#    두 갈래가 d0372a4d(2026-09-20, e1.16.0)에서 갈라져 번호를 따로 올렸다. 서버 운영 판(배포
+#    브랜치)의 e1.17~e1.26 은 위 브랜치 계보이고, 아래 세 번호는 main 코드의 판본이다. 판의
+#    `rules_version` 문자열만으로 계보를 가를 수 없을 때는 빌드 rev 로 가른다.
+# main e1.17.0: 2026-09-27 재무 흐름 필드 TTM(#212·#227). `factor_readiness`(S20)의 evidence·caveat
 #         문구가 바뀐다 — V02·V04·G01·G02·G04 는 TTM 기간, Q04·Q05·V05·Q07 은 TTM 과 원 계정의
 #         기간 차이를 적는다. S12 `FIELDS_FIN` 의 흐름 5필드 label·evidence(TTM)도 바뀌어
 #         `fin_std` 의 `field_profiles` 를 거쳐 `dataset_profile`(S19) 산출도 달라진다(`fin_std`
 #         값 자체는 그대로다). 같은 입력에서 두 산출 해시가 달라지므로 EG5a 비교 판을 올린다.
 #         카탈로그 매크로 `v_fin_latest`(TTM 분기값을 회계기간 축에서 세운다)는 빌드 산출이 아니라
 #         `catalog` 재생성으로 반영된다.
-# e1.18.0: 2026-09-27 `fin_std`(S12) 4분기·현금흐름 분기 파생의 묶음 축(#236). `bsns_year` 대신
+# main e1.18.0: 2026-09-27 `fin_std`(S12) 4분기·현금흐름 분기 파생의 묶음 축(#236). `bsns_year` 대신
 #         기간 말일(사업보고서 말일에서 보고서 종류만큼 당긴 달의 말일)로 같은 회계연도를 찾는다 —
 #         비12월 결산에서 다음 회계연도 분기를 빼던 값과 그 공개일이 바뀌고, 구성 행을 산출에 남는
 #         행으로 좁혀 격리된 분기로 만든 파생도 사라진다. `dataset_profile` 의 내부 스코프 필드
 #         `financial.cf_operating_q` 커버율도 따라 바뀐다.
-# e1.19.0: 2026-09-28 `price.adj_close` 의 `field_scope` 가 `internal` → `field_map`(S23 선언). #218 이
+# main e1.19.0: 2026-09-28 `price.adj_close` 의 `field_scope` 가 `internal` → `field_map`(S23 선언). #218 이
 #         레지스트리 가격 변화 팩터를 이 필드로 옮겨 FIELD_MAP §2 어휘가 됐다(문서 감사 결정 5).
 #         값·랙·커버는 그대로이고 `dataset_profile` 한 행의 `field_scope`·`evidence` 만 바뀐다.
-# e1.20.0: 2026-10-20 자사주 취득 금액을 주식 종류별 class-row 로 나눈다(#589). 보통주 티커는
+# e1.27.0: Q-4 main 역병합(N-40 ③) — 두 계보의 합. 브랜치 e1.26.0 판과 견줘 빌드 산출이 바뀌는
+#          것은 main 계보의 세 변경뿐이다(브랜치 쪽 규칙은 그대로 들어온다):
+#          ① `fin_std`(S12) 4분기·현금흐름 분기 파생의 묶음 축을 회계기간 축으로(main e1.18.0, #236).
+#             비12월 결산 법인의 `*_q4_derived`·`cf_*_q`·`capex_q` 와 그 `*_available_date`·`*_n_rows`
+#             가 바뀌고, 구성 행을 산출에 남는 행(격리·duplicate_vintage 제외)으로 좁혀 격리된 분기로
+#             만든 파생과 격리 행 자신의 파생이 사라진다. 공개일 축은 브랜치 e1.25.0 의 stage 보정
+#             공개일(`avail_dt`, J-41·C-11)을 그대로 쓴다 — main 판은 원천 `rcept_dt` 였는데, 그대로
+#             두면 J-41 재제출본에서 파생 공개일이 자기 행 공개일보다 앞서 EG3 의
+#             `n_derived_available_before_row` 가 깨지고 파생 값이 구성 행보다 먼저 보인다.
+#          ② `dataset_profile`(S19): `FIELDS_FIN` 흐름 5필드 label·evidence(TTM, main e1.17.0) ·
+#             `price.adj_close` field_scope internal → field_map(main e1.19.0 — evidence 는 브랜치 ⑤
+#             문구와 합쳤다) · ① 에 따른 `financial.cf_operating_q` 커버율. 선언 84행(field_map 36 ·
+#             internal 48).
+#          ③ `factor_readiness`(S20): evidence·caveat 문구(TTM 기간, main e1.17.0).
+#          빌드 산출이 아닌 것: 카탈로그 매크로는 main `v_fin_latest`(TTM 분기값을 뷰가 회계기간 축에서
+#          세운다·`period_frontier`·TTM 공개일 열) · `v_credit_balance` · `v_unfolded_event` · `v_adj_close`
+#          와 브랜치 `v_sector` 의 합집합 12개, 계약(EG-C) 대상은 워크벤치 facade
+#          (`_engine/strategy_workbench`, #372). 판본이 바뀌어 첫 빌드는 EG5a 가 skip 이므로 두 번
+#          지어 재현성을 확인한다(EQUITY_HANDOFF §6).
+# e1.28.0: E-1(v3 컷오버 트랙, QL-E 리뷰 MAJOR-2) `adj_factor` — ok 계수는 KRX 기준가가 확인한 세션에만.
+#          (a)(b)(c) 가 원수익률 대신 기준가 후보(bp) 세션의 기준가 비 |r / pf − 1| ≤ tol 로 세션을
+#          고른다 — 기준가 = 직전 종가(조정 없음)인 날은 후보 밖. 소액은 명목 세션만(그 ±
+#          `base_match_window_sessions` 는 S06-2 (a)). 못 찾으면 옛 원수익률 판정의 세션 s 로 사유를
+#          가른다: s 가 기준가 후보 → 옛 경로(conflict → krx_base_inconsistent), 아니면 신설 사유
+#          `no_base_price_evidence`(apply_basis unmatched·명목 세션), 원수익률도 못 맞추면
+#          no_price_match. 같은 날 억제는 기준가로 찾은 후보가 반증 경로 후보보다 먼저(via_raw).
+#          ok 행의 apply_basis 는 krx_base_price 뿐(`OK_APPLY_BASIS`, EG3 `n_ok_apply_basis_bad`).
+#          로컬 10-03 판 재생: 238행·138종목 변화 — ok → not-ok 103(no_base_price_evidence 102 —
+#          소액 자기주식 소각 감자 72 등 · same_day_suppressed 1), 다른 날로 옮긴 ok 12(240600 등),
+#          미매칭 → ok 11,
+#          기준가가 안 바뀐 날의 계수 접힘 114 → 0, 그 밖 (종목, 날짜) 가격 단계는 KRX 기준가 사슬
+#          대조 범주 불변. 열·행 grain 불변 — fi·모델 계약 불변(값만 바뀜).
+# e1.29.0: K1-6a(v3 컷오버 트랙) EG3_adj_factor 기록형 지표 — not-ok 행을 배타·완전한 묶음(가격 축
+#          해소 4갈래 + 미해결 4묶음 + unclassified, 정본 `rules_s06.not_ok_bucket_sql`)으로 센다.
+#          게이트 판정·산출 불변(e1.24.0 과 같은 '게이트 변경, 산출 불변' — 규칙 파일이 바뀌면
+#          올린다는 K1-13 을 따른다). 정의·처리 규칙은 EQUITY_GATES §14.
+# e1.30.0: S26 WISE 3표 신설(`consensus_matrix`·`consensus_annual`·`fin_ratio_wise`, 필드 13) ·
+#          `flow_daily` 필드 `flow.private_fund_net_buy` 선언 · `rules_s19.SOURCE_TABLES` 26 → 29.
+#          `dataset_profile` 행이 14 늘고 기존 표의 산출은 그대로다(플랜 `2026-10-22-equity-wise-fields`).
+# ── main 계보 2차(e8400fba 이후 main, #589·#590·#592, 2026-10-20) — 위 브랜치 e1.20.0·e1.21.0 과
+#    **같은 번호가 다른 규칙**이다. 서버는 이 두 판을 지은 적이 없다(배포는 늘 브랜치 계보였다).
+# main e1.20.0: 2026-10-20 자사주 취득 금액을 주식 종류별 class-row 로 나눈다(#589). 보통주 티커는
 #         보통주식분(`aqpln_prc_ostk`)만, 결정일에 상장돼 있던 우선주가 하나인 법인의 우선주
 #         티커는 기타주식분(`aqpln_prc_estk`)만 받는다. 그런 우선주가 없으면 `unlisted_class`,
 #         둘 이상이면 `class_ambiguous`(둘 다 범위 밖)이고, 상장 여부는 `security_span` 구간으로
@@ -172,12 +330,18 @@ RULES_VERSION = "e1.21.0"                # BuildRecord.rules_version 에 실린�
 #         S19·S20 문장의 「E05 행 0」 서술을 지금 원장대로 고치고(#588) E05 에 레지스트리
 #         `event.buyback_announcement` 를 옮겨 단다(I03 은 사업보고서 확정치 축이라 그 팩터의
 #         재료가 아니다).
-# e1.21.0: 2026-10-20 S19 `table_rows` 축 커버율의 분모에도 `row_filter` 를 건다(#592). 전에는
+# main e1.21.0: 2026-10-20 S19 `table_rows` 축 커버율의 분모에도 `row_filter` 를 건다(#592). 전에는
 #         분자에만 걸려 분모가 창 안 측정 테이블 전 행이었고, `event.buyback_amount` 커버가 다른
 #         사건 유형의 수에 흔들렸다(절단본 40/50 → 40/41). `row_filter` 가 있는 `table_rows` 다섯
 #         필드(`event.buyback_amount`·`capital_raise_amount`·`insider_net_buy`·
 #         `insider_stake_change`·`major_holder_stake`)의 `dataset_profile` `n_denominator`·
 #         `estimated_coverage_pct` 가 바뀐다. 분자·창·S20 판정은 그대로다.
+# e1.31.0: 갈래 병합 2차(main 4859372f ↔ 서버 갈래 fc6c91eb + W 80102a79, 플랜
+#          `2026-10-24-ledger-merge`) — 브랜치 e1.30.0 판과 견줘 빌드 산출이 바뀌는 것은 main 계보
+#          둘이다: ① `corp_event` `treasury_buy` 주식 종류별 class-row(main e1.20.0)
+#          ② `dataset_profile` `table_rows` 커버율 분모의 `row_filter`(main e1.21.0) · 그
+#          evidence 와 S20 문구. 브랜치 쪽 규칙은 그대로 들어온다. 판본이 바뀌어 첫 빌드는 EG5a 가
+#          skip 이므로 같은 입력으로 두 번 지어 재현성을 확인한다(EQUITY_HANDOFF §6).
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

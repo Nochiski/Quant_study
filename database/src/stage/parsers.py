@@ -24,6 +24,7 @@ class RawBlob:
     fetched_date: str    # 'YYYY-MM-DD' (수집일 KST)
     body: bytes
     fetched_at: str      # UTC 무표기 시각 → observed_date 원천
+    sha256: str = ""     # 원장 sha256 열(압축 전 원문) — 연속 판 접기 표만 읽는다(fold.py)
 
 
 @dataclass
@@ -81,11 +82,21 @@ def parse_consensus_monthly(blobs: Iterable[RawBlob]) -> ParseResult:
 
     - 같은 blob 안 라벨 중복은 값이 같으면 접고(카운터), 다르면 value_mismatch 로 계상한다.
     - 5001 과 5002 가 같은 좌표에서 다른 값이면 value_mismatch(5001 값 유지).
+    - 한쪽만 빈 값이면 값 충돌이 아니라 한쪽 결측이다 — n_one_side_null 로 따로 세고(G8 은
+      실패시키지 않는다) 값은 5001 정본 그대로 둔다(5001 이 비었으면 빈 값, 5002 로 채우지 않음).
+      10-08 저녁 474650 2026/09/30 6칸이 이 모양이었다.
     - 무커버 프로브(전부 None)도 행을 만든다 — close_price 실값 보존. 빈 categories 는 0행.
     """
     n_blobs: Counter[str] = Counter()
     n_cells: Counter[str] = Counter()
-    n_parse_failed = n_metric_unknown = n_dup = n_mismatch = 0
+    n_parse_failed = n_metric_unknown = n_dup = n_mismatch = n_one_side_null = 0
+
+    def cross(a: str | None, b: str | None) -> None:
+        nonlocal n_mismatch, n_one_side_null
+        if (a is None) != (b is None):
+            n_one_side_null += 1
+        elif not _same(a, b):
+            n_mismatch += 1
     coords: dict[tuple[str, str, str, str, str], dict[str, str | None]] = {}
     for b in blobs:
         n_blobs[b.ep] += 1
@@ -129,16 +140,15 @@ def parse_consensus_monthly(blobs: Iterable[RawBlob]) -> ParseResult:
                 elif b.fetched_at < str(row["fetched_at"]):
                     row["fetched_at"] = b.fetched_at
                 if is_5001:
-                    if row["in_5002"] == "true" and not _same(row["consensus"], val):
-                        n_mismatch += 1
+                    if row["in_5002"] == "true":
+                        cross(val, row["consensus"])
                     row["consensus"] = val                     # 5001 값이 정본
                     row["close_price_krw"] = _s(close[i]) if i < len(close) else None
                     row["target_price_krw"] = _s(tgt[i]) if i < len(tgt) else None
                     row["in_5001"] = "true"
                 else:
                     if row["in_5001"] == "true":
-                        if not _same(row["consensus"], val):
-                            n_mismatch += 1
+                        cross(row["consensus"], val)
                     else:
                         row["consensus"] = val
                     pair_obj = mm[i] if i < len(mm) else None
@@ -151,6 +161,7 @@ def parse_consensus_monthly(blobs: Iterable[RawBlob]) -> ParseResult:
         "n_blobs": dict(n_blobs), "n_cells": dict(n_cells), "n_rows_emitted": len(rows),
         "n_parse_failed": n_parse_failed, "n_metric_unknown": n_metric_unknown,
         "n_dup_labels_folded": n_dup, "n_value_mismatch": n_mismatch,
+        "n_one_side_null": n_one_side_null,
     }
     return ParseResult(rows=rows, columns=CONSENSUS_COLUMNS, metrics=metrics)
 
@@ -335,18 +346,22 @@ FIN_WISE_COLUMNS: tuple[str, ...] = (
 _FIN_LABEL_N = 8          # YYMM 라벨 8 = 기간 6 + '전년대비(YoY)' 2 (실측 1,592/1,614)
 
 
-def parse_fin_wise(blobs: Iterable[RawBlob]) -> ParseResult:
-    """cF3002(재무제표 244계정)·cF4002(재무비율 36) pkey='Y': DATA 배열 원소 1개 = 출력 1행(wide).
+# 같은 cF3002 의 추가 요청(backfill_wise.FIN_REQUESTS, 플랜 2026-09-30 T-Q2) — stg_fin_wise_q 가 읽는다.
+FIN_WISE_Q_PKEYS: tuple[str, ...] = ("Q:IS", "Y:BS", "Y:CF")
+FIN_WISE_Q_COLUMNS: tuple[str, ...] = FIN_WISE_COLUMNS[:3] + ("pkey",) + FIN_WISE_COLUMNS[3:]
+_FIN_Q_LABEL_N = (8, 10)   # 연간 재무상태·현금흐름 8(기간 6 + YoY 2) · 분기 손익 10(기간 6 + QoQ·YoY 4)
 
-    기간 라벨(YYMM[0..5])은 행마다 period_label_1~6 으로 병기해 DATA1~6 과 짝을 보존한다. DATAQ* 는
-    라벨이 blob 에 없어(QOQ/YOY 코멘트가 상대 위치만 말한다) 슬롯명 그대로 val_q* 컬럼에 둔다.
-    키는 (cmp_cd, fetched_date, ep, seq=배열 위치) — cF4002 는 같은 ACCODE 가 여러 P_ACCODE 아래
-    반복된다(실측 1,614/1,614 blob).
-    """
+
+def _parse_fin(blobs: Iterable[RawBlob], pkeys: tuple[str, ...], columns: tuple[str, ...],
+               label_ns: tuple[int, ...]) -> ParseResult:
+    """cF3002·cF4002 JSON 공통 — DATA 배열 원소 1개 = 출력 1행(wide). `pkeys` 밖 요청은 건너뛰고 센다."""
     n_blobs: Counter[str] = Counter()
-    n_empty = n_failed = n_label_other = 0
+    n_empty = n_failed = n_label_other = n_skipped = 0
     out: list[dict[str, str | None]] = []
     for b in blobs:
+        if b.pkey not in pkeys:
+            n_skipped += 1
+            continue
         n_blobs[b.ep] += 1
         try:
             top, rows = _json_rows(b.body, "DATA")
@@ -360,16 +375,18 @@ def parse_fin_wise(blobs: Iterable[RawBlob]) -> ParseResult:
             continue
         labels_obj = top.get("YYMM")
         labels = [_s(x) for x in labels_obj] if isinstance(labels_obj, list) else []
-        if len(labels) != _FIN_LABEL_N:
+        if len(labels) not in label_ns:
             n_label_other += 1
         fs_basis, freq = _s(top.get("FIN")), _s(top.get("FRQ"))
         for i, r in enumerate(rows):
             if not isinstance(r, dict):
                 n_failed += 1
                 continue
-            row: dict[str, str | None] = dict.fromkeys(FIN_WISE_COLUMNS)
+            row: dict[str, str | None] = dict.fromkeys(columns)
             row.update(cmp_cd=b.cmp_cd, fetched_date=b.fetched_date, ep=b.ep, seq=str(i),
                        fs_basis=fs_basis, freq=freq, fetched_at=b.fetched_at)
+            if "pkey" in row:
+                row["pkey"] = b.pkey
             for src, dst in _FIN_ATTRS.items():
                 row[dst] = _s(r.get(src))
             for k, slot in enumerate(_FIN_SLOTS, 1):
@@ -381,10 +398,29 @@ def parse_fin_wise(blobs: Iterable[RawBlob]) -> ParseResult:
                 row[dst] = _s(r.get(src))
             out.append(row)
     out.sort(key=lambda r: (str(r["cmp_cd"]), str(r["fetched_date"]), str(r["ep"]),
-                            int(str(r["seq"]))))
-    return ParseResult(rows=out, columns=FIN_WISE_COLUMNS, metrics={
+                            str(r.get("pkey") or ""), int(str(r["seq"]))))
+    return ParseResult(rows=out, columns=columns, metrics={
         "n_blobs": dict(n_blobs), "n_empty": n_empty, "n_rows_emitted": len(out),
-        "n_parse_failed": n_failed, "n_value_mismatch": 0, "n_label_shape_other": n_label_other})
+        "n_parse_failed": n_failed, "n_value_mismatch": 0, "n_label_shape_other": n_label_other,
+        "n_skipped_pkey": n_skipped})
+
+
+def parse_fin_wise(blobs: Iterable[RawBlob]) -> ParseResult:
+    """cF3002(재무제표 244계정)·cF4002(재무비율 36) pkey='Y': DATA 배열 원소 1개 = 출력 1행(wide).
+
+    기간 라벨(YYMM[0..5])은 행마다 period_label_1~6 으로 병기해 DATA1~6 과 짝을 보존한다. DATAQ* 는
+    라벨이 blob 에 없어(QOQ/YOY 코멘트가 상대 위치만 말한다) 슬롯명 그대로 val_q* 컬럼에 둔다.
+    키는 (cmp_cd, fetched_date, ep, seq=배열 위치) — cF4002 는 같은 ACCODE 가 여러 P_ACCODE 아래
+    반복된다(실측 1,614/1,614 blob). 같은 cF3002 의 다른 요청(pkey Q:IS·Y:BS·Y:CF — 분기 손익·연간
+    재무상태·현금흐름, 플랜 2026-09-30 T-Q2)은 키가 겹치므로 건너뛰고 세기만 한다(`_parse_periodic` 규약).
+    """
+    return _parse_fin(blobs, ("Y",), FIN_WISE_COLUMNS, (_FIN_LABEL_N,))
+
+
+def parse_fin_wise_q(blobs: Iterable[RawBlob]) -> ParseResult:
+    """cF3002 pkey Q:IS(분기 손익)·Y:BS(연간 재무상태)·Y:CF(연간 현금흐름) — 열은 stg_fin_wise 와 같고 키에
+    pkey 가 더해진다. 분기 응답은 기간 칸마다 연결/별도 이름표가 따로 붙는다('2025/12<br />(IFRS별도)')."""
+    return _parse_fin(blobs, FIN_WISE_Q_PKEYS, FIN_WISE_Q_COLUMNS, _FIN_Q_LABEL_N)
 
 
 ANALYST_COLUMNS: tuple[str, ...] = (
@@ -400,6 +436,10 @@ _WS_RE = re.compile(r"\s+")
 
 
 _NA_TOKENS = frozenset({"N/A", "n/a", "NA"})   # WISE 표기 결측 — PER 'N/A' 98 blob 실측
+# WISE 추정기관수 = 최근 3개월 안에 투자의견을 낸 증권사 수(제공처별 표 cTB24 의 행 수와 같다 —
+# 10-05 실측 005930: 21행 = 21). 이 문구는 그 수가 0 이라는 원천의 명시다. 다른 창(N개월)이면
+# 우리 규칙(3개월 의견 기준)의 0 이 아니므로 맞추지 않는다.
+_NO_OPINION_3M_RE = re.compile(r"최근\s*3\s*개월\s*이내에\s*제시된\s*의견이\s*없습니다")
 
 
 def _cell_text(fragment: str) -> str:
@@ -408,12 +448,31 @@ def _cell_text(fragment: str) -> str:
     return "" if t in _NA_TOKENS else t
 
 
+def _broker_no_opinion_note(text: str) -> str | None:
+    """제공처별 표(cTB24) 본문이 '최근 3개월 … 없습니다' 단일 셀 한 행뿐이면 그 문구, 아니면 None."""
+    m = _TB24_RE.search(text)
+    if m is None:
+        return None
+    body = _TBODY_RE.search(m.group(0))
+    rows = [[_cell_text(td) for td in _TD_RE.findall(tr)]
+            for tr in _TR_RE.findall(body.group(1) if body else m.group(0))]
+    rows = [r for r in rows if r]                     # 머리 행(th 뿐)은 빈 목록
+    if len(rows) == 1 and len(rows[0]) == 1 and _NO_OPINION_3M_RE.search(rows[0][0]):
+        return rows[0][0]
+    return None
+
+
 def parse_analyst_summary(blobs: Iterable[RawBlob]) -> ParseResult:
     """c1010001 HTML: `id="cTB15"` 표 마지막 행 → (투자의견·목표주가·EPS·PER·추정기관수) 1행/blob.
 
     실측 모양 3종(1,612 blob): 5셀 숫자 · 5셀 중 빈칸(&nbsp;/'') · 단일 셀 '최근N개월 이내에 제시된
     의견이 없습니다'(346) → 값 NULL + no_opinion_note. `<script>alert(…)` 리다이렉트 본문(1)은
     데이터 없음(n_no_data, 실패 아님). 기준일은 '[기준:YYYY.MM.DD]'.
+
+    추정기관수 0(2026-10-05): '최근 3개월 … 의견이 없습니다' 가 보이면 추정기관수 = 0 이다 — 요약 표
+    단일 셀 문구이거나, 요약 표의 기관수 칸이 비고 제공처별 표(cTB24)가 그 문구 한 행뿐일 때
+    (10-01 scope 유니버스의 빈 값 77건 전부가 이 둘, 70건이 뒤쪽). 그 밖의 빈칸은 모름(NULL)으로 둔다
+    — 0 과 모름을 섞으면 수집 실패가 '의견 없음'으로 둔갑한다.
     """
     n_blobs = n_no_data = n_failed = n_no_opinion = n_dup = n_na = 0
     coords: dict[tuple[str, str], dict[str, str | None]] = {}
@@ -440,11 +499,16 @@ def parse_analyst_summary(blobs: Iterable[RawBlob]) -> ParseResult:
         if len(cells) == 1:
             n_no_opinion += 1
             row["no_opinion_note"] = cells[0]
+            if _NO_OPINION_3M_RE.search(cells[0]):
+                row["analyst_count"] = "0"
         elif len(cells) == 5:
             n_na += sum(1 for td in _TD_RE.findall(trs[-1])
                         if _TAG_RE.sub("", td).strip() in _NA_TOKENS)
             row.update(opinion_score=cells[0], target_price_krw=cells[1], eps_krw=cells[2],
                        per=cells[3], analyst_count=cells[4])
+            note = _broker_no_opinion_note(text) if cells[4] == "" else None
+            if note is not None:
+                row.update(analyst_count="0", no_opinion_note=note)
         else:
             n_failed += 1
             continue
@@ -521,11 +585,62 @@ def parse_analyst_broker(blobs: Iterable[RawBlob]) -> ParseResult:
         "n_value_mismatch": n_mismatch})
 
 
+WICS_COLUMNS: tuple[str, ...] = (
+    "req_sec_cd", "dt", "cmp_cd", "cmp_kor", "idx_cd", "idx_nm", "sec_cd", "sec_nm", "mkt_val",
+    "all_mkt_val", "wgt", "s_wgt", "apt_shr_cnt", "top60", "cal_wgt", "fetched_at",
+)
+_WICS_FIELDS: tuple[tuple[str, str], ...] = (
+    ("cmp_cd", "CMP_CD"), ("cmp_kor", "CMP_KOR"), ("idx_cd", "IDX_CD"), ("idx_nm", "IDX_NM_KOR"),
+    ("sec_cd", "SEC_CD"), ("sec_nm", "SEC_NM_KOR"), ("mkt_val", "MKT_VAL"), ("all_mkt_val", "ALL_MKT_VAL"),
+    ("wgt", "WGT"), ("s_wgt", "S_WGT"), ("apt_shr_cnt", "APT_SHR_CNT"), ("top60", "TOP60"), ("cal_wgt", "CAL_WGT"),
+)
+
+
+def parse_wics_components(blobs: Iterable[RawBlob]) -> ParseResult:
+    """wiseindex `GetIndexComponets` 원문(`wics_raw`, RawBlob 별칭: cmp_cd=요청 sec_cd · pkey=dt) → 종목 행.
+
+    한 blob 의 `list` 가 그대로 행이 된다(WICS_PROBE §2·§8). `info.CNT` 와 `list` 길이가 다르면
+    `n_value_mismatch` 로 세어 G8 이 잡는다. 빈 list(휴장일·미공표)는 0행 — 원장 `n_rows=0` 판본은
+    `select_sql` 의 `n_rows > 0` 조건으로 애초에 오지 않는다."""
+    n_blobs = n_empty = n_failed = n_mismatch = 0
+    out: list[dict[str, str | None]] = []
+    for b in blobs:
+        n_blobs += 1
+        try:
+            top, rows = _json_rows(b.body, "list")
+        except Exception:  # noqa: BLE001  # reason: blob 손상은 도메인 실패 → parse_failed 계상
+            top, rows = None, None
+        if rows is None or top is None:
+            n_failed += 1
+            continue
+        if not rows:
+            n_empty += 1
+            continue
+        info = top.get("info") if isinstance(top.get("info"), dict) else {}
+        cnt = info.get("CNT") if isinstance(info, dict) else None
+        if cnt is not None and int(str(cnt)) != len(rows):
+            n_mismatch += 1
+        for r in rows:
+            if not isinstance(r, dict):
+                n_mismatch += 1
+                continue
+            row: dict[str, str | None] = {"req_sec_cd": b.cmp_cd, "dt": b.pkey, "fetched_at": b.fetched_at}
+            for name, src in _WICS_FIELDS:
+                v = r.get(src)
+                row[name] = None if v is None else str(v)
+            out.append(row)
+    return ParseResult(out, WICS_COLUMNS, {
+        "n_blobs": n_blobs, "n_empty_blobs": n_empty, "n_rows_emitted": len(out),
+        "n_parse_failed": n_failed, "n_value_mismatch": n_mismatch})
+
+
 PARSERS.update({
+    "parse_wics_components": parse_wics_components,
     "parse_analyst_broker": parse_analyst_broker,
     "parse_consensus_annual": parse_consensus_annual,
     "parse_consensus_quarterly": parse_consensus_quarterly,
     "parse_consensus_matrix": parse_consensus_matrix,
     "parse_fin_wise": parse_fin_wise,
+    "parse_fin_wise_q": parse_fin_wise_q,
     "parse_analyst_summary": parse_analyst_summary,
 })

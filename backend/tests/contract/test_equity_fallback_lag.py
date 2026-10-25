@@ -20,7 +20,6 @@ import pytest
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import FIELD_BY_ID
 from strategy_workbench.domain.equity.facade.research_data import ResearchPanelQuery
 from tests.equity_fixture import (
-    LEDGER_PENDING_FIELDS,
     WB_PROFILE_ROWS,
     WB_SESSIONS,
     build_workbench_root,
@@ -50,12 +49,10 @@ def test_폴백_랙이_원장_선언과_같다(tmp_path: Path) -> None:
     assert all("fallback" in item.available_date_basis for item in served.values())
     ledger = _ledger_lags()
 
-    # 원장 선언이 아직 main 계보에 없는 필드(#608)는 대조에서 뺀다
     drift = sorted(
         (field_id, item.recommended_lag_sessions, ledger[field_id])
         for field_id, item in served.items()
-        if field_id not in LEDGER_PENDING_FIELDS
-        and item.recommended_lag_sessions != ledger[field_id]
+        if item.recommended_lag_sessions != ledger[field_id]
     )
 
     assert not drift, f"폴백 랙이 원장과 다르다 — (field_id, fallback, ledger)={drift}"
@@ -67,7 +64,7 @@ def test_손_픽스처_dataset_profile_랙이_원장_선언과_같다() -> None:
     drift = sorted(
         (field_id, lag, ledger[field_id])
         for field_id, lag, _ in WB_PROFILE_ROWS
-        if field_id not in LEDGER_PENDING_FIELDS and lag != ledger[field_id]
+        if lag != ledger[field_id]
     )
 
     assert not drift, f"손 픽스처 랙이 원장과 다르다 — (field_id, fixture, ledger)={drift}"

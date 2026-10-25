@@ -30,6 +30,13 @@ while [ $# -gt 0 ]; do
 done
 D="${D:-$(TZ=Asia/Seoul date +%Y%m%d)}"
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
+# 아직 오지 않은 D(오타)로 판이 서면 'D 가 앞설 때만 갱신'(N-24 3.8) 때문에 최신판 포인터·완료 신호가 그 날짜에
+# 묶인다. 인자 오류라 rc 2(알 수 없는 basis·인자와 같다). 저녁 잠정판은 D = 오늘, 아침 확정판은 D = 전 거래일이다.
+TODAY_KST=$(TZ=Asia/Seoul date +%Y%m%d)
+if [[ "$D" > "$TODAY_KST" ]]; then
+  echo "D=$D 가 오늘(KST $TODAY_KST)보다 뒤다 — 아직 오지 않은 날의 판은 짓지 않는다(--date 오타?)" >&2
+  exit 2
+fi
 
 if [ -n "$DRY" ]; then
   # 계획만 출력한다 — 락·스냅샷·빌드·알림 전부 없음 (결정 V2-7 의 유일한 예외)
@@ -86,7 +93,7 @@ step_soft() {
 }
 snapshot_step() {
   # 5 DB 전부 뜬다. stg_price_daily 의 G9 가 kiwoom 원장을 직접 조인하므로 부분 스냅샷은 금지
-  # (STAGE_DESIGN §2). 저녁 체인은 키움·WISE 가 끝나면 바로 호출되고 dart.db 는 아직 쓰는 중일 수 있다 —
+  # (STAGE_DESIGN §2). 저녁 체인은 키움이 끝나면 바로 호출되고 dart.db 는 아직 쓰는 중일 수 있다 —
   # 그날 DART 분은 아침 확정판에 들어온다.
   local out; out=$(mktemp)
   # raw 락은 잡지 않는다. 스냅샷은 읽기 전용 연결의 VACUUM INTO 라 트랜잭션 일관 사본이고, 저녁에는 DART 갈래가
@@ -128,7 +135,8 @@ catalog_step() { $PY -m equity catalog; }
 # 에서 민다. 사건은 카탈로그 뷰를 함께 읽어 catalog 단계 뒤에 돈다.
 contract_step() { $PY -m equity contract --engine-src "$QL_HOME/_engine"; }
 deliver_step() {
-  # Kael-alpha·워치독이 읽는 인계 파일. latest_* 는 덮어쓰고 history/ 는 영구 보관한다(B.3 ①층).
+  # Kael-alpha·워치독이 읽는 인계 파일. latest_* 는 D 가 앞서거나 같은 성공 판으로만 덮어쓰고
+  # history/ 는 영구 보관한다(B.3 ①층, N-24 3.8).
   $PY - "$D" "$BASIS" "$SNAP" "$STAGE_S" "$EQUITY_S" "$H_STAGE" "$H_EQUITY" <<'PY'
 import datetime as dt
 import json
@@ -164,12 +172,23 @@ payload = {
 text = json.dumps(payload, ensure_ascii=False, indent=1)
 Path("data/deliver/history").mkdir(parents=True, exist_ok=True)
 Path(f"data/deliver/history/{date}_{basis}.json").write_text(text, encoding="utf-8")
-if h_stage == "ok" and h_equity == "ok":
+latest = Path(f"data/deliver/latest_{basis}.json")
+try:
+    cur = str(json.loads(latest.read_text(encoding="utf-8"))["date"])
+except (OSError, ValueError, KeyError, TypeError):
+    cur = ""
+# 다음 D 를 지은 뒤 놓친 옛 D 를 손으로 다시 지어도 최신판 포인터가 뒤로 가지 않게 한다(N-24 3.8).
+# 포인터가 없거나 그 D 를 읽을 수 없으면 지금처럼 쓴다. D 는 YYYYMMDD 라 문자열 순서가 날짜 순서다.
+older = cur.isdigit() and date < cur      # ready_step 과 같은 판정(같은 모양)
+if h_stage == "ok" and h_equity == "ok" and not older:
     # latest_* 는 소비자(Kael-alpha)가 읽는 포인터 — 실패 판으로 덮으면 health 를 안 읽는 소비자에게
     # 어제 판이 오늘 판처럼 보인다. 실패는 history 에만 남기고 latest_* 는 마지막 성공 판을 유지한다.
-    Path(f"data/deliver/latest_{basis}.json").write_text(text, encoding="utf-8")
+    latest.write_text(text, encoding="utf-8")
     print(f"  인계 latest_{basis}.json stage {len(payload['stage_builds'])}표 "
           f"equity {len(payload['equity_builds'])}표 snapshot={snap}")
+elif h_stage == "ok" and h_equity == "ok":
+    print(f"  인계 history/{date}_{basis}.json 만 기록 (latest_{basis}.json 은 더 새 D={cur} 유지 — "
+          f"옛 D 재빌드는 최신판 포인터를 되돌리지 않는다)")
 else:
     print(f"  인계 history/{date}_{basis}.json 만 기록 (stage={h_stage} equity={h_equity} — "
           f"latest_{basis}.json 은 마지막 성공 판 유지)")
@@ -179,6 +198,7 @@ ready_step() {
   # 공유 소비자(상목 SFTP)는 `data/deliver` 를 볼 수 없다 — 바인드된 것은 raw·stage·equity 3개뿐이라
   # 표별 MANIFEST.json 을 직접 읽을 수밖에 없고, 빌드가 도는 중인지 끝났는지 알 방법이 없었다(DEFECT-B04).
   # 두 루트에 완료 신호를 원자 기록한다. 실패 판에서는 부르지 않으므로 마지막 성공 판 신호가 남는다.
+  # 옛 D 재빌드도 더 새 D 의 신호를 덮지 않는다(인계 포인터와 같은 규칙, N-24 3.8).
   $PY - "$D" "$BASIS" <<'PY'
 import datetime as dt
 import json
@@ -201,6 +221,16 @@ def current_builds(root: Path) -> dict[str, str]:
 
 
 for root in (Path("data/stage"), Path("data/equity")):
+    ready = root / "_READY.json"
+    try:
+        cur = str(json.loads(ready.read_text(encoding="utf-8"))["date"])
+    except (OSError, ValueError, KeyError, TypeError):
+        cur = ""
+    # basis 공용 파일이라 D 만 본다. 파일이 없거나 D 를 읽을 수 없으면(date 없는 옛 형식 포함) 지금처럼 쓴다.
+    older = cur.isdigit() and date < cur      # deliver_step 과 같은 판정(같은 모양)
+    if older:
+        print(f"  완료 신호 유지 {ready} (더 새 D={cur} — 옛 D={date} 재빌드는 완료 신호를 되돌리지 않는다)")
+        continue
     payload = {"date": date, "basis": basis, "generated_at_utc": stamp,
                "builds": current_builds(root)}
     tmp = root / "_READY.json.tmp"
@@ -304,7 +334,7 @@ cat "$RUN" >> "$LOG"
 SUMMARY=$(printf 'D=%s snapshot=%s stage %s(%d분) equity %s(%d분) | %s' \
   "$D" "${SNAP:-없음}" "$H_STAGE" "$((STAGE_S / 60))" "$H_EQUITY" "$((EQUITY_S / 60))" \
   "$(grep -E '^stage 건전성|^  스냅샷|^  인계|^  snapshot gc' "$RUN" | tail -4 | tr '\n' ' ')" \
-  | cut -c1-900)
+  | cut -c1-900 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
 # 판정: stage·equity 실패 또는 인계 파일 실패 = crit(rc 2). 인계가 실패하면 소비자 포인터가 어제 판이라
 # "준비 완료" 를 보내면 안 된다. GC 실패만 남으면 판은 쓸 수 있으니 준비 info + warn 을 따로 보낸다(V2-7).
 if [ "$H_STAGE" != "ok" ] || [ "$H_EQUITY" != "ok" ] || [[ "$FAILED" == *"인계 파일"* ]]; then

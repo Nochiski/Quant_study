@@ -427,12 +427,19 @@ def main(argv: list[str] | None = None) -> int:
                     help="판이 커밋된 KST 날짜 (C1·C2·C5 기준). 기본은 --date 와 같다 — 아침 확정판은 오늘을 준다")
     ap.add_argument("--out", type=Path, help="결과 JSON 경로 (기본 logs/health/stage_<D>_<basis>.json)")
     ap.add_argument("--skip", default="", help="의도적으로 안 지은 표 (쉼표·공백 구분)")
+    ap.add_argument("--tables", default="",
+                    help="이 표만 판정 (쉼표·공백 구분, 기본 stage 규칙 전수) — 장 마감 체인의 단독 빌드(컷오버 PR-8)")
     ap.add_argument("--started-at", help="빌드 시작 시각 ISO (C5. 기본은 오늘 첫 판의 빌드 id 시각)")
     ap.add_argument("--budget-s", type=int, default=BUDGET_S_DEFAULT)
     a = ap.parse_args(argv)
+    names = _split(a.tables)
+    unknown = sorted(set(names) - set(rules.RULES))
+    if unknown:     # 오타로 판정할 표가 줄어 통과하지 않게 — 규칙에 없는 이름은 인자 오류
+        ap.error(f"--tables 에 stage 규칙에 없는 표가 있다: {unknown}")
+    tables = {t: rules.RULES[t].write_mode for t in names} or None
 
-    r = check_stage(a.stage_root, a.basis, a.date, built_on=a.built_on, skip=_split(a.skip),
-                    started_at=a.started_at, budget_s=a.budget_s)
+    r = check_stage(a.stage_root, a.basis, a.date, built_on=a.built_on, tables=tables,
+                    skip=_split(a.skip), started_at=a.started_at, budget_s=a.budget_s)
     out = a.out or base / "logs" / "health" / f"stage_{a.date}_{a.basis}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(r.as_dict(), ensure_ascii=False, indent=1), encoding="utf-8")

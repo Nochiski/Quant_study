@@ -53,7 +53,7 @@
 
 `data/stage/` 의 원장 parquet 을 읽어 **29개 equity 표**(팩트·차원 25 + 선언표 3 —
 `declaration_table=True` 는 `universe_policy`·`dataset_profile`·`factor_readiness`)를 짓고,
-`equity.duckdb` 카탈로그(매크로 11)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
+`equity.duckdb` 카탈로그(매크로 12)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
 백테스트 파이프라인에 point-in-time 관측을 공급한다.
 
 - 코드: `database/src/equity/`
@@ -186,7 +186,7 @@ ssh kael-server "cd ~/quant-ledger && bash scripts/equity_gate_all.sh"
 표별 게이트 `metrics` 를 통째로 뽑아 baseline 근거로 쓰려면
 `database/scripts/equity_gate_metrics.py`(서버에서 `data/equity` 를 읽어 JSON 한 덩이).
 
-### 3-4. 카탈로그(뷰 매크로 11) · 소비자 계약(EG-C 6항)
+### 3-4. 카탈로그(뷰 매크로 12) · 소비자 계약(EG-C 6항)
 
 ```bash
 export QL_HOME=$HOME/quant-ledger PYTHONPATH=$HOME/quant-ledger/src
@@ -376,7 +376,7 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 
 ## 6. `RULES_VERSION` 상향 규칙
 
-`database/src/equity/model.py` 의 `RULES_VERSION`(2026-10-20 현재 e1.21.0)은 `BuildRecord.rules_version` 에 실린다.
+`database/src/equity/model.py` 의 `RULES_VERSION`(2026-10-24 갈래 병합 현재 e1.31.0 — 브랜치 e1.17~e1.30 · main e1.17~e1.21 두 계보의 합)은 `BuildRecord.rules_version` 에 실린다.
 
 - **산출을 바꾸는 규칙 변경이면 반드시 올린다.** `sql/*.sql`·`rules_*.py` 의 산출식·
   선언 컬럼·`field_profiles`·게이트 술어가 대상이다.
@@ -462,8 +462,8 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 
 ## 8-2. 서버 반영 이력 — 2026-09-07 (e1.6.0 → e1.13.0)
 
-> **현행 안내(2026-09-28)**: 8-2~8-5 의 서버 반영 이력은 2026-09-09(e1.14.0, P0 정렬)에서 멈췄다. 그 뒤
-> 판본 e1.15.0~e1.21.0 의 변경 내용은 `database/src/equity/model.py` 의 `RULES_VERSION` 위 판본별 주석에,
+> **현행 안내(2026-10-24, 갈래 병합)**: 8-2~8-5 의 서버 반영 이력은 2026-09-09(e1.14.0, P0 정렬)에서 멈췄다. 그 뒤
+> 판본 e1.15.0~e1.31.0(브랜치·main 두 계보)의 변경 내용은 `database/src/equity/model.py` 의 `RULES_VERSION` 위 판본별 주석에,
 > 운영 상태는 `database/README.md` 상태 표에 있다.
 
 이 날 서버 `data/equity/` 가 크게 움직였다. 배포 전 코드 백업
@@ -669,7 +669,7 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 | 산출 SQL | `database/src/equity/sql/<table>.sql` |
 | 프레임(빌드·게이트·입력 고정·baseline·CLI) | `build.py`·`gates.py`·`inputs.py`·`baseline.py`·`__main__.py` |
 | 전방 조정가 표 | `rules_s23.py` · `sql/price_adj_daily.sql` — 소비 규약은 아래 「조정가 읽는 법」 |
-| 뷰 매크로 11 | `views.py` (`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_adj_price_fwd`·`v_adj_volume_fwd`·`v_firm_mktcap`·`v_consensus`·`v_fin_latest`·`v_credit_balance`·`v_unfolded_event`·`v_adj_close`) |
+| 뷰 매크로 12 | `views.py` (`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_adj_price_fwd`·`v_adj_volume_fwd`·`v_firm_mktcap`·`v_consensus`·`v_fin_latest`·`v_credit_balance`·`v_unfolded_event`·`v_adj_close`·`v_sector`) |
 | 카탈로그 publish + EG11·EG5c | `catalog.py` |
 | 소비자 계약 EG-C | `contract.py` |
 | 골든 픽스처 | `database/src/equity/fixtures/<table>.json` |
@@ -700,13 +700,27 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 EG-C ①(bar = stage 원주가)과 `test_equity_s07_contract.py::test_contract_meta_와_워크벤치_facade_직접_호출`
 이 지킨다(#372 전에는 커널 어댑터 파일의 문자열 검사였다).
 
-**`n_unadjusted_events` 를 반드시 보라** — 같은 구간에서 `factor_ok=false` 이고
-`apply_date ≤ d` 인 사건 수다. **0 이 아니면 그 구간의 조정 시계열은 불완전하다**: 기업행위가
-실재하는데 계수를 못 냈다는 뜻이고(사유는 `adj_factor.factor_source` — `no_price_match` ·
-`ratio_null` · `capred_paid` · `unknown_price_only` 등), 그 뒤 구간의 수익률에는 조정되지 않은
-점프가 남아 있다. equity 는 값을 만들어 채우지 않는다. 소비자는 이 열로 종목·구간을 거른다
-(서버 실측: 행의 27.4% · 1,440 종목이 걸린다 — 대부분 `unknown_price_only`(유상증자 권리락·
-주식배당락 등 MVP 밖 사건)라 "조정이 틀렸다" 가 아니라 "이 축은 MVP 가 안 덮는다" 는 뜻이다).
+**`n_unadjusted_events` 는 보유 수량 축이다** — 같은 구간에서 `factor_ok=false` 이고
+`apply_date ≤ d` 인 사건 수다. **0 이 아니면 그 구간의 계수(보유 수량) 축이 불완전하다**: 기업행위가
+실재하는데 시총 불변 계수를 못 냈다는 뜻이다(사유는 `adj_factor.factor_source` — `no_price_match` ·
+`ratio_null` · `capred_paid` · `unknown_price_only` 등). equity 는 값을 만들어 채우지 않는다.
+e1.26.0 부터 이 열은 **조정가(가격 축)의 거름 축이 아니다** — ⑤ 로 가격 축에서 해소된 사건도 계속
+센다. 조정가 소비자는 아래 ⑤ 문단의 `n_price_unresolved_events` 로 거른다(⑤ 전 서버 실측: 이 열에
+행의 27.4% · 1,440 종목이 걸렸다 — 대부분 `unknown_price_only`(유상증자 권리락·주식배당락 등 MVP 밖
+사건)이고, 그 가격 점프는 이제 ⑤ 계수 행이 고친다).
+
+**⑤ 가격 전용 계수(e1.26.0)** — 미해결 사건 중 그날 KRX 기준가 근거가 있는 (종목, 날짜)는
+`adj_factor.price_only_factor`(그날 기준가 ÷ 직전 행 종가)를 **가격 축에만** 접는다: 조정 OHLC =
+원주가 × `cum_share_factor` ÷ `cum_price_only_factor`. 그 날의 조정 수익률은 종가 ÷ 기준가 − 1 이
+된다(키움 수정주가와 같은 방식). 거래량·`cum_price_factor`·`cum_share_factor`·`n_factors_applied`·
+`n_unadjusted_events` 는 그대로이고, 백테스트 보유 수량 경로(`factor_ok` 행만)도 그대로다 —
+⑤ 는 인적분할·권리락의 수량을 고치지 않는다(H-04 는 남음). **조정가를 쓰는 소비자의 거름 축은
+`n_price_unresolved_events`**(같은 구간 `price_resolution='unresolved'` 사건 수)다 —
+`n_unadjusted_events` 는 뜻을 바꾸지 않아(보유 수량 축 미해결) ⑤ 로 해소된 사건도 계속 센다.
+`adj_factor.price_resolution` 어휘: `factor`(ok) · `price_only`(계수 행) · `price_only_dup`(같은 단위
+다른 행) · `factor_near`(C-05 원안 '정상 사건의 중복본': 형제가 ok 인 억제 중복본 · 창 안에 ok
+계수 적용일이 있는 행((c) 후보 없음) · ok 계수가 접히는 날의 행 — 뒤 둘은 ② 사유 행·유상감자 제외) ·
+`price_only_near`(근처 ⑤ 단위, (c) 후보 없음) · `unresolved`.
 
 **`cum_price_factor` × `cum_share_factor` = 1** 이고(시총 불변), 구간 첫 행에서는 둘 다 정확히
 1 이다. 재상장 종목(036220·101970)은 구간마다 누적이 초기화된다 — 폐지 전 구간의 계수는 새 구간에

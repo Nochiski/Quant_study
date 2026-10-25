@@ -1,0 +1,67 @@
+[
+ {
+  "id": "FX-26-003a",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "seq": "16",
+   "slot": "5"
+  },
+  "column": "value",
+  "expect": "18.267500",
+  "source": "stage:stg_fin_wise(005930, 2026-09-02) — 서버 판과 stage 절단본이 같은 원문(10-22 대조) cF4002 accode=382100 val_5",
+  "note": "PER 2025/12 실적(배)"
+ },
+ {
+  "id": "FX-26-003b",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "seq": "16",
+   "slot": "5"
+  },
+  "column": "period",
+  "expect": "202512",
+  "source": "period_label_5 '2025/12(IFRS연결)'",
+  "note": "결산기"
+ },
+ {
+  "id": "FX-26-003c",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "seq": "16",
+   "slot": "6"
+  },
+  "column": "is_estimate",
+  "expect": "true",
+  "source": "period_label_6 '2026/12(E)(IFRS연결)'",
+  "note": "추정 열"
+ },
+ {
+  "id": "FX-26-003d",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "seq": "19",
+   "slot": "5"
+  },
+  "column": "value",
+  "expect": "1.873520",
+  "source": "accode=382500 val_5",
+  "note": "PBR 2025/12"
+ },
+ {
+  "id": "FX-26-003e",
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "seq": "34",
+   "slot": "5"
+  },
+  "column": "value",
+  "expect": "1.391160",
+  "source": "accode=431800 val_5",
+  "note": "현금배당수익률 2025/12(%)"
+ }
+]

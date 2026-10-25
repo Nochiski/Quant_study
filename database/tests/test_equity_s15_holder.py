@@ -40,10 +40,11 @@ CHAIN = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_SPAN
 
 N_OUT = {"holder_daily": 4329, "ownership_snapshot": 826, "audit_opinion": 226}
 GATE_ORDER = {
-    "holder_daily": ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_holder_daily", "EG4", "EG5a"],
-    "ownership_snapshot": ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_ownership_snapshot",
+    "holder_daily": ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_holder_daily", "EG4", "EG5a"],
+    "ownership_snapshot": ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_ownership_snapshot",
                            "EG4", "EG5a"],
-    "audit_opinion": ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_audit_opinion", "EG4", "EG5a"],
+    "audit_opinion": ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_audit_opinion", "EG4",
+                      "EG5a"],
 }
 OBSERVED = date(2026, 9, 1)          # 손 트리의 재수집 관측일(판본 선택 축)
 

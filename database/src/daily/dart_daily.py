@@ -2,9 +2,12 @@
 
 `daily_dart.sh` 를 대체한다. 그 스크립트의 결함 4건이 여기서 닫힌다 —
 
-  · B01 열린 분기 창은 구조적으로 영구 `mismatch` 라 `ingest_log.status` 로 "오늘이 끝났는가" 를
-    판정할 수 없다 → 완료 판정은 원장 행(`dart_disclosure.rcept_dt=D`)과 **오늘 나간 콜**
-    (`dart_call_log`)로만 한다. 이 파일 어디에서도 `ingest_log.status` 를 읽지 않는다.
+  · B01 열린 분기 창(스윕 유닛)은 구조적으로 영구 `mismatch` 라 그 `ingest_log.status` 로 "오늘이
+    끝났는가" 를 판정할 수 없다 → 완료 판정은 원장 행(`dart_disclosure.rcept_dt=D`)과 **상세 유닛을
+    받았는가**로 한다. '받았다' = 그 유닛의 `ingest_log` 최종 행이 ok 또는 no_data(013 은 DART 의
+    확정 답)이고 `ts` 가 계기 공시 최초 관측 이후(`received()`, N-24 3.1·3.2). 어제 이미 ok 였던
+    유닛은 이 `ts` 조건이 막는다. 콜 기록(`dart_call_log`)은 실패·한도 콜도 남아 근거가 못 된다
+    (배포 묶음 3 A-05).
   · B02 정기보고서 부속 6종이 `11011`(사업) 만 수집됐다 → 당일 공시의 기간 라벨에서 읽은
     **그 (bsns_year, reprt_code)** 로 부른다.
   · B03 stage 2 가 올해 사업연도를 안 쐈다 → 연도를 크론이 아니라 공시가 정한다.
@@ -14,13 +17,19 @@
 "당일 `list.json` 공시에 해당 유형이 있는 corp 만 그날 재호출 — 이벤트 없으면 0콜".
 백필의 종결 판정은 `ok` 를 축 무관하게 **영구 종결**로 보므로(`backfill_dart.py:674-681`),
 재호출하려면 그 유닛의 `ingest_log` 행을 먼저 지워야 한다(`unlock`). `store()` 가 멱등이라
-재호출 자체는 안전하고, 백필 코드는 한 줄도 고치지 않는다(플랜 §4 "백필 코드는 동결").
+재호출 자체는 안전하고, 백필 코드는 T15 예외 재시도 1건(N-23 ③) 말고는 고치지 않는다(플랜 §4
+"백필 코드는 동결").
+같은 D 를 다시 돌 때(18:05 저녁 → 06:00 아침) 지우고 부르는 것은 **받지 않은 유닛**과 재무 반영
+지연 재확인, 재무 자료없음(013) 재확인뿐이다(`recall_targets()`, 배포 묶음 3 A-04) — 저녁
+실패분은 받지 않은 유닛이라 아침에 그대로 다시 불린다.
 
 그 "당일" 의 정의는 접수일이 아니라 **처음 본 날**이다(플랜 v2 §3 Task A.2 Step 5). DART 목록에는
 접수일이 지난 공시가 뒤늦게 나타난다 — 09-10 스윕에서 08-25 접수 8건·09-03 2건·09-07 1건이
 처음 등장했다(검수 09-10 D). `rcept_dt = D` 로만 고르면 그런 공시는 접수일이 D 인 적이 없어
-상세 축을 **영영** 못 받는다. 그래서 대상은 (a) `rcept_dt = D` ∪ (b) 이번 런의 스윕이 시작된
-뒤에 처음 관측된 `rcept_dt < D` 공시다. 최초 관측 시각은 원장의 `collected_at` 인데,
+상세 축을 **영영** 못 받는다. 그래서 대상은 (a) `rcept_dt = D` ∪ (b) 그 D 의 첫 dart 런(보통
+18:05 저녁)이 시작된 뒤에 처음 관측된 `rcept_dt < D` 공시다 — 이번 런 스윕 시작으로 잡으면 저녁이
+처음 본 늦은 공시가 아침 plan 에서 빠져, 저녁 실패가 아침 OK 에 덮인다. 최초 관측 시각은 원장의
+`collected_at` 인데,
 `backfill_dart.store()` 가 `INSERT OR IGNORE` 라 처음 본 행의 값이 유지된다
 (`backfill_dart.py:480-483`). 다만 재스윕은 같은 공시를 다른 `req_page_no` 로 한 번 더 적재하고
 (요청 파라미터가 행 해시에 들어간다 — `sweep_disclosure.py:158-165`) 그 행의 `collected_at` 은
@@ -70,9 +79,6 @@ DS005_ENDPOINTS: tuple[str, ...] = (
     "tsstkAqDecsn", "piicDecsn", "cvbdIsDecsn", "ctrcvsBgrq", "dfOcr", "dsRsOcr", "bnkMngtPcbg",
     "fricDecsn", "pifricDecsn", "crDecsn", "cmpMgDecsn", "cmpDvDecsn", "cmpDvmgDecsn",
     "stkExtrDecsn", "tsstkDpDecsn")
-# `dart_call_log.endpoint` 는 SPEC 의 `ep`(파일명)이다. 완료 판정이 이 철자로 조인한다.
-FIN_CALL_EP = "fnlttSinglAcntAll.json"
-DS005_CALL_EPS: tuple[str, ...] = tuple(f"{n}.json" for n in DS005_ENDPOINTS)
 # `--only` 의 나열 순서 = 백필의 순회 순서다. 알파벳순 대신 선언순으로 둔다 —
 # `fin` 이 먼저 끝나야 나머지를 기다리지 않고 재무를 쓸 수 있다(`backfill_dart.py:120-127`).
 _EP_ORDER: dict[str, int] = {ep: i for i, ep in enumerate(
@@ -91,6 +97,10 @@ _ONE_PREFIX_RE = re.compile(r"\[([^\]]*)\]")
 _LABEL_RE = re.compile(r"\((\d{4})\.(\d{2})\)")
 # 12월 결산 기준. 분기보고서의 Q1/Q3 를 가르는 데만 쓴다 — 사업·반기는 이름이 먼저 정한다.
 _QUARTER_REPRT: dict[str, str] = {"03": "11013", "09": "11014"}
+# 비12월 결산: 라벨 월 − 결산월(acc_mt) 이 3 이면 1분기(11013), 9 면 3분기(11014). 6 은 반기(11012)인데 이름이
+# 분기보고서면 원문 오기라 그대로 반기로 본다. bsns_year 는 12월 결산과 같이 **라벨 연도**(기간 종료 연도) —
+# 실측 테라뷰(acc_mt 04): 반기 (2025.10) → 2025/11012 ok, 사업 (2026.04) → 2026/11011 ok(DART 는 기간 종료 연도).
+_OFFSET_REPRT: dict[int, str] = {3: "11013", 9: "11014", 6: "11012"}
 
 # ── 예산 (findings B §3-1·§7-5) ────────────────────────────────────────────────────
 OUR_QUOTA_LIMIT = 40_000       # 우리 키(k2+k3) 합계 상한. 넘으면 중단한다
@@ -147,6 +157,18 @@ class Unit:
 
 
 @dataclass(frozen=True)
+class Trigger:
+    """유닛을 만든 계기 공시들의 요약 — '받았다' 판정과 재무 재확인의 기준(N-24 3.1, N-23 ②).
+
+    한 유닛을 여러 공시가 만들 수 있다(원본과 정정본, 같은 회사의 주요사항 여러 건). 둘 다
+    최댓값이다 — 가장 늦게 본 공시를 본 뒤의 결과여야 그 공시까지 반영됐다고 볼 수 있다.
+    """
+
+    first_seen: str      # 계기 공시별 최초 관측 시각(공시 단위 MIN(collected_at))의 최댓값
+    rcept_no: str        # 계기 공시 접수번호의 최댓값
+
+
+@dataclass(frozen=True)
 class DailyPlan:
     """D일 공시가 만들어 낸 재호출 계획. 콜은 아직 하나도 나가지 않았다.
 
@@ -165,13 +187,19 @@ class DailyPlan:
     holder_corps: tuple[str, ...] = ()
     unresolved: tuple[tuple[str, str], ...] = ()  # (rcept_no, report_nm) — 라벨을 못 읽은 정기보고서
     bad_corp_codes: tuple[tuple[str, str], ...] = ()        # (rcept_no, corp_code)
-    n_late: int = 0                               # 이번 스윕에서 처음 본 rcept_dt < D 공시 수
+    n_late: int = 0                               # 그 D 의 첫 런 이후 처음 본 rcept_dt < D 공시 수
     late_rcept_nos: tuple[str, ...] = ()          # 그 표본(최대 LATE_SAMPLE_MAX 건, 로그용)
+    # 유닛 → 계기 공시 요약. 키는 `units` 와 같다
+    triggers: dict[Unit, Trigger] = field(default_factory=dict)
 
-    @property
-    def n_calls_est(self) -> int:
-        """`fin` 은 CFS 실패 시 OFS 로 한 번 더 간다(`backfill_dart.py:503` fallback)."""
-        return len(self.units) + sum(1 for u in self.units if u.endpoint == "fin")
+
+def calls_est(units: Sequence[Unit]) -> int:
+    """콜 추정. `fin` 은 CFS 실패 시 OFS 로 한 번 더 간다(`backfill_dart.py:503` fallback).
+
+    `run()` 은 plan 전 유닛이 아니라 이번 런에 실제로 부를 유닛으로 센다 — 두 번째 런은 거의 0 이다.
+    사전 예산 점검(`budget()`)은 이 추정을 쓰지 않고 그날 이미 나간 콜만 센다.
+    """
+    return len(units) + sum(1 for u in units if u.endpoint == "fin")
 
 
 @dataclass(frozen=True)
@@ -202,7 +230,7 @@ class BudgetStatus:
 
 @dataclass(frozen=True)
 class Gate:
-    """완료 판정 1항. `ingest_log.status` 는 쓰지 않는다(DEFECT-B01)."""
+    """완료 판정 1항. 상세 유닛의 수신 여부는 `received()` 한 곳에서 판정한다(N-24 3.1)."""
 
     name: str
     ok: bool
@@ -232,6 +260,13 @@ class DartDailyResult:
     n_unlocked: int = 0
     n_calls: int = 0
     detail: str = ""
+    n_calls_est: int = 0                    # 이번 런에 부를 유닛 기준 콜 추정
+    n_missing: int = 0                      # 받지 않아 다시 부른 유닛 수(T13)
+    n_fin_recheck: int = 0                  # 재무 반영 지연 재확인으로 다시 부른 유닛 수(N-23 ②)
+    n_nodata_recheck: int = 0               # 재무 자료없음(013) 재확인으로 다시 부른 수(3.2 수정)
+    fin_lagged: tuple[Unit, ...] = ()       # 재확인 뒤에도 계기보다 옛 판인 재무 유닛(N-24 3.10)
+    late_since: str | None = None           # (b) 창 시작(UTC) — None 이면 (b) 는 빈 집합
+    late_source: str = ""                   # 그 출처: 첫 런 시작 / 이번 런 시작 / 스윕 시작 / 없음
 
     @property
     def ok(self) -> bool:
@@ -297,10 +332,53 @@ def _classify_periodic(nm_clean: str, prefixes: tuple[str, ...], is_corr: bool) 
     return Classified(Kind.PERIODIC, is_corr, nm_clean, prefixes, year, reprt)
 
 
+def resolve_with_acc_mt(c: Classified, acc_mt: str | None) -> Classified | None:
+    """`classify()` 가 보류한 비12월 결산 분기보고서를 법인의 결산월로 푼다. 못 풀면 None.
+
+    09-23 실측: 테라뷰(acc_mt 04) '분기보고서 (2026.07)' 가 `unresolved` 로 남아 DART 게이트가 저녁·아침
+    두 번 실패했고, 재실행마다 같은 자리에서 다시 실패한다(D 가 같으니). 결산월이 있으면 판정할 수 있다."""
+    # 결산월을 아는 법인은 월 규칙(03→1분기, 09→3분기)을 **덮어쓴다** — 6월 결산 29사의 1분기 라벨은 09, 3분기는
+    # 03 이라 12월 기준 월 규칙이 정반대로 코드를 매긴다(09-24 검수). 이미 판정된 반기·사업보고서는 건드리지 않는다.
+    if c.kind is not Kind.PERIODIC or c.bsns_year is None or c.reprt_code in ("11011", "11012"):
+        return None
+    if not acc_mt or len(acc_mt) != 2 or not acc_mt.isdigit():
+        return None
+    m = _LABEL_RE.search(c.nm_clean)
+    if m is None:
+        return None
+    offset = (int(m.group(2)) - int(acc_mt)) % 12
+    reprt = _OFFSET_REPRT.get(offset)
+    if reprt is None:
+        return None
+    return Classified(c.kind, c.is_correction, c.nm_clean, c.prefixes, c.bsns_year, reprt,
+                      detail=f"resolved via dart_company.acc_mt={acc_mt}: label month {m.group(2)} "
+                             f"offset {offset} → {reprt}")
+
+
+def _acc_mt_by_corp(con: sqlite3.Connection) -> dict[str, str]:
+    """corp_code → 결산월. `dart_company` 가 없는 절단본(테스트)에서는 빈 dict."""
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='dart_company'").fetchone() is None:
+        return {}
+    return {str(r[0]): str(r[1] or "") for r in con.execute("SELECT corp_code, acc_mt FROM dart_company")}
+
+
 # ── 2. 계획 ──────────────────────────────────────────────────────────────────────
+def _first_seen(con: sqlite3.Connection, dates: Sequence[str]) -> dict[str, str]:
+    """접수일이 `dates` 인 공시별 최초 관측 시각 = 공시 단위 `MIN(collected_at)`.
+
+    행이 아니라 공시 단위인 이유와 접수일로 좁혀도 되는 이유는 `late_rows()` 와 모듈 docstring.
+    `plan()` 의 (a)·(b) 와 '받았다' 판정의 기준(`Trigger.first_seen`)이 모두 이 정의 하나를 쓴다.
+    """
+    marks = ",".join("?" * len(dates))             # IN 절은 자리표시자만 조립한다
+    return {str(r[0]): str(r[1] or "") for r in con.execute(
+        f"SELECT rcept_no, MIN(collected_at) FROM dart_disclosure "
+        f"WHERE rcept_dt IN ({marks}) GROUP BY rcept_no", list(dates))}
+
+
 def late_rows(con: sqlite3.Connection, date_yyyymmdd: str,
-              since_ts: str) -> list[tuple[str, str, str]]:
-    """접수일이 D 이전인데 `since_ts` 이후에 **처음 관측된** 상장사 공시 행.
+              since_ts: str) -> list[tuple[str, str, str, str]]:
+    """접수일이 D 이전인데 `since_ts` 이후에 **처음 관측된** 상장사 공시 행
+    (rcept_no, corp_code, report_nm, 최초 관측 시각).
 
     두 걸음으로 나눈 이유는 비용이다. 원장은 실측 3.4M 행이고 `collected_at`·`rcept_dt` 에
     인덱스가 없다. 1단계는 후보(보통 한 자리수)를 고르고, 2단계는 그 후보의 접수일에만
@@ -315,13 +393,9 @@ def late_rows(con: sqlite3.Connection, date_yyyymmdd: str,
         (since_ts, date_yyyymmdd))]
     if not cand:
         return []
-    dates = sorted({d for *_x, d in cand})
-    marks = ",".join("?" * len(dates))             # IN 절은 자리표시자만 조립한다
-    first_seen = {str(r[0]): str(r[1] or "") for r in con.execute(
-        f"SELECT rcept_no, MIN(collected_at) FROM dart_disclosure "
-        f"WHERE rcept_dt IN ({marks}) GROUP BY rcept_no", dates)}
+    first_seen = _first_seen(con, sorted({d for *_x, d in cand}))
     # `collected_at` 이 비어 있으면 "" < since_ts 라 옛 공시로 본다 — 안전한 쪽(재호출 안 함)
-    return [(rno, corp, nm) for rno, corp, nm, _dt in cand
+    return [(rno, corp, nm, first_seen.get(rno, "")) for rno, corp, nm, _dt in cand
             if first_seen.get(rno, "") >= since_ts]
 
 
@@ -329,10 +403,13 @@ def plan(con: sqlite3.Connection, date_yyyymmdd: str, *,
          since_ts: str | None = None) -> DailyPlan:
     """상장사 공시를 분류해 재호출 유닛을 만든다. 콜은 나가지 않는다(CQS — 조회 전용).
 
-    대상은 (a) 접수일이 D 인 공시 ∪ (b) `since_ts`(이번 런의 스윕 시작 시각) 이후에 처음
-    관측된 접수일 D 이전 공시다. `since_ts=None`(= `--skip-sweep`)이면 (b) 는 빈 집합이라
-    종전과 같다. 분류·유닛 생성 규칙은 (a)·(b) 에 똑같이 걸린다 — 늦게 왔다고 다르게
+    대상은 (a) 접수일이 D 인 공시 ∪ (b) `since_ts`(그 D 의 첫 dart 런 시작 — `run()` 이 정한다)
+    이후에 처음 관측된 접수일 D 이전 공시다. `since_ts=None`(앞선 런 없는 `--skip-sweep`)이면 (b) 는
+    빈 집합이다. 분류·유닛 생성 규칙은 (a)·(b) 에 똑같이 걸린다 — 늦게 왔다고 다르게
     다룰 이유가 없고, 다르게 다루면 어느 축이 빠졌는지 나중에 알 수 없다.
+
+    유닛마다 계기 공시의 최초 관측·접수번호 최댓값(`Trigger`)을 남긴다 — '받았다' 판정
+    (`received()`)과 재무 재확인(`recall_targets()`)의 기준이다.
     """
     rows = con.execute(
         "SELECT DISTINCT rcept_no, corp_code, report_nm FROM dart_disclosure "
@@ -340,22 +417,33 @@ def plan(con: sqlite3.Connection, date_yyyymmdd: str, *,
         (date_yyyymmdd,)).fetchall()
     n_filings = len({str(r[0]) for r in rows})
     n_rows_on_d = len(rows)                        # 게이트가 쓰는 값 — (a) 기준으로 굳힌다
+    seen_on_d = _first_seen(con, [date_yyyymmdd]) if rows else {}
     late = [] if since_ts is None else late_rows(con, date_yyyymmdd, since_ts)
     late_nos = tuple(sorted({r[0] for r in late}))
     # (a) 는 rcept_dt = D, (b) 는 rcept_dt < D 라 두 집합은 서로소다 — 합쳐도 중복이 없다
-    rows = [*rows, *late]
+    filings = [*((r[0], r[1], r[2], seen_on_d[str(r[0])]) for r in rows), *late]
 
-    units: set[Unit] = set()
+    triggers: dict[Unit, Trigger] = {}
     periodic: set[tuple[str, str, str]] = set()
     major: set[str] = set()
     holder: set[str] = set()
     unresolved: list[tuple[str, str]] = []
     bad: list[tuple[str, str]] = []
     counts: dict[str, int] = {k.value: 0 for k in Kind}
+    acc_mt_by_corp: dict[str, str] | None = None          # 비12월 결산 분기 라벨이 나올 때만 읽는다
 
-    for rcept_no, corp_code, report_nm in rows:
+    for rcept_no, corp_code, report_nm, seen in filings:
         rno, corp, nm = str(rcept_no), str(corp_code or ""), str(report_nm or "")
         c = classify(nm)
+        if c.kind is Kind.PERIODIC and c.bsns_year is not None and c.reprt_code not in ("11011", "11012"):
+            # 분기보고서는 결산월이 있으면 그것으로 판정한다(보류분은 풀고, 비12월 결산은 월 규칙을 덮어쓴다)
+            if acc_mt_by_corp is None:
+                acc_mt_by_corp = _acc_mt_by_corp(con)
+            acc_mt = acc_mt_by_corp.get(corp)
+            if acc_mt and acc_mt != "12":
+                fixed = resolve_with_acc_mt(c, acc_mt)
+                if fixed is not None:
+                    c = fixed
         counts[c.kind.value] += 1
         if c.kind in (Kind.OTHER, Kind.CORRECTION):
             continue
@@ -368,20 +456,168 @@ def plan(con: sqlite3.Connection, date_yyyymmdd: str, *,
                 unresolved.append((rno, nm))
                 continue
             periodic.add((corp, c.bsns_year, c.reprt_code))
-            units.update(Unit(ep, corp, c.bsns_year, c.reprt_code) for ep in PERIODIC_ENDPOINTS)
+            made = [Unit(ep, corp, c.bsns_year, c.reprt_code) for ep in PERIODIC_ENDPOINTS]
         elif c.kind is Kind.MAJOR:
             major.add(corp)
-            units.update(Unit(ep, corp, "", "") for ep in DS005_ENDPOINTS)
+            made = [Unit(ep, corp, "", "") for ep in DS005_ENDPOINTS]
         else:
             holder.add(corp)
-            units.update(Unit(ep, corp, "", "") for ep in HOLDER_ENDPOINTS)
+            made = [Unit(ep, corp, "", "") for ep in HOLDER_ENDPOINTS]
+        for u in made:
+            t = triggers.get(u)
+            triggers[u] = (Trigger(seen, rno) if t is None
+                           else Trigger(max(t.first_seen, seen), max(t.rcept_no, rno)))
 
     return DailyPlan(date=date_yyyymmdd, n_rows=n_rows_on_d, n_filings=n_filings,
-                     units=tuple(sorted(units)), kind_counts=counts,
+                     units=tuple(sorted(triggers)), kind_counts=counts,
                      periodic_units=tuple(sorted(periodic)), major_corps=tuple(sorted(major)),
                      holder_corps=tuple(sorted(holder)), unresolved=tuple(unresolved),
                      bad_corp_codes=tuple(bad), n_late=len(late_nos),
-                     late_rcept_nos=late_nos[:LATE_SAMPLE_MAX])
+                     late_rcept_nos=late_nos[:LATE_SAMPLE_MAX], triggers=triggers)
+
+
+# ── 2-1. 수신 판정 · 다시 부를 유닛 (배포 묶음 3 T12·T13) ────────────────────────────
+@dataclass(frozen=True)
+class Received:
+    """`received()` 결과 — `ingest_log` 에서 읽은 사실만 낸다. 다시 부를 범위는
+    `recall_targets()` 가 정한다."""
+
+    ok: frozenset[Unit]              # 받음 — 완료 판정은 이것만 본다
+    missing: dict[Unit, str]         # 받지 않음 → 사유
+    nodata: frozenset[Unit]          # 받음 가운데 최종 행이 no_data 인 유닛 — 엔드포인트 무관
+
+
+def received(con: sqlite3.Connection, daily_plan: DailyPlan) -> Received:
+    """plan 유닛마다 '받았다'를 판정한다(N-24 3.1~3.3, 3.2 는 10-07 수정). 읽기만 한다.
+
+    완료 판정(`check()`)과 다시 부를 유닛(`recall_targets()`)이 같이 쓰는 판정 하나다(P4).
+    받았다 = 그 유닛의 `ingest_log`(`unlock` 과 같은 4튜플 키, `fs_div` 무시) 최종 행이
+      ① `ok` 또는 `no_data`(모든 축) — 013 은 DART 의 확정 답이다. `ok_empty` 는 설명되지 않는
+         빈 응답이라 받지 않은 것이다(P1).
+      ② `ts` ≥ 계기 공시 최초 관측(`Trigger.first_seen`) — 어제 이미 ok 였던 유닛이 오늘 공시
+         (정정본·새 DS005 사건)를 반영하지 않은 채 통과하지 못하게 한다(DEFECT-B01 의 우려).
+    받음 가운데 최종 행이 `no_data` 인 유닛은 엔드포인트와 무관하게 `nodata` 로도 낸다 — 사실만
+    낸다. 그중 무엇을 다시 부를지(재무만, N-24 3.2)는 `recall_targets()` 가 정한다.
+    최종 행 = `ts` 가 가장 늦은 행. `fin` 은 CFS·OFS 두 행이 남을 수 있어 같은 시각이면 받지 않은
+    쪽을 고른다(P1). 행이 없는 유닛(키 소진·키 오류 경로 `backfill_dart.py:723-737`)은 받지 않은
+    것이다.
+    """
+    ok: set[Unit] = set()
+    missing: dict[Unit, str] = {}
+    nodata: set[Unit] = set()
+    for u in daily_plan.units:
+        rows = [(str(st), str(ts)) for st, ts in con.execute(
+            "SELECT status, ts FROM ingest_log "
+            "WHERE name=? AND corp_code=? AND bsns_year=? AND reprt_code=?",
+            (u.endpoint, u.corp_code, u.bsns_year, u.reprt_code))]
+        if not rows:
+            missing[u] = "ingest_log 없음"
+            continue
+        last = max(ts for _st, ts in rows)
+        latest = {st for st, ts in rows if ts == last}
+        bad = sorted(latest - {"ok", "no_data"})
+        first_seen = daily_plan.triggers[u].first_seen
+        if bad:
+            missing[u] = f"status={bad[0]}"
+        elif last < first_seen:
+            missing[u] = f"ts {last} < 최초 관측 {first_seen}"
+        else:
+            ok.add(u)
+            if "no_data" in latest:
+                nodata.add(u)
+    return Received(frozenset(ok), missing, frozenset(nodata))
+
+
+def _has_table(con: sqlite3.Connection, name: str) -> bool:
+    return con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                       (name,)).fetchone() is not None
+
+
+def _fin_key(u: Unit) -> tuple[str, str, str]:
+    return (u.corp_code, u.bsns_year, u.reprt_code)
+
+
+def fin_rcept_max(con: sqlite3.Connection, keys: set[tuple[str, str, str]], *,
+                  after_rowid: int | None = None) -> dict[tuple[str, str, str], str]:
+    """재무 유닛 키 (corp, bsns_year, reprt_code) 별 저장된 재무 행의 rcept_no 최댓값.
+
+    `dart_fin_raw`(실측 약 1,540만 행)에는 row_hash 외 색인이 없어 유닛마다 물으면 유닛 수만큼
+    풀스캔이다. 그래서 한 번의 질의로 모은다 — 요청축 (연도, 보고서) 쌍으로만 거르고 회사는 여기서
+    고른다(자리표시자 수가 회사 수와 무관하다). 색인은 추가하지 않는다(배포 묶음 3 T13).
+    `after_rowid` 를 주면 그 rowid 뒤에 적재된 행만 본다 — rowid 표라 새 행은 기존 최댓값 뒤에
+    붙으므로 재호출 직후 확인은 풀스캔이 아니다.
+    """
+    if not keys or not _has_table(con, "dart_fin_raw"):
+        return {}
+    pairs = sorted({(y, r) for _c, y, r in keys})
+    where = " OR ".join("(req_bsns_year = ? AND req_reprt_code = ?)" for _ in pairs)
+    args: list[object] = [v for pair in pairs for v in pair]
+    if after_rowid is not None:
+        where = f"({where}) AND rowid > ?"
+        args.append(after_rowid)
+    out: dict[tuple[str, str, str], str] = {}
+    for c, y, r, m in con.execute(                 # WHERE 는 자리표시자만 조립한다
+            "SELECT req_corp_code, req_bsns_year, req_reprt_code, MAX(rcept_no) "
+            f"FROM dart_fin_raw WHERE {where} GROUP BY 1, 2, 3", args):
+        key = (str(c), str(y), str(r))
+        if key in keys:
+            out[key] = str(m or "")
+    return out
+
+
+def _fin_max_rowid(con: sqlite3.Connection) -> int:
+    """`dart_fin_raw` rowid 최댓값(표가 없으면 0) — 재호출 뒤 새로 적재된 행만 읽는 기준."""
+    if not _has_table(con, "dart_fin_raw"):
+        return 0
+    return int(con.execute("SELECT COALESCE(MAX(rowid), 0) FROM dart_fin_raw").fetchone()[0])
+
+
+@dataclass(frozen=True)
+class Recall:
+    """`recall_targets()` 의 결과 — 다시 부를 유닛과 사유. 세 사유는 서로 겹치지 않는다."""
+
+    received: Received               # 받지 않음(`missing`)은 그대로 다시 부른다
+    fin_lag: frozenset[Unit]         # 재무 재확인 — 저장된 재무 판이 계기 공시보다 옛것
+    fin_nodata: frozenset[Unit]      # 재무 자료없음 재확인 — 받음 중 no_data 인 재무(N-24 3.2)
+
+    @property
+    def units(self) -> list[Unit]:
+        return sorted({*self.received.missing, *self.fin_nodata, *self.fin_lag})
+
+
+def recall_targets(con: sqlite3.Connection, daily_plan: DailyPlan) -> Recall:
+    """다시 부를 유닛 = 받지 않음 + 재무 반영 지연 재확인 + 재무 자료없음 재확인. 읽기만 한다.
+
+    T13 · N-23 ② · N-24 3.2(10-07 수정)·3.10. 재호출 범위는 여기 한 곳에서 정한다 — 받지 않음은
+    `received()` 의 `missing` 그대로, 자료없음(013)은 `received()` 의 `nodata` 가운데 재무만 다시
+    부른다. 부속 6종의 연도 축 013 은 받음으로만 둔다: N-23 ② '재무만 아침에 재확인' 과 같은 범위
+    이고, 서버 실측 부속 013 비율(사업보고서 13%대)로는 마감일 아침 재호출이 1천 건 넘게 늘 수 있다.
+    재무 재확인 = 응답이 있었던(ok) `fin` 유닛 중 저장된 재무 행의 rcept_no 최댓값이 계기 공시
+    rcept_no 보다 작은 것. DART 재무 API 는 최신 판만 주므로(`backfill_dart.py:72-74`) 저녁 응답이
+    계기 공시를 아직 반영하지 못했으면 다음 런에 다시 부른다. no_data 인 재무 유닛은 이미 자료없음
+    재확인으로 부르므로 여기서 빼고, ok 인 재무 유닛이 없으면(그 D 의 첫 런) 원장을 훑지 않는다.
+    재확인으로 다시 부를 때 `unlock` 이 저녁의 받음 행을 먼저 지우므로, 그 호출이 실패하면 받음이
+    받지 않음으로 바뀌어 완료 판정이 실패한다 — P1 쪽이라 그대로 둔다.
+    """
+    rec = received(con, daily_plan)
+    fin_nodata = frozenset(u for u in rec.nodata if u.endpoint == "fin")
+    fins = [u for u in rec.ok - rec.nodata if u.endpoint == "fin"]
+    stored = fin_rcept_max(con, {_fin_key(u) for u in fins})
+    return Recall(rec, frozenset(u for u in fins
+                                 if stored.get(_fin_key(u), "") < daily_plan.triggers[u].rcept_no),
+                  fin_nodata)
+
+
+def fin_still_lagging(con: sqlite3.Connection, daily_plan: DailyPlan,
+                      recheck: frozenset[Unit], *, after_rowid: int) -> tuple[Unit, ...]:
+    """재확인으로 다시 부른 뒤에도 계기 공시보다 옛 판인 재무 유닛 — 판정엔 넣지 않는다(N-24 3.10).
+
+    재확인 대상은 저장된 판이 이미 계기보다 옛것이었으므로 `after_rowid` 뒤로 새로 적재된 행만 보면
+    된다 — 원장을 다시 훑지 않는다.
+    """
+    new = fin_rcept_max(con, {_fin_key(u) for u in recheck}, after_rowid=after_rowid)
+    return tuple(sorted(u for u in recheck
+                        if new.get(_fin_key(u), "") < daily_plan.triggers[u].rcept_no))
 
 
 # ── 3. 종결 해제 ─────────────────────────────────────────────────────────────────
@@ -425,64 +661,61 @@ def budget(con: sqlite3.Connection, *, since_ts: str,
 
 
 # ── 5. 완료 판정 (findings B §7-1 ① · §7-2 · §7-3) ────────────────────────────────
-def check(con: sqlite3.Connection, daily_plan: DailyPlan, *, since_ts: str,
+def check(con: sqlite3.Connection, daily_plan: DailyPlan, *,
           trading_day: bool = True) -> tuple[Gate, ...]:
-    """"하루가 끝났는가" 판정. 근거는 **원장 행과 오늘 나간 콜**뿐이다.
+    """"하루가 끝났는가" 판정. 근거는 **원장 행과 상세 유닛 수신**(`received()`)이다.
 
-    `ingest_log.status` 는 어느 항에서도 읽지 않는다 — 열린 분기 창은 정상 운영에서도
-    영구 `mismatch` 라(DEFECT-B01) 그걸 게이트에 걸면 매일 실패로 보인다. 정기보고서·
-    주요사항의 "따라갔는가" 도 `status='ok'` 가 아니라 `dart_call_log` 로 본다: `ok` 는
-    영구 종결이라 **어제 이미 ok 였던 유닛**이 오늘 재호출 없이도 통과해 버린다.
+    plan 의 전 유닛 — 정기 7종 · DS005 15종 · 지분 2종 — 이 받았는지 본다(N-24 3.4: DS005
+    '아무 1종' 통과는 폐지). 콜 기록(`dart_call_log`)은 근거로 쓰지 않는다 — 실패한 콜·한도(020)
+    콜도 기록은 남고, 같은 D 의 두 번째 런은 받은 유닛을 다시 부르지 않는다(T13). 어제 이미 ok
+    였던 유닛이 통과하는 것(DEFECT-B01 의 우려)은 `received()` 의 `ts ≥ 최초 관측` 이 막는다.
     """
+    rec = received(con, daily_plan)
+
+    def of(endpoints: tuple[str, ...]) -> list[Unit]:
+        return [u for u in daily_plan.units if u.endpoint in endpoints]
+
     return (_gate_filings(con, daily_plan, trading_day=trading_day),
-            _gate_periodic(con, daily_plan, since_ts=since_ts),
-            _gate_major(con, daily_plan, since_ts=since_ts),
+            _gate_received("periodic_followed", of(PERIODIC_ENDPOINTS), rec,
+                           unresolved=daily_plan.unresolved),
+            _gate_received("major_followed", of(DS005_ENDPOINTS), rec),
+            _gate_received("holder_followed", of(HOLDER_ENDPOINTS), rec),
             _gate_docs(con, daily_plan))
 
 
 def _gate_filings(con: sqlite3.Connection, daily_plan: DailyPlan, *, trading_day: bool) -> Gate:
+    # 상장사 건수는 고유 공시로 센다 — 재스윕이 같은 공시를 다른 req_page_no 로 한 번 더
+    # 적재한다(09-30 행 1,262 · 고유 725, N-24 3.5)
     row = con.execute(
         "SELECT COUNT(DISTINCT rcept_no), "
-        "COALESCE(SUM(CASE WHEN stock_code <> '' THEN 1 ELSE 0 END), 0) "
+        "COUNT(DISTINCT CASE WHEN stock_code <> '' THEN rcept_no END) "
         "FROM dart_disclosure WHERE rcept_dt = ?", (daily_plan.date,)).fetchone()
     n_filings, n_listed = (0, 0) if row is None else (int(row[0]), int(row[1]))
-    metrics = {"n_filings": n_filings, "n_listed_rows": n_listed}
+    metrics = {"n_filings": n_filings, "n_listed": n_listed}
     if not trading_day:
         return Gate("filings", True, f"non-trading day, n_filings={n_filings} (0 is normal)",
                     metrics)
     ok = n_filings >= GATE_MIN_FILINGS and n_listed >= GATE_MIN_LISTED
     return Gate("filings", ok,
                 f"n_filings={n_filings} (>= {GATE_MIN_FILINGS}) "
-                f"n_listed_rows={n_listed} (>= {GATE_MIN_LISTED}) date={daily_plan.date}",
+                f"n_listed={n_listed} (>= {GATE_MIN_LISTED}) date={daily_plan.date}",
                 metrics)
 
 
-def _gate_periodic(con: sqlite3.Connection, daily_plan: DailyPlan, *, since_ts: str) -> Gate:
-    called = {(str(c), str(y), str(r)) for c, y, r in con.execute(
-        "SELECT DISTINCT corp_code, bsns_year, reprt_code FROM dart_call_log "
-        "WHERE endpoint = ? AND ts > ?", (FIN_CALL_EP, since_ts))}
-    want = set(daily_plan.periodic_units)
-    missing = sorted(want - called)
-    metrics = {"n_new_periodic": len(want), "n_fin_recalled": len(want) - len(missing),
-               "n_unresolved": len(daily_plan.unresolved)}
-    ok = not missing and not daily_plan.unresolved
-    return Gate("periodic_followed", ok,
-                f"units={len(want)} recalled={len(want) - len(missing)} "
-                f"unresolved={len(daily_plan.unresolved)} "
-                f"missing={missing[:5]}{'…' if len(missing) > 5 else ''}", metrics)
-
-
-def _gate_major(con: sqlite3.Connection, daily_plan: DailyPlan, *, since_ts: str) -> Gate:
-    marks = ",".join("?" * len(DS005_CALL_EPS))
-    called = {str(r[0]) for r in con.execute(
-        f"SELECT DISTINCT corp_code FROM dart_call_log "        # IN 절은 자리표시자만 조립한다
-        f"WHERE endpoint IN ({marks}) AND ts > ?", (*DS005_CALL_EPS, since_ts))}
-    want = set(daily_plan.major_corps)
-    missing = sorted(want - called)
-    metrics = {"n_corp_with_major": len(want), "n_corp_recalled": len(want) - len(missing)}
-    return Gate("major_followed", not missing,
-                f"corps={len(want)} recalled={len(want) - len(missing)} "
-                f"missing={missing[:5]}{'…' if len(missing) > 5 else ''}", metrics)
+def _gate_received(name: str, units: Sequence[Unit], rec: Received, *,
+                   unresolved: Sequence[tuple[str, str]] | None = None) -> Gate:
+    """한 종류의 유닛이 전부 받았는가. 정기보고서는 라벨 미해석 공시(`unresolved`)가 있어도
+    실패다 — 유닛을 만들지 못한 공시라 '받았다' 를 물을 수조차 없다."""
+    missing = [(u, rec.missing[u]) for u in units if u in rec.missing]
+    n_ok = len(units) - len(missing)
+    metrics = {"n_units": len(units), "n_received": n_ok}
+    detail = f"units={len(units)} received={n_ok}"
+    if unresolved is not None:
+        metrics["n_unresolved"] = len(unresolved)
+        detail += f" unresolved={len(unresolved)}"
+    sample = [(u.endpoint, u.corp_code, u.bsns_year, u.reprt_code, why) for u, why in missing[:5]]
+    return Gate(name, not missing and not unresolved,
+                f"{detail} missing={sample}{'…' if len(missing) > 5 else ''}", metrics)
 
 
 _DOC_TARGET_SQL = """
@@ -594,6 +827,25 @@ def _write_corps(tmpdir: str, tag: str, corps: Sequence[str]) -> str:
 _REQUIRED_TABLES = ("dart_disclosure", "ingest_log", "dart_call_log", "doc_store")
 
 
+def _late_window(prior_ts: str | None, started_ts: str,
+                 sweep_started_ts: str | None) -> tuple[str | None, str]:
+    """(b) 창 시작과 출처 = 그 D 의 첫 dart 런 시작(앞선 런이 없으면 이번 런 시작)과 이번 스윕
+    시작 중 이른 쪽. 스윕이 없는 런은 앞선 런이 본 것만 따른다 — 앞선 런도 없으면 (None, "없음"),
+    (b) 는 빈 집합이다.
+    """
+    if sweep_started_ts is None:
+        return (prior_ts, "첫 런 시작") if prior_ts else (None, "없음")
+    if prior_ts:
+        first, source = prior_ts, "첫 런 시작"
+    else:
+        first, source = started_ts, "이번 런 시작"
+    return (first, source) if first <= sweep_started_ts else (sweep_started_ts, "스윕 시작")
+
+
+def _late_text(since: str | None, source: str) -> str:
+    return f"late 창 {since or '-'} ({source})"
+
+
 def _open_dart(db_path: str) -> sqlite3.Connection:
     con = sqlite3.connect(db_path, timeout=60)
     con.execute("PRAGMA busy_timeout=60000")
@@ -615,7 +867,11 @@ def default_home() -> str:
 def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
         sweep_from: str | None = None, max_docs: int = DEFAULT_MAX_DOCS,
         dry_run: bool = False, limit: int = 5, trading_day: bool = True) -> DartDailyResult:
-    """D일 증분 1회. 순서 = 스윕 → 계획 → 종결 해제 → 상세 재호출 → 문서 ZIP → 판정.
+    """D일 증분 1회. 순서 = 스윕 → 계획 → 다시 부를 유닛 → 종결 해제 → 상세 재호출 → 문서 → 판정.
+
+    다시 부를 유닛은 받지 않은 유닛 + 재무 반영 지연 재확인 + 재무 자료없음 재확인뿐이다
+    (`recall_targets()`) — 같은 D 의 두 번째 런(06:00)이 저녁에 받은 유닛을 전량 다시 부르지 않는다
+    (배포 묶음 3 A-04).
 
     `dry_run` 은 플랜 §4 공통 정의를 따른다 — 콜은 `limit` 만큼 실제로 하되 원장·`daily_run.db`
     에 쓰지 않는다. 여기서 "쓰지 않는다" 는 `unlock`(= `ingest_log` 삭제)과 runlog 기록을
@@ -635,6 +891,9 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
                                    DailyPlan(date_yyyymmdd, 0, 0, (), {}), pre,
                                    detail=f"{reason}: {pre.describe()}")
 
+        # 이번 런을 기록하기 전에 읽어야 앞선 런만 보인다. 형식은 runlog 가 맞춰 준다(Z 없는 UTC)
+        prior_ts = runlog.first_started_utc(os.path.join(home, "data", "raw", "daily_run.db"),
+                                            source="dart", date=date_yyyymmdd)
         run_id: int | None = None
         if not dry_run:
             run_id = runlog.start(os.path.join(home, "data", "raw", "daily_run.db"),
@@ -657,10 +916,15 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
                 sweep_started_ts = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S")
                 rc_sweep = _exec(cmd, cwd=home)
 
-            daily_plan = plan(con, date_yyyymmdd, since_ts=sweep_started_ts)
-            groups = group_units(daily_plan.units)
+            late_since, late_source = _late_window(prior_ts, started_ts, sweep_started_ts)
+            daily_plan = plan(con, date_yyyymmdd, since_ts=late_since)
+            # 저녁 실패분은 받지 않은 유닛이라 여기서 그대로 다시 불린다 — 유일한 재시도 경로다
+            recall = recall_targets(con, daily_plan)
+            targets = recall.units
+            groups = group_units(targets)
             if not dry_run:
-                n_unlocked = unlock(con, daily_plan.units)
+                n_unlocked = unlock(con, targets)
+            fin_rowid = _fin_max_rowid(con)      # 재확인 뒤 새로 적재된 재무 행만 읽는 기준
 
             with tempfile.TemporaryDirectory(prefix="dart_daily_") as tmpdir:
                 for i, (year, reprt, eps, corps) in enumerate(groups):
@@ -678,12 +942,21 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
             post = budget(con, since_ts=window_ts)
             n_calls = int(con.execute("SELECT COUNT(*) FROM dart_call_log WHERE ts > ?",
                                       (started_ts,)).fetchone()[0])
-            gates = check(con, daily_plan, since_ts=started_ts, trading_day=trading_day)
+            gates = check(con, daily_plan, trading_day=trading_day)
+            lagged = fin_still_lagging(con, daily_plan, recall.fin_lag, after_rowid=fin_rowid)
             bad_rc = [rc for rc in (rc_sweep, rc_docs, *rc_backfill) if rc not in (None, 0)]
             status, detail = _verdict(post, gates, bad_rc, dry_run=dry_run)
+            if lagged:                           # 판정엔 넣지 않고 런 로그에만 남긴다(N-24 3.10)
+                detail = f"{detail}; 재무 반영 지연 {len(lagged)}건"
+            detail = f"{detail}; {_late_text(late_since, late_source)}"
             result = DartDailyResult(date_yyyymmdd, status, daily_plan, post, gates,
                                      rc_sweep, tuple(rc_backfill), rc_docs, n_unlocked,
-                                     n_calls, detail)
+                                     n_calls, detail, n_calls_est=calls_est(targets),
+                                     n_missing=len(recall.received.missing),
+                                     n_fin_recheck=len(recall.fin_lag),
+                                     n_nodata_recheck=len(recall.fin_nodata),
+                                     fin_lagged=lagged, late_since=late_since,
+                                     late_source=late_source)
         except BaseException as e:
             if run_id is not None:
                 runlog.finish(os.path.join(home, "data", "raw", "daily_run.db"), run_id,
@@ -729,11 +1002,22 @@ def report(result: DartDailyResult) -> str:
     lines = [f"── DART 일일 증분 {result.date} · {result.status.value} (rc {result.exit_code})",
              (f"  공시 {p.n_filings:,}건(상장사 행 {p.n_rows:,}) · late={p.n_late:,} · "
               f"분류 {p.kind_counts}"),
-             (f"  유닛 {len(p.units):,} · 콜 추정 {p.n_calls_est:,} · "
+             # 창을 정하기 전에 끝난 런(예산 초과 조기 반환)은 이 줄을 남기지 않는다
+             *([f"  {_late_text(result.late_since, result.late_source)}"]
+               if result.late_source else []),
+             (f"  유닛 {len(p.units):,} · 콜 추정 {result.n_calls_est:,} · "
               f"해제 {result.n_unlocked:,} · 실제 콜 {result.n_calls:,}"),
+             (f"  다시 부른 유닛 "
+              f"{result.n_missing + result.n_fin_recheck + result.n_nodata_recheck:,} "
+              f"(받지 않음 {result.n_missing:,} · 재무 재확인 {result.n_fin_recheck:,} · "
+              f"재무 자료없음 재확인 {result.n_nodata_recheck:,})"),
              f"  예산 {result.budget.describe()}"]
+    if result.fin_lagged:
+        # 재확인 뒤에도 계기 공시보다 옛 판 — 판정은 통과시키고 기록만 한다(N-24 3.10)
+        lines.append(f"  ⚠ 재무 반영 지연 {len(result.fin_lagged)}건 (판정은 통과): "
+                     f"{[_fin_key(u) for u in result.fin_lagged[:5]]}")
     if p.n_late:
-        # 늦게 등장한 공시 = 접수일이 D 이전인데 이번 스윕에서 처음 본 것. 게이트는 아니다
+        # 늦게 등장한 공시 = 접수일이 D 이전인데 그 D 의 첫 런 이후 처음 본 것. 게이트는 아니다
         lines.append(f"  ↻ 늦게 등장 {p.n_late:,}건 (표본 {len(p.late_rcept_nos)}): "
                      f"{list(p.late_rcept_nos)}")
     if p.unresolved:
@@ -767,8 +1051,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         today_kst = (dt.datetime.now(dt.UTC) + dt.timedelta(hours=9)).date()
         date_yyyymmdd = calendar.prev_trading_day(today_kst).strftime("%Y%m%d")
-    if calendar.detail:
-        print(f"  ⚠ {calendar.detail}", flush=True)
     trading_day = calendar.is_trading_day(to_date(date_yyyymmdd))
 
     result = run(date_yyyymmdd, home=home, skip_sweep=a.skip_sweep,

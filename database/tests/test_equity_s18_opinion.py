@@ -17,14 +17,35 @@ from __future__ import annotations
 import datetime as dt
 import json
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 import duckdb
 import pytest
+from conftest import allow_skips
 from equity import build, rules_s01, rules_s02, rules_s18
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
 from equity.model import EquityTable
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _k17a_fixture_skips() -> Iterator[None]:
+    """K1-7a — 이 모듈의 픽스처가 표본이 작아 못 재는 게이트의 SKIP 만 테스트에서 허용한다
+    (운영 허용표 `src/stage/skip_allow.py` 는 그대로다)."""
+    with allow_skips(
+            ("equity", "EG8", "no_baseline",
+             "s18 시드에 겹침 일치율 하한이 없다(운영 값은 baseline_locked 0.99)",
+             "opinion_daily"),
+            ("equity", "EG8", "no_cross_source",
+             "부정 합성 픽스처는 wise·v3 가 같은 (종목, 관측일) 을 갖지 않는다", "opinion_daily"),
+            ("equity", "EG21", "no_baseline",
+             "EG8 겹침 픽스처는 opinion_daily 상수를 하한 하나로 갈아 끼운다", "opinion_daily"),
+            ("equity", "EG21", "no_coverage",
+             "절단본은 base_date 세션이 판정 창(23)에 못 미친다 — 운영 허용표에서는 지웠다(10-10 리뷰)",
+             "opinion_daily")):
+        yield
+
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 SEED = Baseline({**load(Path(rules_s01.__file__).parent / "baseline_seed_s01.json").data,
@@ -38,9 +59,9 @@ N_BROKER = 249                  # stg_analyst_broker 전건 (1:1)
 N_OVERLAP = 5                   # 두 원천이 같은 (ticker, obs_date) 를 가진 키
 N_V3_NULL = 301                 # v3 값 전 축이 NULL 인 행 (커버 안 되는 종목·날)
 
-OPINION_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_opinion_daily", "EG6", "EG8", "EG9",
-                 "EG21", "EG4", "EG5a"]
-BROKER_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_opinion_broker_daily", "EG9",
+OPINION_GATES = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_opinion_daily", "EG6", "EG8",
+                 "EG9", "EG21", "EG4", "EG5a"]
+BROKER_GATES = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_opinion_broker_daily", "EG9",
                 "EG4", "EG5a"]
 
 # S18 두 테이블이 읽는 equity 입력을 짓기 위한 선행 체인 (WORKFLOW §3-2 S00─S01─S02).
@@ -558,6 +579,86 @@ def test_두_원천_값이_어긋나면_EG8이_폐기한다(tmp_path: Path, make
     assert eg8.metrics["n_agree_by_column"]["target_price_krw"] == 0
     assert eg8.metrics["n_agree_by_column"]["opinion_score"] == 1
     assert eg8.metrics["threshold"] == 1.0
+
+
+def _build_eg8_overlap(tmp_path: Path, make_stage_tree, wise: dict[str, object],
+                       v3: dict[str, object],
+                       fixtures: list[dict[str, object]]) -> build.BuildResult:
+    """겹친 키 1개(005930 09-01)의 wise·v3 행을 열 일부만 덮어써 임계 1.0 으로 EG8 을 돌린다.
+
+    덮어쓴 값이 None 하나뿐이면 그 열이 VARCHAR 로 추론된다(서버는 DECIMAL). 겹치지 않는 숫자형 행을
+    표마다 하나씩 더해 열 타입을 숫자로 고정한다.
+    """
+    synthetic = {
+        "stg_analyst_summary": [{**_summary_row("005930", _D(2026, 9, 1), _D(2026, 8, 31)), **wise},
+                                _summary_row("000660", _D(2026, 9, 1), _D(2026, 8, 31))],
+        "stg_v3_analyst_opinions": [{**_v3_row("005930", _D(2026, 9, 1), _D(2026, 9, 2)), **v3},
+                                    _v3_row("005930", _D(2026, 8, 31), _D(2026, 9, 2))],
+        "stg_wise_coverage": _COVERAGE}
+    stage_root = _hybrid_stage(tmp_path, make_stage_tree, synthetic)
+    eq = tmp_path / "equity"
+    _build_chain(eq, stage_root)
+    seeded = Baseline({**SEED.data, "opinion_daily": {"src_overlap_agree_min": 1.0}})
+    return build.build_table(rules_s18.OPINION_DAILY, stage_root, eq, seeded,
+                             build_id="b_opinion_daily_eg8_overlap",
+                             fixtures_path=_fixture_file(tmp_path, fixtures))
+
+
+def test_wise_0과_v3_NULL인_추정기관수는_EG8이_같은_값으로_본다(tmp_path: Path,
+                                                      make_stage_tree) -> None:
+    """G-42 — stage 2.5.0 부터 WISE '3개월 의견 없음'은 0 이고 동결 v3 미러는 같은 경우가 NULL 이다.
+
+    같은 사실을 어긋남으로 세면 서버 겹침 796키 중 290키가 불일치로 잡혀(일치율 0.636) 매 빌드가
+    폐기된다. 나머지 4열은 같게 두고 임계 1.0 으로 `analyst_count` 한 열만 시험한다.
+    """
+    # 산출은 두 원천의 값을 그대로 싣는다(0 과 NULL) — 같은 값으로 보는 쪽은 게이트다
+    fixtures = [{"id": "g42-wise", "key": {"ticker": "005930", "obs_date": "2026-09-01",
+                                           "src": "wise"},
+                 "column": "analyst_count", "expect": "0", "source": "hand",
+                 "note": "WISE '3개월 의견 없음' = 0"},
+                {"id": "g42-v3", "key": {"ticker": "005930", "obs_date": "2026-09-01",
+                                         "src": "v3"},
+                 "column": "analyst_count", "expect": None, "source": "hand",
+                 "note": "동결 v3 미러는 같은 경우를 NULL 로 가진다"}]
+    r = _build_eg8_overlap(tmp_path, make_stage_tree, {"analyst_count": 0},
+                           {"analyst_count": None}, fixtures)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    eg8 = _gate(r, "EG8")
+    assert eg8.status is GateStatus.PASS
+    assert eg8.metrics["n_overlap_keys"] == 1 and eg8.metrics["n_agree_all_columns"] == 1
+    assert eg8.metrics["n_agree_by_column"]["analyst_count"] == 1
+
+
+@pytest.mark.parametrize(("wise", "v3", "agree"), [
+    # 반대 사례 — 0 ≡ NULL 은 v3 가 비어 있을 때만이다. v3 가 5명이라 하면 어긋남이다
+    ({"analyst_count": 0}, {"analyst_count": 5}, {"analyst_count": 0, "opinion_score": 1}),
+    # 단방향 — 거꾸로 wise NULL · v3 0 은 같은 값이 아니다(대칭으로 넓히면 여기서 잡힌다)
+    ({"analyst_count": None}, {"analyst_count": 0}, {"analyst_count": 0}),
+    # 0 한정 — v3 가 비어 있어도 wise 가 양수면 어긋남이다(v3 가 못 채운 값을 놓치지 않는다)
+    ({"analyst_count": 5}, {"analyst_count": None}, {"analyst_count": 0}),
+    # 괄호 — 추정기관수만 동치이고 목표가가 어긋나면 전 열 일치가 아니다
+    # (동치식의 바깥 괄호가 없으면 OR 가 다른 열의 불일치를 덮는다)
+    ({"analyst_count": 0, "target_price_krw": 400000}, {"analyst_count": None},
+     {"analyst_count": 1, "target_price_krw": 0}),
+    # 열 범위 — 0 ≡ NULL 은 추정기관수 열만이다. EPS 의 0 · NULL 은 어긋남이다
+    ({"eps_krw": 0}, {"estimated_eps": None}, {"eps_krw": 0}),
+], ids=["wise_0_v3_5", "wise_NULL_v3_0", "wise_5_v3_NULL", "wise_0_v3_NULL_with_target_diff",
+        "eps_0_NULL"])
+def test_EG8은_추정기관수_동치의_경계를_넘으면_폐기한다(tmp_path: Path, make_stage_tree,
+                                       wise: dict[str, object], v3: dict[str, object],
+                                       agree: dict[str, int]) -> None:
+    """G-42 — 동치는 추정기관수 열의 wise 0 · v3 NULL 한 방향뿐이다.
+
+    `agree` 는 열별 일치 키 수(겹친 키 1개)이고 전 열 일치는 항상 0 이다. 동치를 넓히는 변경
+    (대칭화·0 한정 해제·바깥 괄호 누락·전 열 적용)을 케이스마다 하나씩 잡는다.
+    """
+    r = _build_eg8_overlap(tmp_path, make_stage_tree, wise, v3, [])
+    assert r.status is build.BuildStatus.GATE_FAILED
+    eg8 = _gate(r, "EG8")
+    assert eg8.status is GateStatus.FAIL, eg8.metrics
+    assert eg8.metrics["n_overlap_keys"] == 1 and eg8.metrics["n_agree_all_columns"] == 0
+    for col, n in agree.items():
+        assert eg8.metrics["n_agree_by_column"][col] == n
 
 
 # ── 선언 ─────────────────────────────────────────────────────────────────────

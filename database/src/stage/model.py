@@ -8,7 +8,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-RULES_VERSION = "2.3.0"
+# 2.6.0: 참조표 룩업 공개일도 접수번호 날짜보다 이르지 않다(J-41, N-26 4.2)
+# (10-09 핫픽스, 판본 그대로) 컨센서스 월간 G8: 5001·5002 한쪽만 빈 값은 불일치가 아니라 n_one_side_null 로 기록만 — 산출 행 불변
+# 2.7.0: stg_fin_wise·_q 연속 판 접기 — 같은 (종목, ep, pkey) 의 바로 앞 원장 blob 과 sha256 이 같으면
+#        파싱 전에 버린다(§1 예외 (f), 묶음 7 N-37). 두 표 fetched_date 뜻이 '그 원문을 처음 본 날'로 바뀐다
+# 2.8.0: stg_flow_postclose_kiwoom 추가 — 장 마감 직후 원장(postclose.db) ka10060, stg_flow_daily_kiwoom 과 같은
+#        열 규칙 + price_valid·collected_at(컷오버 PR-2). G4 골든 물려받기(golden_from). 다른 표 산출 불변
+# 2.9.0: ka10060 거래량(volume_shr) = `acc_trde_qty`, 그 열이 NULL 인 행(10-22 저녁 키움 응답 변경 전에 처음 관측된
+#        행)만 `acc_trde_prica` — ColumnRule.fallback_src. 10-22 부터의 행만 값이 바뀐다(거래대금 → 거래량)
+# 2.10.0: WISE blob 표 7개(`rules_wise._blob_table` — 연간·분기·매트릭스·재무 2·의견 2)에 수집 시각 `fetched_at_utc` 열 추가(#608) — equity S26 이 행마다
+#        가용일(장 전 수집은 그날 쓴다)을 센다. 기존 열·행 산출 불변, 열 하나 추가.
+#        W 계보(feat/equity-wise-fields)에서 2.9.0 으로 매겼던 것을 갈래 병합 때 다시 매김 — 서버 임시 빌드
+#        snap_20261022T232524Z 의 2.9.0 은 이 변경이다(운영 빌드 기록의 2.9.0 은 위 ka10060 줄)
+RULES_VERSION = "2.10.0"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 
 # 빌드 basis — 하루 2판 규약 (플랜 v2 §4 Task B.1). 빌드 id 접두어가 판을 구분한다:
@@ -16,15 +28,22 @@ PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 =
 # equity 층도 같은 접두어를 쓴다 — MANIFEST 의 `basis` 는 이 접두어에서 파생한다.
 BASIS_MANUAL = "manual"
 BASIS_PREFIX: dict[str, str] = {"evening": "e_", "morning": "m_", BASIS_MANUAL: "b_"}
-_BASIS_BY_PREFIX: dict[str, str] = {v: k for k, v in BASIS_PREFIX.items()}
+# 주말 보강판(N-45) `s_` — factor_inputs·모델 층만 짓는 판이다. stage·equity 의 `--basis` 선택지(위
+# BASIS_PREFIX)에는 넣지 않고 빌드 id 접두어 대응에만 더한다(두 층은 이 판을 짓지 않는다)
+BASIS_SUPPLEMENT = "supplement"
+_DERIVED_BASIS_PREFIX: dict[str, str] = {BASIS_SUPPLEMENT: "s_"}
+_BASIS_BY_PREFIX: dict[str, str] = {v: k for k, v in {**BASIS_PREFIX,
+                                                     **_DERIVED_BASIS_PREFIX}.items()}
 BUILD_ID_TIME_FORMAT = "%Y%m%dT%H%M%S_%fZ"
 
 
 def make_build_id(basis: str, now: datetime | None = None) -> str:
     """`<접두어><UTC 시각>` 빌드 id. 모르는 basis 는 예외 — 조용히 `b_` 로 떨어지지 않는다."""
-    if basis not in BASIS_PREFIX:
-        raise ValueError(f"unknown build basis: basis={basis!r} allowed={sorted(BASIS_PREFIX)}")
-    return BASIS_PREFIX[basis] + (now or datetime.now(UTC)).strftime(BUILD_ID_TIME_FORMAT)
+    prefix = BASIS_PREFIX.get(basis) or _DERIVED_BASIS_PREFIX.get(basis)
+    if prefix is None:
+        raise ValueError(f"unknown build basis: basis={basis!r} "
+                         f"allowed={sorted({**BASIS_PREFIX, **_DERIVED_BASIS_PREFIX})}")
+    return prefix + (now or datetime.now(UTC)).strftime(BUILD_ID_TIME_FORMAT)
 
 
 def basis_of_build_id(build_id: str) -> str:
@@ -76,6 +95,16 @@ class ColumnRule:
     required: bool = False          # 키는 아니지만 NULL 이면 행이 무의미 → reject(required_null)
     nonempty_flag: str | None = None  # 빈값 여부 불린 컬럼 병기 (예: sect_available)
     blank_is_value: bool = False    # 키의 '' 를 값으로 인정(key_missing 아님) — ws_call_log.pkey
+    # 원천이 필드를 옮긴 열 — src 가 NULL 인 행(그 열이 생기기 전에 처음 관측된 행)은 이 원장 열 원문을 쓴다.
+    # src 열이 원장에 아예 없으면(옛 판) 전 행이 이 열이다. '' 는 NULL 이 아니라 결측으로 남는다 — ka10060 거래량만
+    fallback_src: str | None = None
+
+    def src_sql(self, alias: str, prefix: str = "") -> str:
+        """원장 원문 식(`alias."prefix+src"`) — `fallback_src` 가 있으면 src 가 NULL 인 행만 그 열 원문."""
+        own = f'{alias}."{prefix}{self.src}"'
+        if self.fallback_src is None:
+            return own
+        return f'coalesce({own}, {alias}."{prefix}{self.fallback_src}")'
 
     @property
     def decimal_type(self) -> str:
@@ -86,7 +115,12 @@ class ColumnRule:
 
 @dataclass(frozen=True)
 class ExtraColumn:
-    """categorize 파생 컬럼 — 같은 행의 원장 컬럼만 참조하는 SQL (`s."원장컬럼"`). §1 1:1 안."""
+    """categorize 파생 컬럼 — 같은 행의 원장 컬럼만 참조하는 SQL (`s."원장컬럼"`). §1 1:1 안.
+
+    예외 하나: `normalize_text` 컬럼의 **정규화 판**을 쓰려면 `build.py _stage_sql` 이 거는
+    조인 별칭 `nm_<원장컬럼>`(`coalesce(nm_x.norm, s."x")`)을 참조한다 — 소비층이 보는 값은
+    원장 원문이 아니라 stage 가 적은 정규화 판이기 때문이다(`stg_fin.account_nm_norm`).
+    """
 
     name: str
     sql: str
@@ -128,6 +162,12 @@ class BlobSource:
     parser: str                                  # parsers.PARSERS 키
     required_columns: tuple[str, ...] = ("cmp_cd", "ep", "pkey", "fetched_date", "body",
                                          "fetched_at")
+    # ws_raw 모양이 아닌 blob 원장(`wics_raw` 등)은 RawBlob 6컬럼 별칭을 내는 SELECT 를 직접 준다.
+    # `{src}` 가 `"db"."table"` 로 치환된다. None 이면 ws_raw 계약(위 required_columns + ep IN eps).
+    select_sql: str | None = None
+    # §1 예외 (f) 연속 판 접기(`fold.py`) — 같은 (cmp_cd, ep, pkey) 의 바로 앞 blob 과 원장 sha256 이
+    # 같으면 파싱하지 않는다. 원장 sha256 열이 필요하다(required_columns 에 선언). stg_fin_wise·_q 만
+    fold_consecutive: bool = False
 
 
 @dataclass(frozen=True)
@@ -155,7 +195,10 @@ class AvailableRule:
     lookup_key: str | None = None   # kind=lookup: 참조 테이블 키 컬럼
     lookup_value: str | None = None  # kind=lookup: 참조 테이블 날짜 컬럼
     basis: str = "default"          # kind=column: default(내용일 대용) | measured(수집일 등 실재)
-    fallback_column: str | None = None   # kind=column: column 이 NULL 이면 이 컬럼 + basis default
+    # kind=column: column 이 NULL 이면 이 컬럼 + basis default.
+    # kind=greatest_ymd8·lookup: 앞 8자리가 YYYYMMDD 인 텍스트 컬럼(접수번호). 날짜가 그보다 이르면
+    # 그 날짜로 민다(E08·J-41 — `build._not_before_ymd8_sql` 한 곳). lookup 미스는 NULL 그대로.
+    fallback_column: str | None = None
 
 
 AVAILABLE_NONE = AvailableRule("none")
@@ -185,6 +228,14 @@ class TableRule:
     file_source: FileSource | None = None
     coverage_from: str | None = None    # §3 temporality ⓑ — 누적 스냅샷 관측 시작일 (ka10099 09-01)
     versioned: bool = True              # False = 판본 없는 로그(콜·유닛) → G6 skip(unversioned)
+    # 아침 확정판 재사용(`reuse.py`, 묶음 7-3) — 원장 지문·규칙 판본·코드 rev 가 저녁 판과 같으면
+    # 다시 짓지 않고 저녁 판 파일을 하드링크한 새 m_ 판으로 커밋한다. stg_fin_wise·_q 만
+    morning_reuse: bool = False
+    # G4 골든 물려받기 — 원천 TR(src_tag)이 같고 이 표의 unit_scale 열이 golden_from 표의 열과 **같은 ColumnRule**
+    # 이면 그 표의 골든 픽스처가 스케일을 지킨다(규칙을 공유하면 검증도 한 곳, P4). 첫 수집(10-14) 전에는 원장에
+    # 행이 없어 골든 행을 둘 수 없는 표(장 마감 원장)만 쓴다. 수집 뒤 그 표 자기 골든 픽스처를 다는 일은
+    # 후속이다. stg_flow_postclose_kiwoom 만
+    golden_from: TableRule | None = None
 
     def column(self, name: str) -> ColumnRule:
         for c in self.columns:

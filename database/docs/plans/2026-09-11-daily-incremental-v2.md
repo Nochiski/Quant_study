@@ -1,4 +1,6 @@
 # 일일 증분 파이프라인 플랜 v2 — 당일 저녁 스코어링
+> **10-05 감사**: **낡음 — 지금 크론·코드의 근거로만 유효하다.** 잠정·확정 2판 구조는 10-05 '저녁 확정 1회'(N-5)로 대체될 예정이고, 페이즈 C·D 는 대체됐다(§5). ([감사](../research/2026-10-05-plan-audit.md) · 결정 [`DECISIONS.md`](../DECISIONS.md))
+
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

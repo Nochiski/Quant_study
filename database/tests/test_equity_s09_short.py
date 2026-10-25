@@ -27,6 +27,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
+from conftest import allow_skips
 from equity import (
     build,
     rules_s01,
@@ -43,7 +44,7 @@ from equity.model import BASIS_VOCAB, FILL_EVIDENCE, FILL_KINDS, EquityTable
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 SHORT = rules_s09.SHORT_DAILY
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG1_short_daily", "EG3_short_daily",
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG1_short_daily", "EG3_short_daily",
               "EG21", "EG4", "EG5a"]
 # S09 격자는 universe_daily(S03) 위에 선다 — S03C 가 adj_factor 를 읽으므로 계수 체인까지 앞세운다
 UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,
@@ -625,8 +626,10 @@ def _synthetic(tmp_path: Path, make_stage_tree) -> build.BuildResult:
          "source": "hand — ka20068 샤드가 empty 이고 원장 행이 없다"},
     ], ensure_ascii=False), encoding="utf-8")
     bl = Baseline({SHORT.name: {"thresholds": {"EG7": 0.5}}})   # 합성 격자가 작아 격리 비율이 크다
-    return build.build_table(SHORT, stage_root, root, bl, build_id="b_syn_s09",
-                             fixtures_path=fx)
+    with allow_skips(("equity", "EG21", "no_baseline",
+                      "합성 격자 6세션 — 최신 구간 창(23세션)을 못 채워 EG21 상수를 싣지 않는다")):
+        return build.build_table(SHORT, stage_root, root, bl, build_id="b_syn_s09",
+                                 fixtures_path=fx)
 
 
 @pytest.fixture

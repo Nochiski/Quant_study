@@ -1,0 +1,225 @@
+"""텔레그램 발송(`deliver.telegram`) — 가짜 전송만 쓴다(실제 발송 없음).
+
+핵심: 토큰·채팅 ID 가 반환값·로그·예외 문자열 어디에도 나오지 않는다.
+"""
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import pytest
+from deliver import telegram as tg
+
+TOKEN, CHAT = "987654:TOKEN-very-secret_XYZ", "-1001234567890"
+
+
+@pytest.fixture
+def env(tmp_path: Path) -> Path:
+    p = tmp_path / "kael.env"
+    p.write_text("# 주석\n"
+                 f"export BOT_TOKEN='{TOKEN}'\n"
+                 f'CHAT_ID_AIPLAYGROUND="{CHAT}"\n'
+                 "CHAT_ID_LOG=-100555\n"
+                 "OPENAI_API_KEY=sk-should-not-be-read\n", encoding="utf-8")
+    return p
+
+
+@pytest.fixture
+def doc(tmp_path: Path) -> Path:
+    p = tmp_path / "model_scores_20260925_morning.xlsx"
+    p.write_bytes(b"PK\x03\x04 fake xlsx")
+    return p
+
+
+class Fake:
+    def __init__(self, resp: dict[str, object] | None = None, exc: Exception | None = None):
+        self.calls: list[tuple[str, dict[str, str], str, bytes]] = []
+        self.resp = resp if resp is not None else {"ok": True, "result": {}}
+        self.exc = exc
+
+    def __call__(self, url: str, fields, name: str, data: bytes):
+        self.calls.append((url, dict(fields), name, data))
+        if self.exc is not None:
+            raise self.exc
+        return self.resp
+
+
+def _clean(*texts: object) -> None:
+    for t in texts:
+        assert TOKEN not in str(t) and CHAT not in str(t), t
+
+
+def test_read_secrets_only_wanted_keys(env: Path) -> None:
+    got = tg.read_secrets(env, ("BOT_TOKEN", "CHAT_ID_AIPLAYGROUND"))
+    assert got == {"BOT_TOKEN": TOKEN, "CHAT_ID_AIPLAYGROUND": CHAT}
+    assert tg.read_secrets(env.parent / "none.env", ("BOT_TOKEN",)) == {}
+
+
+def test_env_path_resolution(monkeypatch: pytest.MonkeyPatch, env: Path, doc: Path,
+                             tmp_path: Path) -> None:
+    """인자 > QL_ENV. 둘 다 없거나 가리킨 파일이 없으면 FileNotFoundError — HOME 의 옛 시스템
+    폴더 파일로 넘어가지 않는다(RG-C7-4, `api._find_env` 와 같은 규칙)."""
+    other = tmp_path / "other.env"
+    other.write_text("X=1\n", encoding="utf-8")
+    monkeypatch.setenv("QL_ENV", str(env))
+    assert tg.env_path() == env
+    assert tg.env_path(other) == other
+    with pytest.raises(FileNotFoundError, match="none.env"):
+        tg.env_path(tmp_path / "none.env")
+    monkeypatch.setenv("QL_ENV", str(tmp_path / "gone.env"))
+    with pytest.raises(FileNotFoundError, match="gone.env"):
+        tg.env_path()
+    monkeypatch.delenv("QL_ENV")
+    home = tmp_path / "home"
+    (home / "kael-system-v3").mkdir(parents=True)
+    (home / "kael-system-v3" / ".env").write_text(f"BOT_TOKEN={TOKEN}\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    assert tg.env_path(other) == other
+    with pytest.raises(FileNotFoundError, match="QL_ENV"):
+        tg.env_path()
+    fake = Fake()
+    with pytest.raises(FileNotFoundError, match="QL_ENV"):
+        tg.send_document(doc, "c", transport=fake)
+    assert fake.calls == []
+
+
+def test_send_document_success(env: Path, doc: Path, caplog: pytest.LogCaptureFixture) -> None:
+    fake = Fake()
+    with caplog.at_level(logging.DEBUG, logger="deliver.telegram"):
+        res = tg.send_document(doc, "캡션", env_file=env, transport=fake)
+    assert res == {"ok": True, "description": "sent"}
+    (url, fields, name, data), = fake.calls
+    assert url == f"https://api.telegram.org/bot{TOKEN}/sendDocument"
+    assert fields == {"chat_id": CHAT, "caption": "캡션"}
+    assert name == doc.name and data == doc.read_bytes()
+    _clean(res, caplog.text)
+    assert "CHAT_ID_AIPLAYGROUND" in caplog.text
+
+
+def test_env_var_is_used_and_other_chat_key(monkeypatch: pytest.MonkeyPatch, env: Path,
+                                            doc: Path) -> None:
+    monkeypatch.setenv("QL_ENV", str(env))
+    fake = Fake()
+    res = tg.send_document(doc, "c", chat_key="CHAT_ID_LOG", transport=fake)
+    assert res["ok"] and fake.calls[0][1]["chat_id"] == "-100555"
+
+
+def test_transport_exception_is_redacted(env: Path, doc: Path,
+                                         caplog: pytest.LogCaptureFixture) -> None:
+    exc = ConnectionError(f"failed https://api.telegram.org/bot{TOKEN}/sendDocument chat={CHAT}")
+    with caplog.at_level(logging.DEBUG, logger="deliver.telegram"):
+        res = tg.send_document(doc, "c", env_file=env, transport=Fake(exc=exc))
+    assert res["ok"] is False
+    assert "ConnectionError" in str(res["description"]) and tg.REDACTED in str(res["description"])
+    _clean(res, caplog.text)
+
+
+def test_api_error_description_is_redacted(env: Path, doc: Path) -> None:
+    fake = Fake({"ok": False, "description": f"Bad Request: chat {CHAT} not found"})
+    res = tg.send_document(doc, "c", env_file=env, transport=fake)
+    assert res["ok"] is False and "Bad Request" in str(res["description"])
+    _clean(res)
+
+
+def test_missing_secrets_or_file_do_not_send(tmp_path: Path, doc: Path) -> None:
+    fake = Fake()
+    empty = tmp_path / "empty.env"
+    empty.write_text("BOT_TOKEN=\n", encoding="utf-8")
+    res = tg.send_document(doc, "c", env_file=empty, transport=fake)
+    assert res["ok"] is False and "BOT_TOKEN" in str(res["description"])
+    res = tg.send_document(tmp_path / "nope.xlsx", "c", env_file=empty, transport=fake)
+    assert res["ok"] is False and "파일 없음" in str(res["description"])
+    assert fake.calls == []
+
+
+def test_dry_run_checks_presence_without_network(env: Path, doc: Path, tmp_path: Path,
+                                                 caplog: pytest.LogCaptureFixture) -> None:
+    fake = Fake()
+    nokey = tmp_path / "nokey.env"
+    nokey.write_text("OTHER=x\n", encoding="utf-8")
+    with caplog.at_level(logging.DEBUG, logger="deliver.telegram"):
+        res = tg.send_document(doc, "c", env_file=env, transport=fake, dry_run=True)
+        res2 = tg.send_document(doc, "c", env_file=nokey, transport=fake, dry_run=True)
+        with pytest.raises(FileNotFoundError):          # 파일 자체가 없으면 실패(RG-C7-4)
+            tg.send_document(doc, "c", env_file=tmp_path / "none.env", transport=fake,
+                             dry_run=True)
+    assert fake.calls == []
+    assert res["ok"] is True and "BOT_TOKEN 있음" in str(res["description"])
+    assert res2["ok"] is False and "없음" in str(res2["description"])
+    _clean(res, res2, caplog.text)
+
+
+def test_caption_is_truncated_to_telegram_limit(env: Path, doc: Path) -> None:
+    fake = Fake()
+    tg.send_document(doc, "가" * 2000, env_file=env, transport=fake)
+    assert len(fake.calls[0][1]["caption"]) == tg.CAPTION_MAX
+
+
+def test_captions_fixed_format() -> None:
+    top = [(1, "005930", "삼성전자"), (2, "000660", "SK하이닉스"), (3, "035420", "")]
+    c = tg.caption_daily("2026-09-25", "morning", "v4_rank@0.1", top, 317, 603)
+    assert c.splitlines() == ["[모델 점수] 2026-09-25 morning · v4_rank@0.1",
+                              "상위5: 1.삼성전자 · 2.SK하이닉스 · 3.035420",
+                              "순위 317 · 제외 286 · 모집단 603"]
+    w = tg.caption_weekly("2026-W39", "2026-09-25", "v4_rank@0.1", top, 30, 5, 5, 4)
+    assert w.splitlines() == ["[주간 후보] 2026-W39 (기준 2026-09-25) · v4_rank@0.1",
+                              "상위5: 1.삼성전자 · 2.SK하이닉스 · 3.035420",
+                              "후보 30 · 신규 5 · 이탈 5 · 거래일 데이터 4/5"]
+    assert tg.caption_daily("d", "b", "s", [], 0, 0).splitlines()[1] == "상위5: -"
+
+
+def test_caption_daily_evening_says_postclose_basis() -> None:
+    """PR-6 — 장 마감 직후 데이터(basis evening)는 둘째 줄에 데이터 성격(가격·수급 시각, 컨센서스
+    기준일)을 단다. 아침 캡션은 그대로(위 고정 형식 테스트). '판' 대신 '데이터'(10-11 사용자)."""
+    top = [(1, "005930", "삼성전자")]
+    morning = tg.caption_daily("2026-10-14", "morning", "scope@1.0", top, 593, 600)
+    c = tg.caption_daily("2026-10-14", "evening", "scope@1.0", top, 593, 600)
+    lines = c.splitlines()
+    assert lines[0] == "[모델 점수] 2026-10-14 evening · scope@1.0"
+    assert lines[1] == ("장 마감 직후 데이터(가격 15:35·수급 15:40 정규장 기준) · "
+                        "컨센서스 기준일 = 직전 거래일")
+    assert lines[2:] == morning.splitlines()[1:]
+    assert "장 마감" not in morning and "컨센서스" not in morning
+
+
+def test_caption_daily_supplement_says_weekend_supplement() -> None:
+    """N-45 · E5 — 주말 보강판(basis supplement)은 첫 줄 basis 자리가 '주말 보강'이고 둘째 줄에
+    데이터 성격(휴일 아침 WISE 재수집 · 컨센서스 기준일 = 기준일 당일)을 단다. '판' 없이, 1024자 안."""
+    top = [(1, "005930", "삼성전자")]
+    morning = tg.caption_daily("2026-10-08", "morning", "scope@2.0", top, 593, 600)
+    c = tg.caption_daily("2026-10-08", "supplement", "scope@2.0", top, 593, 600)
+    lines = c.splitlines()
+    assert lines[0] == "[모델 점수] 2026-10-08 주말 보강 · scope@2.0"
+    assert lines[1] == ("휴일 아침에 WISE 를 다시 받아 기준일 추정치까지 넣은 데이터 · "
+                        "컨센서스 기준일 = 기준일 당일")
+    assert lines[2:] == morning.splitlines()[1:]
+    assert "판" not in c and "supplement" not in c and len(c) <= tg.CAPTION_MAX
+
+
+def test_caption_daily_correction_line() -> None:
+    """Q9 — 정정 발송(n ≥ 1)만 끝에 '정정 n · 데이터 id · 생성 시각' 줄을 단다.
+    첫 발송(n = 0)은 그대로."""
+    top = [(1, "005930", "삼성전자")]
+    base = tg.caption_daily("2026-09-25", "morning", "scope@1.0", top, 317, 603)
+    first = tg.caption_daily("2026-09-25", "morning", "scope@1.0", top, 317, 603,
+                             correction=0, build_id="m_x", generated_at="2026-09-25T00:43:12Z")
+    assert first == base
+    c = tg.caption_daily("2026-09-25", "morning", "scope@1.0", top, 317, 603,
+                         correction=2, build_id="m_x", generated_at="2026-09-25T00:43:12Z")
+    assert c.splitlines() == [*base.splitlines(), "정정 2 · 데이터 m_x · 생성 2026-09-25T00:43:12Z"]
+    assert "판" not in c
+
+
+def test_multipart_body_shape() -> None:
+    body, ctype = tg._multipart({"chat_id": "1", "caption": "한글"}, "a.xlsx", b"DATA")
+    boundary = ctype.split("boundary=")[1]
+    assert ctype.startswith("multipart/form-data; boundary=")
+    assert body.count(f"--{boundary}".encode()) == 4
+    assert b'name="document"; filename="a.xlsx"' in body
+    assert "한글".encode() in body and b"DATA" in body
+    assert body.endswith(f"--{boundary}--\r\n".encode())
+
+
+def test_redact_longest_first() -> None:
+    assert tg.redact(f"x {TOKEN} y {CHAT}", (CHAT, TOKEN)) == f"x {tg.REDACTED} y {tg.REDACTED}"
+    assert tg.redact("plain", ("",)) == "plain"

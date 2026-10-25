@@ -43,6 +43,8 @@
 
 **skip 은 통과가 아니다.** 7단계 최종 게이트(§7-4)가 "전 테이블 `gates[]` 에 `status='fail'` 0 **이면서** `status='skip'` 중 `no_baseline` 잔존 0" 을 요구한다.
 
+K1-7a(2026-10-10)부터 `gates.run_all` 이 판마다 이것을 강제한다 — (게이트, 사유, 표) 가 허용표(`src/stage/skip_allow.py`)에 없는 skip 은 FAIL 로 세고 판을 폐기한다. `no_baseline` 은 허용표에 없으므로 새 게이트·새 표는 상수와 함께 배포한다(측정치는 `_failed/<build_id>.json` 의 그 게이트 metrics 에 남는다 — 배포 전에 재는 경로는 §7-3 ①). 아래 각 항의 "첫 빌드 `skip(no_baseline)`" 은 이 규칙 전의 기술이다.
+
 ### 0-3. 상수 참조 — `data/equity/baseline.json`
 
 파일 형식은 stage 와 동일(`baseline.py:measure` 반환 구조): 최상위 `{table: {metric: value}}` + `_measured[]` 에 `{table, metric, db, sql, value, measured_at, growing}`. equity 는 `db` 대신 **`inputs`(고정 stage build)** 를 provenance 로 싣는다.
@@ -545,7 +547,7 @@ WHERE c.src = 'v3'
 SELECT count(*) AS n FROM duckdb_columns()
 WHERE table_name IN (SELECT "table" FROM _reg_table)
   AND (column_name LIKE 'is\_latest%' ESCAPE '\' OR column_name LIKE '%\_current' ESCAPE '\');
--- 예외: corp.corp_name·security.name_current 처럼 "현재값 라벨"로 선언한 컬럼은
+-- 예외: corp.corp_name·security.name_current·name_abbrv_current 처럼 "현재값 라벨"로 선언한 컬럼은
 --       _reg_column.current_label = true 로 등재하고 술어에서 뺀다
 
 -- EG6-P05 : DOC_DESIGN §8.1 E-G6a
@@ -898,6 +900,8 @@ WHERE g.${VALUE_COL} = 0
 | 24 | `consensus_daily` | 5 | ● | ●(§3-⑲) | ●(P01–P03) · P04 skip(profile 없음) | ●(P01,P07,P13) | ●(FX-5-001…006) | ●(a) · c 는 §9 S17(뷰가 `ASOF_VIEWS` 밖) | ●(P01,P02,P03) | ●(P07) | ●(P07) | ●(P05) · P06 은 §9 S17 대용 | ●⑥⑨ |
 | 25 | `opinion_daily` | 5 | ● | ●(§3-⑳) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-007) | ●(a) | ●(P01,P03) | ● | skip(no_baseline) | ●(P06) | — |
 | 26a | `coverage_daily`(S24, 09-11) | 7 | ● | ●(EG3_coverage_daily: 격자·커버 재계산·PIT 불변식) | — | — | ●(FX-24) | — | skip(no_multi_version) | ● | — | ●(기록형 `n_wise_status_mismatch`) | — |
+| 26b | `sector_snapshot`(S25, 09-20) | 1 | ● | ●(EG3_sector_snapshot: L2 유일·L1↔L2 정합·L1 어휘·L2 접두·폭·부호) | — | — | ●(FX-25) | — | skip(no_multi_version) | ● | — | — | — · 매크로 `v_sector(as_of)`(스냅샷일 ≤ as_of 최신 행 + `days_since_snapshot`)는 `ASOF_VIEWS` 밖 |
+| 26c | `consensus_matrix`·`consensus_annual`·`fin_ratio_wise`(S26, 10-22) | 1 | ● | ●(EG3_consensus_matrix: lookback 어휘·대응·fy_rank·폭 / EG3_consensus_annual: period_kind 어휘·period 폭·폭 / EG3_fin_ratio_wise: 폭, 결산기 못 읽은 칸은 기록형) | — | — | ●(FX-26-001…003) | — | skip(no_multi_version) | ● | — | — | — |
 | 26 | `opinion_broker_daily` | 5 | ● | ●(§3-㉑) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-008) | ●(a) | skip(no_multi_version) | ● | — | ●(P06) | — |
 | 27 | `dataset_profile` | 6 | ● | skip(declaration_table) | skip(dimension_table) → `EG2_dataset_profile`(P04,P06,P07,P08 + 어휘·범위) | ●(P01) | ●(FX-6-001…009,016…018) | ●(a) | skip(no_multi_version) | ● | — | ●(P06 기록형, 시총 분위) | ●⑥⑧ |
 | 28 | `factor_readiness` | 6 | ● | skip(declaration_table) | skip(dimension_table) | ●(P01) | ●(FX-6-010,011,013,015,019) | ●(a) | skip(no_multi_version) | ● | — | — | — · 판정은 **EG10**(§6) |
@@ -1044,6 +1048,8 @@ SELECT (SELECT count(*) FROM adj_factor)
                                                     WHERE domain = 'factor_bearing_event')))
         - eg1_tail('adj_factor')) AS delta;
 ```
+
+⑤(e1.26.0) 는 **행을 만들지 않는다** — 열 2개(`price_only_factor`·`price_resolution`)와 계수 행의 공개일만 바뀌므로 위 등식은 그대로다. 값 축은 `EG3_adj_factor` ⑤ 술어(`rules_s06._price_only`)가 폐기형으로 본다: 어휘 닫힘 · `'factor' ⇔ factor_ok` · 계수 행은 `factor_ok=false` ∧ `apply_basis='krx_base_price'` ∧ 사유 ∈ {krx_base_inconsistent, unknown_price_only} ∧ 주식 계열 · 계수 = 기준가 후보 r(`FACTOR_PRODUCT_TOL`) · 게이트가 다시 만든 단위당 계수 행 정확히 1 · 단위 밖·ok 접힘일 계수 행 0 · 계수 행 아닌데 계수 ≠ 1 0 · `price_only_dup` 은 계수 행과 같은 (ticker, apply_date) · 공개일 재계산에 계수 행 분기. 기록형: 표식별·사유×종류별 수, r 분포, 계수를 실을 행이 없는 기준가 날짜 수, `unresolved` 사유별, 근처 판정 수. EG8 은 계수 행 적용일 수정수익률도 ok 계수와 같은 상수 `adj_return_jump_max` 로 판정한다 — **폐기형(10-09 재연 근거)**: 6-5 서버 재연(운영 입력 D=20261008) 최대 0.300·초과 0 → D6-5 승격 (`PRICE_ONLY_JUMP_GATE = True`, 체크 `n_price_only_return_jump_over`).
 
 ### ⑪ `flow_daily` · `short_daily` · `credit_daily`
 ```sql
@@ -1216,7 +1222,7 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 count(price_adj_daily) = count(price_daily)
 ```
 
-**항등식이다** — 조정은 가격 행 하나하나에 대한 순수 함수라 행이 늘거나 줄지 않고, 격리 사유가 없어 우변에서 뺄 것도 없다(`reject_reasons=()`, EG7 은 항상 0 으로 통과). 등식이 이렇게 약한 대신 값 축을 `EG3_price_adj_daily` 가 **독립 재계산**으로 전건 대조한다: 산출은 ASOF JOIN + 창 누적곱, 게이트는 범위 조인 + GROUP BY 집계로 같은 값을 만들어 값 7축(`adj_open`·`adj_high`·`adj_low`·`adj_close`·`adj_volume_shr`·`cum_price_factor`·`cum_share_factor`)을 비교하고, `n_factors_applied`·`n_unadjusted_events`·`available_date` 도 따로 재계산한다. `n_factors_applied` 은 **완전 일치**(`n_factor_count_mismatch`)와 **방향 있는 초과**(`n_cross_span_factor`) 둘로 센다 — 계수 값이 1 인 사건이 새거나 빠지면 값 축은 안 움직이고 이 수만 어긋난다.
+**항등식이다** — 조정은 가격 행 하나하나에 대한 순수 함수라 행이 늘거나 줄지 않고, 격리 사유가 없어 우변에서 뺄 것도 없다(`reject_reasons=()`, EG7 은 항상 0 으로 통과). 등식이 이렇게 약한 대신 값 축을 `EG3_price_adj_daily` 가 **독립 재계산**으로 전건 대조한다: 산출은 ASOF JOIN + 창 누적곱, 게이트는 범위 조인 + GROUP BY 집계로 같은 값을 만들어 값 8축(`adj_open`·`adj_high`·`adj_low`·`adj_close` — ⑤ 누적으로 나눈 값 · `adj_volume_shr`·`cum_price_factor`·`cum_share_factor`·`cum_price_only_factor`, e1.26.0)을 비교하고, ⑤ 접힌 수·가격 축 미해결 수(`n_price_only_applied`·`n_price_unresolved_events`)도 재계산 대조하고, `n_factors_applied`·`n_unadjusted_events`·`available_date` 도 따로 재계산한다. `n_factors_applied` 은 **완전 일치**(`n_factor_count_mismatch`)와 **방향 있는 초과**(`n_cross_span_factor`) 둘로 센다 — 계수 값이 1 인 사건이 새거나 빠지면 값 축은 안 움직이고 이 수만 어긋난다.
 
 ---
 
@@ -1358,8 +1364,8 @@ count(price_adj_daily) = count(price_daily)
 
 절단본 손계산으로 옮긴 실측 단언: `event.insider_net_buy` 창 2024-08-26~2026-08-26 · GAP-02
 3계정 커버·첫 관측일 · `event.buyback_amount`·`event.capital_raise_amount` 커버(09-06 에는 0,
-e1.9.0 부터 값이 실린다 — 절단본 97.560976%(40/41) · 100%, e1.21.0 분모 기준) · `row_filter` 가
-있는 `table_rows` 다섯 필드의 분자·분모(e1.21.0, #592 — 분모는 창 안 그 유형 행) · M01/V05
+e1.9.0 부터 값이 실린다 — 절단본 97.560976%(40/41) · 100%, main e1.21.0 분모 기준) · `row_filter` 가
+있는 `table_rows` 다섯 필드의 분자·분모(main e1.21.0, #592 — 분모는 창 안 그 유형 행) · M01/V05
 `first_usable_date` · E05/E06 판정(09-06 `no_observations` → e1.9.0 부터 ready) · 커버율 ↔ 정수
 분자·분모 항등.
 
@@ -1539,6 +1545,7 @@ SELECT count(*) AS n FROM ${T}
 WHERE available_date > (SELECT bl_date('trading_calendar','backfill_end'))
   AND available_basis <> 'unknown';
 ```
+- **구현(K1-3a, 2026-10-10 — 위 초안을 대체)** `gates.eg13_available_future`, 실행 위치는 §7-1 대로 EG2 바로 뒤. 기준일은 상수가 아니라 **입력 stage 스냅샷의 KST 날짜**(컷오버 T-12)다 — 고정 입력의 전이 폐포(`inputs.input_snapshot_ids`, equity 내부 입력은 그 판의 `inputs` 를 따라간다)에 있는 stage 판 `BuildRecord.snapshot_id`(`snap_YYYYMMDDTHHMMSSZ`, UTC → KST) 중 가장 늦은 날짜. 판정은 `available_date > 기준일` 행 0(basis 무관). NULL 은 EG2-P01 몫이라 세지 않고 `n_available_null` 로 남긴다. 기준일을 못 세우면(입력 없음·형식 밖 id·위쪽 고정본 소실) FAIL. 산출이 안 바뀌어 RULES_VERSION 은 그대로다. 음성 대조는 `tests/test_equity_build.py::test_EG13_미래_공개일_한_행을_심으면_판을_폐기하고_MANIFEST는_그대로`
 
 ### EG14 — 파티션 경계 누락
 - **분류** 폐기형 · **적용** `date_axis`·`receipt_axis` 테이블 · 전 단계
@@ -1673,7 +1680,7 @@ WHERE p.close IS DISTINCT FROM coalesce(s.close_krw, e.close_krw)
 | EG10 | **팩터 준비도** | 폐기형+기록형 | 6 | `factor_readiness.ready_min`(미등재) | (신규) 재료 무성 소실 · 목적 판정 부재 |
 | EG11 | 뷰 결과 결정성 | 폐기형 | 7 | `<view>.determinism_asof` | 재현성 |
 | EG12 | 단위 접미사 전수 | 폐기형 | 전 | — | (신규) 단위 오적용 |
-| EG13 | `available_date` 미래값 | 폐기형 | 전 | — (기존 상수 재사용) | look-ahead(거울상: 조용한 결측) |
+| EG13 | `available_date` 미래값 | 폐기형 | 전 | 입력 스냅샷 KST 날짜 | look-ahead(거울상: 조용한 결측) |
 | EG14 | 파티션 경계 누락 | 폐기형 | 전 | `<table>.expected_partitions` | 레짐 편향 |
 | EG15 | 폐지 직전 가격 존재 | 기록형→폐기형 | 1·2 | `security.pre_delist_price_days`·`_min` | 생존편향 |
 | EG16 | 가짜 재상장 | 폐기형 | 1 | `security_span.respan_verified_n` | 생존편향 |
@@ -1751,11 +1758,24 @@ stage `build.py:498-502` 의 형식을 계승하고 조인층 필드를 더한�
 ### 7-3. baseline 승인 루프
 
 ```
-① 첫 빌드: baseline 미등재 게이트는 skip(no_baseline) + 측정치를 _meta.gates[].metrics 에
-② 사람이 _meta 를 읽고 값을 판단 → data/equity/baseline.json 에 {table, metric, sql, value, measured_at, inputs}
+① 배포 전 측정(운영 판은 건드리지 않는다): 둘 중 하나로 새 게이트의 측정치를 얻는다
+   · 격리 재생(X-1): scripts/replay.sh --code <새 코드> --out <tmp> --steps equity
+     상수 없는 게이트는 skip(no_baseline) → 허용표 밖이라 FAIL, 그 표 빌드는 폐기된다.
+     측정치 = <tmp>/logs/passN/eq_<표>.log 의 게이트 줄 · <tmp>/data/equity/_failed/<build_id>.json
+     의 그 게이트 metrics(skip_reason=no_baseline). scripts/gate_skips.py --home <tmp> 는 커밋된 판
+     기록(MANIFEST·_runs)만 읽어 폐기된 표의 SKIP 은 보이지 않는다 — 측정치는 위 두 곳에서 읽는다
+   · 재판정: cd ~/quant-ledger && PYTHONPATH=<새 코드>/src .venv/bin/python -m equity
+     --root data/equity --stage-root data/stage gate <표>
+     운영 current_build 를 새 코드로 다시 판정만 한다(폐기 없음·쓰기 없음). 새 게이트가 옛 판에 없는
+     열을 읽으면 재생으로 잰다
+② 사람이 측정치를 읽고 값을 판단 → data/equity/baseline.json 에 {table, metric, sql, value, measured_at, inputs}
 ③ 커밋: diff 를 커밋 메시지에 (STAGE_DESIGN §9 규약)
-④ 2회차 빌드: 같은 게이트가 정식 pass/fail
+④ 배포: 게이트와 상수를 함께 → 첫 빌드부터 정식 pass/fail
 ```
+
+K1-7a(2026-10-10) 전에는 '첫 빌드 skip(no_baseline) → 승인 → 2회차 정식' 이었다. 지금은 상수 없이 배포하면
+첫 빌드에서 그 게이트가 FAIL 하고 판이 폐기되며, 일일 빌드(`scripts/equity_rebuild_all.sh`)는 그 패스를
+롤백한다(§0-2).
 
 **승인 없이 통과시키지 않는다.** `skip(no_baseline)` 이 남아 있는 테이블은 7단계 통과 조건(§7-4)에서 걸린다.
 **baseline 을 느슨하게 고치는 것으로 실패를 해소하지 않는다** — WORKFLOW §3-3 판단 열의 "EG9 커버율 미달 시 임계를 낮추지 않고 한계로 기록" 을 전 게이트로 확장한다. 임계를 바꾸려면 PR body 에 `.claude/rules/pr-review.md` 4요소 양식으로 근거를 적는다.
@@ -1845,7 +1865,7 @@ workspace/dongmin/src/equity/
 | baseline 상수 | — | S04 는 새 상수 없음(`baseline_seed_s04.json` 이 이유를 기록). EG7 비율은 코드 기본값, 2회차 이관은 오케스트레이터 | §1 EG7 |
 | §3-⑨ `n_dedup` 출처 (S05, 09-05) | "dedup 은 `_meta.n_dedup` 이 낸다" | 프레임 `build.py` 가 `_meta.n_dedup` 을 0 으로 고정하므로 `corp_event` 는 산출 컬럼 `n_src_rows` 로 접힌 수를 싣고 EG1 좌변을 `count(out) + Σ(n_src_rows−1)` 로, `n_dedup` 은 `EG3_corp_event` metric 으로 낸다. 우변은 등록표 `rules_s05.SOURCES`(= `_reg_corp_event_source`) 합. reject 후보는 접지 않고 각각 격리해 `Σ후보 = Σ_out n_src_rows + n_reject` 가 성립한다 | DESIGN §4-2 · P21 (22 = 8 + 14 + 0) |
 | ⑨ KRX 원천 유형·방향 불변식 (S05 3차, 09-05) | KRX 행은 액면가 방향으로 split/reverse_split, ratio 는 주식수 비 | 서버 EGC-04 fail(`007195:split:2013-05-24` share_factor 0.833 — 감자 뒤 액면 변경, 모순 11건/split 268). 유형은 **주식수 비 방향**(ratio > 1 split · < 1 reverse_split, 액면가 변화는 트리거만) · 주식수 불변 액면 변경(|ratio−1| ≤ `corp_event.krx_share_change_tol` 1e-3)은 범위 밖 `krx_par_only`(기록형) · **EG3_corp_event 에 방향 불변식 추가(폐기형, 원천 무관)**: split·bonus → ratio > 1, reverse_split·capred → ratio < 1. 재판정 CLI(`gate`)가 빌드와 같은 `_const` 를 만들도록 `__main__._cmd_gate` 에 `make_consts` 1줄 추가(EG1 우변이 pool CTE 의 상수를 읽는다) | DESIGN §4-2 · P21 |
-| §3-⑨ 모집단 = 범위 안 후보 (S05 2차, 09-05) | "Σ 원천 행수" — 원천 행 전부가 모집단 | 서버 1차 빌드가 EG7 에서 폐기(격리 8,834 / 산출 3,865): 자본변동은 창립 이래 이력을 회고 기재해 캘린더 밖(1963~2009)·비상장 종류주·상장 전 사건이 격리로 쏟아졌다. 조정할 가격이 없는 행은 **격리가 아니라 모집단 밖**(`scope_out` 7종: out_of_calendar·unlisted_class·class_unknown·class_ambiguous·pre_listing·krx_par_only·share_unchanged, 기록형 metric — 09-05 도입 때는 out_of_calendar·unlisted_class·class_unknown·pre_listing 4종이었고 krx_par_only·share_unchanged(S05 3·4차)·class_ambiguous(e1.20.0, #589)가 뒤에 더해졌다. 정본은 `rules_s05.SCOPE_OUT_VOCAB`)이고 EG1 우변은 `pool WHERE scope_out IS NULL`(원천별 합). 우변 SQL 은 `.sql` 의 pool CTE 를 재사용한다(모집단 정의 단일화) — 대신 전개 전 원천 행수를 stage 뷰로 독립 기록하고 산출 행의 캘린더·상장 전 위반 0 을 `EG3_corp_event` 가 독립 재검사한다 | DESIGN §4-2 · P21 |
+| §3-⑨ 모집단 = 범위 안 후보 (S05 2차, 09-05) | "Σ 원천 행수" — 원천 행 전부가 모집단 | 서버 1차 빌드가 EG7 에서 폐기(격리 8,834 / 산출 3,865): 자본변동은 창립 이래 이력을 회고 기재해 캘린더 밖(1963~2009)·비상장 종류주·상장 전 사건이 격리로 쏟아졌다. 조정할 가격이 없는 행은 **격리가 아니라 모집단 밖**(`scope_out` 7종: out_of_calendar·unlisted_class·class_unknown·class_ambiguous·pre_listing·krx_par_only·share_unchanged, 기록형 metric — 09-05 도입 때는 out_of_calendar·unlisted_class·class_unknown·pre_listing 4종이었고 krx_par_only·share_unchanged(S05 3·4차)·class_ambiguous(main e1.20.0, #589)가 뒤에 더해졌다. 정본은 `rules_s05.SCOPE_OUT_VOCAB`)이고 EG1 우변은 `pool WHERE scope_out IS NULL`(원천별 합). 우변 SQL 은 `.sql` 의 pool CTE 를 재사용한다(모집단 정의 단일화) — 대신 전개 전 원천 행수를 stage 뷰로 독립 기록하고 산출 행의 캘린더·상장 전 위반 0 을 `EG3_corp_event` 가 독립 재검사한다 | DESIGN §4-2 · P21 |
 | EG7 비율 분모 (S05) | `Σ reject / n_src`(EG1 우변) | 프레임 `gates.eg7_range` 는 `n_reject / (n_out + n_reject)` — dedup 이 있는 테이블에서는 두 정의가 갈린다(`corp_event` 절단본 0.176 vs 0.375). 프레임 미수정, `corp_event.threshold_EG7` seed 는 프레임 정의로 측정. 정본 정의는 미결(§8) | P21 |
 | FX-2-003 (S05) | `corp_event` 무상증자 1.2:1 사례 1 (doc:2단계 기록) | 절단본·seed 픽스처 파일에는 사례가 없어 `tests/test_equity_s05_event.py` 의 `stg_event_fric` 손 트리(SK하이닉스 0.2 배정 → ratio 1.2)로 검증하고, 서버 빌드 뒤 실사례를 `fixtures/corp_event.json` 에 등재한다 | 절단본 `stg_event_fric` 0행 |
 | EG8-P04 (S05) | `corp_event` 첫 빌드 skip(no_baseline) | 분모(기준가≠전일종가)가 `price_daily` 를 요구하므로 S05 에서는 술어를 붙이지 않고 S06 이후에 `corp_event` 재판정으로 붙인다 | DESIGN §4-2 |
@@ -2044,7 +2064,7 @@ S07 의 커널 3포트 어댑터는 제품 경로가 쓰지 않았고, 제품 �
 | `owner` 의 뜻 | (미정의) | **막힌 것을 푸는 책임자**. ready 행은 계산이 남았으므로 `factor_layer`. 절단본 분포 equity 16 · factor_layer 37 · unavailable 1 | `rules_s20.FactorSpec` |
 | R04(시장 베타) | 제안서 §1-6 "즉시" | **blocked(field_unavailable) · owner `unavailable`** — `index_daily.close_idx` 는 실재하지만 `benchmark.close` 는 FIELD_MAP §2 가 미지원으로 판정한 축이다(GAP-09: 지수가 security 축이 아니다). 데이터가 아니라 계약이 없다 | FIELD_MAP §2 |
 | G04(EPS 성장률) | 제안서 §1-3 "즉시" | **blocked(partial_support)** — `fin_std.eps_basic` 이 주식분할 미조정 원장 값이라(FIELD_MAP §3, S12 실측) 시계열 비율이 분할 구간에서 가짜 점프를 낸다. 제안서는 S12 실측 전 판정이었다 | FIELD_MAP §3 |
-| E05·E06 | 제안서 §1-7 "즉시" | **ready**(e1.9.0 부터). 09-06 첫 판정은 **blocked(no_observations)** 였다 — `corp_event` 가 MVP 4유형만 적재해 `treasury_buy`·`rights`·`cb_issue` 행이 0 이었고, **EG10 이 잡으라고 만든 바로 그 경우**였다. e1.9.0(09-07)이 `treasury_buy`(← `stg_event_tsstk_aq`)·`cb_issue`(← `stg_event_cvbd_is`)를 실어 둘 다 열렸다. E05 금액은 주식 종류별이고(e1.20.0, #589) E06 은 `rights` 가 아직 없어 CB 만 덮는다 — 조건은 각 caveat 에 있다 | DESIGN §10 P39 · `rules_s20.py` E05·E06 |
+| E05·E06 | 제안서 §1-7 "즉시" | **ready**(e1.9.0 부터). 09-06 첫 판정은 **blocked(no_observations)** 였다 — `corp_event` 가 MVP 4유형만 적재해 `treasury_buy`·`rights`·`cb_issue` 행이 0 이었고, **EG10 이 잡으라고 만든 바로 그 경우**였다. e1.9.0(09-07)이 `treasury_buy`(← `stg_event_tsstk_aq`)·`cb_issue`(← `stg_event_cvbd_is`)를 실어 둘 다 열렸다. E05 금액은 주식 종류별이고(main e1.20.0, #589) E06 은 `rights` 가 아직 없어 CB 만 덮는다 — 조건은 각 caveat 에 있다 | DESIGN §10 P39 · `rules_s20.py` E05·E06 |
 | V05·V07·Q07·Q08 | 제안서 §1-1·§1-2 "조건부(GAP-02)" | **ready** — GAP-02 는 "3계정이 실재하는가" 였고 S12·S19 실측이 **실재한다**로 답했다(`borrowings` 17.5% · `depreciation`·`interest_expense` 15.0%). 대신 커버 시작이 늦어 `first_usable_date` 가 2023-11-14 다 — 조건이 판정에서 **시작일**로 옮겨간 것이다 | DESIGN §10 P38 |
 
 **S21 축소 정정 — 워크벤치 어댑터 · contract `ADAPTERS` · MVP-B 백테스트 (2026-09-05, 절단본 실측 → `backend/src/strategy_workbench/adapters/outbound/equity_duckdb/`)**
@@ -2090,6 +2110,9 @@ S07 의 커널 3포트 어댑터는 제품 경로가 쓰지 않았고, 제품 �
 | 부정 픽스처 | (i) 비율 어긋남 (ii) 기준가만 (iii) 전일 무거래 (iv) no_price_match 회생 | `test_equity_s06_adj.py` 합성 5건 + 절단본 1건: (i) 분할 pf 0.5 + 같은 날 주식수 ×3 → `krx_base_inconsistent`; r 0.8 반증 → 사건 inconsistent + (d) 신규; 기준가 없으면 폴백 nominal 회귀 (ii) 기준가 ×0.9 → (d) 행·available 다음 세션·ETF 는 행 없음 (iii) 정지 뒤 ×0.7 → 행 없음·`n_base_price_rediscovery` 1·구간 첫날(×5 + 주식수 ×0.2)은 spans 축이 가른다 (iv) 감자 재개일 원수익률 ×12.5 → 2차 unmatched, 기준가 ×10 → (a) 회생(10, 0.1); 창 밖(+7)이면 (b) unknown_krx 가 대신 선다 · 성분(감자+병합 ×4) 기준가 곱 교체 · 산출 기준가 행 계수 ×2 변조 → `n_krx_price_factor_mismatch`·`n_unknown_krx_ok_share_factor_bad` | 절단본 분류 (a)3·(b)0·(c)2·(d)2 |
 | 어댑터 | 변경 없음 | `EVENT_TYPE_MAP` 은 그대로 + `RATIO_DIRECTED_EVENT_TYPES = {unknown_krx}`: share_factor > 1 → SPLIT, < 1 → REVERSE_SPLIT, = 1 은 FORMAT_ERROR. `unknown_price_only` 는 ok=false 라 방출되지 않고 ok 로 오면 어휘 밖 FORMAT_ERROR(그대로) — EGC-04 가 `unknown_krx` ok 행을 비교 모집단에 넣으려면 매핑이 있어야 했다 | backend `test_unknown_krx_*` 3건 |
 | 규칙 판본 | e1.3.0 | `model.RULES_VERSION` e1.3.0 — 첫 서버 빌드는 EG5a `skip(rules_changed)`, 재빌드 해시 동일로 확인 | DESIGN §2 |
+| `adj_factor.available_date` (10-07 C-07 · N-26 4.1, e1.25.0) | `min(announce, apply_date 다음 세션)` · 기준가 신규 행은 다음 세션 | **KRX 기준가가 확정한 ok 행(사건 교체 · unknown_krx 정상)은 `min(announce, apply_date)`**(unknown_krx 는 announce = apply 라 그날). 정상 아닌 행(krx_base_inconsistent·unknown_price_only)·가격 매칭 계수(nominal·price_matched·combined)는 옛 식. **EG3_adj_factor `n_available_mismatch` 의 독립 재계산도 같은 조건**(`factor_ok ∧ apply_basis='krx_base_price'`) — 산출만 바꾸면 GATE_FAILED. 근거: 정정 공시 접수일이 announce 라 apply 보다 늦거나 신규 행이면 fold_date 가 하루 밀려 그 세션 가짜 급락·다음 날 급반등(002070 2026-07-31 −35.0% → 08-03 +159.6%; 현판 `factor_ok ∧ krx_base_price ∧ available > apply` 325행 → 0) | `tests/test_equity_s06_adj.py::test_합성_정정_공시가_적용일보다_늦어도_…` · `…::test_합성_기준가_신규_unknown_krx_정상_행은_…`(회귀 가드: inconsistent·price_only 다음 세션) · `tests/test_equity_s23_price_adj.py::test_정정_공시가_늦어도_…`·`…::test_기준가_신규_unknown_krx_정상_계수도_…` |
+| `corp_event` 미래 기준일 무상증자 (10-07 C-04 · N-25 Q3, e1.25.0) | 효력일 = 캘린더에서 기준일 미만 최대 — 기준일이 캘린더 끝 D 뒤면 기준일과 무관하게 D(현판 6건) | **D 의 KRX 기준가가 비율을 확인할 때만 D**: r = D 기준가 / 직전 행 종가(ETF·구간 첫날 제외 — 위 기준가 후보와 같은 집합), \|r − 1\| > `adj_factor.base_price_tol_rel` ∧ \|r × ratio − 1\| ≤ max(`price_match_tol_rel`·m, `price_match_tol_abs`) — (a) 짝 규칙과 같은 상수를 복제 없이 읽는다. 아니면 효력일 NULL → `out_of_calendar`(대기, 다음 판이 다시 판정). 입력 `price_daily`·`security` 추가. EG1 은 pool CTE 를 재사용해 자동 정합, `n_out_off_calendar` 술어 그대로. '캘린더 밖이면 NULL' 로만 고치면 권리락 당일 빌드(기준일 = D 다음 거래일)가 미조정으로 빠진다 | `tests/test_equity_s05_event.py::test_C04_*`(회귀 가드 `…_회귀_가드_기준일이_D_다음_거래일이고_…`) · `tests/test_equity_s06_adj.py::test_C04_미래_기준일_소액_무상증자는_…`(1.03 → D 에 ok 행 없음) |
+| 아침 패스 실패 롤백 (10-07 C-01 · N-25 Q4) — 게이트 아님 | before = 시작 current(대개 전날 저녁 `e_`), 되돌리는 표는 rc 0 표만 | 아침: before = `data/deliver/latest_morning.json` 의 `equity_builds`(마지막 **완료** 아침 판 — **전부 아니면 전무**: 한 표라도 없음·못 읽음·표 없음·GC 면 전 표 시작 current + stderr 한 줄), 롤백은 before 의 **모든 표**(커밋 못 한 표·미도달 표 포함, 포인터만). 롤백이 성공하면 `equity catalog` 자동 1회(best-effort, 패스 rc 불변), `_READY.json` 은 그대로(포인터가 정본). before.json 을 못 만들면 패스를 시작하지 않는다. 저녁·수동은 그대로 | `equity/rollback.py` `pass_start_targets`·`rollback_pass` · `tests/test_equity_rollback.py::test_아침_패스가_둘째_표에서_실패하면_…`·`…::test_실패한_아침_패스가_남긴_m은_…`·`…::test_한_표라도_latest_morning_판을_못_얻으면_…` · `tests/test_equity_rebuild_all_sh.py` |
 
 ---
 
@@ -2109,6 +2132,22 @@ S07 의 커널 3포트 어댑터는 제품 경로가 쓰지 않았고, 제품 �
 | `corr_has_fin_item` 술어 | "items 에 재무 항목, 2,238" | 항목 목록이 명시되지 않은 인용이라 재현할 수 없다 → `rules_s11.FIN_ITEM_KEYWORDS` 6종(재무제표·재무상태표·손익계산서·현금흐름표·자본변동표·요약재무)을 선언하고 기록형으로 둔다. 절단본 39/84 · ★ 서버 재측정 | DESIGN §4-4 |
 | 모집단 dedup (서버 1차 빌드 FAIL, 09-06) | 모집단 = 정기보고서 접수 **행** 전건 | **접수번호당 1행**으로 접는다. `stg_disclosure` 는 `write_mode='append_only'` · `key_unique=False`(rules_dart.py — 재수집 판본이 G6 축) 라 같은 `rcept_no` 가 여러 행으로 쌓인다: 서버 실측 203건(정기보고서 안 26건, 중복 쌍은 투영 컬럼이 전부 같다). grain 이 `rcept_no` 인데 안 접으면 산출이 같은 행을 두 번 내고 EG1 이 그만큼 어긋난다(**서버 1차 빌드 198,189 vs count(DISTINCT rcept_no) 198,163, delta −26** → 폐기). 모집단 CTE 에 `QUALIFY row_number() OVER (PARTITION BY rcept_no ORDER BY observed_date …) = 1`(first_write_wins, EG6-P04 규약; 동률은 투영 컬럼 전체로 깨 EG5a 를 지킨다). EG1 우변도 `count(DISTINCT rcept_no)` 로 축을 맞추고, 접힌 수는 `n_population_dup_rcept`(기록형)로 남긴다. `stg_doc_index` 도 같은 규약이라 조인 전에 접는다(`idx` CTE); `stg_doc_correction` 은 `key_unique=True` 라 접지 않는다. 사다리·E-G7 의 stage 축도 `count(DISTINCT rcept_no)`·`EXISTS` 로 바꿔 팬아웃을 막았다 | 서버 빌드 로그 · `test_부정_재수집_판본이_모집단에_둘이면_한_행만_낸다` |
 | 상수 | 없음 | `deadline_days_annual` 90 · `deadline_days_interim` 45(법정) · `date_check_near_days` 7(어휘 경계). 뒤 하나는 SQL 숫자 리터럴 금지 규약(`test_sql파일에_상수_하드코딩_없음`)의 통로다 | `baseline_seed_s11.json` |
+
+**S11 최근 창 정정 파싱률 (2026-09-28 추가, `EG3_disclosure_version`)**
+
+DART 정정신고 첫 장 서식이 2025년에 바뀌어 `stg_doc_correction` 의 `target_raw`·`filed_raw`/`filed_date`·`reason_raw` 가 2025년 96.6% · 2026년 99.1% NULL 이 됐다(항목 표는 계속 파싱됐다). `date_check='exact'` 는 2024년 1,212 → 2025년 44 로 떨어졌고, 사다리 L5 `n_correction_filed_parsed` 는 **전 구간 누적**이라 최근 1년이 통째로 죽어도 거의 움직이지 않아 20개월 동안 아무도 못 봤다. 파서는 `parsers_doc` p1.4 → **p1.5** 로 수리했고(값이 앵커와 다른 셀에 있으면 다음 줄을 잇고, 사라진 `3. 정정사유` 앵커는 정정사항 표의 `정정사유` 열에서 유도) 같은 사고가 다시 조용히 지나가지 않도록 최근 창 지표를 붙였다.
+
+| 항목 | 정의 |
+|---|---|
+| 모집단 | 최근 창 안(`rcept_dt` 가 기준일에서 `CORR_RECENT_WINDOW_DAYS`=90일 이내)의 **정정 접수** 중 ZIP 정정신고 첫 장이 있는 것(stage `stg_doc_correction.page_found`) |
+| 분자 | 그중 `filed_date_status='parsed'` |
+| 기준일 | 산출의 `max(rcept_dt)`(metrics `corr_recent_asof`). 오늘 날짜로 잡으면 과거 스냅샷 재빌드에서 창이 늘 비어 판정이 잠든다 |
+| 판정 | 표본 ≥ `CORR_RECENT_MIN_N`(50) **그리고** 비율 < `CORR_RECENT_FAIL_RATIO`(0.5) 일 때만 **FAIL**(`n_corr_recent_parse_drift`=1). 표본이 얇으면(연휴·부분 도착) 기록만 한다 |
+| 경고선 | 비율 < `CORR_RECENT_WARN_RATIO`(0.9) 는 기록형 `corr_recent_parse_warn`=true. `stage.gates.GateStatus` 는 PASS·FAIL·SKIP 셋뿐이라 WARN 상태를 새로 만들지 않았다 — 만들면 전 게이트의 판정 축이 바뀐다 |
+| 기록형 metrics | `n_corr_recent_page` · `n_corr_recent_parsed` · `corr_recent_parse_ratio` · `corr_recent_asof` · `corr_recent_window_days` · `corr_recent_min_n` · `corr_recent_fail_ratio` · `corr_recent_parse_warn` |
+| 축 | `page_found`·`filed_date_status` 는 산출 컬럼이 아니라 **stage 축**이다(§5-C 규약 — 산출이 만들지 않은 축으로 재야 항진명제가 아니다). `stg_doc_correction` 은 `key_unique=True` 라 JOIN 팬아웃이 없다 |
+| 절단본 | 최근 창에 정정 1건(2026-08-31)·파싱 0 → 비율 0.0 이지만 표본 1 < 50 이라 PASS + 기록. 서식 드리프트가 절단본에도 실재한다(픽스처는 p1.4 판이라 재파싱 전까지 그대로) |
+| 테스트 | `test_equity_s11_disclosure.py::test_최근_창_*` 4건(절단본 기록형 · 20/60 폐기 · 40/60 경고만 · 55/60 정상) |
 
 **S12 `fin_std` 구현 정정 (2026-09-06, `rules_s12.py`)**
 
@@ -2194,6 +2233,7 @@ S07 의 커널 3포트 어댑터는 제품 경로가 쓰지 않았고, 제품 �
 | 판본 dedup 축 | "덮어쓰기 원천은 최초 관측만" | 그룹 = (`ticker`, `date`), 선택 = `observed_date` **최소** 1행(동률은 투영 컬럼 순서로 파기 — `corp.sql` 규약, EG5a). 접힌 수는 산출 컬럼 **`n_src_rows`** 로 싣는다(프레임 `build.py` 가 `_meta.n_dedup` 을 0 으로 고정하므로 `corp_event` 규약 계승, 위 S05 블록) | EG1 §3-⑳ 우변이 v3 를 `count(DISTINCT ticker, date)` 로 세는 것과 짝이 맞는다 |
 | EG6 대상 술어 | 매트릭스 25행 `●(P01,P03)` — P01 은 `consensus_daily`(wise) 용 문구 | `opinion_daily` 판으로 옮겨 적는다. **P01** = 산출 wise·v3 행의 `observed_date` 가 그 stage 키 그룹의 `min(observed_date)` 와 같은가를 **stage 에서 독립 재계산**(+ v3 는 값 5축이 실제 그 원천 행에 있는지 역조인 `n_v3_payload_not_in_source`). **P03** = `is_latest*`·`*_current` 컬럼 부재(선언 컬럼 집합에서 판정). 부정 픽스처는 FX-N-005 대응으로 판본 선택을 `DESC` 로 뒤집는 변종 | `rules_s18.eg6_first_observation` · `tests/test_equity_s18_opinion.py::test_최신_관측을_고르면_EG6가_폐기한다` |
 | EG8 술어·상수 | 매트릭스 25행 `skip(no_baseline)` (술어 미기재) | **v3 ⋈ wise 겹친 (`ticker`, `obs_date`) 의 값 5축(`opinion_score`·`target_price_krw`·`eps_krw`·`per`·`analyst_count`) 일치율 ≥ `opinion_daily.src_overlap_agree_min`**. 겹침 0 이면 `skip(no_cross_source)`, 상수 미등재면 `skip(no_baseline)` + 측정치(`agree_rate`·컬럼별 일치수) 기록. 절단본 실측 겹침 5키 · 일치율 **1.0** 이지만 표본이 5뿐이라 seed 에 넣지 않는다(1.0 을 굳히면 서버 첫 불일치에 폐기) | WORKFLOW §3-2 5단계 "v3⋈WISE 겹침 일치율 ≥ baseline" · `baseline_seed_s18.json._measured` |
+| EG8 추정기관수 비교 (10-06 G-42, e1.24.0) | 5축 전부 `IS NOT DISTINCT FROM` | **`analyst_count` 는 wise 0 ≡ v3 NULL 동치 비교**(나머지 4축은 그대로, 반대인 wise NULL · v3 0 은 동치 아님). stage 2.5.0(10-05)부터 WISE '3개월 의견 없음'을 0 으로 싣는데 동결 v3 미러는 같은 경우를 NULL 로 가져 서버 겹침 796키 중 290키가 어긋남으로 잡혔다(일치율 0.636 → 동치 비교 796/796). 게이트만 바뀌고 산출은 불변 — 열 정의는 v3 구간 NULL · wise 구간 0 으로 갈린 채 남는다 | `rules_s18._same` · `tests/…::test_wise_0과_v3_NULL인_추정기관수는_EG8이_같은_값으로_본다` · 경계(단방향·괄호·다른 열·0 한정) `tests/…::test_EG8은_추정기관수_동치의_경계를_넘으면_폐기한다` |
 | EG9-P06 (시총 분위별 커버율) | 매트릭스 25·26행 `●(P06)` | **분위 축은 S18 에서 낼 수 없다** — `mktcap_krw` 는 `universe_daily`(S03B)·`price_daily` 에 있는데 S18 의 선행은 S01 뿐이다(WORKFLOW §3-1). 대신 `security`(종목 축: 커버 종목수·`sec_type` 별 커버)·`security_span`(날짜 축: 관측일이 구간 안/뒤/앞)으로 커버 모집단을 **기록형** 으로 남기고 `coverage_by_mktcap_quintile` = `null` + 사유 문자열을 metrics 에 싣는다. 분위 축은 S19 `dataset_profile.coverage_by_mktcap_quintile` 이 낸다 | `rules_s18._coverage_metrics` · DESIGN §10 P37 ⑥ |
 | S18 입력 | WORKFLOW §3-1 은 stage 4테이블만 적었다 | equity **`security`·`security_span` 2개를 입력에 더한다** — 위 EG9 커버 모집단이 읽는다. 산출 `.sql` 은 stage 만 읽고 두 equity 입력은 게이트 전용이지만 `BuildRecord.inputs` 에 고정돼야 커버율 기록이 재현된다(§2 입력 고정). 그래서 실행 순서는 `trading_calendar` → `security` → `security_span` → S18 이다 | `rules_s18.OPINION_DAILY.inputs` · `tests/test_equity_s18_opinion.py::_build_chain` |
 | 등급 어휘 | DESIGN §4-6 에 어휘 명시 없음 | **stage 정본 계승**. `rules_wise._OPINION_CLASS` 가 원문 17종을 {`buy`, `hold`, `sell`, `other`} + 공란 NULL 로 접으므로 equity 는 **재계산 없이 폐쇄만 판정**한다(`n_opinion_class_outside_vocab`·`n_prev_opinion_class_outside_vocab`, 폐기형). 원문 `opinion`·`prev_opinion` 은 대소문자·한/영 표기 그대로 보존한다(절단본 8종). `opinion_daily.opinion_score` 는 WISE 가 이미 접은 점수라 임계로 등급을 굽지 않는다(§1 금지) | `tests/…::test_등급_어휘_밖이면_EG3가_폐기한다` |
@@ -2510,3 +2550,309 @@ EG5c metrics 에 뷰별 `columns_added`·`columns_removed`·`schema_changed` 와
 **과거 값 변경**을 구별할 수 없었다 — 9/16 의 `n_diff=319,310` 은 전자였고(가격 축이 아닌
 `v_cum_adj`·`v_adj_volume_fwd` 의 n_diff 0 이 증거) 그 판정을 09-19 에 역추적해야 했다.
 이제 FAIL·PASS detail 에도 `schema_changed=[...]` 가 붙는다.
+
+### 11-6. EG3_fin_std 확장 — capex 자산별 합과 `capex_basis` 어휘 (DQ-8, 2026-09-26)
+
+| 항목 | 내용 |
+|---|---|
+| 왜 | DART 현금흐름표는 유형자산 취득을 집계 한 줄(2,218사) 또는 자산별 줄로 적고 **같은 회사가 둘 다 적는 경우는 0건**이다. 대응표가 집계 줄만 잡아 FY2025 연간 2,631사 중 **311사**의 `capex_ytd` 가 NULL 이었고(그중 211사는 자산별 합으로 산출 가능), 그것이 09-23 유니버스 `qual_fcf_assets` 결측 34 중 32 의 원인이다 |
+| 규칙 | `_acct` 에 tier `d_ppe_parts` 두 줄(kind `concept` 9종 · kind `nm_nonstd` 11종, 둘 다 `agg='sum'`). 집계 줄이 하나라도 있으면 `best_tier` 의 `min(tier)` 가 a/b/c 에서 끝내므로 **이중계상은 구조적으로 불가능**하다. `nm_nonstd` 는 표준계정코드 미사용 행만 보는 kind 다 — `건설중인자산의 취득`·`기타유형자산의 취득`·`비품의 취득` 이 표준 태그의 계정명이기도 해서, 평범한 `nm` 으로 두면 같은 줄이 두 번 더해진다 |
+| 신설 컬럼 | `capex_basis` ∈ {`standard`, `ppe_parts`, `ppe_incl_invprop`, `none_in_cf`, `no_cf_statement`, `unmapped`}(뒤의 둘은 §11-8 이 `unavailable` 을 가른 것) — `wide_acct` 에서 `max(basis) FILTER (WHERE metric='capex_ytd' AND v IS NOT NULL)`, 최종 SELECT 에서 `coalesce(…, 'unavailable')`. `revenue_basis` 와 같은 자리·같은 규약이고 **`capex_basis_prev` 는 두지 않는다** |
+| 폐기형 | `n_capex_basis_outside_vocab`(NULL 도 위반) — 어휘 폐쇄뿐이다. 복구 규모에는 임계를 걸지 않는다 |
+| 기록형 | `n_by_capex_basis` — `ppe_parts` 행 수가 이 규칙이 실제로 복구한 크기다(플랜 GA2 가 이 값으로 판정한다: FY2025 11011 `ppe_parts` ≥ 205) |
+| 부호 | 합산 전에 `abs()` 하지 않는다. 한 회사 안에서 부호는 일관이고(실측) 취득액(크기)으로 바꾸는 것은 소비 측 몫이다(compat `mappings.py` · 팩터층 동일) |
+| 제외 | 사용권자산(리스 `AdditionsToRightofuseAssets`·`PurchaseOfFinanceLeaseAssets`, 이름에 '사용권자산') · 무형자산 · 투자부동산. 집계 줄의 정의(PPE)와 범위를 맞춰야 `standard` 회사와 횡단면이 선다 |
+
+### 11-7. 같은 게이트의 후속 — 합산 줄 · 이름 공백 정규화 · 0 규칙 (F-A1·F-A2·F-A3, 2026-09-26)
+
+11-6 의 잔여 107사를 전수 분류해 나온 세 갈래다(규칙 판본 `e1.19.0`).
+
+| 항목 | 내용 |
+|---|---|
+| F-A1 합산 줄 | 유형자산과 투자부동산을 **한 줄로** 적는 7사(정규화 이름 `유형자산및투자부동산의취득`·`투자부동산및유형자산의취득`, 유니버스 024110·030200 KT·000370·046890). tier **`e_ppe_combined`**(kind `nm_nonstd`, `agg='pick'`, basis `ppe_incl_invprop`) 가 `d_ppe_parts` **뒤**에 붙는다 — 자산별 합이 있으면 PPE 정의에 정확히 맞으므로 먼저 쓴다. 표준 태그를 단 회사는 tier a 가 이미 `standard` 로 잡는다. 자산별 비표준 이름도 3종(`건설중인유형자산의 취득`·`기타의유형자산의 취득`·`건설중인자산(유형자산)의 취득`) 늘었다 |
+| F-A2 이름 정규화 | 계정명 대조를 **공백 뗀 판**으로 한다 — `.sql` 의 `fin.account_nm_norm = regexp_replace(account_nm, '\s+', '', 'g')` ↔ `_acct` 토큰(`rules_s12.norm_nm()`). DART 계정명의 공백은 회사마다 임의다(CF 90,456행에 공백). `cf_operating_ytd` 이름 목록에 `영업활동으로인한순현금흐름` 을 더했고 **`영업활동으로부터창출된현금흐름` 은 넣지 않는다**(이자·법인세 차감 전 소계). 완전일치 규칙(fin_map 규칙 1)은 그대로다 — 공백만 무시한다 |
+| F-A3 0 규칙 | `capex_zero` CTE — 현금흐름표가 있고(영업 또는 투자 소계가 잡혔고) **값 있는 유형자산 취득 줄이 하나도 없는** 그룹은 `capex_ytd = 0` · `capex_basis='none_in_cf'`. 판정 축은 OR: capex 토큰(집계 concept · 자산별 9종 · 비표준 이름 · 합산 줄)에 걸린 줄 · 정규화 이름에 '유형자산' 과 '취득' 이 함께 든 줄. **금액이 있는** 줄이 하나라도 있으면 막는다(값 모호로 NULL 인 것과 안 산 것을 섞지 않는다). 금액이 빈 줄은 「샀다」 는 증거가 아니라 막지 않는다 — 집계 줄이 값 공란인 9사가 여기 든다. 현금흐름표 자체가 없으면 NULL 이고 사유 라벨은 `no_cf_statement` 다(§11-8) |
+| 왜 0 인가 | 현금흐름표는 그 기간의 현금흐름을 **다 적는 표**다. 리스·무형·소프트웨어·금융자산 취득만 있고 유형자산 취득 줄이 아예 없으면 그 기간에 유형자산을 안 산 것이고, 충실한 읽기는 결측이 아니라 0 이다(FY2025 92사). 결측으로 두면 FCF 가 통째로 비어 회사가 팩터 모집단에서 사라진다 |
+| F-A4 부호 | `d_ppe_parts` 의 `agg` 는 **`sum_abs`**(크기의 합) — 한 표 안에서 표준 태그 줄은 +, 비표준 줄은 − 로 적는 회사가 있어(00402989 FY2016: 건물 +34.79억·기계장치 +20.42 vs 공구와 기구 −12.59·시설물 −9.11) 그냥 더하면 취득이 상계된다. e1.19.0 서버 재빌드에서 `ppe_parts` 361행 중 53행이 줄어 드러났다. `ppe_parts` capex 는 **언제나 양의 크기**이고 `standard` 는 부호를 그대로 둔다(소비 측이 abs) |
+| F-A4 이름 확장 | `CAPEX_FALLBACK["nm"]` 을 **자산 종류 24 × 접미어 2 = 48종**의 곱집합으로 펼쳤다(`토지의취득`·`토지취득`·`기계장치의취득`…). 표준계정코드를 하나도 안 단 회사는 모든 종류를 평이한 이름으로 적는다(00159971 FY2015 8줄 중 2줄만 세어졌다). 펼친 목록이라 **완전일치 규칙은 그대로**고, `nm_nonstd` 가 `NOT account_std` 행만 보므로 표준 태그 줄은 여전히 두 번 세어지지 않는다. 사용권자산·리스자산·투자부동산은 종류 목록에 없다 |
+| F-A4 pick 우선순위 | `hit.nm_exact`(0 = 공백 정규화 없이도 걸리던 줄·태그 히트 포함, 1 = 공백을 떼야 걸린 줄)를 `val` 이 본다: **exact 히트의 값이 하나면 그것** → exact 히트가 없고 전체 값이 하나면 그것 → 아니면 NULL(모호). `sum`·`sum_abs` 는 전체 히트를 쓴다. 정규화가 만든 모호(아래 「잔여 위험」)로 `cf_operating_ytd` 2행이 값 → NULL 로 퇴행한 것을 되돌린다(00364795 FY2018 · 00926522 2019) |
+| 무회귀 | `val`·`best_tier` 는 건드리지 않는다 — 0 규칙은 `wide` 에서 뒤에 덮고 `capex_q`(분기 차분)로는 옮겨가지 않는다. 절단본 220행 재빌드에서 61컬럼 전부 값 변화 0(`capex_basis` 220 `standard` 유지). **잔여 위험**: 공백 정규화로 tier `c_nm` 의 `pick` 이 새로 갈릴 수 있다(표준 태그가 아예 없는 그룹에서 공백 변형 두 줄이 값이 다를 때). 절단본에서는 `cf_financing_ytd` 3그룹이 그런 꼴인데 셋 다 표준 태그가 있어 tier a 가 이기고(00722500, `non_krw` 격리) 산출은 안 바뀌었다 — 서버 재빌드(e1.19.0)에서 실제로 `cf_operating_ytd` 2행이 이렇게 퇴행했고, 위 **F-A4 pick 우선순위**가 그 통로를 닫았다(공백 변형은 동점자일 때만 본다) |
+
+### 11-8. `EG8_fin_std` 신설 — NULL 사유 어휘와 예상 대상 기준 커버리지 (T-H 1단계, 2026-09-28)
+
+플랜 [`plans/2026-09-26-layer-fixes.md`](plans/2026-09-26-layer-fixes.md) §11 · 자문
+[`research/2026-09-28-gpt-data-quality-consult.md`](research/2026-09-28-gpt-data-quality-consult.md)
+§2. 규칙 판본 `e1.21.0`.
+
+**왜**: DQ-6(은행·보험 템플릿의 순이익이 전건 NULL — 그 서식은 계정 코드가 다르다)도
+DQ-8(capex 311사 NULL)도 **모든 게이트를 통과했다**. EG7 격리 비율은 표 전체를 분모로 쓰고,
+그 행들은 격리된 것이 아니라 **값만 빈 채 채택**됐기 때문이다. 「값이 나와야 했던 대상 중 몇이
+나왔는가」를 세는 축이 아무 데도 없었다.
+
+#### ① NULL 사유 어휘 — `unavailable` 을 둘로 가른다
+
+| 컬럼 | 값이 나온 라벨 | 값이 없는 **사유** |
+|---|---|---|
+| `capex_basis` | `standard` · `ppe_parts` · `ppe_incl_invprop` · `none_in_cf`(0 으로 읽음) | `no_cf_statement` = 영업·투자 소계가 둘 다 없다(현금흐름표를 읽은 적이 없음 = §11-7 F-A3 0 규칙 분모의 **뒤집은 판**) · `unmapped` = 표는 있는데 대응표가 못 잡았다(`pick` 이 갈려 모호한 것 포함) |
+| `revenue_basis` | `standard` · `banking_gross` · `insurance_gross` · `consensus` | `no_is_statement` = IS·CIS 행이 아예 없다(`req` CTE 에 그룹이 없다) · `unmapped` = 표는 있는데 못 잡았다 |
+
+고칠 대상이 **원천**인지 **대응표**인지를 행이 스스로 말한다. 어휘 정본은
+`rules_s12.CAPEX_BASIS_VOCAB`·`REVENUE_BASIS_VOCAB`(각각 6종)이고 NULL 사유만 따로
+`*_NULL_REASONS` 로 묶여 `EG3_fin_std.n_revenue_basis_conflict` 의 우변이 된다.
+**값은 하나도 안 바뀐다** — 재빌드 diff(§12)에서 나와야 하는 값 변경은 이 라벨 재명명뿐이다.
+`wide_acct` 가 `val` 이 아니라 **`grp`(그룹 축)** 에서 출발하도록 바꾼 것도 같은 이유다: 24 계정이
+하나도 안 걸린 그룹이 `wide` 에서 빠지면 최종 SELECT 가 `coalesce` 로 라벨을 지어내야 한다.
+
+#### ② `EG8_fin_std` — 그룹별 예상 대상 대비 유효 비율
+
+| 항목 | 내용 |
+|---|---|
+| 그룹 축 | `fs_div` × **템플릿** × `report_code`. 템플릿은 `.sql` 의 `req` CTE 와 **같은 술어**를 게이트가 `stg_fin` 위에서 되풀이 계산한다(게이트는 `.sql` 을 베끼지 않는다 — EG3 기간 판정과 같은 규약): `RevenueFromInterest` 태그 → `banking`, 아니면 `InvestmentIncome` → `insurance`, 그 밖 `standard`. 요구 태그 정본은 `fin_map.REVENUE_FALLBACK` 의 `require` 이고, 산출에는 `reprt_code` 가 없으므로(1Q·3Q 는 `doc_acode` 로 다시 갈린다) 그룹 조인 키는 `(corp_code, bsns_year, fs_div, rcept_no)` — `.sql` `grp` 의 `max(rcept_no)`(그룹의 최신 접수, e1.25.0 G-21 — 그 전은 `min`)와 같은 자리다 |
+| 분모(예상 대상) | 그 그룹의 **채택 행 + 격리 행**. 격리를 넣는 이유는 값이 나와야 했던 대상이 격리로 사라지는 것도 커버리지 손실이기 때문이다(DQ-5·DEFECT-F01 이 그 유형). 기간 미해소로 격리돼 `report_code` 가 없는 행은 그룹 키에서 `unknown` 자리에 모인다 |
+| 분자 | **채택 행 중 값이 있는 것**. 계정은 `revenue`·`op_profit`·`net_income`·`total_asset`·`cf_operating_ytd`·`capex_ytd` 여섯(`rules_s12.COVERAGE_METRICS`) |
+| 기록형 | `coverage_by_group`(예상 대상 **20 이상**인 그룹만 — MANIFEST 가 커지지 않게) · `coverage_total`(전 그룹 합계) · `n_groups` · `n_groups_recorded`. `BuildRecord.gates` 에 실리고 **다음 빌드가 그것을 읽는다** |
+| 폐기형 | 직전 커밋 빌드의 같은 metric 과 견줘, 예상 대상 20 이상인 그룹에서 유효 비율이 **0.5 이상 떨어지거나**, 직전이 0.5 이상이었는데 **0 이 되면** FAIL |
+| 경보(기록형) | 낙폭 0.05 이상이고 추정 영향 건수(`낙폭 × 예상 대상`)가 5 이상이면 `coverage_warn` |
+| 경보 내용 | 항목마다 그룹·계정·전/후 비율·낙폭·예상 대상·유효 건수·추정 영향 건수 + **대표 사례 3건**(키는 `corp_code`·`period_end`·`report_code`·`fs_div` 를 막대 기호로 이은 문자열) |
+| 직전 판이 없으면 | **기록만 하고 PASS**(첫 빌드·규칙 판본 교체 직후). 절대 수준에 임계를 걸지 않는 이유는 계정 서식이 원래 다른 그룹(금융 템플릿의 `gross_profit` 등)이 매번 걸리기 때문이다 |
+| 상수 | 넷 다 **판정 규칙 자체**라 baseline 에 등재하지 않는다(`rules_s12._COVERAGE_MIN_EXPECTED` 20 · `_COVERAGE_FAIL_DROP` 0.5 · `_COVERAGE_WARN_DROP` 0.05 · `_COVERAGE_WARN_MIN_ROWS` 5). `_INFERRED_RECENT_DAYS_DEFAULT` 와 같은 취급이다 |
+| 실행 순서 | `extra_gates=(EG3_fin_std, EG8_fin_std, EG6_fin_std)` — EG3 바로 뒤. FAIL 하면 뒤 게이트는 `skip(upstream_failed)` 다 |
+
+**절단본 실측(220 채택 + 6 격리)**: 그룹 12(`CFS`·`OFS` × 보고서 종류 4 + 은행 템플릿 1법인의
+CFS 4) 중 예상 대상 20 이상은 `CFS|standard|11011` 48 · `11012` 47 · `11013` 49 · `11014` 42 넷.
+전체 유효 비율은 `net_income` 0.9646, 나머지 다섯 0.9735(분모에 격리 6 이 들어 있어 1.0 이 아니다).
+
+**플랜 GT-H 판정**: DQ-6 상황(금융 템플릿 순이익 0%)을 손 트리로 넣으면 FAIL 하고 대표 사례가
+나오며, 직전 판이 없으면 같은 데이터가 PASS(기록만) 한다 —
+`test_직전_판보다_순이익_커버리지가_무너지면_폐기한다`·`test_직전_판이_없으면_같은_판이_기록만_하고_통과한다`.
+
+**서버 첫 반영 시 주의**: 직전 판(`m_20260926T132656_683291Z`)에는 `EG8_fin_std` 기록이 없으므로
+첫 재빌드는 **기록만** 한다(판정은 그다음 판부터). 2단계(M2 T2.2b `factor_inputs`)는 플랜 §11 참조.
+
+## 12. 판 대 판 전 컬럼 diff — `scripts/equity_diff.py` (T-G, 2026-09-28)
+
+플랜 [`plans/2026-09-26-layer-fixes.md`](plans/2026-09-26-layer-fixes.md) §11. **게이트가 아니라
+게이트 밖의 축이다** — EG1~EG21 은 새 판 하나를 놓고 「이 판이 스스로 옳은가」를 묻고, 이것은 두 판을
+놓고 「규칙 변경이 **무엇을** 바꿨는가」를 묻는다. 09-24~26 의 capex 수정에서 오케스트레이터가 손으로
+짜 돌리던 ad-hoc DuckDB 스크립트를 저장소 도구로 굳혔고, 그 손작업이 실제 회귀를 세 번 잡았다
+(§11-7 F-A4 의 `ppe_parts` 부호 상계 53행 · `cf_operating_ytd` 2행 값→NULL 퇴행 · 공백 정규화가
+만든 `pick` 모호).
+
+### 12-1. 무엇을 세는가
+
+| 축 | 정의 |
+|---|---|
+| 비교 단위 | 표의 **선언 grain**(`rules_s*.py` 의 `EquityTable.grain`)으로 두 판을 FULL OUTER JOIN 한 행. `--key a,b` 로 덮어쓸 수 있다(선언이 없는 표·절단본 실험용) |
+| 컬럼 카운터 | `value_to_null`(값→NULL) · `null_to_value`(NULL→값) · `value_changed`. 수치 컬럼의 값 변경은 **상대 허용오차**(`--tol 1e-9` 기본, `--tol capex_ytd=1e-6` 로 컬럼별), 그 밖(문자·날짜·불리언·LIST·STRUCT·MAP)은 `IS DISTINCT FROM` 동등 비교. 수치는 스칼라 타입만이다(`is_numeric` — 앞만 맞추던 옛 식이 `INTEGER[]` 를 수치로 보고 DOUBLE 캐스트해 서버 10-08 stg_wise_coverage 비교가 죽었다) |
+| 행 카운터 | `rows_added` · `rows_removed` |
+| 묶음 | `*_basis` 계열과 `available_date`·`*_available_date` 를 따로 합산한다 — 어휘 축과 공개시점 축은 값 축과 위험이 다르다 |
+| 제외 | 운영 메타(`v`·`build_id`·`built_at_utc` 류)와 **선언 컬럼이 아닌 하이브 키**(`year`). 보고서 `excluded_columns` 에 무엇을 뺐는지 싣는다. `_reject/` 는 산출이 아니므로 읽지 않는다 |
+| 스키마 차이 | 한쪽에만 있는 컬럼은 비교하지 않고 `columns_only_in_after`·`columns_only_in_before` 로 보고한다(새 컬럼을 「전 행 NULL→값」으로 세면 숫자가 의미를 잃는다) |
+| 대표 사례 | 0 이 아닌 카운터마다 키 + 전/후 값 3건(`--max-examples`). 미설명이 남은 카운터는 **미설명 쪽을** 보여 준다 |
+
+판 기본값은 `--after` = MANIFEST `current_build`, `--before` = MANIFEST 순서상 그 직전이면서
+**디스크에 남은** 판이다(keep=3 GC 로 사라진 판은 후보가 아니고, 후보가 없으면 거절한다).
+
+**키 위생을 먼저 본다.** grain 에 중복이나 NULL 이 있으면 조인이 팬아웃해 아래 숫자가 전부 거짓이
+되므로, 컬럼 비교를 하지 않고 `rc 1` 로 끝낸다(EG3-P01 이 통과한 판이면 일어나지 않는다).
+
+### 12-2. 예상 변경 선언 `--expect`
+
+항목은 `{column, kind, where, note}` 이고 `kind` 는 위 5종이다. `where` 는 **after 행 컬럼** 위의
+SQL 술어이며(before 값은 `before_<컬럼>`, 행 삭제처럼 after 가 없는 카운터는 그쪽을 쓴다), 같은
+(컬럼, kind) 의 항목은 OR 로 묶인다. 술어에 걸린 변경은 `explained`, 나머지는 `unexplained` 다.
+변경 건수가 0 인 선언도 술어를 **실행해 본다** — 오타 난 `where` 가 조용히 지나가면 다음 판에서
+「설명된 줄 알았던」 변경이 게이트를 그냥 통과한다. JSON 이 정본이고(서버 venv 에 PyYAML 이 없을 수
+있다) PyYAML 이 있으면 같은 모양의 YAML 도 읽는다. 문서용 예시:
+[`equity_diff/expect_fa4_example.json`](equity_diff/expect_fa4_example.json)(§11-7 F-A1~F-A4).
+
+### 12-3. 판정 (`--gate`)
+
+| rc | 언제 |
+|---|---|
+| **2** | **미설명** 값→NULL > 0 · **미설명** 행 삭제 > 0 · **미설명** `available_date` 변경 > 0 중 하나라도 |
+| **1** | 사용법·데이터 오류 — 키 중복/NULL, 없는 판, 직전 판 없음, expect 술어 실행 불가 |
+| **0** | 그 밖 |
+
+세 축만 폐기형인 이유: 있던 값이 사라지는 것(값→NULL)과 PIT 표에서 행이 사라지는 것은 규칙 개선의
+산출이 아니라 회귀이고, 공개시점 축이 움직이면 look-ahead 판정 자체가 흔들린다. **미설명 값 변경 ·
+NULL→값은 기록형**이다 — 결측 복구·정의 교정이 정상적으로 만드는 변경이 대부분 이 두 갈래다.
+`--gate` 없이 돌리면 언제나 rc 0 이고 보고서만 낸다.
+
+### 12-4. 결정성 `--determinism <build_a> <build_b>`
+
+MANIFEST 의 **파티션 `content_hash` 만** 본다(데이터를 읽지 않는다). 같은 스냅샷으로 두 번 지은
+판의 해시가 같은지 보는 축이며, 규칙 판본을 올린 빌드에서 EG5a 가 `skip(rules_changed)` 로 비켜
+가는 자리를 메운다(§2-4). 하나라도 다르면 rc 2.
+
+### 12-5. 실행
+
+```bash
+# 로컬 (절단본·스크래치 루트)
+uv run --project backend python database/scripts/equity_diff.py \
+    --root <루트> --table fin_std --before <bid> --after <bid> \
+    --expect database/docs/equity_diff/expect_fa4_example.json --gate
+
+# 서버 (읽기 전용). `deploy.sh` 는 src/ 와 scripts/ 만 민다 — expect 파일은 scp 로 같이 올린다
+scp database/docs/equity_diff/expect_fa4_example.json \
+    kael-server:quant-ledger/logs/equity_diff_expect_fa4.json
+ssh kael-server 'cd quant-ledger && PYTHONPATH=src .venv/bin/python \
+  scripts/equity_diff.py --table fin_std \
+    --before m_20260926T110658_462262Z --after m_20260926T132656_683291Z \
+    --expect logs/equity_diff_expect_fa4.json --gate'
+ssh kael-server 'cd quant-ledger && PYTHONPATH=src .venv/bin/python \
+  scripts/equity_diff.py --table fin_std --determinism <build_a> <build_b>'
+```
+
+JSON 보고서는 `--out` 이 없으면 **루트의 부모 아래** `logs/equity_diff/<표>_<before>_<after>.json`
+이다(표준 서버 루트에서는 `data/logs/equity_diff/`). 마크다운 요약은 stdout 으로 나간다.
+
+### 12-6. 매일 아침 조용한 손실 검사 — `python -m daily.silent_loss` (컷오버 K1-4a, 2026-10-10)
+
+정본 `plans/2026-10-10-cutover-track.md` §3 K1-4a · DECISIONS N-42 Q4('조용한 손실 검사 2주 기록 뒤 차단 전환') · 로드맵
+K1-4('매 아침 직전 아침 확정판과 비교해, 설명 안 되는 값→NULL·행 삭제 0'). 같은 diff 를 사람이 규칙을 바꿀 때만이 아니라
+**매일 아침 확정판 뒤** 모델 입력 전체에 돌린다. 새 엔진은 없다 — 이 스크립트에서 함수 셋을 꺼내 라이브러리로 쓴다:
+`load_equity_rules`(선언 등록 한 곳) · `diff_core`(뷰·키 위생·조인·한 번의 집계 — CLI `run_diff` 도 이것을 부른다) · 집계의
+선택 술어 `split`(카운터마다 술어에 걸린 수 `in_split` 을 같은 한 번의 집계로 더 센다)과 키 위생의 `nullable`(NULL 허용 키 열).
+CLI 출력은 그대로다(로컬 price_daily 두 판 JSON 보고서가 바꾸기 전과 같다).
+
+| 축 | 정의 |
+|---|---|
+| 대상 | 모델 폐포 — fi 직접 원천 `factor_inputs.queries.TABLE_SOURCES` 에서 equity `RULES[t].inputs` 를 거꾸로 따라 닫은 stage·equity 표(원장 제외, `closure_tables`). 10-10 코드 기준 **53표 = equity 18 + stage 35**(정본 문구 '27표'와 다르다 — stage 입력까지 닫으면 35표가 붙는다). 목록은 박지 않는다 |
+| 판 | 오늘 아침 인계 이력 `data/deliver/history/<D>_morning.json` 의 stage_builds·equity_builds 대 직전 거래일(판정 달력) 아침 인계 이력의 판. 판이 MANIFEST·디스크에서 사라졌으면(stage keep 3 · equity keep 10) 그 표는 **판정 불가**(P1) |
+| grain | equity 는 선언 grain. stage 는 `key_unique` 면 자연키, 판본 표(append_only — G6 이 유일성 보장)면 자연키 + `observed_date`, 판본 없는 로그면 선언 열 전부 + `observed_date`. NULL 키는 막지 않는다(조인이 NULL 안전 — equity 격자 flow_daily 의 not_collected 셀은 src NULL 이 설계, 로컬 10-03 판 25,685행). 중복 키만 판정 불가 |
+| 건너뛰기 | 같은 판 id → 읽지 않음(`same_build`). 표 content_hash·행 수가 같음 → 읽지 않음(`same_content`). equity 는 **파티션 content_hash 가 같은 파티션을 양쪽에서 함께 뺀다** — 같은 해시 = 같은 행 집합이고 grain 이 표 전체에서 유일하므로 남은 파티션끼리의 조인이 표 전체 조인과 같은 숫자를 낸다. stage 판 기록에는 파티션 해시가 없어 표 전체를 조인한다 |
+
+**갈래**(기록형 첫 판 — 보수적으로, 설명 못 하면 미설명):
+
+| 갈래 | 무엇 | 판정 |
+|---|---|---|
+| 새 행 · NULL→값 | `rows_added` · `null_to_value` | 정상(수만 남김) |
+| 재수집 창 | 날짜 열(date_axis 파티션 표의 날짜형 grain 열 — `date`·`snapshot_date`·`effective_date`·`fetched_date`)이 D 와 그 앞 `ledger_health.KRX_RECHECK_SESSIONS`(10)세션 안인 행의 값 변경 · 값→NULL(available_date 계열 열 제외) | 설명됨, 수는 남김 |
+| 규칙 변경 | 두 판의 `rules_version`(equity `e*` · stage 판본)이 다른 표 — 아래 미설명 후보 전부가 이 갈래로 간다 | 설명됨, 수는 남김 |
+| **미설명** | 창 밖 값→NULL · **행 삭제(창 안 포함)** · **available_date 계열 변경(창 안 포함 — 공개시점 축은 창으로 설명하지 않는다)** | 기록형: warn · 차단형: crit + 다음 모델 단계 차단 |
+| 보고만 | 창 밖 값 변경 | 12-3 과 같은 이유(정의 교정·결측 복구의 정상 산출) |
+
+날짜 열이 없는 표(마스터 `whole` · DART 접수 축 `receipt_axis`)는 grain 으로 비교하고 재수집 창 없이 같은 규칙이다. 규칙
+판본은 그 표 자신의 것만 본다 — stage 판본이 올라 equity 표 값이 바뀌면(equity 판본은 그대로) 그 equity 표는 미설명이다(보수적).
+
+**산출**: `logs/silent_loss/<D>.json`(표별 상태·판·규칙 판본·비교/건너뛴 파티션·갈래 수·미설명 종류별 수·미설명 표본 상위 5 —
+키와 전/후 값) · 런 로그 source `silent_loss`(ok · unexplained · undecidable · blocked) · notify 한 줄. rc(check) 0 미설명 0 ·
+1 미설명 > 0 · 2 판정 불가 · 3 차단. `daily_build.sh` 는 rc 와 무관하게 확정판 rc 를 그대로 둔다(0~3 밖이면 warn 1건).
+
+**차단 전환**: `config/silent_loss.env` 한 줄 `SILENT_LOSS_BLOCK=1`(켜는 쪽만 정확한 값, 저장소 값 0). **그림자 시작 10-14 부터
+2주 기록한 뒤** 켠다(정본 K1-4a · N-42 Q4). 켜면 미설명 > 0 **또는 판정 불가 표**(N-42 Q4 '필수 검사 SKIP = 실패')가 crit
+'조용한 손실 차단 D=…'(X-2 `COUNTED_CRIT_PREFIXES`)이고, 그 D 의 아침 확정판을 고정해 읽는 다음 모델 단계 — 15:41 장 마감 체인
+close(T-2) — 가 고정 판 확인 뒤·빌드 락 전에 `gate --date D'` 로 멈춘다(결과 파일이 없거나 못 읽거나 관문이 죽어도 막는다,
+P1). **꺼져 있을 때는 어떤 상태에서도 막지 않는다** — 체인이 스위치를 셸에서 파이썬 없이 읽고(`scripts/postclose_conf.sh`
+`silent_loss_block_on`, 모듈 `block_enabled` 와 같은 규칙 — 테스트가 대조) 꺼져 있으면 관문을 부르지 않는다. 그날은 장 마감
+판이 없는 날과 같다(T-7 대체 발송 경로 · T-38 점수 없는 7표). 켜는 쪽 동작은 테스트로만 고정했다
+(`tests/test_silent_loss.py::test_차단_*` · `tests/test_postclose_chain_sh.py::test_silent_loss_gate_*`).
+
+**비용 실측(로컬 맥, threads 3 · memory_limit 6GB)**: 로컬 equity 두 판(m_0929 → m_1003, 17파티션 표는 2026 만 조인) 폐포
+equity 18표 전부 **2.7초**. 파티션 건너뛰기를 끈 전체 조인은 큰 다섯 표(price_daily·price_adj_daily·universe_daily 각 1,100만 ·
+flow_daily·credit_daily 각 930만 행 — 5,200만 행) **27.5초 · 최대 RSS 2.7GB**(≈ 190만 행/초). stage 는 전체 조인이라 stg_fin
+모양 합성(8키 + Decimal(38,4) 6 + 글자 열, 1,540만 행 두 판) **20.5초 · 최대 RSS 5.05GB**. 행 수 비례로 stage 35표(≈ 7,000만 행 —
+stg_fin 1,540만 · 가격·상장·신용·외인·키움 수급 각 800~940만 · 공시 340만 …) ≈ 50초(맥) → 서버(4코어) 어림 **2~4분**, 메모리는
+`--memory-limit` 6GB 안(넘으면 duckdb 가 디스크로 넘긴다). 시간 한도는 두지 않는다(체인 맨 끝, P9). 더 줄이려면 stage 빌더가
+파티션 해시를 기록하게 하는 것이 다음 수다(후속).
+
+## 13. E-1 — `adj_factor` 사건 매칭에 KRX 기준가 근거 요구 (규칙 e1.28.0, 2026-10-10)
+
+v3 컷오버 트랙 QL-E 리뷰 MAJOR-2. 결함·규칙의 정본은 `sql/adj_factor.sql` 머리말 ※ E-1 · (a)~(d)
+블록이고, 여기에는 게이트 축만 적는다.
+
+- **결함**: (a)(b)(c) 가 원수익률 잔여로 세션을 골라, 그날 KRX 기준가가 직전 종가 그대로(조정 없음)여도
+  ok 계수를 접었다(069080·091700 자기주식 소각 · 240600 권리락 07-29 를 두고 09-15 급락 · 291230 감자
+  기준일 급등). 기준가가 같은 날 바뀌지 않으면 S06-2 (a)·conflict 가 손대지 못해 EG3·EG8·T-9 모두
+  통과했다(EG8 은 ok 계수의 적용일 수정수익률만 보고, 잘못 접힌 날은 수정수익률이 오히려 작아진다).
+- **규칙**: (a)(b)(c) 후보 세션 = 기준가 후보 bp, 잔여 = |기준가 비 ÷ 계수 − 1|. 기준가 NULL(저녁 잠정
+  행)은 결측. 못 찾으면 옛 원수익률 세션 s 로 사유를 가른다 — s 가 bp 면 옛 반증 경로
+  (`krx_base_inconsistent`, ⑤·`v_unfolded_event` 축 불변), 아니면 신설 `no_base_price_evidence`,
+  원수익률도 못 맞추면 `no_price_match`.
+- **같은 날 억제 순서(E-1 리뷰 MAJOR-1)**: 같은 (종목, 적용일)의 개별 후보는 기준가로 찾은 후보가 반증 경로
+  후보(`via_raw` — 원수익률 세션이 기준가 후보이나 비율이 안 맞는 것)보다 먼저, 같은 축 안에서는 우선순위
+  순이다. 우선순위 높은 반증 후보가 이기면 기준가로 맞은 사건이 눌리고, 직전 행이 참고가면 그 기준가는
+  (c) 재발견이라 신규 행도 없어 어디에도 접히지 않는다(재현: 감자 0.4 결정공시 + KRX 액면병합 0.5, 정지 뒤
+  기준가 ×2 · 종가 ×2.4 — `test_E1_같은_날_억제는_*`). 로컬 10-03 판에서는 이 모양이 0건이라 산출 불변.
+
+| 게이트 축 | 바뀐 것 |
+|---|---|
+| `FACTOR_SOURCE_VOCAB` | + `no_base_price_evidence`(10종). 어휘 폐쇄 `n_factor_source_outside_vocab` 가 그대로 닫는다 |
+| `n_unmatched_source_mismatch` | `factor_source ∈ UNMATCHED_FACTOR_SOURCES(no_price_match·no_base_price_evidence)` ⇔ `apply_basis = 'unmatched'` |
+| `OK_APPLY_BASIS` | `krx_base_price` 하나 — `n_ok_apply_basis_bad` 가 '기준가 근거 없는 ok 행' 을 폐기형으로 잡는다. 근거의 나머지 두 조건(그 세션이 기준가 후보 · 계수 곱 = 기준가 비)은 기존 `n_krx_row_out_of_scope`·`n_krx_price_factor_mismatch` 가 묶는다. 부정 픽스처: 069080 옛 산출 모양 되살리기 → FAIL(`test_E1_부정_*`) |
+| 기록형 | + `n_no_base_price_evidence`. 원래 0 이 되는 기록형: `n_ok_without_base_price_event` · `n_nominal_small_expected` · `apply_offset_sessions_max_individual`·`_combined`(ok 행이 전부 `krx_base_price`) — 축 정리는 후속 |
+| EG8 | 술어 불변. ok 사건 집합이 기준가 세션으로 좁혀져 `n_ok_events` 가 줄고 P02·P03 은 그 집합에서 잰다 |
+| ⑤ ③(ok 접힘일 제외) | 술어 불변. ok 행의 `available_date ≤ apply_date` 라 접힘일 = 적용일 = 그 단위가 소비한 기준가 세션이 되어 ② 사유 행과 겹칠 수 없다 — 안전망으로 남긴다 |
+
+**미해결이 늘어난 몫과 하류**: ok → 미해결(`no_base_price_evidence`) 사건은 `price_resolution` 이
+대개 `unresolved`(근처에 ⑤ 단위·ok 계수가 있으면 `price_only_near`·`factor_near`)다. fi `adj_ok` 는 그
+적용일에서 뒤집히고, T-9 `adj_jump_ok`(H1-4)는 적용일 ±6 세션에 제한폭 초과 점프가 있을 때만
+뒤집힌다 — 새 미해결은 대부분 소액(자기주식 소각 0.1~4.5%)이라 점프가 없다. K1-7a SKIP 허용표:
+이 변경은 새 SKIP 경로를 만들지 않고, 판본 상향 뒤 첫 빌드의 EG5a `rules_changed` 는 이미 허용표에
+있다(`src/stage/skip_allow.py`).
+
+**로컬 실측(10-03 판 입력, 같은 상수)**: 5,605 → 5,547행, 238행·138종목 변화. ok → not-ok 103
+(no_base_price_evidence 102 = 소액 84(자기주식 소각 감자 72 + 소액 무상증자 12) + 큰 사건 18 ·
+same_day_suppressed 1 — 같은 무상증자 중복 공시 109860, 계수는 형제가 같은 날 그대로 접는다), 다른 날로
+옮긴 ok 12(240600 07-29 · 037760
+2010-03-19 등 — 옮긴 날의 unknown_price_only 13행 소멸), 미매칭 → ok 11(정지 뒤 재개 기준가가 명목 ± 5
+밖 — 같은 날 unknown_krx ok 10행 소멸), 미매칭 → 반증 38(같은 날 unknown_krx 반증 35행 소멸, ⑤ 계수 행만
+사건 행으로 옮겨감). (종목, 날짜) 가격 단계를 KRX 기준가 사슬 단계(전일 종가 ÷ 기준가)와 견주면
+기준가가 안 바뀐 날의 계수 접힘 114 → **0**, 나머지 범주(일치 4,058 · KRX 만 1,062 · 둘 다 다름 197)
+불변.
+
+## 14. K1-6a — `adj_factor` not-ok 행 묶음 (기록형, 규칙 e1.29.0, 2026-10-10)
+
+v3 컷오버 트랙 K1-6a. K1-6/H1-1 분해(10-09, 운영 판 e1.26.0 — not-ok 3,561 = 가격 축 해소 2,962 +
+미해결 599)를 **매 빌드** 같은 술어로 다시 세어 `EG3_adj_factor` metrics 에 싣는다. 기록형이다 — checks 에
+넣지 않아 PASS/FAIL 을 바꾸지 않고, 산출 SQL(`sql/adj_factor.sql`)은 그대로라 표 내용도 같다. 판본 상향은
+'규칙 파일이 바뀌면 올린다'(K1-13)를 따른 것이다(e1.24.0 과 같은 '게이트 변경, 산출 불변').
+
+**정본 SQL**: `rules_s06.not_ok_bucket_sql(adj)` — not-ok 행마다 한 행(event_id · factor_source ·
+price_resolution · sec_type · no_bar_after_apply · 인접 수익률 행 수·최댓값 · bucket). 게이트 지표와 서버
+재판정이 같은 함수를 쓴다. 묶음은 아래 CASE 순서로 **배타·완전**하다(어디에도 안 맞으면 `unclassified`).
+
+| 순서 | bucket | 술어 | 처리 규칙 |
+|---|---|---|---|
+| 1 | `price_only`·`price_only_dup`·`factor_near`·`price_only_near` | `price_resolution` 그대로(가격 축 해소, e1.26.0 ⑤) | ⑤ 가 처리했다 — `price_only` 계수 행이 그날 기준가 비를 가격 축에 접고, 나머지 셋은 수정종가가 이미 이어져 fi `adj_ok`·`adj_jump_ok` 계단이 세지 않는다. 보유 수량 축(factor_ok=false·계수 1)은 그대로 |
+| 2 | `unresolved_excluded_kind` ① | 미해결 ∧ `sec_type ∈ PRICE_ONLY_EXCLUDED_SEC_TYPES`(fund·ship_fund·reit) | **설계상 제외(D6-1)** — 처리 없음. 분배·배당락 반복 하락이라 접으면 `adj_close` 가 분배 재투자 축이 된다. 가격 축 표식은 다른 미해결과 같다 |
+| 3 | `unresolved_no_bar_after` ② | 미해결 ∧ 주식 계열(`PRICE_ONLY_SEC_TYPES`) ∧ `no_bar_after_apply` | **가격 축 영향 없음** — 적용일 뒤 실거래 바가 없어 끊길 뒤 구간이 없다. 처리 없음(백테스트 정산은 DEFECT-10 그대로 소비자가 그 열로 고른다) |
+| 4 | `unresolved_jump` ④ | 미해결 ∧ 주식 계열 ∧ 바 있음 ∧ 적용일 ±`ADJ_JUMP_NEIGHBOR_SESSIONS`(6) 세션 안 원종가 수익률이 그 행 날짜의 가격제한폭(+`PRICE_LIMIT_EPS`) 밖 | **점프 흔적 — 표식만(T-10)**. 기준가 근거가 없어 계수를 내려면 점프 비율로 추정해야 하므로 적재하지 않는다. 분해 때 7행 전부 2010~2014(fi 가격 창 550 달력일·연구 창 2016+ 밖). 창 안으로 새 행이 오면 H1-4 `adj_jump_ok` 가 점프 행에서 뒤집혀 scope 가 그 창의 모멘텀·20일 변동성을 결측으로 둔다(T-9). 목록은 `unresolved_jump_event_ids` |
+| 5 | `unresolved_within_limit` ③ | 그 밖의 주식 계열 미해결(창 안 수익률 행이 없는 경우 포함) | **점프 아님** — 수정종가가 끊겼다는 근거가 없다. fi `adj_ok=false` 표식(창 안 사건 계단)만 남고, 모델은 H1-4 `adj_jump_ok` 가 뒤집히지 않으므로 scope 결측 규칙(T-9) 밖이다(scope `v3_zscore` 는 `adj_ok` 를 읽지 않는다). 창 안 가격 행이 하나도 없는 행(상장폐지 기간 사건 등)은 `n_unresolved_within_limit_no_adjacent_return` 로 따로 센다 |
+| 6 | `unclassified` | 위 어디에도 안 맞음 — 종류 etf·other·security 없음 · 적용일 캘린더 밖 · `price_resolution` 이 not-ok 행에서 어휘 밖·`factor` | 0 이 정상. 0 이 아니면 묶음 정의(종류·표식 어휘)를 다시 본다 — 기록형이라 빌드는 막지 않는다 |
+
+- **인접 수익률**: `price_daily` 의 KRX 확정 행(`basis='krx'` — 저녁 잠정 T 행 제외) 원종가, 그 종목
+  직전 행(참고가 행 포함) 대비. 가격제한폭은 수익률이 난 행 날짜 기준 2015-06-15 전 15% · 그날부터 30%.
+  상수(`PRICE_LIMIT_*`·`ADJ_JUMP_NEIGHBOR_SESSIONS`)는 fi `factor_inputs.queries` 의 H1-4 정의와 같은
+  값이다(fi queries 가 `rules_s06` 을 import 해 equity 가 fi 를 읽으면 순환 — 값 동치를
+  `test_K1_6a_가격제한폭_인접_세션_상수는_fi_H1_4_정의와_같다` 가 묶는다).
+- **H1-4 와 다른 점**: H1-4 `adj_jump_ok` 는 **수정종가**(`price_adj_daily`) 수익률을 본다. 이 지표는
+  adj_factor 게이트 시점에 수정종가 표가 없어 원종가를 본다 — 미해결 행 ±6 세션 안에 접힌 ok·⑤ 계수가
+  있으면 원종가에서만 점프로 보일 수 있다(그런 행은 대개 `factor_near`·`price_only_near` 로 먼저 빠진다).
+- **새 사유 어휘**: 묶음은 `factor_source` 를 보지 않고 위 술어로만 정한다. E-1(e1.28.0)이 ok → not-ok 로
+  돌린 103행(`no_base_price_evidence` 102 · `same_day_suppressed` 1)도 같은 술어로 간다 — 기준가가 안
+  바뀐 소액 자기주식 소각형 감자는 인접 수익률이 제한폭 안이라 대개 ③, 근처에 ⑤ 단위·ok 계수가 있으면
+  `price_only_near`·`factor_near`, 형제가 ok 인 `same_day_suppressed` 는 `factor_near`(가). 분포는
+  `n_not_ok_by_bucket_factor_source` 가 매 빌드 남긴다.
+
+| 지표(`EG3_adj_factor` metrics) | 뜻 |
+|---|---|
+| `n_not_ok_by_bucket` | bucket → 행 수(어휘 `not_ok_bucket_vocab` 전부, 0 포함). 합 = not-ok 행 수 |
+| `n_not_ok_unclassified` | `unclassified` 행 수 — 0 이 정상 |
+| `n_not_ok_by_bucket_factor_source` | `bucket:factor_source` → 행 수 |
+| `n_unresolved_within_limit_no_adjacent_return` | ③ 중 창 안 수익률 행이 0 인 행 |
+| `unresolved_jump_event_ids` | ④ event_id(정렬, 최대 `JUMP_SAMPLE_ROWS`) |
+
+**서버 확인(운영 판은 건드리지 않는다)**: §7 ① 재판정 — `cd ~/quant-ledger && PYTHONPATH=<새 코드>/src
+.venv/bin/python -B -m equity --root data/equity --stage-root data/stage gate adj_factor` 의
+`EG3_adj_factor` 줄. 운영 판이 e1.28.0 전이면 E-1 술어(`n_ok_apply_basis_bad` 등)로 FAIL 할 수 있으나
+metrics 는 그대로 실린다(묶음 지표는 판정 밖).
+
+**후속(출력이 바뀌어 컷오버 뒤 별도 PR)**:
+- `no_adjustment` 표시 — 자기주식 소각형 감자(주식수만 줄고 KRX 기준가 불변, E-1 이 not-ok·계수 1 로 둔
+  소액 감자)를 '조정 불필요' 로 표시한다. 지금은 ③ 에 섞여 있다.
+- E-1 리뷰 MINOR-3 — 기준가 단계가 매칭 창 밖인 진짜 주식수 증가 2건(017180 bonus 2011-07-08 · 225220
+  bonus 2023-03-31)의 보유 수량 경로 누락.
+- 가격제한폭·인접 세션 상수의 단일 정본 — fi queries 가 `rules_s06` 상수를 import 하게 바꾼다(fi 규칙
+  파일 변경이라 fi 판본 상향을 동반 — fi 를 고치는 다음 PR 에).

@@ -9,7 +9,7 @@
   · 2026-09-09(플랜 P1 Task 1.2, DEFECT-A-01): 빈 응답이라도 캘린더가 거래일이라 하면 `holiday` 가 아니라
     `pending` 으로 적는다 — KRX 는 T+1 08:00 KST 에 공표하므로 그 전 실행은 거래일을 휴장으로 영구 확정했다.
     pending 은 done 에 안 들어가 다음 실행이 다시 친다. `--refetch D1,D2` 는 그 날짜의 기록을 지우고 다시 받는다.
-    캘린더가 없으면 평일 = 거래일로 가정한다(빈 응답을 휴장 근거로 쓰지 않는다).
+    달력을 못 읽으면 멈춘다(K1-9 ⑦ — 예전 '평일 = 거래일 가정' 폴백 폐지).
 """
 import argparse
 import os
@@ -80,12 +80,10 @@ def main():
     ap.add_argument("--to",   dest="to",  default="2026-08-20")
     ap.add_argument("--limit", type=int, default=0, help="날짜 수 제한(스모크용)")
     ap.add_argument("--calendar", default=os.path.join(BASE, "data", "calendar", "kis_holidays.json"),
-                    help="휴장 캐시(JSON). 없으면 평일 = 거래일 가정")
+                    help="판정 달력(그 디렉터리의 kis_holidays_<YYYY>.json). 못 읽으면 중단한다")
     ap.add_argument("--refetch", default="", help="다시 받을 날짜 YYYYMMDD 쉼표구분 — ingest_log 를 지우고 재수집")
     a = ap.parse_args()
     cal = _cal.load(a.calendar)
-    if cal.source != "kis_cache":
-        print(f"  ! {cal.detail}")
 
     os.makedirs(os.path.dirname(DB), exist_ok=True)
     con = sqlite3.connect(DB, timeout=120)

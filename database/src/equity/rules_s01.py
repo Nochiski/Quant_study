@@ -186,7 +186,8 @@ SECURITY = register(EquityTable(
     name="security",
     grain=("ticker",),
     columns={"ticker": "VARCHAR", "corp_code": "VARCHAR", "isin": "VARCHAR",
-             "name_current": "VARCHAR", "sec_type": "VARCHAR", "list_date": "DATE",
+             "name_current": "VARCHAR", "name_abbrv_current": "VARCHAR",
+             "sec_type": "VARCHAR", "list_date": "DATE",
              "list_date_basis": "VARCHAR", "delist_date_krx": "DATE",
              # `delist_date_kis` 의 원천 `stg_delisted_master`(= `kis.kis_stock_info`)는 **일일
              # 체인에 없다** — KIS 단계는 신용잔고 하나뿐이다(`daily_ledger.sh`, 플랜 R10).
@@ -208,8 +209,8 @@ SECURITY = register(EquityTable(
                  "UNION SELECT DISTINCT ticker FROM stg_etf_price_daily)"),
     sql_path=SQL_DIR / "security.sql",
     input_columns={
-        "stg_listing_daily": ("ticker", "date", "isin", "name", "list_date", "secugrp",
-                              "sect_tp", "stkcert_tp"),
+        "stg_listing_daily": ("ticker", "date", "isin", "name", "name_abbrv", "list_date",
+                              "secugrp", "sect_tp", "stkcert_tp"),
         "stg_etf_price_daily": ("ticker", "date", "name"),
         "stg_delisted_master": ("ticker", "lstg_abol_dt"),
         "stg_index_daily": ("date",),

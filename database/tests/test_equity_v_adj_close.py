@@ -8,14 +8,15 @@ available)). 그래서 계수가 적용일 다음 세션에 공개되면 적용�
 바꾸지 않는다). 그래서 늦은 ok 계수는 KRX 기준가로 적용일을 정한 것만 가린다 — 명목일로 적용일을 둔
 계수는 그날 재설정이 없어 가릴 근거가 없다(#301 리뷰 P3-1).
 
-적용일 술어의 정본은 `v_unfolded_event` 다(#369) — 백테스트 데이터 포트도 같은 뷰를 읽고, 그날 ok
-계수가 층 이동을 설명하지 않는 행(`factor_ok` 거짓)만 기준가 비로 보유 수량을 조정한다.
+가격 전용 보정으로 해결된 사건은 가리지 않는다. 보유 수량 축 `v_unfolded_event` 는 그대로 유지한다.
 """
 from __future__ import annotations
 
 from datetime import date, timedelta
+from pathlib import Path
 
 import duckdb
+import pytest
 from equity import views
 
 _DAYS = tuple(
@@ -45,9 +46,9 @@ def _connect() -> duckdb.DuckDBPyConnection:
                      for i, d in enumerate(_DAYS)])
     con.execute("CREATE TEMP TABLE adj_factor (ticker VARCHAR, apply_date DATE, "
                 "available_date DATE, factor_ok BOOLEAN, factor_source VARCHAR, "
-                "apply_basis VARCHAR)")
-    con.executemany("INSERT INTO adj_factor VALUES (?, ?, ?, ?, ?, ?)",
-                    [(t, _DAYS[a], _DAYS[v], ok, src, basis)
+                "apply_basis VARCHAR, price_resolution VARCHAR)")
+    con.executemany("INSERT INTO adj_factor VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [(t, _DAYS[a], _DAYS[v], ok, src, basis, "factor" if ok else "unresolved")
                      for t, a, v, ok, src, basis in _EVENTS])
     made = views.install_temp_macros(
         con, {"price_adj_daily": "price_adj_daily", "adj_factor": "adj_factor"})
@@ -87,3 +88,65 @@ def test_as_of_는_행만_자르고_가림은_공개일과_무관하다() -> Non
     assert _gaps(con, _DAYS[3])["LATE"] == [_DAYS[3]]
     assert max(r[0] for r in con.execute(
         "SELECT date FROM v_adj_close(?)", [_DAYS[3]]).fetchall()) == _DAYS[3]
+
+
+@pytest.mark.parametrize("resolution", [
+    "price_only", "price_only_near", "price_only_dup", "factor_near",
+])
+def test_가격만_해결된_사건은_보이되_보유_수량_사건은_유지한다(resolution: str) -> None:
+    with _connect() as con:
+        con.execute("UPDATE adj_factor SET price_resolution = ? WHERE ticker = 'INCON'",
+                    [resolution])
+        for as_of in (_DAYS[5], _DAYS[6], _LAST):
+            assert _gaps(con, as_of)["INCON"] == []
+            assert con.execute(
+                "SELECT factor_ok FROM v_unfolded_event(?) WHERE ticker = 'INCON'",
+                [as_of]).fetchall() == [(False,)]
+        assert con.execute("SELECT * FROM v_adj_close(?) WHERE date > ?",
+                           [_DAYS[4], _DAYS[4]]).fetchall() == []
+
+
+@pytest.mark.parametrize("extra_resolution,extra_ok,expected_gap", [
+    ("price_only_dup", False, False),
+    ("unresolved", False, True),
+    ("factor", True, True),
+])
+def test_복수_사건은_미해결과_지연_공개를_보존하고_가격_행을_늘리지_않는다(
+        extra_resolution: str, extra_ok: bool, expected_gap: bool) -> None:
+    with _connect() as con:
+        con.execute("UPDATE adj_factor SET price_resolution = 'price_only' "
+                    "WHERE ticker = 'INCON'")
+        con.execute("INSERT INTO adj_factor VALUES ('INCON', ?, ?, ?, ?, 'krx_base_price', ?)",
+                    [_DAYS[5], _DAYS[6], extra_ok,
+                     "mktcap_neutral" if extra_ok else "krx_base_inconsistent", extra_resolution])
+        for as_of in (_DAYS[5], _LAST):
+            rows = con.execute("SELECT adj_close, adj_gap FROM v_adj_close(?) "
+                               "WHERE ticker = 'INCON' AND date = ?",
+                               [as_of, _DAYS[5]]).fetchall()
+            assert rows == [(None if expected_gap else 105.0, expected_gap)]
+        assert con.execute("SELECT factor_ok FROM v_unfolded_event(?) WHERE ticker = 'INCON'",
+                           [_LAST]).fetchall() == [(extra_ok,)]
+
+
+def test_가격_전용_보정_SQL의_결과가_소비_뷰까지_유지된다() -> None:
+    with duckdb.connect() as con:
+        con.execute("CREATE TABLE price_daily AS SELECT 'A' AS ticker, d AS date, "
+                    "c AS open, c AS high, c AS low, c AS close, 1000 AS volume_shr, "
+                    "'krx' AS basis, false AS corp_action_pending "
+                    "FROM (VALUES (DATE '2024-01-02', 100.0), "
+                    "(DATE '2024-01-03', 50.0)) p(d, c)")
+        con.execute("CREATE TABLE security_span AS SELECT 'A' AS ticker, 1 AS span_seq, "
+                    "DATE '2024-01-02' AS first_date")
+        con.execute("CREATE TABLE adj_factor AS SELECT 'A' AS ticker, "
+                    "DATE '2024-01-03' AS apply_date, DATE '2024-01-03' AS available_date, "
+                    "false AS factor_ok, 1.0 AS price_factor, 1.0 AS share_factor, "
+                    "0.5 AS price_only_factor, 'price_only' AS price_resolution, "
+                    "'krx_base_inconsistent' AS factor_source, 'krx_base_price' AS apply_basis")
+        sql = (Path(views.__file__).parent / "sql" / "price_adj_daily.sql").read_text()
+        con.execute("CREATE TABLE price_adj_daily AS " + sql)
+        views.install_temp_macros(con, {
+            "price_adj_daily": "price_adj_daily", "adj_factor": "adj_factor"})
+        assert con.execute("SELECT adj_close, adj_gap FROM v_adj_close(DATE '2024-01-03') "
+                           "ORDER BY date").fetchall() == [(100.0, False), (100.0, False)]
+        assert con.execute("SELECT factor_ok FROM v_unfolded_event(DATE '2024-01-03')"
+                           ).fetchall() == [(False,)]

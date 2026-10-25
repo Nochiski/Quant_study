@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# 텔레그램 알림 — quant-ledger 는 로그 채널(CHAT_ID_LOG)로 보낸다(사용자 지정 2026-09-09). 플랜 P0 Task 0.1.
+# 알림 — 기본은 로컬 logs/notify.log 기록만(2026-10-01 사용자 지시). QL_NOTIFY_TELEGRAM=1 이면 텔레그램 로그 채널(CHAT_ID_LOG).
+# 플랜 P0 Task 0.1.
 #   사용: scripts/notify.sh <crit|warn|info> <title> [body]
 #   · 같은 title 은 30분 쿨다운(/tmp/ql_notify_<hash>) — crit 은 쿨다운 없이 항상 보낸다
-#   · 토큰·채팅방 ID 는 QL_ENV(없으면 ~/kael-system-v3/.env)에서 BOT_TOKEN·CHAT_ID_LOG 만 읽는다
+#   · 토큰·채팅방 ID 는 QL_ENV 에서 BOT_TOKEN·CHAT_ID_LOG 만 읽는다 — 텔레그램 분기에서만. QL_ENV 가 비면
+#     다른 파일로 대신하지 않고 rc 2(RG-C7-4). 기본(로그만) 분기는 비밀 파일 없이 돈다
 #   · 전송 실패는 stderr 뿐 아니라 logs/notify_failed.log 에도 한 줄 남긴다(DEFECT-D04) —
 #     수집 체인 3개는 크론 리다이렉트가 없어 stderr 가 버려지므로, 그 파일이 유일한 사후 증거다
 #   · v3 infra/gpu_alert.sh 의 패턴을 그대로 옮겼다(실측으로 동작이 확인된 최소 구현)
@@ -10,7 +12,22 @@ set -uo pipefail
 LEVEL="${1:?usage: notify.sh <crit|warn|info> <title> [body]}"
 TITLE="${2:?title required}"
 BODY="${3:-}"
-ENV_FILE="${QL_ENV:-$HOME/kael-system-v3/.env}"
+# 2026-10-01 사용자 지시: quant-ledger 로그 알림을 텔레그램에 보내지 않는다. 모든 등급을 로컬
+# logs/notify.log 에 한 줄로 남기고 끝낸다. 다시 보내려면 QL_NOTIFY_TELEGRAM=1 로 부른다.
+if [ "${QL_NOTIFY_TELEGRAM:-0}" != "1" ]; then
+  NOTIFY_LOG="${QL_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)}/logs/notify.log"
+  mkdir -p "$(dirname "$NOTIFY_LOG")" 2>/dev/null
+  # 로캘이 C 이면 ${BODY:0:900} 이 바이트로 잘린다 — 끝에서 잘린 글자 조각은 iconv -c 가 버린다(#630)
+  printf '%s %s %s | %s\n' "$(date -u +%FT%TZ)" "$LEVEL" "$TITLE" \
+    "$(printf '%s' "${BODY:0:900}" | iconv -c -f UTF-8 -t UTF-8 2>/dev/null | tr '\n\t' '  ')" >> "$NOTIFY_LOG" 2>/dev/null
+  echo "notify: logged only ($LEVEL: $TITLE)"
+  exit 0
+fi
+if [ -z "${QL_ENV:-}" ]; then
+  echo "notify: QL_ENV is empty — set it to the quant-ledger secret file (\$HOME/quant-ledger/.env)" >&2
+  exit 2
+fi
+ENV_FILE="$QL_ENV"
 if [ ! -f "$ENV_FILE" ]; then
   echo "notify: env file not found: $ENV_FILE" >&2
   exit 2

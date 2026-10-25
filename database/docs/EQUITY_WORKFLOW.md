@@ -78,7 +78,7 @@ v1.1 은 "엔진에 재무·컨센서스 포트가 없다" 고 결론지었으�
 
 EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 전 테이블) · EG2 PIT 불변식(`<col>_available_date` 포함) · EG3 키·불변식(독립 재계산) · EG4 골든 픽스처(FX 카탈로그 54 + 부정 10) · EG5 재현성(a 해시 · b 등식 · c as-of 불변 `_asof/`) · EG6 판본 선택(E-G6a/b/c 링크) · EG7 범위(격리형, `sec_type='other'` 는 격리 아님) · EG8 교차 소스(가격·거래량 점프·recall) · EG9 레짐 커버리지(커버율 ∧ evidence_rate ∧ 상관) · **EG10 팩터 준비도**(`factor_readiness` 54행) · EG11 뷰 결정성 · EG12 단위 접미사 · EG13 available 미래값 · EG14 파티션 경계 · EG15 폐지 전 가격 · EG16 가짜 재상장 · EG17 캘린더 · EG18 조인 팬아웃 · EG19 as-of 단조성 · EG20 원주가 불변 · EG-C 소비자 계약 ①~⑩(⑥ 는 커버 밖 팩터 `skip(no_coverage)`).
 
-상수는 전부 `baseline.json`(`{table}.{metric}`), 첫 빌드 `skip(no_baseline)` + `_meta.gates[].metrics` 기록 → 사람 승인 → 2회차 정식. 실행 순서·실패 리포트·부정 픽스처 규약은 GATES §7.
+상수는 전부 `baseline.json`(`{table}.{metric}`). 상수 없는 게이트는 `skip(no_baseline)` 이고 허용표(`src/stage/skip_allow.py`) 밖이라 그 빌드는 FAIL·폐기된다(K1-7a) — 그래서 배포 전에 잰다: 격리 재생(X-1 `scripts/replay.sh --code <새 코드> --out <tmp>`) 또는 `python -m equity gate` 재판정(폐기 없음)의 그 게이트 metrics → 사람 승인 → 게이트와 상수를 함께 배포 → 첫 빌드부터 정식(GATES §7-3). 실행 순서·실패 리포트·부정 픽스처 규약은 GATES §7.
 
 ---
 
@@ -237,7 +237,8 @@ catalog 도 안 돌아 `equity.duckdb` 매크로는 옛 `v=` 를 가리켰고, �
 밀리면 매크로가 `No files found` 로 조용히 깨진다.
 
 ```
-PYTHONPATH=src .venv/bin/python -m equity --root data/equity rollback --pass morning_20260918
+PYTHONPATH=src .venv/bin/python -m equity --root data/equity rollback --pass morning_20260918 \
+  --basis morning --before logs/equity/rebuild_morning_20260918/before.json
 ```
 
 규약:
@@ -245,13 +246,16 @@ PYTHONPATH=src .venv/bin/python -m equity --root data/equity rollback --pass mor
 | 항목 | 내용 |
 |---|---|
 | 되돌리는 것 | `MANIFEST.current_build` **하나뿐**. `builds[]` 목록과 `v=<build_id>` 디렉터리는 **그대로 둔다** — keep=10 이라 이전 판이 살아 있고, 지우면 그 판으로 다시 못 돌아간다 |
-| 대상 | `logs/equity/rebuild_<PASS>/summary.tsv` 에서 **rc 0 인 표만**. rc≠0 인 표는 이번 판을 커밋하지 못했으므로 current 가 이미 어제 판이다 — 한 칸 더 되돌리면 멀쩡한 판을 잃는다 |
-| 대상 판 | 기본은 `builds[]` 에서 현재 판 **바로 앞**. `rollback_table(..., to_build_id=...)` 로 특정 판 지정 가능(없는 판이면 `ValueError`) |
-| 자동 호출 | `equity_rebuild_all.sh` 가 `QL_EQUITY_CONTINUE` 없는(= 운영) 경로에서 첫 실패 직후 부른다. 로그는 `logs/equity/rebuild_<PASS>/rollback.log`, 되돌리기가 실패해도 스크립트는 원래 실패 코드로 나간다 |
+| 대상 | 저녁·수동 패스: `logs/equity/rebuild_<PASS>/summary.tsv` 에서 **rc 0 인 표만**. rc≠0 인 표는 이번 판을 커밋하지 못했으므로 current 가 이미 시작 판이다 — 한 칸 더 되돌리면 멀쩡한 판을 잃는다. **아침 패스(`--basis morning`, C-01 · N-25 Q4)**: rc 0 표 + `before.json` 의 **모든 표**(실패 표·미도달 표 포함) — rc 0 표만 옮기면 앞 표는 확정판, 뒤 표는 전날 저녁 잠정판으로 섞인다(포인터만 옮기므로 판을 잃지 않는다) |
+| 대상 판 | `--before`(패스 시작 때 `equity_rebuild_all.sh` 가 `rollback.pass_start_targets` 로 남긴 `logs/equity/rebuild_<PASS>/before.json`)의 판, 없으면 `builds[]` 에서 현재 판 **바로 앞**. 저녁·수동 = 시작 current. **아침 = 마지막으로 완료된 아침 확정판** — `data/deliver/latest_morning.json` 의 `equity_builds`(build_chain deliver_step 이 stage·equity 가 다 ok 인 아침 판에서만 쓴다). **전부 아니면 전무**: 한 표라도 그 판을 못 얻으면(파일 없음·못 읽음·표 없음·GC) 전 표를 시작 current 로 두고 stderr 에 이유 한 줄. 목표 판이 패스 도중 GC 됐으면 이번 패스가 커밋한 표만 직전 판으로 폴백하고 나머지는 그대로 둔다 |
+| 자동 호출 | `equity_rebuild_all.sh` 가 `QL_EQUITY_CONTINUE` 없는(= 운영) 경로에서 첫 실패 직후 `--before`·`--basis` 를 붙여 부른다. 로그는 `logs/equity/rebuild_<PASS>/rollback.log`, 되돌리기가 실패해도 스크립트는 원래 실패 코드로 나간다. `before.json` 을 못 만들면 아무 표도 짓지 않고 멈춘다(되돌릴 기준 없는 패스는 시작하지 않는다, P1) |
+| 롤백 뒤 catalog | 되돌리기가 성공하면 같은 스크립트가 `python -m equity catalog` 를 **자동으로 한 번** 돌려 `equity.duckdb` 매크로·`_catalog_meta.json` 을 되돌린 포인터에 맞춘다(best-effort — 실패해도 패스 rc 는 빌드 실패 그대로, `rollback.log` 에 한 줄). 실패했으면 손으로 `PYTHONPATH=src .venv/bin/python -m equity catalog` |
+| `_READY.json` | **바꾸지 않는다** — 앞으로만 움직이는 마지막 성공 판 신호다(N-24 3.8). 아침 실패 롤백 뒤 `_READY.builds` 는 마지막 성공 판(대개 전날 저녁 `e_D`)으로 남고 MANIFEST 포인터(`m_{D−1}`)와 다를 수 있다 — **포인터가 정본** |
 | 구현 | `src/equity/rollback.py`. `stage.manifest` 는 stage 층 소유라 읽기·원자쓰기 유틸만 쓴다 |
 
-되돌린 뒤에도 `equity.duckdb` 는 실패 시점의 판을 가리킬 수 있다 — 되돌리기 후에는 `equity
-catalog` 를 한 번 더 돌려 매크로를 현재 포인터에 맞춘다(체인은 equity 실패 시 catalog 를 건너뛴다).
+체인(`build_chain.sh`)은 equity 실패 시 catalog_step 을 건너뛰므로 롤백 뒤 catalog 는
+`equity_rebuild_all.sh` 가 직접 돈다(위 표). 손으로 `equity rollback` 을 돌렸다면 catalog 도 손으로
+한 번 돌린다.
 
 ### 9-2. `equity contract` 의 체인 편입 (DEFECT-C05)
 

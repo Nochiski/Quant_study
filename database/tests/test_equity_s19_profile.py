@@ -24,15 +24,33 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import duckdb
 import pytest
-from conftest import apply_slice_override
+from conftest import allow_skips, apply_slice_override
 from equity import build, gates, inputs, rules_s19
 from equity.baseline import Baseline, load
 from equity.gates import EquityGateContext
 from equity.model import CELL_KINDS, RULES, VALUE_TYPES, FieldProfile
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _k17a_fixture_skips() -> Iterator[None]:
+    """K1-7a — 이 모듈의 픽스처가 표본이 작아 못 재는 게이트의 SKIP 만 테스트에서 허용한다
+    (운영 허용표 `src/stage/skip_allow.py` 는 그대로다)."""
+    with allow_skips(
+            ("equity", "EG8", "no_baseline",
+             "시드에 opinion_daily 겹침 일치율 하한이 없다(운영 값은 baseline_locked 0.99)",
+             "opinion_daily"),
+            ("equity", "EG6_fin_std", "no_coverage",
+             "절단본에 12월·비12월 결산 법인이 함께 있지 않아 결산월별 무매칭률 차이를 못 잰다"),
+            ("equity", "EG21", "no_coverage",
+             "절단본은 base_date 세션이 판정 창(23)에 못 미친다 — 운영 허용표에서는 지웠다(10-10 리뷰)",
+             "opinion_daily")):
+        yield
+
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 SRC = Path(rules_s19.__file__).parent
@@ -46,7 +64,9 @@ CHAIN: tuple[str, ...] = (
     "flow_daily", "short_daily", "credit_daily",
     "disclosure_version", "fin_std", "holder_daily", "ownership_snapshot", "audit_opinion",
     "shares_outstanding", "treasury_stock", "dividend_event", "consensus_daily",
-    "opinion_daily", "opinion_broker_daily")
+    "opinion_daily", "opinion_broker_daily",
+    # S26 WISE 3표(2026-10-22) — stage 만 읽는다
+    "consensus_matrix", "consensus_annual", "fin_ratio_wise")
 
 # 2026-09-07 S08-2: `flow.foreign_ownership`·`flow.foreign_limit_exhaustion` 선언(72 → 74).
 # 2026-09-07 S02-2: `benchmark.close` 선언(75 → 76, R04 시장 베타).
@@ -55,14 +75,19 @@ CHAIN: tuple[str, ...] = (
 # 2026-09-19 감사 DEFECT-E02: KIS 축 4(flow 2 · short 2)를 **내부 스코프**로 선언 → 83.
 # 카탈로그만 보는 소비자에게 원천 정지(2026-08-14)를 `coverage_to` 로 알리는 것이 목적이고,
 # FIELD_MAP §2 어휘·어댑터 `list_fields()` 는 그대로다.
+# 2026-09-26 DQ-8: `financial.capex_basis`(내부 스코프 1)를 선언 → 84. capex 자산별 합 규칙이
+# 붙으면서 값의 출처(집계 한 줄 vs 자산별 합)를 라벨로 싣는다 — `revenue_basis` 와 같은 사정.
 # 2026-09-28 문서 감사 결정 5: `price.adj_close` 를 내부 스코프에서 FIELD_MAP §2 어휘로 옮겼다(#218 이
-# 레지스트리 가격 변화 팩터의 입력으로 삼았다) → field_map 35 → 36 · internal 48 → 47 · 어휘 45 → 46.
-N_FIELDS = 83                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
+# 레지스트리 가격 변화 팩터의 입력으로 삼았다) → field_map +1 · internal −1 · 어휘 +1.
+# Q-4 병합(e1.27.0): 두 변경의 합 — 84 = field_map 36 + internal 48, 어휘 46.
+# 2026-10-22 S26: WISE 13(내부 스코프) + `flow.private_fund_net_buy`(내부 스코프 1) → 98.
+N_FIELDS = 98                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
 N_FIELD_MAP_SCOPE = 36           # FIELD_MAP §2 어휘 중 프로파일 행을 갖는 것
-N_INTERNAL_SCOPE = 47            # equity 내부 스코프(fin_std 계정·4B·유니버스 …)
+N_INTERNAL_SCOPE = 62            # equity 내부 스코프(fin_std 계정·4B·유니버스·WISE …)
 N_FIELD_MAP_VOCAB = 46           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
                                  # 2026-09-07: `flow.foreign_limit_exhaustion` 신설(F08 재료)
-PROFILE_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG2_dataset_profile", "EG9", "EG4", "EG5a"]
+PROFILE_GATES = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG2_dataset_profile", "EG9", "EG4",
+                 "EG5a"]
 
 
 def _seed() -> Baseline:
@@ -416,6 +441,16 @@ ROW_FILTERED_FIELDS: dict[str, tuple[str, int, int, float, str, str]] = {
     "consensus.forward_ni": ("grid_security", 5, 15, 33.333333, "2026-04-03", "2026-08-04"),
     "consensus.forward_op": ("grid_security", 5, 15, 33.333333, "2026-04-03", "2026-08-04"),
     "consensus.forward_sales": ("grid_security", 4, 15, 26.666667, "2026-04-03", "2026-09-02"),
+    # S26 WISE 13필드(e1.30.0) — 격자 축이라 #592 가 분모를 바꾸지 않는다. 절단본 WISE 매트릭스·
+    # 연간·재무비율은 15종목 중 5종목, 관측 창 2026-09-01~09-02 다.
+    **{
+        field_id: ("grid_security", 5, 15, 33.333333, "2026-09-01", "2026-09-02")
+        for field_id in (
+            *(f"wise.consensus_{metric}{suffix}" for metric in ("op", "ni")
+              for suffix in ("", "_1w_ago", "_1m_ago", "_3m_ago")),
+            "wise.fy0_op_estimate", "wise.fy0_ni_estimate",
+            "wise.per", "wise.pbr", "wise.dividend_yield")
+    },
 }
 
 

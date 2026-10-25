@@ -1,0 +1,74 @@
+[
+ {
+  "key": {
+   "ticker": "005930",
+   "date": "2026-09-18",
+   "req_sec_cd": "G4530"
+  },
+  "column": "float_mktcap_krw",
+  "expect": "1144409038000000",
+  "measured_sql": "zlib+JSON list 원문: SELECT body FROM wics_raw WHERE dt='20260918' AND sec_cd='G4530' → CMP_CD='005930'",
+  "measured_at": "2026-09-20",
+  "note": "원문 MKT_VAL 1144409038 (백만원) × 1000000"
+ },
+ {
+  "key": {
+   "ticker": "005930",
+   "date": "2026-09-18",
+   "req_sec_cd": "G4530"
+  },
+  "column": "all_float_mktcap_krw",
+  "expect": "2337020017000000",
+  "measured_sql": "zlib+JSON list 원문: SELECT body FROM wics_raw WHERE dt='20260918' AND sec_cd='G4530' → CMP_CD='005930'",
+  "measured_at": "2026-09-20",
+  "note": "원문 ALL_MKT_VAL 2337020017 (백만원) × 1000000"
+ },
+ {
+  "key": {
+   "ticker": "005930",
+   "date": "2026-09-18",
+   "req_sec_cd": "G4530"
+  },
+  "column": "float_shares_shr",
+  "expect": "4384708956",
+  "measured_sql": "zlib+JSON list 원문: SELECT body FROM wics_raw WHERE dt='20260918' AND sec_cd='G4530' → CMP_CD='005930'",
+  "measured_at": "2026-09-20",
+  "note": "원문 APT_SHR_CNT 그대로(주)"
+ },
+ {
+  "key": {
+   "ticker": "005930",
+   "date": "2026-09-18",
+   "req_sec_cd": "G4530"
+  },
+  "column": "idx_nm",
+  "expect": "WICS 반도체와반도체장비",
+  "measured_sql": "zlib+JSON list 원문: SELECT body FROM wics_raw WHERE dt='20260918' AND sec_cd='G4530' → CMP_CD='005930'",
+  "measured_at": "2026-09-20",
+  "note": "L2 라벨은 IDX_NM_KOR (WICS_PROBE §6)"
+ },
+ {
+  "key": {
+   "ticker": "005930",
+   "date": "2026-09-18",
+   "req_sec_cd": "G45"
+  },
+  "column": "idx_nm",
+  "expect": "WICS IT",
+  "measured_sql": "zlib+JSON list 원문: SELECT body FROM wics_raw WHERE dt='20260918' AND sec_cd='G45' → CMP_CD='005930'",
+  "measured_at": "2026-09-20",
+  "note": "L2 라벨은 IDX_NM_KOR (WICS_PROBE §6)"
+ },
+ {
+  "key": {
+   "ticker": "005930",
+   "date": "2026-09-18",
+   "req_sec_cd": "G45"
+  },
+  "column": "sec_cd",
+  "expect": "G45",
+  "measured_sql": "zlib+JSON list 원문: SELECT body FROM wics_raw WHERE dt='20260918' AND sec_cd='G45' → CMP_CD='005930'",
+  "measured_at": "2026-09-20",
+  "note": "행의 SEC_CD 는 L1"
+ }
+]

@@ -1,0 +1,221 @@
+"""전달층 공통 — 라벨 · 표시 규칙(MODEL_EXCEL_SPEC D·E) · 후보 선정.
+
+점수 계산은 하지 않는다. 백분위 재순위는 엔진과 같은 공식(`pct_rank_avg`)을 import 해 쓴다 —
+정의가 두 곳으로 갈리지 않게.
+"""
+from __future__ import annotations
+
+import statistics
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+
+from model.engines._common import z_score_winsorized
+from model.engines.v4_rank import pct_rank_avg
+
+# ── 라벨 ─────────────────────────────────────────────────────────────────────
+BUCKET_LABELS: dict[str, str] = {
+    "low_risk": "저위험", "value": "밸류", "quality": "퀄리티", "pull": "고점근접+반전",
+    "revision": "리비전", "aux": "보조", "momentum_display": "추세 모멘텀",
+    "momentum": "모멘텀", "flow": "수급", "valuation": "밸류", "growth": "성장"}
+
+
+def bucket_label(b: str) -> str:
+    return BUCKET_LABELS.get(b, b)
+
+
+# 판 성격 문구 — 텔레그램 캡션·엑셀 메타 공용. 장 마감 직후 판은 basis 이름 evening 을 재사용한다
+# (컷오버 트랙 T-1). 시각 근거 N-35(가격 15:35 회차부터 공식 종가 일치 · 정규장 수급 15:40 확정),
+# 컨센서스는 WISE DT = T−1(N-13 근거). 주말 보강판(supplement)은 휴일 아침 WISE 재수집이 D 분
+# 추정치를 담는다(WISE 기준일 = D, N-45). 문구가 없는 basis(아침판 morning)는 기존 그대로 둔다.
+BASIS_NOTES: dict[str, str] = {
+    "evening": ("장 마감 직후 데이터(가격 15:35·수급 15:40 정규장 기준) · "
+                "컨센서스 기준일 = 직전 거래일"),
+    "supplement": ("휴일 아침에 WISE 를 다시 받아 기준일 추정치까지 넣은 데이터 · "
+                   "컨센서스 기준일 = 기준일 당일")}
+
+
+@dataclass(frozen=True)
+class IndMeta:
+    """지표 표시 규칙 — 라벨 · 배율(비율 → %) · 숫자 서식."""
+
+    label: str
+    scale: float = 1.0
+    fmt: str = "#,##0.00"
+
+
+IND_META: dict[str, IndMeta] = {
+    "VOL60": IndMeta("60일 변동성(%)", 100, "#,##0.00"),
+    "EP": IndMeta("후행 E/P(%)", 100, "#,##0.00"),
+    "DY0": IndMeta("배당수익률(%)", 100, "#,##0.00"),
+    "OPM_TTM": IndMeta("영업이익률 TTM(%)", 100, "#,##0.0"),
+    "FCF_A": IndMeta("FCF/자산(%)", 100, "#,##0.0"),
+    "M_PULL_C": IndMeta("고점근접+반전(0~100)", 100, "#,##0.0"),
+    "REV_OP_1M": IndMeta("영업이익 추정 1M(%)", 100, "#,##0.0"),
+    "REV_OP_3M": IndMeta("영업이익 추정 3M(%)", 100, "#,##0.0"),
+    "REV_NI_1M": IndMeta("순이익 추정 1M(%)", 100, "#,##0.0"),
+    "REV_NI_3M": IndMeta("순이익 추정 3M(%)", 100, "#,##0.0"),
+    "CRDT_CHG": IndMeta("신용잔고 20일 변화(%)", 100, "#,##0.0"),
+    "FRGN60": IndMeta("외국인 60일 순매수/시총(%)", 100, "#,##0.00"),
+    "R1M": IndMeta("1M 수익률(%)", 100, "#,##0.0"),
+    "M_52WH": IndMeta("52주 고점 근접(%)", 100, "#,##0.0"),
+    "R3M": IndMeta("3M 수익률(%)", 100, "#,##0.0"),
+    "R6M": IndMeta("6M 수익률(%)", 100, "#,##0.0"),
+    "R12_1": IndMeta("12-1 수익률(%)", 100, "#,##0.0"),
+    "EP_FWD": IndMeta("선행 E/P(%)", 100, "#,##0.00"),
+}
+REVISION_KEYS = frozenset({"REV_OP_1M", "REV_OP_3M", "REV_NI_1M", "REV_NI_3M"})
+
+
+def ind_meta(key: str) -> IndMeta:
+    """레지스트리에 새 지표가 생기면 키 그대로 라벨 · 배율 1 로 나온다(열은 자동으로 는다)."""
+    return IND_META.get(key, IndMeta(key))
+
+
+EXCLUDE_LABELS: dict[str, str] = {
+    "admin": "관리종목", "halted": "매매정지", "audit_adverse": "감사의견 비적정",
+    "filing_late": "정기보고서 지연", "adv20": "거래대금 미달", "adv20_unknown": "거래대금 미상",
+    "insufficient_data": "데이터 부족"}
+
+
+def exclude_label(reason: object) -> str:
+    """엔진 exclude_reason → '라벨(코드)'. `<bucket>_gate` 는 '<버킷> 게이트'."""
+    if reason is None or reason == "":
+        return ""
+    code = str(reason)
+    if code in EXCLUDE_LABELS:
+        return f"{EXCLUDE_LABELS[code]}({code})"
+    if code.endswith("_gate"):
+        return f"{bucket_label(code[:-5])} 게이트({code})"
+    return code
+
+
+def coverage_label(state: object, age: object) -> str:
+    """fresh → 신선 · grace → 유예 D+n(마지막 신선일부터 거래일 n) · lapsed → 소멸 ·
+    none → 없음."""
+    if state == "fresh":
+        return "신선"
+    if state == "grace":
+        return f"유예 D+{age}" if isinstance(age, int) else "유예"
+    return {"lapsed": "소멸", "none": "없음"}.get(str(state), "" if state is None else str(state))
+
+
+def analyst_note(n: object) -> str | None:
+    """비고 — 추정기관수(WISE 최근 3개월 투자의견을 낸 증권사 수) 0 · 1~3 · 모름을 표시, 4 이상은 빈칸.
+
+    0 은 원천이 밝힌 '최근 3개월 의견 없음'(stage v2.5.0), NULL 은 모름(수집 실패 등) — 둘을 섞지 않는다.
+    표지는 짧게 — 애널 미상 · 의견 0(3M) · 애널 ≤3(확정 샘플 · DECISIONS §7 #6 ⑪, 뜻은 Score 비고
+    머리 메모 범례).
+    """
+    if n is None:
+        return "애널 미상"
+    if not isinstance(n, int | float) or n > 3:
+        return None
+    return "의견 0(3M)" if n == 0 else "애널 ≤3"
+
+
+def market_label(m: object) -> str:
+    return {"KOSPI": "KS", "KOSDAQ": "KQ"}.get(str(m), "" if m is None else str(m))
+
+
+def missing(reason: object) -> str:
+    """결측 표기(D: 결측 = '결측(사유)' 문자열)."""
+    return f"결측({reason or '원천없음'})"
+
+
+# ── 표식(E) ─────────────────────────────────────────────────────────────────
+SIGN_FLAGS = ("흑전", "적전", "적확", "적축")
+PREV_NEGATIVE_FLAGS = frozenset({"흑전", "적확", "적축"})   # 이전값 < 0 → 변화율 대신 표식만
+
+
+def split_flags(flag: object) -> list[str]:
+    return [f for f in str(flag or "").split(";") if f]
+
+
+def yoy(cur: float | None, prev: float | None) -> tuple[float | None, str | None]:
+    """실적 y-y(%) → (증가율, 부호 전환 글자). 부호가 바뀌면 증가율 대신 글자만 준다(E):
+    흑자전환(−→+) · 적자전환(+→−) · 적자지속(−→−). 흑자지속은 증가율(숫자)이다.
+
+    이전값 0 은 부호 전환으로 본다(0→+ 흑자전환 · 0→− 적자전환). 값이 없으면 (None, None).
+    실적 시트는 글자가 있으면 글자를, 없으면 증가율을 y-y 칸 하나에 넣는다(표식 열 없음, N-19).
+    """
+    if cur is None or prev is None:
+        return None, None
+    if prev > 0:
+        if cur < 0:
+            return None, "적자전환"
+        return (cur / prev - 1.0) * 100.0, None
+    if prev < 0:
+        if cur > 0:
+            return None, "흑자전환"
+        if cur < 0:
+            return None, "적자지속"
+        return None, None
+    if cur > 0:
+        return None, "흑자전환"
+    if cur < 0:
+        return None, "적자전환"
+    return None, None
+
+
+# ── 통계 ─────────────────────────────────────────────────────────────────────
+def group_pct(values: Mapping[str, float], group_of: Mapping[str, str | None],
+              min_size: int) -> dict[str, float]:
+    """그룹(업종) 안 백분위 0~100(엔진 공식). 표본 < min_size 이거나 그룹이 없으면
+    유니버스 백분위."""
+    wide = pct_rank_avg(values)
+    groups: dict[str, dict[str, float]] = {}
+    for t, v in values.items():
+        g = group_of.get(t)
+        if g is not None:
+            groups.setdefault(g, {})[t] = v
+    out = dict(wide)
+    for members in groups.values():
+        if len(members) >= min_size:
+            out.update(pct_rank_avg(members))
+    return out
+
+
+def group_z(values: Mapping[str, float], group_of: Mapping[str, str | None],
+            min_size: int) -> dict[str, float]:
+    """그룹(업종) 안에서 다시 매긴 z — 엔진 `z_score_winsorized`(그룹 평균·표본 표준편차, ±3σ 로
+    자른 뒤 표준화 → ±3 안). 값 있는 종목 < min_size 이거나 표준편차 0 이거나 그룹이 없으면 원래
+    값(유니버스 z)을 그대로 둔다(group_pct 의 표본 문턱과 같다). 표본 표준편차는 2종목부터라
+    min_size ≤ 1 인 spec 이어도 2종목 미만은 되돌린다. 표시용 참고값 — 순위·점수에 안 쓴다."""
+    out = dict(values)
+    groups: dict[str, dict[str, float]] = {}
+    for t, v in values.items():
+        g = group_of.get(t)
+        if g is not None:
+            groups.setdefault(g, {})[t] = v
+    for members in groups.values():
+        vals = list(members.values())
+        if len(vals) < max(min_size, 2) or statistics.stdev(vals) == 0:
+            continue
+        out.update(zip(members, z_score_winsorized(vals), strict=True))
+    return out
+
+
+def cap_candidates(ranked: Sequence[Mapping[str, object]], top_n: int, max_per: int,
+                   sector_of: Callable[[Mapping[str, object]], object],
+                   ) -> list[Mapping[str, object]]:
+    """순위순 행에서 업종당 max_per 까지만 담아 top_n 개(OutputRule).
+    업종이 없으면 '(없음)' 한 묶음."""
+    out: list[Mapping[str, object]] = []
+    count: dict[str, int] = {}
+    for r in ranked:
+        key = str(sector_of(r) or "(없음)")
+        if count.get(key, 0) >= max_per:
+            continue
+        count[key] = count.get(key, 0) + 1
+        out.append(r)
+        if len(out) >= top_n:
+            break
+    return out
+
+
+__all__ = [
+    "BUCKET_LABELS", "EXCLUDE_LABELS", "IND_META", "PREV_NEGATIVE_FLAGS", "REVISION_KEYS",
+    "SIGN_FLAGS", "IndMeta", "bucket_label", "cap_candidates", "coverage_label",
+    "exclude_label", "group_pct", "group_z", "ind_meta", "market_label", "missing", "pct_rank_avg",
+    "split_flags", "yoy",
+]

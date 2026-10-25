@@ -18,6 +18,7 @@ from stage import (
     rules_krx,
     rules_wise,
     snapshot,
+    rules_wics,
 )
 
 
@@ -157,7 +158,7 @@ def test_g7_default_threshold_fails_on_isolated_cells(tmp_path: Path) -> None:
 
 def test_registry_assembles_per_source_modules() -> None:
     mods = (rules_krx, rules_kiwoom, rules_kis, rules_dart, rules_dart_events, rules_wise,
-            rules_doc)
+            rules_doc, rules_wics)
     names = {t.name for mod in mods for t in mod.TABLES}
     assert set(rules.RULES) == names
     assert rules_krx.TABLES[0].name == "stg_price_daily"
@@ -165,8 +166,8 @@ def test_registry_assembles_per_source_modules() -> None:
                                                   "stg_listing_daily", "stg_ingest_krx"}
     assert {t.name for t in rules_kiwoom.TABLES} == {
         "stg_flow_daily_kiwoom", "stg_short_daily_kiwoom", "stg_foreign_daily",
-        "stg_lending_daily", "stg_master_daily", "stg_shards_kiwoom"}
+        "stg_lending_daily", "stg_master_daily", "stg_shards_kiwoom", "stg_flow_postclose_kiwoom"}
     assert {t.name for t in rules_dart.TABLES} >= {"stg_rcept_dt_map", "stg_fin"}
     assert {t.name for t in rules_kis.TABLES} >= {"stg_flow_split_daily", "stg_credit_daily"}
     assert rules_wise.TABLES[0].name == "stg_consensus_monthly"
-    assert model.RULES_VERSION == "2.3.0"
+    assert model.RULES_VERSION == "2.10.0"

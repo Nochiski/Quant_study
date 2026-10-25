@@ -1,14 +1,28 @@
 -- fin_std (S12) — 재무 PIT 표준화. DESIGN v1.2 §4-4 · GATES v1.0 §3-⑫ · EG7-P04.
 -- grain (corp_code, period_end, report_code, fs_div, vintage_kind) · receipt_axis.
 -- 모집단 = `stg_fin` 의 (corp_code, bsns_year, reprt_code, fs_div) 중 표준계정 행이 하나라도
--- 있는 그룹(= EG1 우변). 그룹당 `rcept_no` 는 하나다(API 는 요청한 보고서 하나를 돌려준다).
+-- 있는 그룹(= EG1 우변). 그룹의 판본은 **최신 접수(max `rcept_no`) 하나**다 — API 는 요청한 보고서의
+-- 최신 정정본 하나를 돌려주지만, 일일 수집은 같은 그룹에 원본 뒤에 정정을 덧붙인다(G-21, `grp`).
 --
 -- 계정 대응표 `_acct` 는 `src/fin_map.py` 가 정본이고 `rules_s12.py:acct_values_sql()` 이 만든
 -- 문자열을 그대로 옮겼다(tests 가 대조). 탐색 순서는 tier(a_concept → b_concept_alt → c_nm →
 -- d 보험 대체 → e 은행 대체, 정렬 가능한 라벨이라 min() 이 고른다) 다음 sj 순서(IS → CIS)다. 같은 우선순위에서 `pick` 은 값이 하나로
--- 모일 때만 채우고 갈리면 NULL(모호), `sum` 은 합산한다.
+-- 모일 때만 채우고 갈리면 NULL(모호), `sum` 은 합산하며 `sum_abs` 는 **크기**를 합산한다(F-A4 —
+-- 자산별 취득 줄은 한 표 안에서도 부호가 섞인다). `pick` 은 공백 없는 원문을 먼저 본다(F-A4).
+-- capex 는 `d_ppe_parts` tier 가 더 있고 그 안에 kind 두 줄(concept · nm_nonstd)이 함께
+-- `sum_abs` 된다 — 자산별 줄을 나눠 적는 회사의 합이 집계 한 줄과 같기 때문이다(DQ-8). 집계 줄이
+-- 하나라도 있으면 tier a/b/c 가 이겨 d 는 무시되므로 이중계상은 구조적으로 불가능하다.
+-- 자산별 이름 목록은 자산 종류 × 접미어를 펼친 48종이고(F-A4, 표준계정코드를 하나도 안 단 회사가
+-- 모든 종류를 평이한 이름으로 적는다) 합은 부호가 섞여도 **크기**로 더한다.
+-- 그 뒤에 `e_ppe_combined`(유형자산+투자부동산 **합산 줄** 7사, F-A1)가 있고 basis 가
+-- `ppe_incl_invprop` 라 정의 차이가 행에 남는다 — 자산별 합이 있으면 그것이 이긴다.
+-- 이름 대조는 **공백을 뗀 판**으로 한다(F-A2) — stage 가 적는 `stg_fin.account_nm_norm`(T-E)과
+-- `_acct` 토큰이 같은 규칙(rules_s12.norm_nm)으로 정규화돼 있다. 완전일치 규칙은 그대로다.
+-- 취득 줄이 아예 없는 현금흐름표는 `capex_zero` 가 0 으로 읽는다(F-A3, basis `none_in_cf`).
+-- 그 분모 밖(표가 없음 · 표는 있는데 못 잡음)은 basis 가 사유를 말한다(T-H, 아래).
 --
--- 기간: `period_end` = `stg_doc_meta.period_to`(main), `report_code` = `doc_acode`.
+-- 기간: `period_end` = `stg_doc_meta.period_to`(main), `report_code` = `doc_acode`. 그 판에 문서가
+-- 없으면 같은 정정 사슬(disclosure_version 링크)의 최신 문서를 쓴다(`chain_doc`, G-21 후속).
 -- `doc_acode` 는 1분기·3분기를 둘 다 11013 으로 적으므로 `period_from → period_to` 개월 수로
 -- 가른다(≤ `quarter_months` → 11013 · 그 밖 → 11014).
 -- 문서가 없으면 후보 규칙: `corp.fiscal_month` 말일(bsns_year · bsns_year+1)에서 보고서 종류만큼
@@ -33,9 +47,20 @@
 -- **직전 회계연도 같은 보고서**(`bsns_year` − 1, 같은 `report_code`·`fs_div`)가 어느 규칙이었는지를
 -- 남긴다. 둘이 다르면 매출 시계열이 끊긴 것이고(삼성카드 2024 `standard` 4.38조 → 2025
 -- `banking_gross` 3.84조), 그 구간의 성장률을 버릴지는 **팩터층이** 정한다.
+-- capex 기준: `capex_basis ∈ {standard, ppe_parts, ppe_incl_invprop, none_in_cf,
+-- no_cf_statement, unmapped}` — 같은 자리·같은 규약의 라벨이다. 합산 뒤에는 값만으로 출처를 알
+-- 수 없으므로 산출 규칙을 행에 싣는다(`_prev` 축은 두지 않는다). `ppe_incl_invprop` 는
+-- 투자부동산이 섞여 정의가 다르고, `none_in_cf` 는 0 을 읽은 근거라 소비 측이 둘을 가릴 수
+-- 있어야 한다. 뒤의 둘은 **값이 없는 사유**다(T-H): `no_cf_statement` = 현금흐름표를 읽은 적이
+-- 없다(영업·투자 소계 둘 다 없음 = 0 규칙의 분모 밖) · `unmapped` = 표는 있는데 대응표가 못
+-- 잡았다. 매출도 같은 꼴로 `no_is_statement`(IS·CIS 행 없음) 와 `unmapped` 로 갈린다 — 한 낱말
+-- (`unavailable`)로 묶여 있던 동안 DQ-6·DQ-8 같은 대응 실패가 게이트 숫자에 안 보였다.
 --
--- PIT: `available_date = rcept_dt`(derived, `stg_disclosure`). `stg_rcept_dt_map` 은 stage 에
--- 실재하지 않는다(GATES §9). 판본은 `api_restated` 하나 · `restated_unknown = true`(4A).
+-- PIT: `available_date` = 판 접수번호의 stage 공개일(`stg_disclosure.available_date`, derived — 원천
+-- `rcept_dt` 와 접수번호 날짜 중 늦은 쪽. 재제출본은 원천 rcept_dt 가 접수번호보다 이르다, J-41) — 단
+-- 재무를 안 건드린 정정본은 원본 공개일(`redate` CTE — 그 행만 `available_date < rcept_dt`, basis 는 둘 다
+-- derived). `stg_rcept_dt_map` 은 stage 에 실재하지 않는다(GATES §9). 판본은 `api_restated` 하나 ·
+-- `restated_unknown = true`(4A).
 -- 격리 4종: non_krw · period_unresolved · rcept_lag_out_of_range · duplicate_vintage.
 WITH _acct(metric, tier, kind, tokens, sjs, agg, require_tag, basis, family) AS (
     VALUES
@@ -53,10 +78,10 @@ WITH _acct(metric, tier, kind, tokens, sjs, agg, require_tag, basis, family) AS 
         ('net_income', 'c_nm', 'nm', ['당기순이익', '당기순이익(손실)', '연결당기순이익'], ['IS', 'CIS'], 'pick', NULL, NULL, 'flow'),
         ('net_income_owners', 'a_concept', 'concept', ['ProfitLossAttributableToOwnersOfParent'], ['IS', 'CIS'], 'pick', NULL, NULL, 'flow'),
         ('eps_basic', 'a_concept', 'concept', ['BasicEarningsLossPerShare'], ['IS', 'CIS'], 'pick', NULL, NULL, 'flow'),
-        ('eps_basic', 'c_nm', 'nm', ['기본주당이익', '기본주당순이익', '보통주 기본주당이익', '보통주기본주당순손실'], ['IS', 'CIS'], 'pick', NULL, NULL, 'flow'),
+        ('eps_basic', 'c_nm', 'nm', ['기본주당이익', '기본주당순이익', '보통주기본주당이익', '보통주기본주당순손실'], ['IS', 'CIS'], 'pick', NULL, NULL, 'flow'),
         ('depreciation', 'a_concept', 'concept', ['DepreciationAndAmortisationExpense'], ['IS', 'CIS'], 'pick', NULL, NULL, 'flow'),
         ('depreciation', 'b_concept_alt', 'concept', ['DepreciationExpense'], ['IS', 'CIS'], 'pick', NULL, NULL, 'flow'),
-        ('depreciation', 'c_nm', 'nm', ['감가상각비 및 상각비', '감가상각비'], ['IS', 'CIS'], 'pick', NULL, NULL, 'flow'),
+        ('depreciation', 'c_nm', 'nm', ['감가상각비및상각비', '감가상각비'], ['IS', 'CIS'], 'pick', NULL, NULL, 'flow'),
         ('interest_expense', 'a_concept', 'concept', ['InterestExpense'], ['IS', 'CIS'], 'pick', NULL, NULL, 'flow'),
         ('interest_expense', 'c_nm', 'nm', ['이자비용'], ['IS', 'CIS'], 'pick', NULL, NULL, 'flow'),
         ('total_asset', 'a_concept', 'concept', ['Assets'], ['BS'], 'pick', NULL, NULL, 'stock'),
@@ -80,15 +105,18 @@ WITH _acct(metric, tier, kind, tokens, sjs, agg, require_tag, basis, family) AS 
         ('borrowings', 'a_concept', 'concept', ['Borrowings'], ['BS'], 'pick', NULL, NULL, 'stock'),
         ('borrowings', 'c_nm', 'nm', ['차입부채'], ['BS'], 'pick', NULL, NULL, 'stock'),
         ('cf_operating_ytd', 'a_concept', 'concept', ['CashFlowsFromUsedInOperatingActivities'], ['CF'], 'pick', NULL, NULL, 'cf'),
-        ('cf_operating_ytd', 'c_nm', 'nm', ['영업활동현금흐름', '영업활동으로인한현금흐름', '영업활동순현금흐름'], ['CF'], 'pick', NULL, NULL, 'cf'),
+        ('cf_operating_ytd', 'c_nm', 'nm', ['영업활동현금흐름', '영업활동으로인한현금흐름', '영업활동순현금흐름', '영업활동으로인한순현금흐름'], ['CF'], 'pick', NULL, NULL, 'cf'),
         ('cf_investing_ytd', 'a_concept', 'concept', ['CashFlowsFromUsedInInvestingActivities'], ['CF'], 'pick', NULL, NULL, 'cf'),
         ('cf_investing_ytd', 'c_nm', 'nm', ['투자활동현금흐름', '투자활동으로인한현금흐름', '투자활동순현금흐름'], ['CF'], 'pick', NULL, NULL, 'cf'),
         ('cf_financing_ytd', 'a_concept', 'concept', ['CashFlowsFromUsedInFinancingActivities'], ['CF'], 'pick', NULL, NULL, 'cf'),
         ('cf_financing_ytd', 'c_nm', 'nm', ['재무활동현금흐름', '재무활동으로인한현금흐름', '재무활동순현금흐름'], ['CF'], 'pick', NULL, NULL, 'cf'),
-        ('capex_ytd', 'a_concept', 'concept', ['PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities'], ['CF'], 'pick', NULL, NULL, 'cf'),
-        ('capex_ytd', 'c_nm', 'nm', ['유형자산의 취득', '유형자산의취득', '유형자산 취득'], ['CF'], 'pick', NULL, NULL, 'cf'),
+        ('capex_ytd', 'a_concept', 'concept', ['PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities'], ['CF'], 'pick', NULL, 'standard', 'cf'),
+        ('capex_ytd', 'c_nm', 'nm', ['유형자산의취득', '유형자산취득'], ['CF'], 'pick', NULL, 'standard', 'cf'),
         ('revenue', 'd_insurance_gross', 'concept', ['OperatingIncomeInsurance', 'InvestmentIncome'], ['IS', 'CIS'], 'sum', 'InvestmentIncome', 'insurance_gross', 'flow'),
-        ('revenue', 'e_banking_gross', 'concept', ['RevenueFromInterest', 'FeeAndCommissionIncome', 'OperatingIncomeInsurance'], ['IS', 'CIS'], 'sum', 'RevenueFromInterest', 'banking_gross', 'flow')
+        ('revenue', 'e_banking_gross', 'concept', ['RevenueFromInterest', 'FeeAndCommissionIncome', 'OperatingIncomeInsurance'], ['IS', 'CIS'], 'sum', 'RevenueFromInterest', 'banking_gross', 'flow'),
+        ('capex_ytd', 'd_ppe_parts', 'concept', ['PurchaseOfLand', 'PurchaseOfBuildings', 'PurchaseOfStructure', 'PurchaseOfMachinery', 'PurchaseOfVehicles', 'PurchaseOfOfficeEquipment', 'PurchaseOfConstructionInProgress', 'PurchaseOfOtherPropertyPlantAndEquipment', 'PurchaseOfFixturesAndFittings'], ['CF'], 'sum_abs', NULL, 'ppe_parts', 'cf'),
+        ('capex_ytd', 'd_ppe_parts', 'nm_nonstd', ['토지의취득', '토지취득', '건물의취득', '건물취득', '구축물의취득', '구축물취득', '기계장치의취득', '기계장치취득', '차량운반구의취득', '차량운반구취득', '비품의취득', '비품취득', '집기의취득', '집기취득', '집기비품의취득', '집기비품취득', '사무용비품의취득', '사무용비품취득', '공구의취득', '공구취득', '공구와기구의취득', '공구와기구취득', '공구기구의취득', '공구기구취득', '시설장치의취득', '시설장치취득', '시설물의취득', '시설물취득', '금형의취득', '금형취득', '건설중인자산의취득', '건설중인자산취득', '건설중자산의취득', '건설중자산취득', '건설중인유형자산의취득', '건설중인유형자산취득', '건설중인자산(유형자산)의취득', '건설중인자산(유형자산)취득', '기타유형자산의취득', '기타유형자산취득', '기타의유형자산의취득', '기타의유형자산취득', '건물부속설비의취득', '건물부속설비취득', '임차자산개량의취득', '임차자산개량취득', '리스개량자산의취득', '리스개량자산취득'], ['CF'], 'sum_abs', NULL, 'ppe_parts', 'cf'),
+        ('capex_ytd', 'e_ppe_combined', 'nm_nonstd', ['유형자산및투자부동산의취득', '투자부동산및유형자산의취득'], ['CF'], 'pick', NULL, 'ppe_incl_invprop', 'cf')
 ),
 _qcode(reprt_code) AS (
     -- 3개월 손익을 싣는 분기 판본. q4 파생은 이 셋이 다 있어야 선다(부분합 금지).
@@ -100,8 +128,12 @@ _rcode(reprt_code) AS (
 ),
 grp AS (
     -- 모집단. `WHERE account_std` 는 GATES §3-⑫ 우변과 같은 술어다.
+    -- 판본 = 그룹의 **최신 접수**(G-21, N-25 Q2). 일일 수집이 원본 뒤에 정정을 덧붙인 그룹을 첫 접수에
+    -- 고정하면 정정 값이 영영 안 들어오고, 줄 순서(ord)를 바꾼 계정은 두 판의 줄이 다 살아 `pick` 이
+    -- 모호 NULL 이 된다(이오플로우 01274310 total_equity). 백필 구간(API = 최신 정정본 하나)과 같은
+    -- 정책이다 — 정정 값 + 그 판의 공개일(B-41 결정 A). 원본 구간의 원본 값은 4C 몫이다.
     SELECT corp_code, bsns_year, reprt_code, fs_div,
-           min(rcept_no)                                        AS rcept_no,
+           max(rcept_no)                                        AS rcept_no,
            min(currency)                                        AS currency,
            bool_and(is_krw)                                     AS is_krw_group
     FROM stg_fin
@@ -111,24 +143,60 @@ grp AS (
 fin AS (
     SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.sj_div,
            regexp_replace(f.account_id, '^(ifrs-full_|ifrs_|dart_)', '')  AS concept,
+           -- 계정명은 **원문과 공백 뗀 판**을 함께 싣는다(F-A2). DART 계정명의 공백은 회사마다
+           -- 임의라('영업활동으로 인한 순현금흐름' · '유형자산 및 투자부동산의 취득', CF
+           -- 90,456행에 공백) 원문으로 완전일치하면 같은 계정이 결측이 된다. 토큰도 같은 규칙으로
+           -- 정규화된 판이 `_acct` 에 들어 있다(rules_s12.norm_nm). 원문은 `pick` 의 우선순위
+           -- (`nm_exact`)에 쓴다 — 공백 변형을 받아들이되 **원래 이기던 줄이 계속 이겨야** 한다.
+           -- 공백 뗀 판은 **stage 가 적는다**(T-E, `rules_dart.STG_FIN.extras.account_nm_norm`).
+           -- 같은 정규화를 소비층마다 되풀이하지 않는다 — 여기서는 읽기만 한다.
            f.account_nm,
+           f.account_nm_norm,
+           f.account_std,
            f.thstrm_amount
     FROM stg_fin f
     SEMI JOIN grp g
       ON g.corp_code = f.corp_code AND g.bsns_year = f.bsns_year
      AND g.reprt_code = f.reprt_code AND g.fs_div = f.fs_div
-    -- 자연키 8열(rules_dart.STG_FIN natural_key)당 1행. first_write_wins(`observed_date` 최소).
+     AND g.rcept_no = f.rcept_no                -- 그룹의 최신 판본 줄만(G-21) — 판끼리 섞지 않는다
+    -- 자연키 8열(rules_dart.STG_FIN natural_key)당 1행 — 같은 접수의 재수집 판본을 접는다.
+    -- first_write_wins(`observed_date` 최소).
     QUALIFY row_number() OVER (
         PARTITION BY f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.sj_div,
                      f.account_id, f.account_detail, f.ord
         ORDER BY f.observed_date NULLS LAST, f.thstrm_amount NULLS LAST) = 1
 ),
 dt AS (
-    -- 접수일 원천. 접수번호당 1행으로 접어야 `head` 조인이 grp 행을 늘리지 않는다.
-    SELECT rcept_no, rcept_dt
+    -- 접수일·공개일 원천. 접수번호당 1행으로 접어야 `head` 조인이 grp 행을 늘리지 않는다.
+    -- `available_date` 는 stage 가 보정한 공개일이다(원천 rcept_dt 와 접수번호 날짜 중 늦은 쪽 —
+    -- E08·J-41, 보정 규칙은 stage 한 곳). `rcept_dt` 는 원천 그대로 기간 판정·접수 지연 격리 축이다.
+    SELECT rcept_no, rcept_dt, available_date
     FROM stg_disclosure
     QUALIFY row_number() OVER (PARTITION BY rcept_no
                                ORDER BY observed_date NULLS LAST, rcept_dt NULLS LAST) = 1
+),
+redate AS (
+    -- 정정본의 원본 공시일 승계(09-30, `docs/research/2026-09-30-gpt-layer-debate.md` ③).
+    -- DART API 는 정정이 있으면 정정본만 돌려주므로 이 판의 값은 정정본이다. 원본부터 이 판까지의
+    -- **모든 정정**이 재무를 건드리지 않았으면(`corr_has_fin_item = false` — 첫 장 미해석·빈 항목 표
+    -- NULL 은 건드린 것으로 본다) 재무 수치는 원본과 같으므로 공개일은 원본 접수일이다. 정정 첫 장의 원본
+    -- 제출일이 연결된 원본 접수일과 1일 안(`date_check` exact·off_1d)일 때만 — 연결이 흔들리면
+    -- 정정 접수일을 지킨다. `disclosure_version` 은 rcept_no grain(유일)이다.
+    -- 재무 정정 판정은 disclosure_version 한 곳이다 — 사유가 재작성·재감사 류이거나 항목 표가 빈 정정은
+    -- TRUE·NULL 이라 승계하지 않는다(C-11, N-25 Q1). 날짜는 두 판 모두 stage 공개일(`dt`)로 잇는다 —
+    -- 원본이 재제출본이면 원천 rcept_dt 가 접수번호보다 이르다(J-41).
+    SELECT c.rcept_no, od.available_date                         AS orig_avail_dt
+    FROM disclosure_version c
+    JOIN dt od ON od.rcept_no = c.orig_rcept_no
+    JOIN dt cd ON cd.rcept_no = c.rcept_no
+    WHERE c.is_correction
+      AND c.date_check IN ('exact', 'off_1d')
+      AND od.available_date < cd.available_date
+      AND NOT EXISTS (
+          SELECT 1 FROM disclosure_version x
+          WHERE x.orig_rcept_no = c.orig_rcept_no AND x.is_correction
+            AND x.rcept_no <= c.rcept_no
+            AND x.corr_has_fin_item IS NOT FALSE)
 ),
 req AS (
     -- 대체 규칙의 발동 조건(fin_map.REVENUE_FALLBACK.require) — 태그 존재 여부
@@ -143,12 +211,22 @@ hit AS (
     SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div,
            a.metric, a.tier, a.agg, a.basis, a.family,
            list_position(a.sjs, f.sj_div)                        AS sj_rank,
+           -- 0 = 공백 정규화 없이도 걸리던 줄(태그 히트 포함) · 1 = 공백을 떼야 걸린 줄.
+           -- `val` 의 `pick` 이 0 을 먼저 본다(F-A4) — 정규화가 없던 때 뽑히던 값을 지킨다.
+           CASE WHEN a.kind = 'concept' OR f.account_nm = f.account_nm_norm
+                THEN 0 ELSE 1 END                                 AS nm_exact,
            f.thstrm_amount                                       AS val
     FROM fin f
     JOIN _acct a
       ON list_position(a.sjs, f.sj_div) IS NOT NULL
      AND ((a.kind = 'concept' AND list_contains(a.tokens, f.concept))
-       OR (a.kind = 'nm' AND list_contains(a.tokens, f.account_nm)))
+       OR (a.kind = 'nm' AND list_contains(a.tokens, f.account_nm_norm))
+       -- `nm_nonstd` = 표준계정코드 미사용 행(account_std=false)만 보는 이름 폴백. capex 자산별
+       -- 합은 concept 줄과 **같은 tier** 라 표준 태그 줄을 이름으로 또 세면 두 번 더해진다
+       -- (`건설중인자산의 취득` 등은 표준 태그의 계정명이기도 하다 — fin_map.CAPEX_FALLBACK).
+       -- 합산 줄(tier e_ppe_combined)도 표준 태그를 안 단 회사만 잡으면 되므로 같은 kind 다.
+       OR (a.kind = 'nm_nonstd' AND NOT f.account_std
+           AND list_contains(a.tokens, f.account_nm_norm)))
     LEFT JOIN req r
       ON r.corp_code = f.corp_code AND r.bsns_year = f.bsns_year
      AND r.reprt_code = f.reprt_code AND r.fs_div = f.fs_div
@@ -178,8 +256,18 @@ val AS (
     SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.metric,
            min(h.family)                                         AS family,
            min(h.basis)                                          AS basis,
-           CASE WHEN min(h.agg) = 'sum' THEN sum(h.val)
-                WHEN count(DISTINCT h.val) = 1 THEN min(h.val)
+           -- `sum_abs` 는 **크기의 합**이다(F-A4) — 자산별 취득 줄은 한 표 안에서도 부호가
+           -- 섞여(표준 태그 +, 비표준 −) 그냥 더하면 취득이 상계된다. `sum` 은 종전대로 부호를
+           -- 지킨다(금융업 매출 대체 · lease_liab).
+           -- `pick` 은 공백 없는 원문(nm_exact=0)이 먼저다: 그런 줄이 있고 값이 하나로 모이면
+           -- 그것을 쓰고, 없을 때만 공백 변형까지 보며(값이 하나면 채운다), 그래도 갈리면
+           -- NULL(모호). 공백 정규화 전에 뽑히던 값이 정규화 때문에 모호로 떨어지지 않는다.
+           CASE WHEN min(h.agg) = 'sum'     THEN sum(h.val)
+                WHEN min(h.agg) = 'sum_abs' THEN sum(abs(h.val))
+                WHEN count(DISTINCT h.val) FILTER (WHERE h.nm_exact = 0) = 1
+                     THEN min(h.val) FILTER (WHERE h.nm_exact = 0)
+                WHEN count(*) FILTER (WHERE h.nm_exact = 0) = 0
+                     AND count(DISTINCT h.val) = 1 THEN min(h.val)
            END                                                   AS v
     FROM hit h
     JOIN best b
@@ -196,14 +284,48 @@ doc AS (
     QUALIFY row_number() OVER (PARTITION BY rcept_no
                                ORDER BY period_to, period_from, doc_acode) = 1
 ),
+chain_doc AS (
+    -- 그룹의 판(최신 접수)에 기간 문서가 없으면(정정 ZIP 미제공 014 등) **같은 정정 사슬**의 다른 판
+    -- 문서로 기간을 잇는다 — 정정과 원본은 같은 보고서라 기간이 같다. 없으면 G-21 이 고른 정정의 접수일이
+    -- 추정 창(0~period_end_lag_max_days) 밖일 때 그룹이 통째로 `period_unresolved` 가 된다.
+    -- 사슬은 disclosure_version 링크(정정 → 원본, 링크가 성립한 것만)로만 묶는다. 그룹(API 요청 축)의
+    -- 아무 접수나 쓰지 않는다 — 한 그룹에 서로 다른 보고서가 묶일 수 있다(한화리츠 01669226 반기
+    -- 2026.01·2026.07). 사슬에 문서가 여럿이면 최신 판(가장 큰 rcept_no)의 문서다.
+    -- 전제: disclosure_version 이 정정 체인을 평평하게 접는다(정정의 orig_rcept_no 는 언제나 원본) —
+    -- S11 EG3 `n_link_orig_invalid`·`n_is_correction_prefix_mismatch` 가 지킨다.
+    -- 사슬 문서가 판보다 늦은 접수일 수 있으나 기간은 보고서의 고정 속성이라 값이 새지 않는다.
+    SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div,
+           m.period_from, m.period_to, m.doc_acode
+    FROM grp g
+    JOIN disclosure_version s ON s.rcept_no = g.rcept_no
+    JOIN disclosure_version x
+      ON coalesce(x.orig_rcept_no, x.rcept_no) = coalesce(s.orig_rcept_no, s.rcept_no)
+    JOIN doc m ON m.rcept_no = x.rcept_no
+    WHERE NOT EXISTS (SELECT 1 FROM doc o WHERE o.rcept_no = g.rcept_no)
+    -- 유효한 사슬 안에서는 기간이 같아 어느 판을 골라도 결과가 같다 — 정렬은 결정성을 위한 것이다.
+    QUALIFY row_number() OVER (PARTITION BY g.corp_code, g.bsns_year, g.reprt_code, g.fs_div
+                               ORDER BY x.rcept_no DESC) = 1
+),
 head AS (
+    -- `rcept_dt` 는 이 판의 원천 접수일(기간 판정·접수 지연 격리는 이 축), `avail_dt` 는 공개일 축이다 —
+    -- 원본 공시일을 승계한 정정본(`redate`)은 `available_date < rcept_dt`, 원천 rcept_dt 가 접수번호보다
+    -- 이른 재제출본(J-41)은 `available_date > rcept_dt` 로 드러난다.
     SELECT g.*,
            d.rcept_dt,
-           m.period_from, m.period_to, m.doc_acode,
+           coalesce(rd.orig_avail_dt, d.available_date)          AS avail_dt,
+           -- 기간 문서: 그 판 자신 → 없으면 같은 정정 사슬의 문서(`chain_doc`). `doc` 은 세 열이 다
+           -- 차거나 다 비므로 열마다 coalesce 해도 한 문서의 값이 섞이지 않는다.
+           coalesce(m.period_from, cd.period_from)               AS period_from,
+           coalesce(m.period_to, cd.period_to)                   AS period_to,
+           coalesce(m.doc_acode, cd.doc_acode)                   AS doc_acode,
            c.fiscal_month
     FROM grp g
     LEFT JOIN dt d ON d.rcept_no = g.rcept_no
+    LEFT JOIN redate rd ON rd.rcept_no = g.rcept_no
     LEFT JOIN doc m ON m.rcept_no = g.rcept_no
+    LEFT JOIN chain_doc cd
+      ON cd.corp_code = g.corp_code AND cd.bsns_year = g.bsns_year
+     AND cd.reprt_code = g.reprt_code AND cd.fs_div = g.fs_div
     LEFT JOIN corp c ON c.corp_code = g.corp_code
 ),
 pe_cand AS (
@@ -233,6 +355,7 @@ pe_inf AS (
 ),
 resolved AS (
     SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.rcept_no, h.rcept_dt,
+           h.avail_dt,
            h.currency, h.is_krw_group,
            h.period_from                                         AS period_start,
            CASE WHEN h.period_to IS NOT NULL THEN h.period_to
@@ -276,8 +399,9 @@ kept AS (
     -- 비12월 결산은 사업보고서와 같은 회계연도 분기의 연도가 다르다(3월 결산: 2021-03 사업보고서와
     -- 2021-06·09·12 분기가 둘 다 2021). 같은 회계연도는 결산월 말일에서 보고서 종류만큼 당긴
     -- 달의 말일로 찾는다(`pe_cand` 와 같은 달력 규약).
+    -- 공개일은 원천 `rcept_dt` 가 아니라 stage 보정 공개일 `avail_dt` 를 싣는다(Q-4 병합 — `head` 주석).
     SELECT j.corp_code, j.bsns_year, j.reprt_code, j.fs_div, j.period_end, j.report_code,
-           j.rcept_dt
+           j.avail_dt
     FROM judged j
     JOIN dup d
       ON d.corp_code = j.corp_code AND d.period_end = j.period_end
@@ -290,7 +414,7 @@ q4member AS (
            m.bsns_year                                           AS m_bsns_year,
            m.reprt_code                                          AS m_reprt_code,
            m.report_code                                         AS m_report_code,
-           m.rcept_dt                                            AS m_rcept_dt
+           m.avail_dt                                            AS m_avail_dt
     FROM kept a
     CROSS JOIN _const k
     JOIN kept m
@@ -326,24 +450,27 @@ q4 AS (
       AND q.n_q = (SELECT count(*) FROM _qcode)
 ),
 q4meta AS (
-    -- 구성 보고서 수(사업보고서 + 같은 회계연도 분기, 최대 4)와 그 접수일의 max — 파생 컬럼의
-    -- 공개시점(DESIGN §3)
+    -- 구성 보고서 수(사업보고서 + 같은 회계연도 분기, 최대 4)와 그 공개일의 max — 파생 컬럼의
+    -- 공개시점(DESIGN §3). 구성 행은 회계기간 축(#236), 공개일은 stage 보정 공개일 `avail_dt`
+    -- (J-41·C-11)다 — 구성 행 각자의 `available_date` 와 같은 축이어야 파생 값이 구성 행보다
+    -- 먼저 공개되지 않는다(Q-4 병합, e1.27.0).
     SELECT a.corp_code, a.bsns_year, a.fs_div,
            1 + count(DISTINCT q.m_report_code)                   AS n_rows,
-           greatest(a.rcept_dt, coalesce(max(q.m_rcept_dt), a.rcept_dt)) AS available_date
+           greatest(a.avail_dt, coalesce(max(q.m_avail_dt), a.avail_dt)) AS available_date
     FROM kept a
     LEFT JOIN q4member q
       ON q.corp_code = a.corp_code AND q.bsns_year = a.bsns_year AND q.fs_div = a.fs_div
     WHERE a.reprt_code = '11011'
-    GROUP BY a.corp_code, a.bsns_year, a.fs_div, a.rcept_dt
+    GROUP BY a.corp_code, a.bsns_year, a.fs_div, a.avail_dt
 ),
 cfprev AS (
     -- 현금흐름 분기값의 직전 보고서 — 같은 회계연도 바로 앞 분기(기간 말일 = 자기 말일에서
     -- `quarter_months` 당긴 달의 말일)이고 보고서 종류가 대응표(`rules_s12.CF_PRIOR_REPORT`)대로다.
-    SELECT s.corp_code, s.bsns_year, s.reprt_code, s.fs_div, s.report_code, s.rcept_dt,
+    -- 공개일은 두 행 모두 `avail_dt`(Q-4 병합).
+    SELECT s.corp_code, s.bsns_year, s.reprt_code, s.fs_div, s.report_code, s.avail_dt,
            p.bsns_year                                           AS p_bsns_year,
            p.reprt_code                                          AS p_reprt_code,
-           p.rcept_dt                                            AS p_rcept_dt
+           p.avail_dt                                            AS p_avail_dt
     FROM kept s
     CROSS JOIN _const k
     LEFT JOIN kept p
@@ -370,39 +497,108 @@ cfqmeta AS (
     SELECT corp_code, bsns_year, reprt_code, fs_div,
            CASE WHEN report_code = '11013' THEN 1
                 WHEN p_reprt_code IS NOT NULL THEN 2 ELSE 1 END  AS n_rows,
-           CASE WHEN report_code = '11013' THEN rcept_dt
-                ELSE greatest(rcept_dt, coalesce(p_rcept_dt, rcept_dt)) END AS available_date
+           CASE WHEN report_code = '11013' THEN avail_dt
+                ELSE greatest(avail_dt, coalesce(p_avail_dt, avail_dt)) END AS available_date
     FROM cfprev
 ),
+wide_acct AS (
+    -- **그룹 축이 정본**이다 — 대응표 24 계정 중 하나도 안 걸린 그룹(표준계정 행은 있지만 전부
+    -- 다른 계정)도 행을 가져야 `basis` 라벨이 「왜 값이 없는가」 를 말할 수 있다(T-H). `val` 로만
+    -- 몰면 그런 그룹이 `wide` 에서 빠져 최종 SELECT 가 라벨을 지어내야 한다.
+    SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div,
+           max(a.v) FILTER (WHERE a.metric = 'revenue')              AS revenue,
+           max(a.basis) FILTER (WHERE a.metric = 'revenue' AND a.v IS NOT NULL) AS revenue_basis,
+           max(a.v) FILTER (WHERE a.metric = 'cost_of_sales')        AS cost_of_sales,
+           max(a.v) FILTER (WHERE a.metric = 'gross_profit')         AS gross_profit,
+           max(a.v) FILTER (WHERE a.metric = 'op_profit')            AS op_profit,
+           max(a.v) FILTER (WHERE a.metric = 'pretax_income')        AS pretax_income,
+           max(a.v) FILTER (WHERE a.metric = 'net_income')           AS net_income,
+           max(a.v) FILTER (WHERE a.metric = 'net_income_owners')    AS net_income_owners,
+           max(a.v) FILTER (WHERE a.metric = 'eps_basic')            AS eps_basic,
+           max(a.v) FILTER (WHERE a.metric = 'depreciation')         AS depreciation,
+           max(a.v) FILTER (WHERE a.metric = 'interest_expense')     AS interest_expense,
+           max(a.v) FILTER (WHERE a.metric = 'total_asset')          AS total_asset,
+           max(a.v) FILTER (WHERE a.metric = 'total_liab')           AS total_liab,
+           max(a.v) FILTER (WHERE a.metric = 'total_equity')         AS total_equity,
+           max(a.v) FILTER (WHERE a.metric = 'equity_owners')        AS equity_owners,
+           max(a.v) FILTER (WHERE a.metric = 'cash')                 AS cash,
+           max(a.v) FILTER (WHERE a.metric = 'inventories')          AS inventories,
+           max(a.v) FILTER (WHERE a.metric = 'current_assets')       AS current_assets,
+           max(a.v) FILTER (WHERE a.metric = 'current_liab')         AS current_liab,
+           max(a.v) FILTER (WHERE a.metric = 'lease_liab')           AS lease_liab,
+           max(a.v) FILTER (WHERE a.metric = 'borrowings')           AS borrowings,
+           max(a.v) FILTER (WHERE a.metric = 'cf_operating_ytd')     AS cf_operating_ytd,
+           max(a.v) FILTER (WHERE a.metric = 'cf_investing_ytd')     AS cf_investing_ytd,
+           max(a.v) FILTER (WHERE a.metric = 'cf_financing_ytd')     AS cf_financing_ytd,
+           max(a.v) FILTER (WHERE a.metric = 'capex_ytd')            AS capex_ytd,
+           -- 합산 뒤에는 값만으로 출처를 알 수 없다 — 집계 한 줄(standard)인지 자산별 줄의
+           -- 합(ppe_parts)인지를 `revenue_basis` 와 같은 꼴로 싣는다(DQ-8).
+           max(a.basis) FILTER (WHERE a.metric = 'capex_ytd' AND a.v IS NOT NULL) AS capex_basis
+    FROM grp g
+    LEFT JOIN val a
+      ON a.corp_code = g.corp_code AND a.bsns_year = g.bsns_year
+     AND a.reprt_code = g.reprt_code AND a.fs_div = g.fs_div
+    GROUP BY g.corp_code, g.bsns_year, g.reprt_code, g.fs_div
+),
+capex_zero AS (
+    -- **유형자산 취득 줄이 없는 그룹**(F-A3) — 값 있는 PPE 취득 줄이 하나도 없는 현금흐름표.
+    -- 현금흐름표는 그 기간의 현금흐름을 **다 적는 표**다. 리스·무형자산·소프트웨어·금융자산
+    -- 취득만 적혀 있고 유형자산 취득 줄이 아예 없으면 그 기간에 유형자산을 안 산 것이고,
+    -- 충실한 읽기는 결측이 아니라 **0** 이다(FY2025 92사 + 집계 줄이 값 공란인 9사).
+    -- 결측으로 두면 FCF 가 통째로 비어 회사가 팩터 모집단에서 사라진다.
+    -- 「유형자산 취득 줄」 판정은 OR 두 갈래다: ① capex 토큰(집계 concept · 자산별 9종 ·
+    -- 비표준 이름 · 합산 줄)에 걸린 줄 ② 정규화 이름에 '유형자산' 과 '취득' 이 함께 든 줄
+    -- (목록에 없는 변형까지 넓게 막는 쪽으로 판단한다). 그중 **금액이 있는** 줄이 하나라도
+    -- 있으면 0 규칙을 막는다 — 값이 모호해(pick 이 갈려) NULL 이 된 그룹을 「안 샀다」 와 섞으면
+    -- 안 되기 때문이다. 합산 줄도 여기 들어 0 을 막는다(값이 있으면 tier e 가 이미 채운다).
+    -- 금액이 빈 줄은 「샀다」 는 증거가 아니라서 막지 않는다.
+    -- 현금흐름표 자체가 있는지(소계가 잡혔는지)는 `wide` 에서 본다.
+    SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div
+    FROM fin f
+    LEFT JOIN _acct a
+      ON a.metric = 'capex_ytd'
+     AND ((a.kind = 'concept' AND list_contains(a.tokens, f.concept))
+       OR (a.kind <> 'concept' AND list_contains(a.tokens, f.account_nm_norm)))
+    WHERE f.sj_div = 'CF'
+    GROUP BY f.corp_code, f.bsns_year, f.reprt_code, f.fs_div
+    HAVING NOT bool_or(coalesce(
+        f.thstrm_amount IS NOT NULL
+        AND (a.metric IS NOT NULL
+             OR (f.account_nm_norm LIKE '%유형자산%' AND f.account_nm_norm LIKE '%취득%')),
+        FALSE))
+),
 wide AS (
-    SELECT corp_code, bsns_year, reprt_code, fs_div,
-           max(v) FILTER (WHERE metric = 'revenue')              AS revenue,
-           max(basis) FILTER (WHERE metric = 'revenue' AND v IS NOT NULL) AS revenue_basis,
-           max(v) FILTER (WHERE metric = 'cost_of_sales')        AS cost_of_sales,
-           max(v) FILTER (WHERE metric = 'gross_profit')         AS gross_profit,
-           max(v) FILTER (WHERE metric = 'op_profit')            AS op_profit,
-           max(v) FILTER (WHERE metric = 'pretax_income')        AS pretax_income,
-           max(v) FILTER (WHERE metric = 'net_income')           AS net_income,
-           max(v) FILTER (WHERE metric = 'net_income_owners')    AS net_income_owners,
-           max(v) FILTER (WHERE metric = 'eps_basic')            AS eps_basic,
-           max(v) FILTER (WHERE metric = 'depreciation')         AS depreciation,
-           max(v) FILTER (WHERE metric = 'interest_expense')     AS interest_expense,
-           max(v) FILTER (WHERE metric = 'total_asset')          AS total_asset,
-           max(v) FILTER (WHERE metric = 'total_liab')           AS total_liab,
-           max(v) FILTER (WHERE metric = 'total_equity')         AS total_equity,
-           max(v) FILTER (WHERE metric = 'equity_owners')        AS equity_owners,
-           max(v) FILTER (WHERE metric = 'cash')                 AS cash,
-           max(v) FILTER (WHERE metric = 'inventories')          AS inventories,
-           max(v) FILTER (WHERE metric = 'current_assets')       AS current_assets,
-           max(v) FILTER (WHERE metric = 'current_liab')         AS current_liab,
-           max(v) FILTER (WHERE metric = 'lease_liab')           AS lease_liab,
-           max(v) FILTER (WHERE metric = 'borrowings')           AS borrowings,
-           max(v) FILTER (WHERE metric = 'cf_operating_ytd')     AS cf_operating_ytd,
-           max(v) FILTER (WHERE metric = 'cf_investing_ytd')     AS cf_investing_ytd,
-           max(v) FILTER (WHERE metric = 'cf_financing_ytd')     AS cf_financing_ytd,
-           max(v) FILTER (WHERE metric = 'capex_ytd')            AS capex_ytd
-    FROM val
-    GROUP BY corp_code, bsns_year, reprt_code, fs_div
+    -- 0 규칙은 `val`·`best_tier` 를 건드리지 않고 **뒤에서** 덮는다 — tier 해석은 그대로 두고
+    -- 「줄이 없다」 는 사실만 읽는다. 현금흐름표가 있다는 증거는 영업·투자 소계다.
+    -- `capex_q`(분기 차분)는 `val` 에서 나오므로 여기 0 은 옮겨가지 않는다 — 누계 축의 사실만
+    -- 고친다.
+    -- **값이 없는 사유도 여기서 라벨이 된다**(T-H, 2026-09-28). 예전에는 둘 다 `unavailable`
+    -- 한 낱말이라 「볼 표가 없었다」 와 「표는 있는데 대응표가 못 잡았다」 가 구별되지 않았고,
+    -- 그래서 DQ-6·DQ-8 같은 대응 실패가 게이트 숫자에 안 보였다. 갈래는 0 규칙의 분모를 그대로
+    -- 뒤집어 쓴다: 영업·투자 소계가 둘 다 없으면 현금흐름표를 읽은 적이 없고
+    -- (`no_cf_statement`), 있으면 표는 있었는데 못 잡은 것이다(`unmapped`). 매출은 같은 자리를
+    -- `req`(IS·CIS 행이 있는 그룹)가 맡는다 — 행이 없으면 `no_is_statement`, 있으면 `unmapped`.
+    SELECT w.* REPLACE (
+             CASE WHEN w.revenue_basis IS NOT NULL THEN w.revenue_basis
+                  WHEN r.corp_code IS NOT NULL     THEN 'unmapped'
+                  ELSE 'no_is_statement' END                    AS revenue_basis,
+             CASE WHEN w.capex_ytd IS NULL AND z.corp_code IS NOT NULL
+                       AND (w.cf_operating_ytd IS NOT NULL OR w.cf_investing_ytd IS NOT NULL)
+                  THEN 0 ELSE w.capex_ytd END                   AS capex_ytd,
+             CASE WHEN w.capex_basis IS NOT NULL THEN w.capex_basis
+                  WHEN z.corp_code IS NOT NULL
+                       AND (w.cf_operating_ytd IS NOT NULL OR w.cf_investing_ytd IS NOT NULL)
+                       THEN 'none_in_cf'
+                  WHEN w.cf_operating_ytd IS NULL AND w.cf_investing_ytd IS NULL
+                       THEN 'no_cf_statement'
+                  ELSE 'unmapped' END                           AS capex_basis)
+    FROM wide_acct w
+    LEFT JOIN capex_zero z
+      ON z.corp_code = w.corp_code AND z.bsns_year = w.bsns_year
+     AND z.reprt_code = w.reprt_code AND z.fs_div = w.fs_div
+    LEFT JOIN req r
+      ON r.corp_code = w.corp_code AND r.bsns_year = w.bsns_year
+     AND r.reprt_code = w.reprt_code AND r.fs_div = w.fs_div
 ),
 basis_prev AS (
     -- 직전 회계연도(`bsns_year` − 1) 의 같은 `report_code`·`fs_div` 행이 어떤 매출 기준으로
@@ -414,8 +610,8 @@ basis_prev AS (
     -- `val` 의 pick 과 같은 규약이다.
     SELECT j.corp_code, TRY_CAST(j.bsns_year AS INTEGER)          AS fy,
            j.report_code, j.fs_div,
-           CASE WHEN count(DISTINCT coalesce(w.revenue_basis, 'unavailable')) = 1
-                THEN min(coalesce(w.revenue_basis, 'unavailable'))
+           CASE WHEN count(DISTINCT w.revenue_basis) = 1
+                THEN min(w.revenue_basis)
            END                                                    AS revenue_basis
     FROM judged j
     JOIN dup d
@@ -463,8 +659,9 @@ SELECT
     j.period_start,
     j.period_end_basis,
     j.currency,
-    coalesce(w.revenue_basis, 'unavailable')                    AS revenue_basis,
+    w.revenue_basis,
     bp.revenue_basis                                            AS revenue_basis_prev,
+    w.capex_basis,
     TRUE                                                        AS restated_unknown,
     w.revenue, w.cost_of_sales, w.gross_profit, w.op_profit, w.pretax_income,
     w.net_income, w.net_income_owners, w.eps_basic, w.depreciation, w.interest_expense,
@@ -480,7 +677,7 @@ SELECT
     cq.cf_operating_q, cq.cf_investing_q, cq.cf_financing_q, cq.capex_q,
     cm.n_rows                                                   AS cf_q_n_rows,
     cm.available_date                                           AS cf_q_available_date,
-    j.rcept_dt                                                  AS available_date,
+    j.avail_dt                                                  AS available_date,
     'derived'                                                   AS available_basis,
     coalesce(j.pre_reject,
              CASE WHEN d.n_grain > 1 THEN 'duplicate_vintage' END) AS reject_reason

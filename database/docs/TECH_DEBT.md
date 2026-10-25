@@ -9,7 +9,7 @@
 > | 10 | 정지 종목 감자가 run 을 죽인다 | **equity 몫 완료** `ae0b549` — `no_bar_after_apply` 표기. 정산 정책은 커널 몫(워크벤치 어댑터는 `7f9c7e15` 부터 그런 사건을 빼고 경고한다, §10 머리) |
 > | 1·3·5·6·7·8·9 | | **미완** — 우선순위는 아래 표 |
 >
-> **2026-09-09 조사에서 나온 등재 전 후보**(상세는 `reviews/2026-09-09-daily-findings-*.md`, 처리 순서는 `plans/2026-09-09-daily-incremental.md` §11): stage 스냅샷 GC 없음(37 GB) · stage G5 `src_mtime` 비교 미구현 · equity EG13·EG14·EG19 미구현 · `stg_doc_parse_log` `t_*_ms` 로 content_hash 비결정 · KIS `kis_credit_balance` 중복 1,084,443행(12.1%) · equity `_pinned` GC 없음(≈1 GB/일). **§4 는 문서가 낡았다** — 코드는 `8014655` 로 해결됐고, 남은 위험이던 `dataset_profile` 부재 시 랙 0 폴백(플랜 Task 5.4)도 2026-09-28 워크벤치 #255 로 해소됐다(폴백 랙을 원장 선언과 같게 맞추고, 폴백을 쓰면 부팅 때 `profile_lag_fallback` 경고).
+> **2026-09-09 조사에서 나온 등재 전 후보**(상세는 `reviews/2026-09-09-daily-findings-*.md`, 처리 순서는 `plans/2026-09-09-daily-incremental.md` §11): stage 스냅샷 GC 없음(37 GB) · stage G5 `src_mtime` 비교 미구현 · equity EG14·EG19 미구현(EG13 은 10-10 K1-3a 로 구현 — `gates.eg13_available_future`) · `stg_doc_parse_log` `t_*_ms` 로 content_hash 비결정 · KIS `kis_credit_balance` 중복 1,084,443행(12.1%) · equity `_pinned` GC 없음(≈1 GB/일). **§4 는 문서가 낡았다** — 코드는 `8014655` 로 해결됐고, 남은 위험이던 `dataset_profile` 부재 시 랙 0 폴백(플랜 Task 5.4)도 2026-09-28 워크벤치 #255 로 해소됐다(폴백 랙을 원장 선언과 같게 맞추고, 폴백을 쓰면 부팅 때 `profile_lag_fallback` 경고).
 >
 > **2026-09-10 첫 적재분 검수에서 나온 등재 전 후보**(상세·근거는 `reviews/2026-09-10-intake-audit-summary.md`): 키움 폐지 직전 4축 영구 결측 3종목(096610 7세션 등 — 복구 불가, 알려진 구멍) · KIS 재수집 판본 중복 536군이 equity `credit_daily` 격자 유일성을 깨뜨릴 전망(판본 선택 규칙 미정) · ~~키움 merge `INSERT OR REPLACE` 가 매일 전체 이력을 재기록(`collected_at` 소실)~~(09-10 결정 6-1 로 신규 행만 적재로 전환) · KIS 잔고율 분모는 공표일(T+2) 주식수 · 액면병합 종목의 KIS 잔고 항등식 파괴 · WISE 커버 판정 오탐·키움 유예 로직·DART 분기 창은 **09-10 핫픽스 완료**(`52d0f48`, 서버 배포).
 >
@@ -944,9 +944,10 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 | B-20 | 08:10 체인이 주말·휴일에도 `ka10008` 을 D(직전 거래일)로 다시 받는다(09-13 일요일 2,651콜, 머지 0 신규). KRX 단계의 "이미 완료" 처럼 ka10008 도 D 행이 이미 머지돼 있으면 건너뛰어야 한다 | 콜 낭비뿐(한도 안) | `scripts/daily_build.sh` kiwoom fetch 단계 |
 | B-22 | 19:00 스코어링 목표는 키움 21:05 수집(결정 11, 애프터마켓 20:00 마감 + kael-v3 20:05 앱키 공유) 뒤 ≈22:30 으로 밀렸다. 플랜 v2 B.1 "단축 옵션"(저녁엔 키움·WISE 관련 stage 표만 재빌드, 22.5→≈10분)을 앞당겨야 목표가 선다. 아울러 stage 전량 소요가 30~52분으로 계획(22.5분)보다 길다 — 병목 표 실측이 먼저 | 확정 빌드 완주가 우선 | `scripts/run_stage_all.sh`, `scripts/build_chain.sh` |
 | B-21 | 신규 상장사가 유니버스(`dart_corp_map`)에 들어와도 `dart_company` 를 받는 경로가 일일 체인에 없었다(09-12 확정 빌드 equity `corp` EG3 폐기). `scripts/dart_company_gap.sh` 를 06:00 체인에 붙여 메우지만, `dart_daily` 안에서 신규 corp 를 유닛으로 다루는 편이 정본이다 | 임시 스크립트로 충분 | `src/daily/dart_daily.py`, `scripts/daily_ledger.sh` |
-| B-23 | equity `consensus_daily`(S17) wise 축이 `stg_consensus_monthly`(cF5001/5002: eps·revenue)만 읽어 **영업이익·순이익 추정치가 09-01 이후 비어 있다**. 원장·stage 에는 있다 — `stg_consensus_annual`(c1050001 연간 표, `period_kind='E'`, 09-01~ 매일 ≈800종목 op·ni 각 ≈1,750행) + `stg_consensus_matrix`(1w·1m·3m·1y lookback). v3 미러는 08-31 보존본(사용자 결정 09-08, 재개 안 함). G05·G06 리비전 팩터의 "오늘 값" 이 여기 달려 있다(09-16 확인) | equity 단계에서 S17 배선 | `src/equity/rules_s17.py`, `src/equity/sql/consensus_daily.sql` |
+| B-23 | equity `consensus_daily`(S17) wise 축이 `stg_consensus_monthly`(cF5001/5002: eps·revenue)만 읽어 **영업이익·순이익 추정치가 09-01 이후 비어 있다**. 원장·stage 에는 있다 — `stg_consensus_annual`(c1050001 연간 표, `period_kind='E'`, 09-01~ 매일 ≈800종목 op·ni 각 ≈1,750행) + `stg_consensus_matrix`(1w·1m·3m·1y lookback). v3 미러는 08-31 보존본(사용자 결정 09-08, 재개 안 함). G05·G06 리비전 팩터의 "오늘 값" 이 여기 달려 있다(09-16 확인) | equity 단계에서 S17 배선 — **10-22 S26 이 equity 표 3개(`consensus_matrix`·`consensus_annual`·`fin_ratio_wise`)를 신설**, 남은 것은 fi·compat 의 읽기 전환 | `src/equity/rules_s17.py`, `src/equity/sql/consensus_daily.sql` |
 | B-24 | 저녁 잠정 행(`price_daily.basis='evening'`)은 주식수·시총이 NULL 이라 v3 수급 팩터(순매수/시총)를 저녁에 계산하려면 "전일 KRX 주식수 × 당일 키움 종가" 규칙이 필요하다. 소비자(Kael-alpha) 규약으로 둘지 equity 뷰로 줄지 미결 | 스코어링 단계 | `docs/EQUITY_DESIGN.md` §13-2 |
-| B-25 | `ledger_health` 의 `wise.req_identity`·`wise.raw` 는 `ws_coverage`(종목당 최신 `checked_at` 한 행만 보존)를 D 기준으로 세므로 **지난 날짜를 나중에 재실행하면 항상 FAIL** 이다(09-16 23:30 실측: 09-14·15 재실행 covered 0). 정본은 `ws_run_log`(런별 종목·행·오류 수)라 거기서 판정하거나, 재실행 시 `--skip wise` 를 쓰고 사유를 남긴다(09-14·15 는 후자로 처리). 08:10 체인이 그날 돌면 문제없다 | 건전성 재실행이 드묾 | `src/daily/ledger_health.py` `check_wise` |
+| B-39 | `sector_snapshot`(S25, 09-20)의 필드 프로파일 4건(`rules_s25.FIELDS`)이 `dataset_profile`·`factor_readiness` 에 안 실린다 — `rules_s19.SOURCE_TABLES` 가 코드 고정 목록이라 넣으면 이 표가 없는 equity 루트(테스트 절단본·과거 판)에서 S19 가 죽는다(B-1 과 같은 사정). S19 가 선택 입력(없으면 skip 기록)을 지원하면 `field_profiles=FIELDS` 로 켠다 | S19 선택 입력 지원 | `src/equity/rules_s19.py`, `src/equity/rules_s25.py` |
+| B-25 | `ledger_health` 의 `wise.req_identity`·`wise.raw` 는 `ws_coverage`(종목당 최신 `checked_at` 한 행만 보존)를 D 기준으로 세므로 **지난 날짜를 나중에 재실행하면 항상 FAIL** 이다(09-16 23:30 실측: 09-14·15 재실행 covered 0). 정본은 `ws_run_log`(런별 종목·행·오류 수)라 거기서 판정하거나, 재실행 시 `--skip wise` 를 쓰고 사유를 남긴다(09-14·15 는 후자로 처리). 08:10 체인이 그날 돌면 문제없다 | **닫힘 09-26**: 항등식 입력을 append-only `ws_call_log`(그날 cF3002 요청 종목 = covered)로 전환, `ws_coverage` 는 표 부재 시 폴백만(DQ-9, `plans/2026-09-26-layer-fixes.md` §2). `--mode daily` 도 제거 | `src/daily/ledger_health.py` `check_wise` |
 
 ## 2026-09-19 전수 감사에서 연기한 항목 (B-26~B-31)
 
@@ -957,16 +958,19 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 
 ### B-26 — 저녁 체인이 원장 락을 3시간 15분 붙잡는다 (감사 A08)
 
-- **상황**: 평일 18:05 `daily_evening.sh` 가 최외곽에서 `/tmp/quant_ledger_raw.lock` 을 `flock -n` 으로
-  잡는다. 키움 갈래는 결정 11(애프터마켓 20:00 마감·kael-v3 20:05 앱키 공유 회피)에 따라 21:05 까지
+- **상황**: 평일 18:05 `daily_evening.sh` 가 최외곽에서 `/tmp/quant_ledger_raw.lock` 을 잡는다(배포 묶음 5-3
+  전까지 `flock -n`, 지금은 못 잡으면 기다린다). 키움 갈래는 결정 11(애프터마켓 20:00 마감·kael-v3 20:05 앱키 공유 회피)에 따라 21:05 까지
   `sleep 60` 루프로 기다린다. DART(≈40분)·WISE(≈6분)는 18:05 에 이미 끝나 있다.
 - **인풋**: 평일 18:05 자동 실행 1회. 같은 창(18:05~21:20)에 원장 락이 필요한 다른 작업이 들어오는 경우.
-- **에러 위치**: `scripts/daily_evening.sh:18-25`(락 획득) + `:64-67`(21:05 대기 루프) + `:118-130`
-  (세 갈래 `wait`). 락 해제는 스크립트 종료 시점(≈21:20)이라 실제 원장 접근이 없는 2시간 50분도 점유한다.
+- **에러 위치**: `scripts/daily_evening.sh:33-34`(락 획득 — `scripts/raw_lock.sh`) + `:64-67`(21:05 대기 루프) + `:131-138·172`
+  (세 갈래 띄우기·`wait`). 락 해제는 스크립트 종료 시점(≈21:20)이라 실제 원장 접근이 없는 2시간 50분도 점유한다.
 - **위험성**: **운영 정지(회피 가능)**. 락을 못 잡은 쪽은 `notify.sh warn` 후 `exit 3` 으로 **그 회차를
   통째로 건너뛴다**(재시도 없음). 현재 크론 배치(06:00·08:10·토 03:30·일 04:30)는 이 창과 겹치지 않아
   사고는 없었지만, 수동 복구 작업이나 앞으로 추가될 슬롯이 조용히 스킵된다. 부수적으로
   `daily_report.py` 의 "락 raw=점유" 표시가 저녁 내내 켜져 있어 진짜 점유와 구분되지 않는다.
+- **배포 묶음 5-3 뒤**: 원장 락을 쓰는 체인 스크립트 다섯(`scripts/raw_lock.sh`)은 건너뛰지 않고 이 점유가
+  끝나기를 기다린다(B-52) — 체인 쪽 위험은 '그 회차 건너뜀'에서 '≈21:20 까지 대기 지연'으로 바뀐다. 손 작업
+  (`flock -w <초>`)은 여전히 상한에서 물러난다. 점유 시간 자체(이 항목)는 그대로다.
 - **왜 미뤘나**: 갈래를 나눠 락을 따로 잡는 설계(키움 갈래만 21:05 직전에 획득)가 필요하고, 그러면
   DART·WISE 갈래와의 경합 규약을 새로 정해야 한다. 감사 판의 수술 범위 밖.
 - **위치**: `scripts/daily_evening.sh`
@@ -1109,3 +1113,345 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **인풋**: 워크벤치·엔진이 `dataset_profile.recommended_lag_sessions` 를 실제로 적용하는지 미확인.
 - **에러 위치**: `src/equity/rules_s10.py`(선언) vs 소비 측 어댑터의 lag 적용 코드.
 - **위험성**: look-ahead 잔존 가능. 조치: 어댑터가 lag 를 읽어 필터하는지 확인, 안 하면 `available_date` 를 `deal_date + 3세션` 파생으로 바꾸는 규칙 변경 검토.
+
+## 2026-09-28 T-F(정정 첫 장 2025 서식) 에서 분리한 항목
+
+### B-40: `fin_std` 의 1분기/3분기 판정이 "기간 3개월 이하" 라서 4~5개월 첫 분기를 3분기로 적는다
+- **상황**: `doc_acode='11013'`(1분기·3분기 공용 코드)으로 들어온 분기보고서 중 **첫 분기 기간이 3개월이 아닌** 것. 신규 상장·신설 법인의 첫 분기(설립일 ~ 분기말 4~5개월)와 결산월을 바꾼 법인의 과도기 분기가 그렇다. 서버 실측 2016~2025 채택 행 **25건**.
+- **인풋**:
+  1. `stg_doc_meta` 에 `period_from=2021-11-01` · `period_to=2022-03-31`(5개월) · `doc_acode='11013'` 인 main 멤버가 있는 접수 1건.
+  2. `scripts/run_equity.sh fin_std` → `report_code` 산출.
+- **에러 위치**: `src/equity/sql/fin_std.sql:287-291` — `WHEN date_diff('month', h.period_from, h.period_to) + 1 <= k.quarter_months THEN '11013' ELSE '11014'`. 기간 **길이**만 보고 회계연도 안의 **위치**를 보지 않는다. 문서 머리말(같은 파일 23-24행)도 같은 규칙을 정본으로 적고 있다.
+- **위험성**: **silent corrupt**. 1분기 값이 3분기(`11014`) 라벨을 달고 실리면 ① 같은 (corp_code, bsns_year, '11014') 에 진짜 3분기가 오면서 `duplicate_vintage` 격리로 **양쪽 다 사라지거나**(행째 소실), 부딪히지 않으면 ② 3분기 누계로 읽혀 Q4 파생(`q4_*` = 사업보고서 − 3분기)과 CF 분기 파생(`cf_q_*`)이 **한 분기 어긋난 값**을 낸다 — 팩터 쪽에서는 부호가 뒤집힌 성장률로 나타난다. 어느 쪽도 게이트가 못 잡는다: `EG3_fin_std` 의 `n_fiscal_month_mismatch` 는 기록형이고, 25건은 EG7 전역 격리 비율에 묻힌다.
+- **조치(제안)**: 길이 대신 **회계연도 안의 위치**로 가른다. ① `period_to` 가 `corp.fiscal_month` 말일 + 3개월(= 회계연도 시작 + 3개월)이면 1분기, + 9개월이면 3분기 — `corp.fiscal_month` 는 현재값 스냅샷이라 결산월을 바꾼 법인은 문서 `period_from` 이 회계연도 시작과 같은지로 보조 판정한다. ② 또는 `period_from` = 회계연도 시작이면 1분기. 어느 쪽이든 `corp` 를 `fin_std` 입력으로 이미 고정하고 있어(후보 규칙이 `fiscal_month` 를 쓴다) 새 입력이 필요하지 않다. 바꾸면 기존 25건의 `report_code` 가 바뀌므로 EG5a 해시가 한 번 깨진다 — 재빌드 전후 건수 대조를 같이 남긴다.
+- **위치**: `src/equity/sql/fin_std.sql`, `src/equity/rules_s12.py`
+
+### B-41: 재무표를 고친 정정본은 정정 접수일에야 보인다 — 원본 수치 복원(4C) 보류 (2026-09-30 사용자 결정 A)
+
+- **상황**: DART API 는 정정이 있으면 정정본만 돌려준다. e1.22.0 이 재무표 무관 정정은 원본 공시일로 당겼지만, 재무표를 건드린 정정
+  (`disclosure_version.corr_has_fin_item` true·NULL)은 정정 접수일을 공개일로 둔다.
+- **인풋**: 2016~ `fin_std` 중 법정 기한(사업 120일·분기 75일)을 넘겨 찍힌 행 2,469(사업보고서 1,586/22,399 = 7.1%, e1.22.0 서버 판 m_20260930T113110).
+- **에러 위치**: `src/equity/sql/fin_std.sql` `redate` CTE(승계 조건 밖) · `head.avail_dt` — 판본은 `api_restated` 하나(`rules_s12.py:25-31`).
+- **위험성**: look-ahead 는 아니지만(보수적) 백테스트에서 정정이 잦은 회사의 재무가 정정일까지 1년 전 값이나 빈칸 → 체계적 편향.
+  소규모 4C 실험(`docs/research/2026-09-30-gpt-layer-debate.md` ③-2): 재무표 정정 사업보고서 120건 중 96건 판독, 핵심 4계정 같음 62.5% ·
+  바뀜 37.5%(중앙 10%). 바뀐 쪽은 정정값을 원본 날짜에 쓰면 look-ahead 라 원본 수치를 원본 날짜에 두는 판본 분리(4C,
+  `stg_fin_asreported`)만 정답. 원본 문서 ZIP 은 `data/raw/documents/{yyyy}/{rcept_no}.zip` 에 전부 캐시돼 있다.
+- **보류 이유**: 실시간 모델은 WISE 분기로 전환 예정(`docs/plans/2026-09-30-wise-quarterly.md`) — 이 편향은 백테스트 품질 문제다.
+
+## 2026-10-06 감사 수정 A-01(월요일 DART 번호표 자동 갱신) 품질 검토에서 분리한 항목
+
+### B-42: `dart_universe.py` 가 종목코드 키 `INSERT OR REPLACE` 라 티커 재사용 때 옛 회사 매핑을 덮는다
+
+- **상황**: `dart_corp_map(stock_code PRIMARY KEY, corp_code, corp_name)` 은 stage `stg_corp_map`(`src/stage/rules_dart.py:547-552`)을 거쳐
+  equity `corp`·`corp_ticker`·`security` 로 간다. 10-06 A-01 로 매주 월요일 06:00 에 자동 갱신된다(그 전엔 손으로 돌릴 때만).
+- **인풋**: 상장폐지된 회사의 종목코드를 다른 회사가 다시 쓰는 경우(실례 036220 — `stage-health-dashboard` 09-05 기록) 다음 월요일 갱신.
+- **에러 위치**: `src/dart_universe.py:94-99` — 키가 stock_code 하나라 새 corp_code 가 옛 corp_code 를 덮고, 원장 표에는 최신 매핑만 남는다.
+- **위험성**: stage·equity 가 옛 매핑을 이력으로 보존하지 않으면, 옛 회사의 DART 재무·공시가 새 회사 종목에 잘못 이어지거나(silent corrupt)
+  폐지 종목 이력이 끊긴다(백테스트 생존 편향). stage 의 최초 관측 접기가 옛 행을 판본으로 남기는지는 확인하지 않았다 — 고치기 전에 먼저 본다.
+
+### B-43: `dart_universe.py` 가 DART 오류 응답을 `BadZipFile` 로만 남긴다
+
+- **상황**: 매주 월요일 06:00 무인 실행(A-01) — 배포 묶음 5-2 부터는 마지막 성공이 7일을 넘으면 다른 요일 06:00 에도 다시 돈다. 실패하면 warn 한 줄이 `logs/notify.log` 에만 기록된다(5-2 전엔 FAILED·crit).
+- **인풋**: DART 가 corpCode.xml ZIP 대신 오류 본문(키 한도 초과·점검·인증 오류 등)을 돌려준 날.
+- **에러 위치**: `src/dart_universe.py:73` `zipfile.ZipFile(io.BytesIO(api.dart("corpCode.xml")))` — 응답 본문 앞부분과 DART status·message 를 로그에 남기지 않는다.
+- **위험성**: 재시도가 성공할 때까지 번호표가 낡고(신규 상장 DART 연결 지연 — 5-2 전엔 다음 월요일까지 1~2주), 원인이 로그에 없어 진단이 늦다.
+
+## 2026-10-06 감사 수정 F-13(서버 경로 정리) 품질 검토에서 분리한 항목
+
+### B-44: 크론 스크립트 다수가 `cd` 실패를 검사하지 않는다
+
+- **상황**: `daily_build.sh:16`·`daily_evening.sh:14`·`daily_wise.sh:13`·`daily_dart.sh:8`·`watchdog.sh:12`·`run_stage.sh:5`·`daily_ledger.sh:19`·`sync_calendar.sh:10`·`dart_company_gap.sh:8`·`backup_raw.sh:16` 은 `set -e` 가 없고 `cd "$HOME/quant-ledger"` 뒤 실패 가드가 없다(F-13 전에는 리터럴 경로).
+- **인풋**: 크론 환경의 HOME 이 다른 값이거나 디렉터리가 없는 날.
+- **에러 위치**: 위 각 줄 — cd 가 실패해도 크론의 cwd 에서 계속 돈다. daily_build·daily_evening 은 `scripts/notify.sh` 를 상대경로로 불러 notify.log 에도 남지 않고 `cron_*.log` 에만 흔적이 남는다.
+- **위험성**: 체인이 엉뚱한 디렉터리에서 돌다 조용히 실패한다(운영 중단 · 무음). 같은 머리말을 가진 워치독도 함께 침묵할 수 있다. 고칠 때는 `|| { echo …; exit 4; }` 로 통일한다(build_chain 계열은 이미 있음).
+
+### B-45: `.gitignore` 의 `*.bak` 가 `deploy.sh` 깨끗한 트리 검사를 비켜 간다
+
+- **상황**: F-13 이 `.gitignore` 에 `*.bak` 를 더했다(#99 와 같음). `deploy.sh:64` 는 `git status --porcelain` 으로 '깨끗한 트리'를 판정한다.
+- **인풋**: `database/src`·`database/scripts` 아래에 `.bak` 파일이 생긴 채 배포.
+- **에러 위치**: `deploy.sh` 의 rsync `COMMON` 제외 목록에 `*.bak` 가 없다 — git 은 무시하지만 rsync 는 서버로 민다.
+- **위험성**: 백업 사본이 서버 src 에 섞여 들어간다(낮음, 10-06 기준 .bak 0개). 필요하면 `COMMON` 에 `--exclude '*.bak'` 를 더한다.
+
+
+## 2026-10-07 감사 수정 A-03(WISE 같은 날 재실행 건전성) 품질 검토에서 분리한 항목
+
+### B-46: 수집 도중 커버 판정이 뒤집힌 종목은 같은 날 재실행으로 회복되지 않는다
+
+- **상황**: 첫 런에서 무커버 종목의 첫 cF5001 이 비 ok 로 온다 → `probe_coverage` 가 판정 불능을 covered 로 보고 커버 전용 키를 더 부르는데 그중 하나라도 실패한다. 목록 호출이 실패해 기본 12월 연도를 쓴 비12월 결산 종목도 같다.
+- **인풋**: 같은 날 무인자 재실행(`backfill_wise.py --mode full`).
+- **에러 위치**: 재실행에서 그 종목은 무커버(4콜) 경로라 첫 런의 커버 전용 키를 다시 부르지 않는다. `backfill_wise.py` `last_call_status` 는 그 키의 첫 런 실패를 계속 미회복으로 보고, 재실행 대상(`retry`)은 그 종목을 매번 헛되이 다시 부른다. `ledger_health.py` `check_wise` 의 cov(그날 cF3002 를 한 번이라도 부른 종목)도 그 종목을 covered 로 세어 `wise.req_identity`·`wise.raw` 기대치가 어긋난다.
+- **위험성**: 그날 `wise.*` REQUIRED FAIL 이 재실행으로 풀리지 않아 08:10 확정 빌드가 원장 게이트에서 멈춘다(운영 지연 — 데이터 손상은 아님). 산발 실패에선 드물지만(09-02·09-03 실례 bad 1건/15k 콜) 몇 분짜리 장애(5xx·연결 거부) 때는 걸린 무커버 종목 대부분이 이 꼴이 된다(품질 검토 무작위 탐색: '데이터 완전인데 FAIL' 77건 중 약 71건). 지금 대응은 README 운영 절 'WISE 같은 날 재실행' 6번(`--skip wise` + 사유 기록 + 수동 빌드). 후속 설계 후보: (a) 종목마다 그날 마지막 수집(마지막 목록 호출 이후)만으로 판정하고 cov·ws_raw 기대치도 그 기준으로 센다, (b) 그날 이미 covered 로 받은 종목은 재수집 때도 커버 경로를 강제해 키 집합을 고정한다.
+
+### B-47: '마지막 호출' 회복 규칙이 데이터가 완전한 키를 미회복으로 본다
+
+- **상황**: 1차 런에서 키 X 가 실패하고, 재실행에서 X 는 ok 지만 1차에 ok 였던 키 Y 가 이번엔 실패한다.
+- **인풋**: 같은 날 재실행 1회.
+- **에러 위치**: `backfill_wise.py` `last_call_status` — 키마다 그날 마지막 호출만 본다. ws_raw 는 ok 일 때만 쓰므로 Y 의 1차 본문이 남아 데이터는 완전하다.
+- **위험성**: `wise.run` FAIL(unrecovered 1)·`wise.raw` PASS 로 REQUIRED 둘이 엇갈리고 한 번 더 돌려야 풀린다(거짓 FAIL, 운영 지연). '그날 ok 호출이 하나라도 있으면 회복'(= 그날 ws_raw 행 존재)으로 바꾸면 거짓 PASS 없이 더 빨리 수렴하지만 회복 규칙(명세) 변경이라 결정 사항이다. `test_daily_health.py` 의 ("ok","http500") 케이스가 지금 규칙을 고정한다.
+
+### B-48: 정리 — 호출 원장 정렬과 스캔 횟수
+
+- `last_call_status` 는 `ORDER BY ts, rowid` 다. 시계가 1초 역행하면(NTP 보정) 완전한 날도 FAIL 한다(품질 검토 재현). 호출 기록 INSERT 는 메인 스레드 한 곳뿐이라 rowid 가 기록 순서다 — 바꿀 때는 VACUUM 뒤 rowid 순서 보존부터 확인한다.
+- `check_wise` 가 같은 날 조건으로 호출 원장을 4번, 수집기가 1번 훑는다. 지금 0.1초/회지만 하루 약 2.2만 행씩 늘어 1년 뒤 약 800만 행이다. `n_calls` 를 `last_call_status` 순회에서 같이 세면 1번 줄고, 장기적으로는 KST 하루의 UTC 범위 조건 + ts 색인으로 바꾼다.
+
+### B-49: WISE 건전성이 '요청 유니버스' 대비 완결성을 보지 않는다
+
+- **상황**: WISE 수집 유니버스는 키움 마스터(`daily.universe.kiwoom_common`, A-07)이고, 마스터를 못 읽거나 고른 종목이 0 이면 KRX 스냅샷으로 폴백한다(`backfill_wise.py` `universe` — KRX 원장은 08-20 동결이라 그 뒤 신규 상장이 없다). 폴백은 수집 로그에 한 줄로만 남는다.
+- **인풋**: (a) 18:05 런이 런 로그 없이 끊긴 뒤, 같은 날 무인자 재실행이 키움 마스터 읽기에 실패해 KRX 폴백으로 완주. (b) 18:05 단일 런 자체가 폴백.
+- **에러 위치**: `ledger_health.py` `check_wise` — 완결성은 '그날 부른 종목'의 키가 다 ok 인지(호출 원장 경로)와 `wise.raw` 의 2,400종목 하한만 본다. cov+none 을 그날 요청 유니버스 크기와 대조하지 않는다.
+- **위험성**: 폴백 유니버스에 없는 신규 상장 종목(끊긴 런이 닿지 못한 것)이 빠진 채 `wise.*` 가 PASS 한다 — 그날 WISE 스냅샷이 조용히 줄어든다(silent partial). scope 유니버스가 '추정치 보유'라 모델 유니버스도 같이 준다. 키움 DB 는 읽기 전용(WAL)이라 드물다. (a) 는 A-03 뒤 새로 열린 경로다(종전엔 재실행 날이 항상 FAIL). 고칠 때: cov+none 을 그날 키움 규칙 유니버스 크기와 대조하는 검사(폴백이면 WARN 이상).
+
+## 2026-10-07 배포 묶음 3(A-04·A-05, DART 마감일 대비) 검토에서 분리한 항목
+
+### B-50: 옛 D 를 다시 지으면 stage·equity MANIFEST 의 현재 판이 옛 D 판으로 바뀐다
+
+- **상황**: 더 새 D 의 확정판이 이미 있는데 놓친 옛 D 를 `daily_build.sh --date D` 로 다시 짓는다. 배포 묶음 3(T14)으로 `latest_<basis>.json`·`_READY.json` 은 더 새 D 를 유지하고 그 판은 `history/` 에만 남는다.
+- **인풋**: 옛 D 의 수동 확정 빌드 1회.
+- **에러 위치**: `src/stage/manifest.py` `commit()` — 표마다 `current_build = record.build_id` 를 날짜와 무관하게 옮긴다(equity 도 같은 방식).
+- **위험성**: MANIFEST 를 직접 읽는 소비자(fi·model 빌드, `build_chain.sh` 의 `_READY` 작성부)는 다음 정규 빌드까지 옛 D 라벨의 판을 본다(데이터는 그 시점 원장 전량이라 더 오래되진 않지만 D 라벨·포인터가 어긋난다). 지금 대응은 README 운영 절 'DART 완료 판정 실패 · 놓친 확정판' 3번(더 새 D 판이 있으면 다시 짓지 않는다). 고칠 때는 '이력 전용 빌드'(포인터를 옮기지 않는 판) 경로를 둔다.
+
+### B-51: `daily_build.sh` 의 D 는 원장 락 대기가 끝난 뒤 계산된다 — **해결(배포 묶음 5-3, 대기 중 날짜가 바뀌면 멈춤)**
+
+- **상황**: 배포 묶음 3(T16)으로 08:10 체인이 원장 락을 한도 없이 기다린다(P9).
+- **인풋**: 원장 락 보유자가 KST 자정을 넘겨서야 끝나는 날(08:10 기준 16시간 이상 대기 — 사실상 장애).
+- **에러 위치**: `scripts/daily_build.sh` — 락 획득 뒤 D(직전 거래일)와 로그 파일 이름을 계산한다.
+- **위험성**: 원래 D 대신 다음 D 를 짓고 원래 D 는 예전처럼 빠진다(10:30 워치독 crit 이 이미 난 뒤라 조용하진 않다). 고칠 때는 D 를 대기 전에 고정한다(F-11 날짜 판정 규칙).
+- **배포 묶음 5-3 뒤 같은 모양이 셋 더**: `daily_ledger.sh`·`wics_weekly.sh`(D = 직전 거래일)·`daily_evening.sh`(D = 오늘 KST)도 이제 원장 락을 한도 없이 기다리고 D 는 대기 뒤에 정한다(`scripts/raw_lock.sh` 를 부른 다음 줄들). 가장 나쁜 것은 저녁이다 — 18:05 에 시작해 보유자가 KST 자정을 넘겨 끝나면 D 가 다음 날이 되고, 키움 갈래의 21:05 대기(`daily_evening.sh:64-67`)는 시각만 비교해 그날 21:05 까지 원장 락을 쥔 채 잔다(그동안 06:00·08:10 체인은 기다린다). WISE 갈래는 자정 직후 바로 돌아 그날 스냅샷을 장중 갱신 전 값으로 채우고, 그날 18:05 인스턴스는 대기자로 기다렸다 '이미 완료'로 끝나며 같은 날 재실행도 받은 종목을 건너뛰어 덮지 못한다(silent — 리비전 팩터 1일 랙). 18:05 이후 6시간 넘는 점유가 전제라 사실상 장애 상황이고 워치독(21:50 저녁 원장·10:30 확정판)이 원래 날의 crit 을 낸다. 대기 뒤 KST 날짜가 바뀌었으면 crit 후 멈출지(5-3 전의 '건너뜀'과 같은 결과 + 경보)는 '체인이 멈추는 조건'이라 사람 결정(P3).
+- **해결(배포 묶음 5-3 후속, 10-08 오케스트레이터 결정 — P1 멈춤)**: `scripts/raw_lock.sh` 한 곳에서 다섯 스크립트 공통으로, 실제로 기다린 경우 대기 시작 직전과 락을 잡은 직후의 KST 날짜가 다르면 crit '<이름> 원장 락 대기 중 날짜가 바뀜(시작 YYYY-MM-DD → 지금 YYYY-MM-DD) — 이번 실행 중단'(본문: 수집 대상일 기준이 바뀌어 그날 값을 그대로 받을 수 없다, 다시 돌릴지는 사람 판단)을 남기고 원장 락을 놓고 rc 3 이다(dry-run 은 알림 없이 같은 rc). `daily_build.sh --date D` 처럼 D 를 고정한 실행도 멈춘다 — 다시 돌리면 된다(10-08 리뷰 하-1). 위 D 이동·저녁 21:05 수면·WISE 장중 전 스냅샷은 생기지 않고, 원래 날의 회차는 예전처럼 빠지되 crit 으로 드러난다. 같은 날 안에 끝난 대기는 그대로 이어서 돈다. 날짜 주입은 테스트 전용 `QL_RAW_LOCK_WAKE_DATE`. 시험: `tests/test_raw_lock_sh.py::test_date_change_during_wait_stops`·`test_same_day_wait_continues`.
+
+### B-52: 원장 락 대기는 `daily_build.sh` 한 곳뿐이다 — 다른 사용자는 여전히 `flock -n` — **해결(배포 묶음 5-3, 원장 락 범위)**
+
+- **상황**: 배포 묶음 3(T16)은 08:10 확정 체인에만 P9(앞 작업 끝 감지)를 적용했다. `daily_ledger.sh`(06:00)·`daily_evening.sh`(18:05)·`wics_weekly.sh`(토 03:00·10:00)·빌드 락(`build_chain.sh`)은 잡혀 있으면 건너뛴다(exit 3).
+- **인풋**: ① 06:00 체인이 아주 늦게(약 16:25 뒤) 끝나 확정 빌드가 18:05 를 넘김 ② 토요일 06:00 체인이 늦어 금요일 판 빌드가 10:00 WICS 재시도와 겹침 ③ 락 보유자가 하루 넘게 멈춰 08:10 대기 인스턴스가 날마다 쌓임 ④ (배포 묶음 4-0 뒤) 08:10 체인의 모델 단계(`model_daily.sh`)가 빌드 락을 기다리는 동안 daily_build 는 원장 락을 계속 쥔다 — 손 equity 재빌드가 18:05 까지 이어지면 저녁 수집이 건너뛴다(체인 안에서는 build_chain 이 빌드 락을 푼 직후라 정상이면 대기가 없다). ⑤ 반대로 손으로 돌린 `model_daily.sh` 가 빌드 락을 쥔 동안 08:10 체인의 확정 빌드나 21:20 잠정 빌드가 시작하면 `build_chain.sh` 가 `flock -n` 으로 물러나 그날 판이 생기지 않는다(워치독 crit 로 사후 감지) — MODEL_DELIVER.md 에 손 실행을 피할 시간대를 적어 둔다(배포 묶음 4-0 명세 검토 중요-1). ⑥ 모델 단계는 원장 락이 필요 없는데 daily_build 의 원장 락 안에서 돌아 점유가 그만큼 길어진다 — 확정판이 09:49 근처에 끝나는 토요일엔 10:00 `wics_weekly --retry`(`flock -n`)와 겹칠 확률이 오른다(② 악화, 운영 전 확인에서 모델 단계 소요와 함께 잰다).
+- **에러 위치**: 각 스크립트의 `flock -n` 분기 · `scripts/daily_build.sh` 대기형 flock(대기자 수 제한 없음 — 풀리면 무작위 순서로 전부 같은 D 로 돈다).
+- **위험성**: ① 그날 저녁 원장 소실(WISE 는 자정 전 손 재실행만 가능) ② WICS 주간 스냅샷 누락 → 다음 주 확정 빌드 정지(감사 A-02 보충) ③ 같은 D 체인 N회·crit N건. 확률은 낮다. 대기 사실은 notify.log 의 '원장 락 대기' 줄로 보인다. 다른 사용자도 기다릴지·대기자를 하나로 제한할지는 사람 결정(P3).
+- **해결(배포 묶음 5-3 — N-27 ⑥, 구현 10-08 · 배포 대기)**: 원장 락을 쓰는 다섯 스크립트(`daily_ledger.sh`·`daily_build.sh`·`daily_evening.sh`·`daily_wise.sh`·`wics_weekly.sh`)가 공용 조각 `scripts/raw_lock.sh` 로 같은 규칙을 따른다 — 못 잡으면 실시간 출력 + notify info '<이름> 원장 락 대기'(dry-run 제외) 뒤 한도 없이 기다리고, 같은 스크립트의 대기자는 하나(대기자 락 `<원장 락>.<이름>.wait`, 두 번째 인스턴스는 info '<이름> 이미 대기 중인 실행 있음 — 이번 실행 건너뜀' 후 rc 3), 기다리는 동안 KST 날짜가 바뀌면 crit 후 rc 3(B-51). `daily_build.sh` 에 새로 생긴 것은 대기자 1 과 날짜 바뀜 중단이다. ①②④⑥(원장 락 경합)과 ③(대기자 누적)은 이것으로 닫힌다. 남는 것: ⑤ 빌드 락(`build_chain.sh` 의 `flock -n`)은 원장 락이 아니라 범위 밖 · 서로 다른 스크립트가 함께 기다리다 풀리면 잡는 순서는 정해져 있지 않다(B-62) · 대기 중 날짜가 바뀌면 멈춘다(B-51). 시험: `tests/test_raw_lock_sh.py`(실물 flock 시험은 서버·CI 우분투에서).
+
+### B-53: DART 네트워크 예외가 연속될 때 끊는 장치가 없다
+
+- **상황**: 배포 묶음 3(T15)으로 'exc' 상태도 재시도한다(유닛당 최대 4콜, 대기 5·10·20초 + 호출마다 타임아웃 최대 60초).
+- **인풋**: DART 가 몇 시간 응답하지 않는 날의 06:00 런.
+- **에러 위치**: `src/backfill_dart.py` `fetch` — quota·abuse·ok_empty 만 끊고 연속 예외는 끊지 않는다.
+- **위험성**: 실패 유닛마다 수십 초~수 분이 붙어 06:00 체인이 길어지고, 08:10 체인은 그만큼 기다린다(경보는 10:30 워치독). 데이터 손상은 없다. 고칠 때는 연속 N회 예외면 그 런을 멈추고 다음 런(받지 않은 유닛 재호출)에 맡긴다.
+
+### B-54: 늦은 공시(b) 창에 끝 시각이 없다
+
+- **상황**: 배포 묶음 3 으로 같은 D 의 두 번째 런은 '그 D 의 첫 dart 런 시작 이후 처음 본' 늦은 공시(접수일 < D)까지 따라간다(저녁 실패분 재시도).
+- **인풋**: 다음 거래일 18:05 저녁 런(다른 D 의 스윕)이 지난 뒤 옛 D 를 손으로 다시 돌림(`--skip-sweep` 이어도 같다 — 공시가 이미 원장에 있다).
+- **에러 위치**: `src/daily/dart_daily.py` `late_rows` 의 기준 시각(첫 런 시작 ~ 현재).
+- **위험성**: 다른 D 의 런이 처음 본 늦은 공시가 이 D 의 plan·판정에 섞인다 — 받은 유닛은 건너뛰어 호출은 실패분만 늘지만, 다른 D 의 실패가 이 D 의 판정 FAIL 로 보인다(오판, 데이터 손실 없음). 자동 순서(저녁 → 아침 → 주말·연휴 재실행)엔 다른 D 의 스윕이 끼지 않아 생기지 않는다. 고칠 때는 창 끝을 '다음 D 의 첫 런 시작'으로 막는다.
+
+### B-55: 정리 — DART 스윕이 호출마다 전체 행 수를 두 번 센다
+
+- `src/backfill_dart.py` `store()` 가 콜마다 COUNT(*) 2회(`dart_disclosure` 351만 행 0.9~5.3초, `dart_fin_raw` 1,541만 행 0.25~7.1초 — cold/warm). 평일 06:00 DART 시간의 대부분(27~33분)이 스윕이다. 원인 단정 아님 — 고칠 때 먼저 잰다(동결 코드라 사람 결정).
+
+### B-56: 원장 락 경로와 대기 규칙이 여러 곳에 흩어져 있다
+
+- **상황**: 원장 락 파일 경로가 `scripts/daily_ledger.sh`·`daily_evening.sh`·`daily_wise.sh`·`wics_weekly.sh`·README 절차서에 하드코딩돼 있고, `daily_build.sh` 만 `QL_RAW_LOCK_FILE`(테스트 전용)로 덮어쓸 수 있다. 대기 규칙도 넷이다 — `daily_build.sh` 한도 없음(P9) · 나머지 체인 `-n`(B-52) · README 수동 실행 `-w 600`(사람이 정한 마감).
+- **인풋**: 대화형 셸에 `QL_RAW_LOCK_FILE` 이 남은 채 `daily_build.sh` 를 손으로 돌림 · 락 경로를 한 곳만 바꿈. 빌드 락도 같다 — `model_daily.sh` 만 `QL_BUILD_LOCK_FILE`(테스트 전용)을 받고 `build_chain.sh` 등은 하드코딩(배포 묶음 4-0).
+- **에러 위치**: 위 스크립트들의 `LOCK=` 줄.
+- **위험성**: 그 실행만 다른 락을 잡아 원장 쓰기 배타가 깨질 수 있다(동시 쓰기). 경로 변경이 한 곳에서 빠지면 같은 결과. 고칠 때는 락 경로·대기 규칙을 공용 셸 조각 하나로 모은다(배포 묶음 3 구조 검토 M-7).
+- **진행(배포 묶음 5-3)**: 원장 락은 공용 조각 `scripts/raw_lock.sh` 하나로 모았다 — 경로(`QL_RAW_LOCK_FILE` 테스트 전용, 기본 `/tmp/quant_ledger_raw.lock`)·대기(한도 없음)·대기자 1·`QL_RAW_LOCK_HELD` 규칙을 다섯 스크립트가 source 해서 쓴다(`LOCK=` 줄은 그 파일 하나). 그 대신 '대화형 셸에 `QL_RAW_LOCK_FILE` 이 남은 채 손으로 돌림' 인풋은 이제 다섯 스크립트 모두에 해당한다. 남은 것: README 수동 실행의 하드코딩 경로·`-w 600`(사람이 정한 마감 — 의도된 차이) · 빌드 락 경로(`build_chain.sh` 등 하드코딩).
+
+### B-57: 워치독이 일간 모델 단계·발송 장부를 보지 않는다 — 해결(배포 묶음 5-1, 10-09 rev d12085bd)
+
+- **상황**: 배포 묶음 4-0 으로 08:10 체인이 확정판 뒤에 `scripts/model_daily.sh`(fi → 모델 → 엑셀 발송)를 잇는다. 실패하면 notify.log 에 crit 한 줄을 남기고 끝난다(운영 로그 텔레그램 금지).
+- **인풋**: 거래일 D 에 fi·모델·엑셀 생성 중 한 단계가 실패하거나, 확정판이 rc ≥ 2 로 끝나 모델 단계가 아예 돌지 않음.
+- **에러 위치**: `scripts/watchdog.sh morning_build`(10:30) — 확정 빌드 보고만 판정하고 `data/deliver/sent_model_daily.jsonl` 의 D 줄은 보지 않는다(헤더 주석 '스코어 워치독은 페이즈 C 에서 case 에 추가' — 아직 없음).
+- **위험성**: 로드맵 K0-1 '거래일마다 정확히 1건'이 깨져도 사람은 엑셀이 오지 않은 것으로만 안다(notify.log 를 열어 봐야 원인이 보인다). 데이터 손상은 없다. 고칠 때는 아침 워치독이 '오늘 확정판 D 의 장부 줄 유무'를 같이 본다. 자동 재시도도 없다 — 같은 D 를 가드로 건너뛰는 날(주말·연휴)엔 모델 단계도 돌지 않아, 토요일 발송이 실패해도 일요일 08:10 이 복구하지 않는다(재시도 트리거는 사람 결정, P3).
+- **해결(배포 묶음 5-1, N-31 ①, 10-09 배포)**: `scripts/watchdog.sh morning_build` 이 확정판이 정상이면 이어서 그 확정판 D 의 장부 줄(`date`=D(YYYY-MM-DD) · `basis`=morning)을 본다. 없으면 crit '확정판 D=… 엑셀 발송 기록 없음 — `scripts/model_daily.sh --date D` 로 손 발송(사용자 승인 뒤)', 장부를 못 읽거나 줄이 JSON 객체가 아니면 crit(P1), 확정 빌드가 비정상이면 그 crit 하나만(발송 검사 생략). crit 제목은 확정 빌드 실패와 가른다(`watchdog: 10:30 까지 확정판 엑셀 발송 기록 없음` · `watchdog: 확정판 엑셀 발송 여부 판정 불가`). 정상 info 에 '발송 기록 있음(정정 n)'. 자동 재시도는 여전히 없다(P3). 테스트 `tests/test_watchdog_sh.py`.
+
+### B-58: 발송은 됐는데 장부 쓰기가 실패하면 다음 실행이 한 번 더 보낸다
+
+- **상황**: `deliver model-daily --send` 는 텔레그램 발송이 성공한 뒤에만 장부에 한 줄을 덧붙인다(N-25 Q9).
+- **인풋**: 발송 성공 직후 디스크 가득 참·권한 오류로 `sent_model_daily.jsonl` 쓰기 실패(rc 3) → 같은 D 로 `model_daily.sh` 재실행.
+- **에러 위치**: `src/deliver/__main__.py` model-daily 분기의 장부 기록(발송 → 기록 순서).
+- **위험성**: 같은 D 가 두 번 나간다(K0-1 위반, 정정 표시 없음). 반대 순서(기록 → 발송)는 발송 실패 시 '보낸 것으로 기록된 미발송'이 되어 더 나쁘다 — 지금 순서가 맞고, 재실행 전 rc 3 로그를 보는 절차로 막는다. 배포 직후 장부가 비어 있어 이미 손으로 보낸 D 를 체인이 다시 보내는 경우도 같은 결과다(배포 뒤 첫 체인 D 가 손으로 보낸 적 없는 날인지 배포 점검에서 확인).
+
+### B-59: fin_std 의 '그룹'은 정정 사슬이 아니라 API 요청 축이다 — 서로 다른 보고서가 한 그룹이면 하나만 남는다
+
+- **상황**: fin_std 그룹 = stg_fin (corp_code, bsns_year, reprt_code, fs_div). 한 사업연도·보고서 종류에 서로 다른 보고서가 둘인 법인(한화리츠 01669226 2026 반기 11012 의 2026.01·2026.07, 결산월 변경 법인)이 한 그룹에 묶인다.
+- **인풋**: 그런 법인의 일일 수집 → equity 빌드.
+- **에러 위치**: `src/equity/sql/fin_std.sql` `grp`(배포 묶음 4-1b G-21 로 min → max rcept_no). 값은 고른 접수만 쓰지만 `is_krw_group`·`currency`·모집단 `HAVING bool_or(account_std)`·EG8 템플릿 플래그(`rules_s12.py`)는 여전히 그룹의 모든 접수를 본다.
+- **위험성**: 기간이 다른 보고서 하나가 이력에서 빠진다(옛 min 은 뒤 보고서, 새 max 는 앞 보고서 — 손실 방향만 바뀌었다). 리츠는 fi 적격 밖이라 모델 영향은 없다. 결정 N-25 Q2('원본·정정이 쌓이면')의 전제 밖이다. 고칠 때는 그룹 안 접수들의 문서 period_to 가 갈리는 그룹 수를 기록형으로 먼저 센다(배포 묶음 4-1b 명세 검토 사소 2·3).
+
+### B-60: 미래 기준일 무상증자 확인(C-04)이 작은 비율에서 약하다
+
+- **상황**: 배포 묶음 4-1a C-04 로, 신주배정기준일이 그 판 캘린더 밖인 무상증자는 캘린더 끝 D 의 KRX 기준가가 비율을 확인할 때만 효력일 D 가 된다. 확인 식은 adj_factor S06-2 (a) 짝 규칙과 같다(`|r·ratio − 1| ≤ max(tol_rel·|min(ratio,1/ratio) − 1|, tol_abs)`, tol_abs 0.05).
+- **인풋**: 유무상증자 — 유상 권리락이 D(기준가 r 0.954)이고 무상 비율이 1.1. `|0.954 × 1.1 − 1| = 0.049 ≤ 0.05`.
+- **에러 위치**: `src/equity/sql/corp_event.sql` C-04 확인 갈래 — (a) 와 달리 ±창 안 후보끼리 경쟁하지 않고 D 후보 하나만 본다.
+- **위험성**: 그 판 하나에서 무상증자 효력일이 D 로 잘못 확정된다(수정주가가 하루 어긋남). 다음 판이 캘린더를 넓히면 전량 재빌드로 다시 판정되므로 일시적이다. 고칠 때는 tol_abs 하한 대신 비율 크기에 비례한 허용치만 쓰거나, 같은 날 다른 사건(유상 권리락)이 있으면 대기로 둔다(배포 묶음 4-1a 명세 검토 C).
+
+### B-61: J-41(접수번호 날짜 하한) 후속 — 남은 원천 접수일 사용·기록 지표·뜻이 바뀐 주석
+
+- **상황**: 배포 묶음 4-1b 가 stage 접수 룩업 26표·stg_disclosure·fin_std·disclosure_version(N-26 4.10)의 공개일을 '원문과 접수번호 앞 8자리 날짜 중 늦은 쪽'으로 맞췄다.
+- **인풋**: 재제출본처럼 원천 rcept_dt 가 접수번호 날짜보다 이른 공시(박셀바이오 rcept_dt 2024-03-19 · rcept_no 20250828000446).
+- **에러 위치**:
+  - `src/equity/sql/universe_daily.sql` `sig_raw`(정지 신호)가 `stg_disclosure.rcept_dt` 원천값을 쓴다 — 게이트 장부 RG-C1-07 범위.
+  - `disclosure_version.delay_days`·fi `filing_late` 는 원천 rcept_dt 로 기한을 대조한다 — 원천 rcept_dt 가 원 제출일인지 확인 전이라 그대로 둔 열린 질문(N-26 4.10).
+  - stage 룩업 표에는 J-41 이 민 행 수 기록형 지표가 없다(stg_disclosure 의 G3 `n_rcept_dt_before_no_prefix` 만 있음 — `stage/build.py` `_recorded_metrics` 를 룩업에도 넓히면 매 빌드 보인다).
+  - 뜻이 바뀐 주석: `src/equity/rules_s16.py:6·455·497·548`, `rules_s15.py:5`, `sql/corp_event.sql:46`('announce_date = DART rcept_dt' — 이제 보정된 stage 값).
+- **위험성**: 정지 신호 창이 재제출본에서 앞당겨질 수 있다(미측정). 지연 판정은 재제출본에서 '기한 안'으로 볼 수 있다(원 제출일 확인 전이라 결함 여부 미정). 지표·주석은 운영 위험 없음 — 노출이 매 빌드 안 보이고 읽는 사람이 옛 뜻으로 오해할 수 있다(배포 묶음 4-1b 품질 검토 사소 5·8).
+- **10-10 실측(컷오버 K1-3b)**: 서버 stage 현판 `stg_disclosure` 에서 정지 신호 술어(`universe_daily.sql` `sig_day`)에 걸리는 has_ticker 공시 17,576건 중 `rcept_dt` < 접수번호 날짜 0건 · `rcept_dt` < `available_date` 0건 — stage 가 이미 늦은 쪽을 `rcept_dt` 에 싣는다. 정지 신호 앞당김 노출 0 이라 `sig_raw` 는 고치지 않는다(지연 판정·지표·주석 항목은 그대로 남는다).
+
+## 2026-10-08 배포 묶음 5-3(원장 락 대기) 후속에서 분리한 항목
+
+### B-62: 함께 기다리던 원장 작업이 풀리는 순서가 정해져 있지 않다 — 08:10 이 06:00 보다 먼저 잡을 수 있다
+
+- **상황**: 배포 묶음 5-3 으로 원장 락을 쓰는 다섯 스크립트가 모두 한도 없이 기다린다(스크립트마다 대기자 1). flock(2) 은 대기자 순서를 보장하지 않아 락이 풀리면 먼저 깨어난 쪽이 잡는다. 08:10 `daily_build.sh` 는 06:00 `daily_ledger.sh` 의 산출을 전제로 한다.
+- **인풋**: 손 작업(`flock -w` 로 돌린 수집기·`daily_build.sh --date` 재빌드 등)이 06:00 전부터 08:10 뒤까지 원장 락을 쥔다 → 06:00·08:10 이 함께 기다리다 풀리는 순간 08:10 이 먼저 잡는다.
+- **에러 위치**: `scripts/raw_lock.sh` 의 `flock 9`(순서 없음) → `scripts/daily_build.sh:118-130`(원장 단계 — ka10008 fetch → merge → ledger_health). 06:00 산출이 없을 때 지금 막는 것과 막지 않는 것(코드 확인 10-08):
+  - 키움 대차 ka20068 — **막는다, 지금 유일한 차단**. ka20068 incoming 은 06:00 `kw_daily --fetch --tr ka20068` 만 세운다. 08:10 `--merge`(`src/daily/kw_daily.py:754-786`)는 게이트 TR ka10008 incoming(08:10 자기 fetch)만 있으면 OK 로 머지하므로 ka20068 의 D 행이 없다 → `ledger_health` `kiwoom.ka20068.rows`(dt=D, rows/requested ≥ 0.98, REQUIRED — `src/daily/ledger_health.py:260-268`) FAIL → rc 2(`:627`) → `daily_build.sh` 의 ledger_health 단계 실패 → 확정 빌드·모델 단계(엑셀 발송) 미실행, crit 'daily_build 실패: ledger_health(rc=2)'.
+  - KIS 신용 — 막지 않는다. 오늘 06:00 이 안 돌면 max(deal_date) 가 한 세션 뒤(D−3)라 `kis.credit.fresh` 는 WARN(`ledger_health.py:327-329`).
+  - DART — 막지 않는다. 08:10 원장 게이트는 dart 런 로그(A-05 완료 판정)를 보지 않고 `dart.disclosure.rows`(rcept_dt=D ≥ 400)·`dart.docs` 만 본다(`:360-375`) — 18:05 저녁 런이 이미 채워 통과한다. 06:00 두 번째 런(늦은 공시·재무 재확인)만 빠진다.
+  - 캘린더 — 막지 않는다. `daily_build.sh` 는 `sync_calendar.sh` 를 부르지 않고 직전 복사본으로 D 를 정한다(하루 늦은 복사본이라도 보통 같은 D).
+  - 키움 마스터 — 무관. `kiwoom.master` 는 snap_date=D(전날 06:00 스냅샷, `ledger_health.py:304-307`)를 본다.
+  - `QL_SKIP_KW=1`(운영 크론엔 없음)이면 키움 판정이 통째로 빠져 아무것도 막지 않는다 — KIS 한 세션 뒤·DART 아침 재확인 없는 확정판이 조용히 지어진다.
+- **위험성**: 운영 정지·비결정(풀리는 순서가 실행마다 다르다). 그 D 확정판과 일간 엑셀이 그날 빠지고(10:30 워치독 crit), 손 재빌드(README 'DART 완료 판정 실패 · 놓친 확정판' 2번 — 06:00 이 끝난 뒤, 16:30 전)가 필요하다. 원장 손상은 없다 — 게이트가 막고, 대차 D 행은 다음 날 06:00 fetch 가 과거 100행을 함께 받아(`kw_daily.py` 머리말 '1회 실행 = 유니버스 × 4콜', `insert_rows` 가 응답 전 행 적재) 다음 08:10 머지에 들어간다. `QL_SKIP_KW` 가 켜진 날만 silent 부분판이다. 지금은 고치지 않는다(10-08 오케스트레이터 판정). 고칠 때의 후보는 08:10 이 락을 잡은 뒤 그날 `ledger_chain` 런 로그(06:00 완료)를 확인하거나, 06:00 대기자가 있으면 양보하는 것 — 체인이 멈추는 조건이라 사람 결정(P3).
+
+### B-63: 컨센서스 월간 G8 핫픽스(10-09) 후속 — 같은 blob 안 라벨 중복의 한쪽 결측, 한쪽 결측 상한 없음, 순서 커버리지
+
+10-09 핫픽스 1425a9ba 가 5001·5002 사이 '한쪽만 빈 값'을 `n_one_side_null`(기록만)로 갈랐다. 검토에서 남은 것 셋(모두 하, 배포는 막지 않음).
+
+- **상황**: WISE `ws_raw` cF5001·cF5002 blob 을 `stage/parsers.py` `parse_consensus_monthly` 가 좌표별로 합친다. G8(`stage/gates.py` `g8_parse_equation`)은 `n_value_mismatch > 0` 이면 그 표의 새 판을 폐기한다.
+- **인풋**:
+  1. 같은 blob 안에서 라벨이 반복되는데(5002 응답은 마지막 라벨 반복이 정상 모양) 반복 칸 중 한쪽만 빈 값.
+  2. WISE 가 cF5001 을 대량으로 비워 보냄(칸 수십 %).
+  3. 한 5001 blob 안에 같은 metric 차트가 둘(예: 둘 다 알 수 없는 항목명)이고 한쪽만 빈 값, blob 순서 [5002, 5001].
+- **에러 위치**:
+  1. `stage/parsers.py` `seen` 경로(같은 blob 라벨 중복) — None 대 값을 여전히 `n_value_mismatch` 로 센다.
+  2. `stage/gates.py` G8 — `n_one_side_null` 에 상한·알림이 없다(equity 쪽 `rules_s17.py` `n_mean_null` 도 기록만).
+  3. `stage/parsers.py` 5001 분기의 `cross(val, row["consensus"])` — 5002 가 먼저 오면 직전 5001 차트 값과 비교해 `n_one_side_null` 이 순서에 따라 0 또는 2(방출 행·G8 판정은 순서와 무관).
+- **위험성**: 1 은 이번과 같은 모양의 운영 정지(시끄러운 실패, 오염 없음) — 현재 원장엔 0건. 2 는 조용한 결측 확대(consensus None 대량 방출, 알림 없음). 3 은 기록 지표 비결정(판정 영향 없음). 진짜 충돌 회귀 테스트가 5001 먼저인 순서만 본다(`tests/test_stage_consensus.py` — parametrize 로 막을 수 있다). 고칠 때: 1 은 같은 규칙(한쪽 결측 = 기록) 적용 여부 결정, 2 는 비율 임계 또는 세션 시작 보고 항목, 3 은 테스트 순서 parametrize.
+
+## 2026-10-09 배포 묶음 6(Q-5 고침 ⑤, e1.26.0) 범위 밖으로 남긴 항목
+
+플랜 `docs/plans/2026-10-08-batch6-q5-price-only.md` '범위 밖' 1~5. ⑤ 는 미해결 사건의 KRX 기준가
+비율을 가격 축에만 접는다(보유 수량·거래량 축 불변). 아래는 그 설계가 일부러 고치지 않은 것이다.
+
+### B-64: KRX 기준가로 교체된 ok 계수의 조정가는 기준가비가 아니라 주식수비를 쓴다 — 키움과 최대 약 1%p
+
+- **상황**: 기준가 원천이 사건 계수를 교체하거나(사건 교체) 사건 없이 만든 정상 행(unknown_krx)은 `price_factor` = 그날 기준가 ÷ 직전 행 종가 r, `share_factor` = 같은 날 주식수 비 S(없으면 1/r)이고, 곱 |r × S − 1| ≤ `factor_product_tol_base`(0.01)면 ok 다. 조정가는 share 축(S)으로 접힌다.
+- **인풋**: S ≠ 1/r 이지만 곱 허용치 안인 사건 — 208640 썸에이지 2026-06-25 unknown_krx(10:1 병합): S = 0.1, 기준가비 1/r = 121/1,220 = 1/10.083. 키움 적용일 수익률 −30.04%(= 854/1,220 − 1) 대 ql 0.66%p 차(0단계 대조 §5).
+- **에러 위치**: `src/equity/sql/adj_factor.sql:378-381`(`replaced` 의 share_factor = coalesce(같은 날 주식수 비, 1/r)) → `src/equity/sql/price_adj_daily.sql:183`(조정가 = 원주가 × 누적 share_factor ÷ 누적 ⑤).
+- **위험성**: 정의 차이(silent, 소폭) — 그 사건일의 조정 수익률이 키움 수정주가와 최대 약 1%p 다르다. v3 대조·모멘텀에 작은 편차. 보유 수량 축은 S 가 맞다(실제 주식수 변화)라 고치려면 가격 축만 r 로 접는 별도 열이 필요하다(⑤ 와 같은 모양). 판단 필요(P1 대 P4).
+
+### B-65: 정지 뒤 재개 기준가 리셋((c) 재발견)은 행도 표식도 없다
+
+- **상황**: 기준가 후보 중 같은 날 주식수 변화가 없고 직전 행이 참고가(전일 무거래)인 것은 '정지 재개 가격 재발견'으로 보고 adj_factor 행을 만들지 않는다. ⑤ 는 행이 있는 미해결만 다루므로 이 리셋은 조정가에 그대로 남는다.
+- **인풋**: 로컬 사본(10-03 판) 2016 이후 132행. 시총 1,000억 이상 035890 +106% · 002210 +85% · 298000 +41%(셋 다 직전 무거래 행 대비 기준가 ≈ 2배 — 2:1 병합 추정, 미확인).
+- **에러 위치**: `src/equity/sql/adj_factor.sql:400`(`bp_new` — prev_kind='reference' ∧ 주식수 비 없음 → event_type NULL) · `:434`(`out_new` 가 그 후보를 버린다). ⑤ 쪽에서는 `near_c` 가드(근처 표식을 막는 데)로만 쓴다.
+- **위험성**: silent corrupt — 조정가 일간 수익률에 표식 없는 점프가 남고 `n_price_unresolved_events`·fi `adj_ok` 도 못 거른다. ⑤ 뒤 scope 모멘텀에 남는 가격 불연속의 주원인(추정). 고칠 때: 행(새 사유) 또는 표식을 만들고 KRX 공시(병합 여부)로 원인을 가린다.
+
+### B-66: 백테스트 두 어댑터는 미해결 사건을 세지도 경고하지도 않고 버린다(H-04) — ⑤ 는 보유 수량을 고치지 않는다
+
+- **상황**: 워크벤치·커널 어댑터는 `factor_ok` 행만 기업행위 사건으로 넘긴다. ⑤ 계수 행도 `factor_ok=false` 라(설계 — 보유 수량 경로 불변) 어댑터에는 그대로 안 보인다.
+- **인풋**: 인적분할·권리락·병합 등 `krx_base_inconsistent`·`unknown_price_only` 사건이 있는 종목을 사건일을 넘어 보유하는 전략(감사 H-04: 미해결 창 수익률 |r| > 30% 560건/453종목, 2016 이후 275).
+- **에러 위치**: `backend/src/strategy_workbench/adapters/outbound/equity_duckdb/_adapter.py:954`(`WHERE factor_ok`) · `backend/src/backtest_engine/adapters/equity_duckdb.py:650`(`factor_ok` 아니면 건너뜀). 정적 가드 `tests/test_equity_s23_price_adj.py::test_두_백테스트_어댑터는_가격_전용_계수를_읽지_않는다` 가 ⑤ 열을 읽지 않음을 지킨다.
+- **위험성**: 가짜 손익(silent) — 원주가 bar 가 기준가로 뛰는데 수량이 그대로라 재개일 가격으로 평가된다. ⑤ 는 연구 패널 `price.adj_close` 쪽(팩터 절반)만 고친다. main #369 포트가 krx_base_inconsistent 의 수량 조정·경고(`equity.unfolded_level_shift`)를 가져온다 — 병합(e1.27.0) 때 `v_adj_close` 가림 술어를 `price_resolution='unresolved'` 로 좁히는 것과 함께(플랜 'main 병합 때 맞출 것'). 나머지 유형의 경고는 §8-11.
+
+### B-67: ⑤ 가 키움 수정주가와 같은 방식이라는 근거는 보통주 2025-10~2026-10 150건뿐이다
+
+- **상황**: 0단계 대조(148/150 일치)는 v3 유니버스(보통주)의 2025-10 이후 사건만 봤다. ⑤ 는 주식 계열 다섯 종류(D6-1)·전 기간에 계수를 싣는다.
+- **인풋**: 우선주·스팩·외국기업·DR 계수 행(로컬 사본 2,333 중 preferred 96 · spac 37 · foreign 28 · dr 1), 2025-10 이전 계수 행(로컬 사본 약 2,180). fund·ship_fund·reit 99행은 D6-1 로 이미 뺐다(분배·배당락 반복 하락 추정).
+- **에러 위치**: `src/equity/sql/adj_factor.sql:477`(`po_kind` 화이트리스트 — 검증하지 않은 종류도 싣는다) · 대조 근거 `~/quant-data/research/2026-10-08-batch5/5-7-q5-step0-v3-check.md` §6.
+- **위험성**: 정의 불일치 가능성(silent) — 키움이 그 종류·기간에 다른 방식이면 조정가가 v3 와 갈린다. v3 데이터는 2025-01 부터이고 우선주가 없어 지금 대조 수단이 없다. 6-5 서버 재연에서 0단계 150건을 실제 산출로 다시 대조하는 것이 이 범위의 전부다.
+
+### B-68: 표식만 남긴 미해결 — ok 접힘일과 겹친 단위 · 기준가 근거 없는 DART 행 · 09-14 이후 대조 불성립
+
+- **상황**: ⑤ 단위는 ok 계수가 접히는 날을 뺀다(③). 기준가 후보가 없는 날짜의 DART 행은 근처 판정(D6-2 price_only_near · D6-3 factor_near)에 걸리지 않으면 `unresolved` 다. 09-14 부터 키움 종가가 애프터마켓 마지막 체결가다.
+- **인풋**: ① ok 접힘일과 겹친 단위 — e1.22.0 판 1건(C-07 고침 뒤 e1.25.0 재연 0건) ② 기준가 근거 없는 DART 행 — 로컬 사본 2025-10 이후 `unresolved` 39행(D6-3 넓힘 뒤, 플랜 기록 38~49) ③ 09-14 이후 사건 4건 중 2건 v3 대조 불일치(042940 09-22 · 207940 10-02).
+- **에러 위치**: `src/equity/sql/adj_factor.sql:494`(`po_unit` 의 ok 접힘일 제외) · `:591`(나머지 → `'unresolved'`) · 대조 근거 0단계 §4.
+- **위험성**: ①② 는 가격 축 미해결로 남아 fi `adj_ok` 가 창을 결측 처리한다(보수적, P1 — 오염은 없음). scope 근사 유니버스(D 10-02) 252세션 안 미해결 5종목 중 2종목(052400·290650)은 로컬 사본의 C-04 대기 행이라 서버 e1.25.0 에선 빠질 것으로 본다. ③ 은 대조 도구의 한계(하루치 비교 불성립) — 조정 결함이 아니다.
+
+## 2026-10-09 배포 묶음 7(WISE 재무 연속 판 접기 · 아침 재사용, stage 2.7.0) 범위 밖으로 남긴 항목
+
+플랜 `docs/plans/2026-10-09-batch7-wise-dedup.md` '범위 밖' 1~8.
+
+### B-69: 원장 `ws_raw` 가 같은 원문(sha256)을 수집일마다 다시 적재한다 — stage 접기(묶음 7)는 산출만 줄인다
+
+- **상황**: 배포 묶음 7(stage 2.7.0)이 `stg_fin_wise`·`_q` 에서 연속 판을 접지만 원장은 그대로 매일 전체 원문을 쌓는다(결정 장부 §3-C D-Q4 'WISE 원문 매일 전체 저장' ↔ RM:74).
+- **인풋**: 매 저녁 `backfill_wise.py --mode full` — cF3002·cF4002 원문의 81~94% 가 전날과 같은 sha256(10-09 서버 실측, 플랜 2026-10-09 '사실 근거').
+- **에러 위치**: `src/backfill_wise.py:405-412`(ok 응답마다 `INSERT OR REPLACE`, PK 에 fetched_date) · 같은 sha 재적재를 막으면 `src/daily/ledger_health.py:470-471`(REQ_COVERED 항등식)이 깨진다.
+- **위험성**: 데이터 손상은 없다(원장 증가·디스크·백업 시간). 막으려면 원장 건전성 항등식·D-Q4·RM:74 재결정이 함께 걸린다 — 사람 결정.
+
+### B-70: fstrim 매일화(N-36 ②) — 묶음 7 효과를 본 뒤 정한다
+
+- **상황**: N-36 ② '나중에'. 묶음 7 로 stage 두 표의 쓰기가 76M·34M 블록(10-09 아침 `/usr/bin/time`)에서 크게 준다(추정).
+- **인풋**: 10-13 배포 뒤 첫 저녁·아침의 쓰기 블록 실측(플랜 7-6 관측).
+- **에러 위치**: 서버 크론(fstrim 주기) — 코드 밖.
+- **위험성**: 성능·디스크 수명 축. 정확성 영향 없음.
+
+### B-71: stage 열·JSONL 성능 — blob 표는 `raw__` 열 중복·1행 약 2.2KB JSONL·창 함수 spill
+
+- **상황**: 접기 뒤에도 blob 표 빌드는 파서 출력 → JSONL → duckdb `read_json` → 창 함수(`build._stage_sql` rn·rn_day) 경로다.
+- **인풋**: `stg_fin_wise` 류 wide 표(열 50+), 10-09 서버 RSS 6.8GB(한도 6GB 초과 spill — 접기 전 실측).
+- **에러 위치**: `src/stage/build.py` `_load_blob_source`(JSONL 경유)·`_stage_sql`(`raw__` 원장 열 전부 복제).
+- **위험성**: 성능(아침 체인 종료 시각). 정확성 영향 없음.
+
+### B-72: cF4002 원문이 거의 매일 바뀐다 — 접은 뒤 `stg_fin_wise` 증가의 절반 이상
+
+- **상황**: 같은 sha 비율 cF4002:Y 1.8~4.2%(10-01~10-08 서버 실측) — 가격 의존 비율(PER·PBR 등)이 담겨 있다는 추정.
+- **인풋**: 매일 수집되는 cF4002 pkey='Y' 36행/blob.
+- **에러 위치**: `src/stage/fold.py`(blob 단위 비교라 한 칸만 바뀌어도 판 전체가 남는다).
+- **위험성**: 성능·저장 축. 고칠 방법(행 단위 접기 또는 가격 의존 비율 분리)은 blob 의 한 시점 일관성 상실·소비자 쿼리 확대가 걸려 묶음 7 에서 기각(플랜 '설계 7-1').
+
+### B-73: 두 표가 접기 전 크기(948만 행)로 돌아오는 시점 재측정 — 12월 초
+
+- **상황**: 접은 뒤 두 표 합 하루 약 8.7~17만 행 증가(추정) → 약 40~80거래일 뒤 지금 크기(추정, 실적 시즌엔 더 짧다).
+- **인풋**: 12월 초 서버 `summary.tsv` 두 표 행 수·소요.
+- **에러 위치**: 해당 없음(측정 항목).
+- **위험성**: 성능 회귀가 조용히 돌아온다 — 재측정으로만 보인다.
+
+### B-74: 아침 재사용 일반화 — 지금은 `stg_fin_wise`·`_q` 두 표만
+
+- **상황**: D7-7 로 범위를 두 표로 묶었다. 구조는 `TableRule.morning_reuse` 선언으로 일반이지만, 원장 지문(`fold.input_fingerprint`)이 ws_raw 모양 blob 원천에만 정의돼 있다.
+- **인풋**: 나머지 WISE blob 6표(절감 약 3분, 추정) 등.
+- **에러 위치**: `src/stage/build.py` `_ledger_metrics`(지문은 `morning_reuse` 표만 계산) · `src/stage/reuse.py` 판정 ⑤.
+- **위험성**: 성능 축. 넓힐 때는 표마다 지문 정의(원장 모양)와 회귀 가드를 새로 세워야 한다.
+
+### B-75: 접을 수 없는 WISE 표의 증가를 감시하는 장치가 없다
+
+- **상황**: `stg_consensus_monthly` 하루 +20.7만 행·108초, `stg_consensus_matrix` +10.9만 행·54초(10-09 서버). fetched_date 를 수집일로 쓰는 소비자(fi `_cov`·matrix 같은 날짜 조인·equity coverage_daily)가 있어 접을 수 없다(D7-2).
+- **인풋**: 매일 저녁·아침 빌드.
+- **에러 위치**: `src/stage/health.py` C5 는 체인 전체 소요만 기록형으로 본다 — 표별 증가 추세는 아무도 안 본다.
+- **위험성**: 성능 회귀가 조용히 쌓여 체인 종료가 늦어진다(워치독이 시각으로만 잡는다).
+
+### B-76: '마지막 확인일'이 stage 에서 사라졌다 — 두 표의 `fetched_date` 는 '그 원문을 처음 본 날'
+
+- **상황**: 2.7.0 부터 `stg_fin_wise`·`_q` 는 원문이 안 바뀐 날의 행이 없다. 그 종목·ep 가 오늘도 수집됐는지는 stage 로 알 수 없다.
+- **인풋**: '이 종목 재무를 최근 언제 확인했나'를 stage 에서 읽으려는 소비자(지금은 없음 — 플랜 '설계 7-2' 표).
+- **에러 위치**: `src/stage/fold.py`(접힌 판은 행이 없다). 기록형 `n_keys_stale{ep:pkey}`(G8 지표 — 마지막 원장 blob 날짜 < 그 ep·pkey 최신 수집일인 단위 수)가 일부만 대신한다.
+- **위험성**: 소비자가 `max(fetched_date)` 를 최신성으로 읽으면 수집 정지로 오판하거나(반대로) 정지를 못 본다. 필요해지면 원장 직독 지표로 만든다 — 지금 수집 신선도는 `stg_consensus_annual`(접지 않음)·원장 `wise.run`·fi FG-fresh 가 본다.
+
+### B-77: `backfill_kis._spec_shim` 이 import 시점의 `backfill_dart.SPEC` 을 쥔다 — 모듈을 다시 import 하면 KeyError
+
+- **상황**: 테스트가 `backfill_dart` 만 `sys.modules` 에서 지우고 다시 import 한다(`tests/test_daily_dart.py:84-86`). 그 전에 `backfill_kis` 가 import 돼 있으면 그대로 남는다.
+- **인풋**: 같은 세션에서 앞 테스트가 `backfill_kis` 를 import(예: `daily.calendar_refresh.fetch_page` 의 지연 import) → `test_daily_dart` → `test_daily_kis::_seed_by_backfill`(`from backfill_dart import store` 는 새 모듈, `_spec_shim` 은 옛 모듈).
+- **에러 위치**: `src/backfill_kis.py:24-25`(`from backfill_dart import store, SPEC as DART_SPEC` — import 시점 바인딩)·`:358-361` `_spec_shim`(옛 `DART_SPEC` 에 `__kis_<name>` 등록) → 새 `backfill_dart.store` 가 자기 SPEC 에서 못 찾아 `KeyError: '__kis_credit'`.
+- **위험성**: 운영 경로(프로세스마다 한 번 import)에는 영향이 없고, 테스트 실행 순서에 따라 거짓 실패가 난다. 지금은 `tests/test_calendar_refresh.py` 픽스처가 두 모듈을 import 전 상태로 되돌려 피한다(휴장 달력 플랜 2026-10-10). 뿌리는 `_spec_shim` 이 모듈 전역 SPEC 을 고치는 구조 — 백필 코드 동결(P5)이라 고치려면 결정이 필요하다.
+
+## 2026-10-10 주말 작업(N-40)에서 남긴 항목
+
+### B-78: `test_not_before_blocks_with_rc3` 가 실제 시계에 기대어 23:59 KST 에 돌면 실패한다
+
+- **상황**: `kw_daily._too_early` 는 `dt.datetime.now(KST)` 의 `HH:MM` 을 문자열로 비교한다(`now < not_before`). 테스트는 시계를 고정하지 않는다.
+- **인풋**: `tests/test_daily_kw.py::test_not_before_blocks_with_rc3` 가 `--not-before 23:59` 로 rc 3 을 기대한다. 실행 순간이 23:59 KST 면 `now == not_before` 라 막히지 않고 rc 0.
+- **에러 위치**: `tests/test_daily_kw.py:313`(시계 고정 없음), `src/daily/kw_daily.py:825-835`.
+- **위험성**: 운영 결함은 아니다(가드 자체는 맞다). 10-09 23:59 KST 무렵 CI(`wip/cal-direct` run 37947870744)에서 이 한 건만 실패했다 — 같은 테스트가 다른 시각엔 통과한다. 23:59 에 `deploy.sh` 테스트 단계가 돌면 배포가 헛되이 거부된다. 고칠 방향: 테스트에서 `kw_daily` 의 현재 시각을 monkeypatch 로 고정한다.
+
+## 2026-10-10 컷오버 트랙 K1-3a(EG13) 리뷰에서 남긴 항목
+
+### B-79: `_pinned/` GC 가 전이 계보를 보호하지 않는다 — 옛 `price_adj_daily` 판 재판정에서 EG13 이 기준일을 못 세울 수 있다
+
+- **상황**: EG13 기준일은 고정 입력의 전이 폐포에 있는 stage 판 스냅샷이다. `price_adj_daily` 는 stage 입력이 없어 `price_daily`·`adj_factor` 등 equity 판의 `inputs` 를 따라 `_pinned/stg_*/` 까지 내려간다. `gc_pinned` 의 보호 축은 ① 살아 있는 equity MANIFEST 기록의 **직접** 입력 ② 전달 이력 보호 id ③ 표별 최신 keep 뿐이다.
+- **인풋**:
+  1. 저녁·아침 체인이 몇 번 돌아 `price_daily` MANIFEST(keep 3)에서 판 X 가 빠진다. 같은 시점 `price_adj_daily` MANIFEST 에는 X 를 가리키는 옛 판 P 가 아직 남아 있다(체인 실패·되돌림 등으로 두 표의 keep 창이 어긋난 경우).
+  2. 빌드 체인 GC 단계 `equity.inputs.gc_pinned(data/equity, protect=이력 id)` 가 X 의 stage 입력 `_pinned/stg_price_daily/v=Y` 를 지운다. Y 를 가리키던 것은 빠진 X 기록뿐이었고, Y 는 보호 id·최신 keep 에도 없다.
+  3. `python -m equity gate price_adj_daily --build P` 로 재판정한다.
+- **에러 위치**:
+  - `src/equity/inputs.py:277-290` `referenced_pins` — MANIFEST 기록의 직접 `inputs` 만 모으고 전이 폐포는 보지 않는다.
+  - `src/equity/inputs.py:306-350` `gc_pinned` — 판정이 위 집합 기준이다.
+  - `src/equity/inputs.py:158-180` `input_snapshot_ids` → `load_pinned`(`:119-125`)가 FileNotFoundError 를 낸다.
+  - `src/equity/gates.py:271-276` 에서 EG13 이 그 예외를 FAIL("input snapshot lineage unresolvable")로 바꾼다.
+- **위험성**: 운영 정지 오탐(재판정 한정). 현행 판은 같은 체인에서 함께 지어져 해당 없고, 10-10 서버 현판 22표 재판정은 전부 PASS 였다. 옛 판 재판정·DoD-5 재생 집계에서만 거짓 FAIL 이 나 '미래 데이터' 로 오독될 수 있다(실제는 계보 소실). 노출 미측정. 고칠 방향은 `referenced_pins` 를 equity 입력의 `inputs` 까지 전이로 넓히는 것 — GC 보존량이 늘어 용량 영향을 먼저 잰다.

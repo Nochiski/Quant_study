@@ -66,4 +66,4 @@ def test_current_snapshot_ids_collects_every_manifest_pointer(tmp_path: Path,
         rules_version="2.2.3", built_at_utc="2026-09-11T09:30:00+00:00", n_rows=1,
         content_hash="1:a"))
     got = snapshot.current_snapshot_ids(t1.stage_root)
-    assert got == {"snap_test", "snap_evening"}     # stg_a 는 픽스처 기본값 snap_test
+    assert got == {"snap_20260905T000000Z", "snap_evening"}     # stg_a 는 픽스처 기본값

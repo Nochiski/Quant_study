@@ -13,6 +13,7 @@
                         돈다. 엔진 소스는 `--engine-src`(기본 `<repo>/backend/src` 또는
                         `$QL_ENGINE_SRC`)
   rollback              `--pass <PASS>` 의 `summary.tsv` 에서 rc 0 인 표만 직전 판으로 되돌린다
+                        (`--basis morning` 이면 `--before` 의 모든 표를 직전 확정판으로 — C-01)
                         (포인터만 — `v=` 는 남는다). 전량 빌드가 중간에 실패해 표마다 다른 날의
                         판이 섞인 상태를 푼다(DEFECT-C03)
 
@@ -57,6 +58,8 @@ from . import (
     rules_s20,  # noqa: F401  # reason: 등록 부작용 — S20 팩터 준비도 factor_readiness
     rules_s23,  # noqa: F401  # reason: 등록 부작용 — S23 전방 조정가 price_adj_daily
     rules_s24,  # noqa: F401  # reason: 등록 부작용 — S24 WISE 커버 이력 coverage_daily
+    rules_s25,  # noqa: F401  # reason: 등록 부작용 — S25 WICS 섹터 스냅샷 sector_snapshot
+    rules_s26,  # noqa: F401  # reason: 등록 부작용 — S26 WISE 컨센서스·재무비율 3표
     rules_sample,  # noqa: F401  # reason: T0 샘플 테이블
 )
 from .model import BUILD_BASES, BUILD_BASIS_DEFAULT, RULES, record_basis
@@ -166,7 +169,7 @@ def _cmd_contract(a: argparse.Namespace) -> int:
 
 def _cmd_rollback(a: argparse.Namespace) -> int:
     done = rollback.rollback_pass(a.root, getattr(a, "pass"), log_root=a.log_root,
-                                  before=a.before)
+                                  before=a.before, basis=a.basis)
     if not done:
         print(f"ok rollback root={a.root} pass={getattr(a, 'pass')} — 되돌린 표 없음")
         return 0
@@ -230,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
     p_rb.add_argument("--before", type=Path, default=None,
                       help="패스 시작 시점의 {표: current_build} JSON — "
                            "있으면 직전 판이 아니라 그 판으로")
+    p_rb.add_argument("--basis", choices=sorted(BUILD_BASES), default=BUILD_BASIS_DEFAULT,
+                      help="되돌리는 패스의 빌드 판 — morning 이면 before 의 모든 표")
     p_rb.set_defaults(fn=_cmd_rollback)
 
     a = ap.parse_args(argv)

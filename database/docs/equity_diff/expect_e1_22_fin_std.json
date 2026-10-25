@@ -1,0 +1,11 @@
+{
+ "_note": [
+  "e1.22.0 — 재무표를 안 건드린 정정본이 원본 공시일을 승계한다(09-30, docs/research/2026-09-30-gpt-layer-debate.md ③).",
+  "바뀔 수 있는 것은 공개일 축 셋뿐이고 전부 **앞당겨지는** 방향이다. 값·행·rcept_dt 는 불변이어야 한다."
+ ],
+ "expect": [
+  {"column": "available_date", "kind": "value_changed", "where": "available_date < rcept_dt AND before_available_date = rcept_dt", "note": "원본 접수일 승계"},
+  {"column": "q4_derived_available_date", "kind": "value_changed", "where": "q4_derived_available_date < before_q4_derived_available_date", "note": "구성 판 공개일 max — 승계 판이 끼면 당겨진다"},
+  {"column": "cf_q_available_date", "kind": "value_changed", "where": "cf_q_available_date < before_cf_q_available_date", "note": "자기·직전 판 공개일 greatest — 승계 판이 끼면 당겨진다"}
+ ]
+}

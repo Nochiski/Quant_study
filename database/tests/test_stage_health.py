@@ -10,6 +10,7 @@ import datetime as dt
 import json
 from pathlib import Path
 
+import pytest
 from stage import freshness, health, manifest, model
 
 DATE = "20260911"
@@ -488,3 +489,29 @@ def test_c4_skips_tables_whose_rules_version_changed(tmp_path: Path, make_stage_
     c4 = _check(_run(root), "C4")
     assert c4.status is health.Status.PASS
     assert c4.metrics["rules_changed"] == ["stg_a"] and c4.metrics["mismatched"] == []
+
+
+# ── CLI --tables — 장 마감 체인의 표 한 개 단독 판정(컷오버 PR-8) ──────────────────
+
+POSTCLOSE = "stg_flow_postclose_kiwoom"
+
+
+def test_cli_tables_judges_only_the_named_table(tmp_path: Path, make_stage_tree) -> None:
+    """`--tables` 를 주면 그 표만 판정한다 — 장 마감 체인은 `data/model_db/stage` 에 표 하나만 짓는다(T-29).
+    빼면 종전대로 stage 규칙 전수라 같은 루트가 '나머지 표 없음'으로 FAIL 한다. write_mode 는 규칙에서 온다."""
+    root = _tree(tmp_path, make_stage_tree, POSTCLOSE)
+    out = tmp_path / "h.json"
+    args = ["--stage-root", str(root), "--basis", "evening", "--date", DATE, "--out", str(out)]
+    assert health.main([*args, "--tables", POSTCLOSE]) == 0
+    rep = json.loads(out.read_text(encoding="utf-8"))
+    c1 = next(c for c in rep["checks"] if c["name"] == "C1")
+    assert rep["ok"] is True and c1["metrics"]["n_tables"] == 1
+    assert health.main(args) == 2                     # 전수 판정 — 나머지 표가 없다
+
+
+def test_cli_tables_rejects_an_unknown_table(tmp_path: Path) -> None:
+    """규칙에 없는 이름은 인자 오류다 — 오타로 판정할 표가 0개가 되어 통과하는 일이 없게."""
+    with pytest.raises(SystemExit) as e:
+        health.main(["--stage-root", str(tmp_path), "--basis", "evening", "--date", DATE,
+                     "--tables", "stg_no_such_table", "--out", str(tmp_path / "h.json")])
+    assert e.value.code == 2

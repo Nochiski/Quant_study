@@ -204,7 +204,49 @@ def test_커밋은_inputs와_빈_snapshot_id를_싣는다(tmp_path: Path, make_s
         encoding="utf-8"))
     assert meta["inputs"] == {"stg_sample": tree.build_id}
     assert meta["partition"] == "whole" and meta["n_reject_by_reason"] == {}
-    assert [g["name"] for g in meta["gates"]] == ["EG0", "EG7", "EG1", "EG2", "EG3", "EG4", "EG5a"]
+    assert [g["name"] for g in meta["gates"]] == ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG4",
+                                                  "EG5a"]
+
+
+# ── EG13 음성 대조 (K1-3a) — 판을 지은 원장 스냅샷보다 뒤의 공개일 = 미래 데이터 ─────────────
+def test_EG13_정상_판은_통과하고_기준일이_meta에_남는다(tmp_path: Path, make_stage_tree) -> None:
+    tree = make_stage_tree(tmp_path, "stg_sample", ROWS, snapshot_id="snap_20210104T000000Z")
+    eq = tmp_path / "equity"
+    _sample_fixtures(eq)
+    r = build.build_table(rules_sample.SAMPLE_TABLE, tree.stage_root, eq, Baseline(),
+                          build_id="b_eq_1")
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    eg13 = next(g for g in r.gates if g.name == "EG13")
+    assert eg13.status is GateStatus.PASS
+    assert eg13.metrics["snapshot_kst_date"] == "2021-01-04"
+
+
+def test_EG13_미래_공개일_한_행을_심으면_판을_폐기하고_MANIFEST는_그대로(
+        tmp_path: Path, make_stage_tree) -> None:
+    """스냅샷 2021-01-04 09:00 KST 로 지은 stage 판에 공개일 2021-01-05 행 하나를 심는다."""
+    snap = "snap_20210104T000000Z"
+    tree = make_stage_tree(tmp_path, "stg_sample", ROWS, snapshot_id=snap)
+    eq = tmp_path / "equity"
+    _sample_fixtures(eq)
+    ok = build.build_table(rules_sample.SAMPLE_TABLE, tree.stage_root, eq, Baseline(),
+                           build_id="b_eq_1")
+    assert ok.ok
+    planted = [*ROWS, {"k": 4, "val": "d", "available_date": date(2021, 1, 5),
+                       "available_basis": "measured"}]
+    tree2 = make_stage_tree(tmp_path, "stg_sample", planted, build_id="b_stage_0002",
+                            snapshot_id=snap)
+    bad = build.build_table(rules_sample.SAMPLE_TABLE, tree2.stage_root, eq, Baseline(),
+                            build_id="b_eq_2")
+    assert bad.status is build.BuildStatus.GATE_FAILED
+    assert bad.failed_report is not None
+    report = json.loads(bad.failed_report.read_text(encoding="utf-8"))
+    assert report["first_failed_gate"] == "EG13"
+    eg13 = next(g for g in bad.gates if g.name == "EG13")
+    assert eg13.metrics["n_available_after_snapshot"] == 1
+    assert {g.name: g.status for g in bad.gates}["EG2"] is GateStatus.PASS   # 하한은 멀쩡하다
+    m = manifest.load(eq / "sample_table" / "MANIFEST.json")
+    assert m.current_build == "b_eq_1"                       # 폐기형 — 포인터 불변
+    assert not (eq / "sample_table" / "v=b_eq_2").exists()
 
 
 def test_build_by_year는_아직_구현되지_않았다(tmp_path: Path, make_stage_tree) -> None:

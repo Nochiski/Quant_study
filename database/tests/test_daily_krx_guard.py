@@ -11,7 +11,7 @@ def _load(tmp_path, monkeypatch, holidays):
     monkeypatch.setenv("QL_ENV", str(env))
     monkeypatch.setenv("QL_HOME", str(tmp_path))
     (tmp_path / "data" / "calendar").mkdir(parents=True)
-    (tmp_path / "data" / "calendar" / "kis_holidays.json").write_text(
+    (tmp_path / "data" / "calendar" / "kis_holidays_2026.json").write_text(
         json.dumps({"year": 2026, "holidays": holidays}), encoding="utf-8")
     for m in ("api", "backfill_krx"):
         sys.modules.pop(m, None)

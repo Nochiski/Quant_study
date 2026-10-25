@@ -220,6 +220,13 @@ def factor_table(
         "price_factor": pa.array([1.0 / r[4] for r in rows], type=pa.float64()),
         "share_factor": pa.array([r[4] for r in rows], type=pa.float64()),
         "factor_ok": pa.array([r[5] for r in rows], type=pa.bool_()),
+        # 가격 축을 따로 지정하지 않은 옛 손 픽스처는 미해결 사건을 유지한다.
+        "price_resolution": pa.array(
+            ["factor" if r[5] else "unresolved" for r in rows], type=pa.string()
+        ),
+        # 원장 S23 SQL(e1.26.0 ⑤)이 읽는 가격 전용 계수 — 'price_only' 가 아닌 행은 원장 게이트
+        # 규칙대로 1 이다(NULL 0). 이 손 픽스처에는 ⑤ 사건이 없다.
+        "price_only_factor": pa.array([1.0 for _ in rows], type=pa.float64()),
     }
     if apply_dates is not None:
         columns["apply_date"] = pa.array(apply_dates, type=pa.date32())
@@ -975,11 +982,6 @@ WB_WISE_FIELDS = (
     "wise.pbr",
     "wise.dividend_yield",
 )
-# 원장 선언이 아직 main 계보의 `database/src/equity` 에 없는 필드 — 서버 원장 계보(e1.30.0: S26 WISE
-# 3표·사모 순매수 선언)가 main 에 합쳐지기 전까지 원장 선언 대조에서 뺀다. 합쳐지면
-# `test_equity_field_contract_parity` 의 대기 필드 검사가 실패하니 이 목록을 지우고 전체 대조로
-# 돌아간다(#608).
-LEDGER_PENDING_FIELDS = frozenset({*WB_WISE_FIELDS, "flow.private_fund_net_buy"})
 WB_WISE_MATRIX_FETCHES = (
     date(2023, 12, 28), date(2024, 1, 3), date(2024, 1, 4), date(2024, 1, 6), date(2024, 1, 8)
 )

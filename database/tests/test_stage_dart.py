@@ -368,7 +368,8 @@ def test_rules_route_available_date_by_the_measured_receipt_date() -> None:
         avail = rules.RULES[name].available
         assert avail.kind == "column" and avail.column == "rcept_dt"
         assert avail.basis == "measured"
-    # stg_disclosure 만 접수번호 접두와 대조한다 (E08) — 나머지 둘은 원천에 오타 사례가 없다
+    # stg_disclosure 는 rcept_dt 열을 접수번호 접두와 대조한다(E08). 참조표 룩업 표(위 6표 등)도
+    # 같은 보정을 룩업 값에 건다(J-41, rules_dart.RCEPT_LOOKUP). 지분 2표는 원천에 오타 사례가 없다
     avail = rules.RULES["stg_disclosure"].available
     assert avail.kind == "greatest_ymd8" and avail.column == "rcept_dt"
     assert avail.fallback_column == "rcept_no" and avail.basis == "measured"

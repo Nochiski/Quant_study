@@ -34,6 +34,7 @@
 | 키움 | `stg_lending_daily` | 6,988,296 | 6,988,296 | 0 | `remn_amt_krw` ×1e6 · 항등식 불변식 |
 | 키움 | `stg_master_daily` | 8,614 | 8,614 | 0 | first_write_wins · `coverage_from=2026-09-01` · state 파이프 분해 3불린 |
 | 키움 | `stg_shards_kiwoom` | 10,420 | 10,420 | 0 | 원구조 · collected_at 08-23~24 2일뿐 |
+| 키움(장 마감) | `stg_flow_postclose_kiwoom` | — | — | — | 장 마감 직후 판 전용(컷오버 PR-2, 2.8.0) · 연구 루트에 없음 · 아래 별도 메모 |
 | KIS | `stg_flow_split_daily` | 949,023 | 1,001,370 | 52,347 | 중복 52,347 접힘 · `*_ntby_tr_pbmn_krw` ×1e6(픽스처 13) · 수정주가 플래그 payload 보존 |
 | KIS | `stg_short_daily_kis` | 939,610 | 939,610 | 0 | `acml_valid`(창 첫 행) · `avrg_prc` '0' 결측 |
 | KIS | `stg_loan_daily_kis` | 493,445 | 493,445 | 0 | `rmnd_stcn_shr` 음수 2,691 keep · `rmnd_amt_krw` ×1e6 |
@@ -42,7 +43,7 @@
 | KIS | `stg_calls_kis` | 355,027 | 357,682 | 2,655 | unversioned 로그 · d1·d2 비키 |
 | KIS | `stg_units_kis` | 355,027 | 355,027 | 0 | unversioned 로그 |
 | DART | `stg_rcept_dt_map` | 3,443,898 | 3,444,518 | 620 | 참조표 rcept_no→rcept_dt · 페이지 중복 620 접힘 · key_unique |
-| DART | `stg_fin` | 15,375,024 | 15,375,024 | 0 | 8컬럼 요청축 키 · wide 6금액 Decimal(38,4) · available=참조표(미스 0) · `is_krw`·`account_std` |
+| DART | `stg_fin` | 15,375,024 | 15,375,024 | 0 | 8컬럼 요청축 키 · wide 6금액 Decimal(38,4) · available=참조표(미스 0) · `is_krw`·`account_std`·`account_nm_norm`(계정명 공백 제거, T-E) |
 | DART | `stg_dividend` | 384,232 | 384,232 | 0 | 키 = row_hash + 요청축 + se·stock_knd · `se` 라벨이 단위 → 스케일 없음 |
 | DART | `stg_shares` | 97,194 | 97,194 | 0 | 키 = row_hash + … · `row_kind` · 비숫자 다수(G2 12%) |
 | DART | `stg_capital` | 283,479 | 283,479 | 0 | `isu_dcrs_de` 점표기 + `_raw` · 연도 오타 셀 격리 15 |
@@ -82,7 +83,7 @@
 | WISE | `stg_consensus_matrix` | 214,650 | 214,650 | 0 | T4 계정 9 × lookback 5(current·1w·1m·3m·1y 실측 대조) |
 | WISE | `stg_analyst_summary` | 1,612 | 1,612 | 0 | cTB15 요약행 · 무의견 346 · `N/A` blank |
 | WISE | `stg_analyst_broker` | 9,717 | 9,717 | 0 | cTB24 증권사별 목표가·의견(09-01~03) · `opinion_class` buy/hold/sell/other · 리비전 팩터 재료 |
-| WISE | `stg_fin_wise` | 445,294 | 445,294 | 0 | 키 (…,ep,seq) wide · `period_label_1~6` 병기 · `val_q*` 슬롯 라벨 없음 · Decimal(38,6) |
+| WISE | `stg_fin_wise` | 445,294 | 445,294 | 0 | 키 (…,ep,seq) wide · `period_label_1~6` 병기 · `val_q*` 슬롯 라벨 없음 · Decimal(38,6) · **2.7.0(묶음 7)부터 연속 판 접기 — 행 수는 이 표(09-03 당시)와 다르다, §4 WISE 참조** |
 | WISE | `stg_v3_revision_daily` | 63,175 | 63,175 | 0 | 동결 사본 · available=collected_date, NULL 은 base_date/default + `coverage_degraded` |
 | WISE | `stg_v3_analyst_opinions` | 254,925 | 254,925 | 0 | 동결 사본 · snapshot_date measured |
 | WISE | `stg_v3_consensus_annual` | 18,086 | 18,086 | 0 | sync_date 09-01·09-02 두 판본 |
@@ -92,6 +93,27 @@
 
 합계 62테이블 · stage 84,374,088행 / 원장 85,051,268행(접힘 677,180 — doc_index 재빌드·analyst_broker 추가 반영) · reject 0 · 1차 패스 23분 · 같은 스냅샷 재빌드 content_hash 60/60 동일(G5 Δ=0). 게이트 판정은 각 테이블 `MANIFEST.json` 의 `builds[].gates`.
 
+**`stg_flow_postclose_kiwoom`(장 마감 직후 판 — 컷오버 PR-2 · stage 2.8.0)** — 위 표의 숫자(09-03 1차 풀 빌드)에는 없다.
+- 원천: 15:41 장 마감 수집 원장 `data/raw/postclose.db` 의 `ka10060_investor_flows`(키움 KRX 코드, T 행만). 파싱은
+  `stg_flow_daily_kiwoom` 과 같은 규칙 객체라 공유 열(투자자 13열 `_krw` 등)의 뜻·단위가 같다. 더한 열은 둘이다.
+- `price_valid`(BOOLEAN): 수집기가 그 응답을 16:00 KST 전에 받았나. **`price_valid IS TRUE` 인 행만 가격으로 쓴다.**
+  NULL·false 면 수급 13열(`*_krw`)만 유효하고, 종가·전일대비·거래량(`close_krw`·`close_krw_dir`·`pred_pre_krw`·
+  `volume_shr`)에는 애프터마켓 값이 섞인다(N-35 ①). stage 는 거르지 않고 원문을 1:1 로 싣는다.
+- `collected_at`(TEXT): 그 **행**을 받은 시각, 원장 원문 UTC `YYYY-MM-DDTHH:MM:SS` 그대로이고 끝에 'Z' 가 없다.
+  저녁 키움 원장의 같은 이름 열(수집 실행 단위 스탬프)과 뜻이 달라 두 표의 값을 견주지 않는다.
+- `observed_date`: 두 표 모두 `collected_at` 의 KST 날짜지만, 저녁 표는 **실행 단위 스탬프**의 날짜(21:05 실행이면 T,
+  다음 날 06:00 재수집이면 T+1)이고 이 표는 **그 행을 받은 시각**의 날짜(15:41~ 수집이라 T)다. 원장이
+  INSERT OR IGNORE(첫 관측 유지)라 `write_mode` 는 `first_write_wins` 다.
+- 위치: 연구 루트(`data/stage`)가 아니라 **`data/model_db/stage`** 에 짓는다(정본 계획 T-29). 연구 체인 전량 빌드
+  (`run_stage_all.sh`)는 이 표를 짓지 않고 `skipped.txt` 에 남긴다. 원장은 연구 스냅샷 세트 밖
+  (`stage.rules.SOLO_LEDGER_FILES`)이라 단독 빌드(`python -m stage --table stg_flow_postclose_kiwoom`)만 뜬다.
+- G4: 첫 수집(10-14) 전에는 원장에 행이 없어 자기 골든이 없다. 단위 환산 13열은 `stg_flow_daily_kiwoom` 의 골든을
+  물려받고(`golden_from`, 원천 TR 이 같을 때만) SKIP 사유 코드는 `golden_inherited` 다. 수집 뒤 자기 골든을 다는
+  일은 후속.
+- **fi 장 마감 판이 이 표를 읽는다(PR-5, `FACTOR_INPUTS.md` §2-2)** — K1-7a 허용표(`stage/skip_allow.py`)에 이 표
+  한정으로 G4 `golden_inherited` · G6 `write_mode=first_write_wins` · G8 `not_blob` SKIP 을 등록했다(다른 stage 표에서
+  같은 SKIP 은 실패). 그 밖의 SKIP(G5 첫 판 `no_baseline` · G9 `no_cross_check`)은 `stg_flow_daily_kiwoom` 과 같다.
+
 
 ## 4. equity 가 판단해야 하는 것 (stage 는 안 한다)
 - 가격 정본·조정계수: `stg_price_daily`(KRX 원주가) + `stg_credit_daily`(`stck_prpr` 수정종가, OHL 원주가 — 컬럼 단위 `price_basis_*`) + `stg_listing_daily`(PARVAL·상장주식수). `price_matches_krx` 딱지는 equity.
@@ -100,6 +122,7 @@
 - **공시 정정 신호(equity 첫 파생 테이블 후보)**: "이 공시에 나중에 정정이 붙었나" 는 stage 에 없다 — 원장에 원본↔정정 링크가 없고(ZIP 본문에만), 여러 행을 묶는 일이라 §1 금지. stage 가 주는 재료는 `stg_disclosure.is_correction`(그 접수가 정정인가)·`report_nm` 원문·`rcept_dt`·`stg_doc_index.zip_ok`. equity 는 (corp_code, 보고서 종류, `report_nm` 끝 기간 라벨) 로 묶어 `has_correction`·`correction_rcept_no`·`corrected_at` 을 만들고 기준일 D 에는 `rcept_dt ≤ D` 판본만 본다. 실측 09-03: 정기보고서 그룹 181,106 중 정정 있음 20,759(11.5%), 정정 접수는 원본 후 7일 이내 32% · 90일 이후 30% · 1년 이후 10% → 이 규칙 없이는 look-ahead. **09-05 정정**: ZIP 첫 장에는 원본 접수번호가 없다(C340 0/339). 링크는 equity 가 원장 후보 규칙(같은 corp·종류·기간, 접두 ∉ {[기재정정],[첨부정정]})으로 만들고 `stg_doc_correction.filed_date` 는 검증 딱지 — `DOC_DESIGN.md` §8.1.
 - 집계행·라벨: DART 보조원장 `row_kind='aggregate'` 제외 후 합산. `stg_fin` 은 wide 6금액·`account_std=false` 행은 표준계정 조인 금지·기간 라벨은 텍스트.
 - WISE: `stg_consensus_*` 는 fetched_date 판본 축 — 리비전 팩터는 `(ticker, obs)` 의 `min(fetched_date)` 행이 PIT. `stg_fin_wise` 의 `val_q*` 슬롯 라벨·`lookback` 해석은 equity. 단위는 데이터 값(`unit`, `acc_nm`).
+- **WISE 재무 2표 `fetched_date` 뜻(2.7.0, 묶음 7 — 2026-10-13 배포 예정)**: `stg_fin_wise`·`stg_fin_wise_q` 는 같은 (종목, ep, pkey) 의 바로 앞 원장 판과 원문(sha256)이 같은 판을 싣지 않는다(STAGE_DESIGN §1 예외 f). 그래서 `fetched_date` 는 '마지막 확인일'이 아니라 **'그 원문을 처음 본 날'**이고, 원문이 안 바뀐 날에는 그 단위의 행이 없다(A→B→A 로 되돌아온 판은 남는다). 날짜 D 의 값은 **(종목, ep[, pkey]) 마다 `fetched_date ≤ D` 의 최신 판**으로 읽어야 한다 — 종목별 `max(fetched_date)` 한 날짜로 두 ep 를 함께 고르면 한쪽 ep 만 새 판인 날 다른 ep 가 빈다(fi wsnap·compat latest 는 묶음 7-2 에서 고침). 수집 신선도는 이 열로 보지 않는다(접지 않는 `stg_consensus_annual` 과 원장 건전성이 본다). 원장에는 모든 판이 그대로 있다. 외부 공유 소비자 알림은 D7-9(사용자).
 - 단위 미측정 컬럼(접미사 없음): 키움 `shrts_avg_pric`·`last_price`·ka20068 `dbrt_trde_*`·`rmnd`·ka10008 `frgnr_limit*`, KIS `frgn_reg/nreg_ntby_pbmn`·credit `*_amt` 6, DART `df_amt`, WISE T2Y/T2Q 값(억원·원은 카탈로그 지식).
 
 ## 5. 알려진 한계 (§0·§8)

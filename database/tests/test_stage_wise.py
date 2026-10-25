@@ -2,9 +2,12 @@
 
 blob 구조는 2026-09-02 서버 ws_raw 실측(§10). 픽스처는 실물 인코딩(zlib+JSON, HTML)을 재현한다.
 """
+import hashlib
 import json
 import sqlite3
+import weakref
 import zlib
+from collections.abc import Iterable
 from pathlib import Path
 
 import duckdb
@@ -61,7 +64,8 @@ def _fin_blob(rows: list[dict], yymm: list[str] = YYMM8) -> bytes:
     return _z({"YYMM": yymm, "DATA": rows, "FIN": "IFRS연결", "FRQ": "연간"})
 
 
-def _html(cells: list[str] | str, base: str = "2026.09.01") -> bytes:
+def _html(cells: list[str] | str, base: str = "2026.09.01",
+          broker: str = "<tr><td>LS</td><td>26/08/31</td></tr>") -> bytes:
     if isinstance(cells, str):
         body = f'<tr><td width="353" colspan="5" class="center noline-bottom">{cells}</td></tr>'
     else:
@@ -75,8 +79,15 @@ def _html(cells: list[str] | str, base: str = "2026.09.01") -> bytes:
         '<tr><td rowspan="2"><span id="pointerVal">4.05</span></td><th scope="col">투자의견</th>'
         '<th scope="col">목표주가<span class="span-sub">(원)</span></th><th>EPS</th><th>PER</th>'
         f'<th>추정기관수</th></tr>{body}</table>'
-        '<table id="cTB24"><tr><td>LS</td><td>26/08/31</td></tr></table></body></html>')
+        f'<table id="cTB24">{broker}</table></body></html>')
     return zlib.compress(html.encode("utf-8"))
+
+
+# 실물(340450 지씨지놈, 10-01): 요약 표는 EPS·PER 만 있고 투자의견·목표가·추정기관수가 빈칸이며,
+# 제공처별 표(cTB24)는 머리 행 + 단일 셀 문구 한 행이다.
+NO_OPINION_TB24 = ('<thead><tr><th scope="col">제공처</th><th scope="col">최종일자</th></tr></thead>'
+                   '<tbody><tr><td colspan="7" class="center">최근 3개월 이내에 제시된 의견이 '
+                   '없습니다.</td></tr></tbody>')
 
 
 ALERT = b"<script>alert('x');location.replace('../company/c1010001.aspx');</script>"  # 142B 실물
@@ -84,7 +95,13 @@ SAMSUNG_CELLS = ["<b>4.05</b>", "487,045", "48,339", "5.40", "22"]
 
 
 def _row(cmp: str, ep: str, pkey: str, body: bytes, fd: str = "2026-09-02", at: str = AT) -> tuple:
-    return (cmp, ep, pkey, fd, body, f"sha-{cmp}-{ep}-{pkey}-{fd}", len(body), at)
+    """ws_raw 한 행. sha256 은 원장 규약대로 압축 전 원문의 해시다(`backfill_wise.py:412` — 접기 표 G8 이
+    대조한다). 압축이 깨진 본문은 원문이 없어 본문 바이트 해시로 둔다(파서가 parse_failed 로 센다)."""
+    try:
+        raw = zlib.decompress(body)
+    except zlib.error:
+        raw = body
+    return (cmp, ep, pkey, fd, body, hashlib.sha256(raw).hexdigest(), len(body), at)
 
 
 def _blob(cmp: str, ep: str, pkey: str, body: bytes, fd: str = "2026-09-02") -> parsers.RawBlob:
@@ -187,6 +204,18 @@ def test_fin_wise_parser_keeps_one_row_per_data_entry_with_period_labels() -> No
     assert res.rows[1]["seq"] == "1" and res.rows[1]["p_accode"] == "200000"
 
 
+def test_fin_wise_parser_reads_only_the_annual_income_request() -> None:
+    """같은 cF3002 로 분기 손익·연간 재무상태·현금흐름(pkey Q:IS·Y:BS·Y:CF, 플랜 2026-09-30 T-Q2)이 들어와도
+    stg_fin_wise 는 기존 pkey='Y' 만 읽는다 — 섞이면 (ticker, fetched_date, ep, seq) 키가 겹친다."""
+    body = _fin_blob([_fin_row("200000", "매출액(수익)")])
+    res = parsers.parse_fin_wise([_blob("005930", "cF3002", "Y", body),
+                                  _blob("005930", "cF3002", "Q:IS", body),
+                                  _blob("005930", "cF3002", "Y:BS", body),
+                                  _blob("005930", "cF3002", "Y:CF", body)])
+    assert res.metrics["n_rows_emitted"] == 1 and res.metrics["n_skipped_pkey"] == 3
+    assert res.metrics["n_blobs"] == {"cF3002": 1}
+
+
 def by_ticker(res: parsers.ParseResult) -> dict[str, dict[str, str | None]]:
     return {str(r["cmp_cd"]): r for r in res.rows}
 
@@ -208,11 +237,28 @@ def test_analyst_summary_parser_handles_three_html_shapes_and_alert_body() -> No
             s["analyst_count"], s["no_opinion_note"]) == (
         "2026.09.01", "4.05", "487,045", "48,339", "5.40", "22", None)
     n = by["000250"]
-    assert n["opinion_score"] is None and n["analyst_count"] is None
+    # WISE 추정기관수 = 최근 3개월 안에 투자의견을 낸 증권사 수 → '의견 없음' 문구는 0 이다
+    assert n["opinion_score"] is None and n["analyst_count"] == "0"
     assert n["no_opinion_note"] == "최근3개월 이내에 제시된 의견이 없습니다"
-    e = by["000020"]
+    e = by["000020"]       # 기관수 빈칸인데 제공처 표에 증권사가 있다 → 모름(빈칸 그대로)
     assert (e["opinion_score"], e["target_price_krw"], e["eps_krw"], e["analyst_count"]) == (
         "", "", "999", "")
+
+
+def test_analyst_summary_reads_zero_from_broker_table_note() -> None:
+    blobs = [_blob("340450", "c1010001", "",
+                   _html(["<b>&nbsp;</b>", "", "266", "34.80", ""], broker=NO_OPINION_TB24)),
+             # 3개월이 아닌 창이면 우리 규칙(3개월 의견 기준)의 0 이 아니다 → 모름
+             _blob("000040", "c1010001", "", _html("최근6개월 이내에 제시된 의견이 없습니다"))]
+    res = parsers.parse_analyst_summary(blobs)
+    g = by_ticker(res)["340450"]
+    assert (g["opinion_score"], g["target_price_krw"], g["eps_krw"], g["per"]) == (
+        "", "", "266", "34.80")
+    assert g["analyst_count"] == "0"
+    assert g["no_opinion_note"] == "최근 3개월 이내에 제시된 의견이 없습니다."
+    s = by_ticker(res)["000040"]
+    assert s["analyst_count"] is None
+    assert s["no_opinion_note"] == "최근6개월 이내에 제시된 의견이 없습니다"
 
 
 # ── 선언 ─────────────────────────────────────────────────────────────────────────────────────
@@ -220,7 +266,7 @@ def test_rules_wise_declares_all_thirteen_tables_per_design_section_4() -> None:
     names = {t.name for t in rules_wise.TABLES}
     assert names == {"stg_consensus_monthly", "stg_consensus_annual", "stg_consensus_quarterly",
                      "stg_consensus_matrix", "stg_analyst_summary", "stg_analyst_broker",
-                     "stg_fin_wise",
+                     "stg_fin_wise", "stg_fin_wise_q",                   # _q: 10-01 T-Q3
                      "stg_v3_revision_daily", "stg_v3_analyst_opinions", "stg_v3_consensus_annual",
                      "stg_v3_revision_compare", "stg_wise_coverage", "stg_calls_wise"}
     assert names <= set(rules.RULES)
@@ -299,12 +345,50 @@ def test_build_fin_wise_rounds_float_artifacts_into_decimal_38_6(tmp_path: Path)
     assert got[3][:4] == ("cF4002", 1, "312000", "382100")
 
 
+# ── stg_fin_wise_q (cF3002 pkey Q:IS·Y:BS·Y:CF, 플랜 2026-09-30 T-Q3) ──────────────────────────
+# 분기 손익 응답의 이름표(10-01 실측): 기간 6 + QoQ/YoY 4. 기간마다 연결/별도가 따로 붙는다.
+YYMM_Q = ["2025/06<br />(IFRS별도)", "2025/09<br />(IFRS별도)", "2025/12<br />(IFRS별도)",
+          "2026/03<br />(IFRS연결)", "2026/06<br />(IFRS연결)", "2026/09(E)<br />(IFRS연결)",
+          "전분기대비<br />(QoQ)", "전년동기대비<br />(YoY)", "전분기대비<br />(QoQ)", "전년동기대비<br />(YoY)"]
+
+
+def test_fin_wise_q_parser_reads_only_the_three_new_requests() -> None:
+    body = _z({"YYMM": YYMM_Q, "DATA": [_fin_row("200000", "매출액(수익)")], "FIN": "IFRS연결",
+               "FRQ": "분기"})
+    res = parsers.parse_fin_wise_q([_blob("462870", "cF3002", "Y", _fin_blob([_fin_row("1", "x")])),
+                                    _blob("462870", "cF3002", "Q:IS", body),
+                                    _blob("462870", "cF3002", "Y:BS", _fin_blob([_fin_row("2", "자산총계")])),
+                                    _blob("462870", "cF3002", "Y:CF", _fin_blob([]))])
+    assert res.metrics["n_skipped_pkey"] == 1 and res.metrics["n_empty"] == 1
+    assert res.metrics["n_rows_emitted"] == 2 and res.metrics["n_label_shape_other"] == 0
+    q = next(r for r in res.rows if r["pkey"] == "Q:IS")
+    assert q["freq"] == "분기" and q["period_label_3"] == "2025/12<br />(IFRS별도)"
+
+
+def test_build_fin_wise_q_derives_period_estimate_and_basis(tmp_path: Path) -> None:
+    q = _z({"YYMM": YYMM_Q, "DATA": [_fin_row("200000", "매출액(수익)")], "FIN": "IFRS연결",
+            "FRQ": "분기"})
+    rows = [_row("462870", "cF3002", "Q:IS", q),
+            _row("462870", "cF3002", "Y:BS", _fin_blob([_fin_row("211000", "자산총계")])),
+            _row("462870", "cF3002", "Y", _fin_blob([_fin_row("200000", "매출액(수익)")]))]
+    r = _build("stg_fin_wise_q", _snap(tmp_path, rows), tmp_path)
+    assert r.n_rows == 2                                # pkey 'Y' 는 stg_fin_wise 몫
+    con = _read(tmp_path, r)
+    got = con.execute("SELECT pkey, period_3, is_est_3, basis_3, period_4, basis_4, period_6, is_est_6 "
+                      "FROM t WHERE pkey = 'Q:IS'").fetchone()
+    assert got == ("Q:IS", "202512", False, "IFRS별도", "202603", "IFRS연결", "202609", True)
+    bs = con.execute("SELECT period_5, is_est_5, basis_5, period_6, is_est_6 FROM t "
+                     "WHERE pkey = 'Y:BS'").fetchone()
+    assert bs == ("202512", False, "IFRS연결", "202612", True)
+
 def test_build_analyst_summary_from_html(tmp_path: Path) -> None:
     rows = [_row("005930", "c1010001", "", _html(SAMSUNG_CELLS)),
             _row("000250", "c1010001", "", _html("최근3개월 이내에 제시된 의견이 없습니다")),
+            _row("340450", "c1010001", "",
+                 _html(["<b>&nbsp;</b>", "", "266", "34.80", ""], broker=NO_OPINION_TB24)),
             _row("082640", "c1010001", "", ALERT)]
     r = _build("stg_analyst_summary", _snap(tmp_path, rows), tmp_path)
-    assert r.n_rows == 2
+    assert r.n_rows == 3
     con = _read(tmp_path, r)
     s = con.execute("SELECT base_date, opinion_score, target_price_krw, eps_krw, per,"
                     " analyst_count FROM t WHERE ticker='005930'").fetchone()
@@ -312,7 +396,10 @@ def test_build_analyst_summary_from_html(tmp_path: Path) -> None:
         "2026-09-01", "4.05", 487045, 48339, "5.40", 22)
     n = con.execute("SELECT analyst_count, miss_kind.analyst_count, no_opinion_note FROM t "
                     "WHERE ticker='000250'").fetchone()
-    assert n == (None, "ledger_null", "최근3개월 이내에 제시된 의견이 없습니다")
+    assert n == (0, None, "최근3개월 이내에 제시된 의견이 없습니다")
+    g = con.execute("SELECT analyst_count, miss_kind.analyst_count, no_opinion_note FROM t "
+                    "WHERE ticker='340450'").fetchone()
+    assert g == (0, None, "최근 3개월 이내에 제시된 의견이 없습니다.")
     assert next(g for g in r.gates if g.name == "G8").metrics["n_no_data"] == 1
 
 
@@ -456,8 +543,8 @@ def test_rules_analyst_broker_declares_key_and_two_digit_year_dates() -> None:
     assert r.natural_key == ("ticker", "fetched_date", "broker", "opinion_date") and r.key_unique
     assert r.column("opinion_date").kind == model.KIND_DATE_YY_SLASH
     assert r.blob_source is not None and r.blob_source.parser == "parse_analyst_broker"
-    assert {e.name for e in r.extras} == {"opinion_class", "prev_opinion_class"}
-    assert len(rules_wise.TABLES) == 13
+    assert {e.name for e in r.extras} == {"fetched_at_utc", "opinion_class", "prev_opinion_class"}
+    assert len(rules_wise.TABLES) == 14          # 13 + stg_fin_wise_q(10-01 T-Q3)
 
 
 def test_build_analyst_broker_parses_dates_and_classifies_opinions(tmp_path: Path) -> None:
@@ -480,3 +567,209 @@ def test_build_analyst_broker_parses_dates_and_classifies_opinions(tmp_path: Pat
     assert str(got[0][8]) == "2026-09-02" and got[0][9] == "measured"
     g8 = next(g for g in r.gates if g.name == "G8")
     assert g8.status is gates.GateStatus.PASS and g8.metrics["n_no_opinion"] == 1
+
+
+def test_fin_wise_separate_basis_rows_keep_values_and_fs_basis():
+    """별도(IFRS별도) 기준 응답(DQ-5, 수집기 finGubun=MAIN 이후 별도만 내는 회사의 정상 형태)도
+    연결과 같은 규약으로 파싱되고 fs_basis 가 'IFRS별도' 로 남는다."""
+    yymm = [x.replace("IFRS연결", "IFRS별도") for x in YYMM8[:6]]
+    rows = [{"ACCODE": "203170", "ACC_NM": "당기순이익", "P_ACCODE": None, "LVL": 1, "GRP_TYP": "", "UNT_TYP": "",
+             "ACKIND": "", "DATA1": 119.1, "DATA2": 151.4, "DATA3": -13.1, "DATA4": 33.2, "DATA5": 150.6, "DATA6": 359.0}]
+    body = _z({"YYMM": yymm, "DATA": rows, "FIN": "IFRS별도", "FRQ": "연간"})
+    res = parsers.parse_fin_wise([_blob("252990", "cF3002", "Y", body)])
+    assert len(res.rows) == 1
+    r = res.rows[0]
+    assert r["fs_basis"] == "IFRS별도" and r["period_label_5"] == "2025/12<br />(IFRS별도)"
+    assert r["val_5"] == "150.6" and r["accode"] == "203170"   # 파서는 값을 문자열로 보존(캐스팅은 stage 규칙)
+
+
+# ── B-01: stg_fin_wise·_q 를 회사 단위로 나눠 푼다(플랜 2026-10-06 Task 3) ─────────────────────
+# 운영 원장 DDL(backfill_wise.DDL)과 같은 키 — 이 키의 색인이 회사 묶음 조회를 받친다.
+WS_RAW_PK_DDL = ("CREATE TABLE ws_raw (cmp_cd TEXT NOT NULL, ep TEXT NOT NULL,"
+                 " pkey TEXT NOT NULL, fetched_date TEXT NOT NULL, body BLOB NOT NULL,"
+                 " sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, fetched_at TEXT NOT NULL,"
+                 " PRIMARY KEY (cmp_cd, ep, pkey, fetched_date))")
+FIN_CMPS = ["462870", "005930", "0010V0", "000020"]   # 정렬 밖 순서로 적재(rowid ≠ 회사 순)
+
+
+def _fin_body(k: int, tag: str, n: int) -> bytes:
+    return _fin_blob([_fin_row(f"2{k}{i:04d}", f"계정{tag}{i}", data5=1000.5 + 100 * k + i)
+                      for i in range(n)])
+
+
+def _fin_ws_rows(broken: bool) -> list[tuple]:
+    """회사 4 × 수집일 2 × (cF3002 Y·Q:IS·Y:BS·Y:CF·X:ZZ · cF4002 Y) + ep 밖 cF5001.
+
+    X:ZZ 는 두 파서가 다 건너뛰는 pkey 다. 첫 회사의 Y 는 12행이라 seq 10·11 이 정수 정렬을
+    탄다. 두 수집일의 원문이 같아 10-02 판은 연속 판 접기(2.7.0)로 접힌다 — 사이에 다른 원문(10-01 빈
+    DATA·깨진 본문)이 낀 단위만 A→B→A 로 셋 다 남는다(`FIN_FOLDED`).
+    """
+    rows = []
+    for fd in ("2026-10-02", "2026-09-30"):
+        for k, cmp in enumerate(FIN_CMPS):
+            rows.append(_row(cmp, "cF3002", "Y", _fin_body(k, "Y", 12 if k == 0 else 3), fd))
+            rows.append(_row(cmp, "cF4002", "Y", _fin_body(k, "R", 2), fd))
+            rows += [_row(cmp, "cF3002", pk, _fin_body(k, pk, 2), fd)
+                     for pk in ("Q:IS", "Y:BS", "Y:CF", "X:ZZ")]
+            rows.append(_row(cmp, "cF5001", "202612", b"not-read", fd))
+    rows.append(_row("005930", "cF3002", "Y:CF", _fin_blob([]), "2026-10-01"))     # 빈 DATA
+    if broken:                          # 파서 실패 계상도 묶음 사이에서 더해져야 한다
+        rows += [_row("0010V0", "cF4002", "Y", b"\x78\x9cbroken", "2026-10-01"),
+                 _row("0010V0", "cF3002", "Q:IS", b"\x78\x9cbroken", "2026-10-01")]
+    return rows
+
+
+# 위 픽스처(broken=True)에서 접히는 blob — 'ep:pkey' → 수. 005930 Y:CF 와 0010V0 cF4002 Y·Q:IS 는 10-01 에
+# 다른 원문이 끼어 10-02 판이 남는다.
+FIN_FOLDED = {"cF3002:Q:IS": 3, "cF3002:X:ZZ": 4, "cF3002:Y": 4, "cF3002:Y:BS": 4, "cF3002:Y:CF": 3,
+              "cF4002:Y": 3}
+
+
+def _snap_fin(tmp_path: Path, broken: bool, snap_root: Path | None = None) -> snapshot.Snapshot:
+    d = tmp_path / "raw"
+    d.mkdir(exist_ok=True)
+    p = d / "wisereport.db"
+    con = sqlite3.connect(p)
+    con.execute(WS_RAW_PK_DDL)
+    con.executemany(f"INSERT INTO ws_raw VALUES ({','.join('?' * len(WS_COLS))})",
+                    _fin_ws_rows(broken))
+    con.commit()
+    con.close()
+    return snapshot.make_snapshot({"wise": p}, snap_root or tmp_path / "snapshots",
+                                  snapshot_id="s")
+
+
+def _load_fin(tmp_path: Path, snap: snapshot.Snapshot, name: str, tag: str, **kw: int
+              ) -> tuple[bytes, list[str], dict[str, object], int]:
+    """`_load_blob_source` 한 번 → (src_all.jsonl 바이트, 열, metrics, src_all 행 수)."""
+    rule = rules.RULES[name]
+    d = tmp_path / tag
+    d.mkdir()
+    con = duckdb.connect()
+    con.execute("LOAD sqlite")
+    build._attach(con, rule, snap, {})
+    cols, metrics = build._load_blob_source(con, rule, d, **kw)
+    row = con.execute("SELECT count(*) FROM src_all").fetchone()
+    con.close()
+    assert row is not None
+    return (d / "src_all.jsonl").read_bytes(), cols, metrics, int(row[0])
+
+
+@pytest.mark.parametrize("name", ["stg_fin_wise", "stg_fin_wise_q"])
+def test_fin_blob_source_split_by_company_equals_one_shot(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """회사 1곳씩 나눠 푼 결과가 한 번에 푼 결과와 JSONL 바이트·metrics 까지 같다. 나눠 풀면
+    파서를 회사 오름차순으로 여러 번 부르고, 앞 묶음의 파싱 결과는 다음 묶음을 풀기 전에 이미
+    놓여 있다 — 한 번에 한 묶음의 행만 메모리에 산다."""
+    snap = _snap_fin(tmp_path, broken=True)
+    bs = rules.RULES[name].blob_source
+    assert bs is not None
+    real = parsers.PARSERS[bs.parser]
+    calls: list[list[str]] = []
+    prev: list[weakref.ref[parsers.ParseResult]] = []
+
+    def spy(blobs: Iterable[parsers.RawBlob]) -> parsers.ParseResult:
+        got = list(blobs)
+        if got and prev:                    # 앞 묶음 결과가 아직 살아 있으면 두 묶음이 겹친다
+            assert prev[-1]() is None, f"previous batch still alive: {calls[-1]}"
+        calls.append(sorted({b.cmp_cd for b in got}))
+        res = real(got)
+        if got:                             # 빈 호출(열·0 metrics)은 누적의 바탕이라 산다
+            prev.append(weakref.ref(res))
+        return res
+
+    monkeypatch.setitem(parsers.PARSERS, bs.parser, spy)
+    with monkeypatch.context() as m:        # 한 번에 푸는 기존 경로(다른 파서와 같은 길)
+        m.setattr(build, "CHUNKED_PARSERS", frozenset())
+        one = _load_fin(tmp_path, snap, name, "one")
+    assert [c for c in calls if c] == [sorted(FIN_CMPS)]
+    calls.clear()
+    prev.clear()
+    per1 = _load_fin(tmp_path, snap, name, "per1", chunk_companies=1)
+    assert [c for c in calls if c] == [[c] for c in sorted(FIN_CMPS)]   # 오름차순 1곳씩
+    calls.clear()
+    prev.clear()
+    big = _load_fin(tmp_path, snap, name, "big", chunk_companies=10**9)
+    assert [c for c in calls if c] == [sorted(FIN_CMPS)]
+    calls.clear()
+    prev.clear()
+    per3 = _load_fin(tmp_path, snap, name, "per3", chunk_companies=3)   # 끝 묶음이 1곳
+    assert [c for c in calls if c] == [sorted(FIN_CMPS)[:3], sorted(FIN_CMPS)[3:]]
+    assert one[0] == per1[0] == big[0] == per3[0]       # JSONL 바이트 = src_all 적재 입력
+    assert one[1:] == per1[1:] == big[1:] == per3[1:]   # 열 · metrics · src_all 행 수
+    pm = one[2]
+    skipped = pm["n_skipped_pkey"]
+    assert pm["n_rows_emitted"] == one[3] > 0
+    assert pm["n_parse_failed"] == 1
+    assert isinstance(skipped, int) and skipped > 0     # 건너뛴 pkey 도 센다
+    # 연속 판 접기(2.7.0): 두 수집일의 같은 원문은 접히고, 원장 blob 은 남김·건너뜀·접음으로 빠짐없이 갈린다
+    want = {k: v for k, v in FIN_FOLDED.items() if k.split(":")[0] in bs.eps}
+    assert pm["n_folded"] == want
+    n_blobs = pm["n_blobs"]
+    assert isinstance(n_blobs, dict)
+    assert pm["n_ledger_blobs"] == sum(n_blobs.values()) + skipped + sum(want.values())
+    assert pm["n_sha_mismatch"] == 0
+
+
+def test_build_fin_wise_content_hash_unchanged_when_split_by_company(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """서버 G3(운영 MANIFEST content_hash 대조)의 로컬판 — 한 번에 푼 빌드 · 기본 묶음 ·
+    3곳 묶음(4곳이라 끝 묶음이 1곳)의 content_hash · 행 수 · G8 metrics 가 같다. content_hash 는
+    행 순서와 무관한 bit_xor 라, 행 순서는 위 JSONL 바이트 비교가 지킨다."""
+    snap = _snap_fin(tmp_path, broken=False)
+    real = build._load_blob_source
+    for name in ("stg_fin_wise", "stg_fin_wise_q"):
+        rule = rules.RULES[name]
+        with monkeypatch.context() as m:
+            m.setattr(build, "CHUNKED_PARSERS", frozenset())
+            one = build.build_table(rule, snap, tmp_path / "one")
+        dflt = build.build_table(rule, snap, tmp_path / "dflt")
+        with monkeypatch.context() as m:
+            m.setattr(build, "_load_blob_source",
+                      lambda con, r, d: real(con, r, d, chunk_companies=3))
+            per3 = build.build_table(rule, snap, tmp_path / "per3")
+        got = [(r.ok, r.content_hash, r.n_rows,
+                next(g.metrics for g in r.gates if g.name == "G8")) for r in (one, dflt, per3)]
+        assert got[0][0] and got[0][2] > 0, name
+        assert got[0] == got[1] == got[2], name
+
+
+def test_fin_blob_source_opens_relative_snapshot_path_with_uri_characters(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """스냅샷 경로가 cwd 기준 상대 경로(운영: QL_HOME 의 `data/snapshots/…`)이고 `#`·`?`·`%` 를
+    품어도 ATTACH 한 그 파일을 읽기 전용으로 연다. 날 경로를 URI 에 넣으면 `#`·`?` 에서 잘리고
+    mode=ro 가 떨어져, 잘린 이름의 빈 DB 를 rwc 로 만들고 'no such table' 로 죽는다."""
+    monkeypatch.chdir(tmp_path)
+    snap = _snap_fin(tmp_path, broken=False, snap_root=Path("snap #1?x=%41"))
+    assert not snap.files["wise"].path.is_absolute()
+    with monkeypatch.context() as m:
+        m.setattr(build, "CHUNKED_PARSERS", frozenset())
+        one = _load_fin(tmp_path, snap, "stg_fin_wise", "one")
+    per = _load_fin(tmp_path, snap, "stg_fin_wise", "per")
+    assert per[3] > 0 and per == one
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["one", "per", "raw", "snap #1?x=%41"]
+
+
+@pytest.mark.parametrize("extra, err, words", [
+    ({"n_new": 1}, RuntimeError, ("key='n_new'", "parser=parse_fin_wise", "cmp_cd=000020..000020")),
+    ({"n_empty": "x"}, TypeError, ("key='n_empty'", "acc=0", "new='x'", "parser=parse_fin_wise")),
+])
+def test_fin_blob_metrics_merge_errors_carry_context(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: dict[str, object],
+        err: type[Exception], words: tuple[str, ...]) -> None:
+    """parser([]) 에 없는 metrics 키나 더할 수 없는 값이면 파서·키·누적값·새 값·묶음 회사를
+    싣고 멈춘다 — 조용히 덮어쓰거나 맥락 없는 KeyError 로 죽지 않는다."""
+    snap = _snap_fin(tmp_path, broken=False)
+    real = parsers.PARSERS["parse_fin_wise"]
+
+    def bad(blobs: Iterable[parsers.RawBlob]) -> parsers.ParseResult:
+        got = list(blobs)
+        res = real(got)
+        if got:
+            res.metrics.update(extra)
+        return res
+
+    monkeypatch.setitem(parsers.PARSERS, "parse_fin_wise", bad)
+    with pytest.raises(err) as ei:
+        _load_fin(tmp_path, snap, "stg_fin_wise", "bad", chunk_companies=1)
+    assert all(w in str(ei.value) for w in words), str(ei.value)

@@ -35,7 +35,7 @@ from __future__ import annotations
 # DART 10일     : 공시·보조원장은 접수일 축(rcept_dt)이라 영업일마다 들어온다. 연휴 여유 포함 10.
 # 재무·주식수 150일: 정기보고서 주기 축이라 분기 공백이 정상이다. 11/14(3분기) → 3/31(사업보고서)
 #                 사이가 최대 137 캘린더일이라 120 이면 2~3월에 오탐한다(리뷰 REC-16) → 150.
-# WISE 10일     : `fetched_date` = 수집일 축, 18:05 저녁 슬롯. 연휴 여유 포함 10.
+# WISE 10일     : `fetched_date` = 수집일 축, 06:00 원장 체인(월~토 — N-53, 그 전 18:05 저녁 슬롯). 연휴 여유 포함 10.
 # 문서층 4표 10일: available 이 rcept_dt lookup — 공시와 같은 축.
 #
 # 값을 더 죄고 싶으면 거래일 캘린더가 먼저 필요하다. **지금은 느슨한 쪽이 옳다** — C6 가 잡아야
@@ -47,6 +47,9 @@ ALLOW_DAYS: dict[str, int] = {
     # 키움
     "stg_flow_daily_kiwoom": 10, "stg_short_daily_kiwoom": 10, "stg_foreign_daily": 10,
     "stg_lending_daily": 10, "stg_master_daily": 10,
+    # 장 마감 직후 판(컷오버 PR-2) — T 15:41 수집이라 장 마감 체인 판(D = T)에 D 가 그대로 든다. 연구 체인은 이 표를
+    # 짓지 않는다(run_stage_all.sh skipped). 장 마감 체인이 이 표를 판정할 때 쓰는 값이고 다른 키움 표와 같은 10
+    "stg_flow_postclose_kiwoom": 10,
     # KIS (일일 체인 대상은 신용잔고 하나 — 나머지 4표는 FROZEN)
     "stg_credit_daily": 10,
     # DART 공시·보조원장
@@ -58,7 +61,14 @@ ALLOW_DAYS: dict[str, int] = {
     # WISE
     "stg_consensus_monthly": 10, "stg_consensus_annual": 10, "stg_consensus_quarterly": 10,
     "stg_consensus_matrix": 10, "stg_analyst_summary": 10, "stg_analyst_broker": 10,
+    # WICS 주 1회(토요일, dt=금요일) — 다음 금요일 저녁 D 기준 7일 + 연휴 여유(플랜 wics-weekly T2)
+    "stg_wics_components": 14,
+    # 2.7.0(묶음 7) 연속 판 접기 뒤 두 표의 max_available_date 는 '최근 원문이 바뀐 날'이다 — stg_fin_wise 는
+    # cF4002 가 하루 96~98% 바뀌어 사실상 그날, stg_fin_wise_q 는 Q:IS·Y:BS·Y:CF 가 하루 7~18% 바뀐다(10-01~10-08
+    # 서버 실측). 10일 동안 전 종목 원문이 그대로일 때만 FAIL — 수집 정지와 같은 신호로 읽는다. 수집 정지
+    # 자체는 컨센서스 6표 C6·원장 `wise.run`·fi FG-fresh 가 계속 본다
     "stg_fin_wise": 10,
+    "stg_fin_wise_q": 10,                 # 10-01 T-Q3 — stg_fin_wise 와 같은 WISE 저녁 수집 축
     # 문서층
     "stg_doc_meta": 10, "stg_doc_section": 10, "stg_doc_correction": 10,
     "stg_doc_parse_log": 10,

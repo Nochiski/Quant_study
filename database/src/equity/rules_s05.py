@@ -387,7 +387,8 @@ FIELDS_CORP_EVENT: tuple[FieldProfile, ...] = (
         recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
         disclosure_basis="자기주식취득결정 공시 접수일(rcept_dt)",
         evidence="corp_event.amount_krw WHERE event_type='treasury_buy' ← stg_event_tsstk_aq "
-                 "(e1.9.0 부터 적재). 금액은 주식 종류별 취득예정금액이다(e1.20.0, #589) — "
+                 "(e1.9.0 부터 적재). 금액은 주식 종류별 취득예정금액이다"
+                 "(e1.31.0 — main e1.20.0, #589) — "
                  "보통주 티커는 aqpln_prc_ostk, 우선주 티커는 aqpln_prc_estk 이다. 기타주식분은 "
                  "결정일에 상장돼 있던 우선주가 하나일 때만 싣고, 없으면 unlisted_class, 둘 "
                  "이상이면 어느 우선주인지 몰라 class_ambiguous 로 범위 밖이다. 사업보고서 "
@@ -417,9 +418,13 @@ CORP_EVENT = register(EquityTable(
              "amount_krw": "BIGINT",
              "rcept_no": "VARCHAR", "source": "VARCHAR", "n_src_rows": "BIGINT",
              "available_date": "DATE", "available_basis": "VARCHAR"},
+    # price_daily·security 는 C-04(e1.25.0) — 기준일이 캘린더 밖인 무상증자를 캘린더 끝 D 의 KRX
+    # 기준가로 확인하는 축과 그 후보에서 ETF 를 빼는 축이다(adj_factor 기준가 후보와 같은 집합; 빌드
+    # 순서 security·price_daily → corp_event, scripts/equity_order.txt).
     inputs=("stg_event_fric", "stg_event_pifric", "stg_event_cr", "stg_capital",
             "stg_event_tsstk_aq", "stg_event_cvbd_is",
-            "stg_listing_daily", "corp_ticker", "trading_calendar", "security_span"),
+            "stg_listing_daily", "corp_ticker", "trading_calendar", "security_span",
+            "price_daily", "security"),
     partition_class="receipt_axis",
     # receipt 축이지만 키 식은 year(announce_date) — KRX 파생행은 rcept_no 가 없고, DART 행은
     # rcept_no 앞 4자리 = 접수연도 = year(rcept_dt) 라 같은 값이다 (DESIGN §4-2).
@@ -451,12 +456,17 @@ CORP_EVENT = register(EquityTable(
                               "available_basis"),
         "corp_ticker": ("ticker", "isin8", "corp_code", "is_common"),
         "trading_calendar": ("date", "prev_td"),
-        "security_span": ("ticker", "first_date", "last_date", "end_reason")},
+        "security_span": ("ticker", "first_date", "last_date", "end_reason"),
+        "price_daily": ("ticker", "date", "close", "base_price_krw"),
+        "security": ("ticker", "sec_type")},
     available_basis=("derived", "default"),
     content_date_column="announce_date",
     reject_reasons=REJECT_REASONS,
+    # adj_factor.* 3개는 C-04 의 기준가 확인 — adj_factor S06-2 (a) 짝 규칙과 같은 상수를 복제 없이
+    # 읽는다(같은 판정을 두 상수로 나누지 않는다).
     consts=("effective_before_announce_max_days", "krx_share_change_tol",
-            "bonus_ratio_window_sessions"),
+            "bonus_ratio_window_sessions", "adj_factor.base_price_tol_rel",
+            "adj_factor.price_match_tol_rel", "adj_factor.price_match_tol_abs"),
     extra_gates=(eg3_corp_event,),
     field_profiles=FIELDS_CORP_EVENT,
 ))

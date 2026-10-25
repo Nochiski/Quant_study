@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
+from backtest_engine.engine.portfolio import scale_quantity
 from backtest_engine.engine.slippage import FixedBpsSlippage, SqrtImpactSlippage
 from backtest_engine.engine.tape import evaluate_tape
 from backtest_engine.errors import EquityWipedOut
@@ -835,6 +836,13 @@ def _artifacts(
             ratio=format(item.action.ratio.normalize(), "f"),
             old_quantity=format(item.old_quantity.normalize(), "f"),
             new_quantity=format(item.new_quantity.normalize(), "f"),
+            # 단주는 엔진 수량 규칙(scale_quantity)으로 정한다. 소비자는 다시 곱하지 않는다.
+            settled_quantity=format(
+                (
+                    scale_quantity(item.old_quantity, item.action.ratio) - item.new_quantity
+                ).normalize(),
+                "f",
+            ),
             cash_paid=item.cash_paid,
         )
         for item in actions

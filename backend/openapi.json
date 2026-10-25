@@ -8495,7 +8495,7 @@
         "type": "object"
       },
       "RawCorporateAction": {
-        "description": "엔진이 보유에 실제로 적용한 분할·병합(`CORPORATE_ACTION_APPLIED`)을 그대로 옮긴 기록.\n\n엔진은 같은 세션의 어떤 체결보다 먼저 적용한다. 수량은 정수 문자열이고 `ratio` 는 구주 1주당\n신주 수(Decimal 문자열)다. 새 수량은 `old × ratio` 를 0 쪽으로 내린 값이고, 버린 단주는 정산\n세션 시가로 `cash_paid` 만큼 현금 정산된다(숏이면 음수).",
+        "description": "엔진이 보유에 실제로 적용한 분할·병합(`CORPORATE_ACTION_APPLIED`)을 그대로 옮긴 기록.\n\n엔진은 같은 세션의 어떤 체결보다 먼저 적용한다. 수량은 정수 문자열이고 `ratio` 는 구주 1주당\n신주 수(Decimal 문자열)다. 엔진은 `old × ratio` 를 1e-9 에서 반올림한 이론 수량을 0 쪽으로 내려\n`new_quantity` 로 두고, 버린 단주 `settled_quantity`(이론 수량 − 새 수량, 숏이면 음수)를 정산\n세션 시가로 `cash_paid` 만큼 현금 정산한다. 단주는 엔진 규칙(`scale_quantity`)으로 정한 값이라\n소비자가 비율로 다시 곱하지 않는다.",
         "properties": {
           "cash_paid": {
             "title": "Cash Paid",
@@ -8521,6 +8521,10 @@
             "format": "date",
             "title": "Session",
             "type": "string"
+          },
+          "settled_quantity": {
+            "title": "Settled Quantity",
+            "type": "string"
           }
         },
         "required": [
@@ -8529,6 +8533,7 @@
           "ratio",
           "old_quantity",
           "new_quantity",
+          "settled_quantity",
           "cash_paid"
         ],
         "title": "RawCorporateAction",

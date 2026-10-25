@@ -85,39 +85,43 @@ def _apply_corporate_action(
             f"old_quantity={action.old_quantity} "
             f"reconstructed={None if state is None else state.quantity}"
         )
-    ratio = Decimal(action.ratio)
-    scaled = float(Decimal(action.old_quantity) * ratio)
     new_quantity = float(Decimal(action.new_quantity))
+    # 단주는 엔진이 정한 값이다. 비율을 다시 곱하면 1e-9 반올림이 빠져 가짜 단주 거래가 생긴다.
+    settled = float(Decimal(action.settled_quantity))
+    scaled = new_quantity + settled
     adjusted = _OpenTrade(
         quantity=scaled,
-        average_price=state.average_price / float(ratio),
+        average_price=state.average_price / float(Decimal(action.ratio)),
         opened_on=state.opened_on,
         opening_fees=state.opening_fees,
         opening_slippage=state.opening_slippage,
     )
-    fraction = abs(scaled - new_quantity)
-    if fraction > 0:
+    fees, slippage = adjusted.opening_fees, adjusted.opening_slippage
+    if settled != 0:
         # 정산가 = 정산 현금 ÷ 버린 단주(숏이면 둘 다 음수라 양수다).
-        settlement_price = action.cash_paid / (scaled - new_quantity)
         trades.append(
             _closing_trade(
                 action.security_id,
                 adjusted,
-                fraction,
-                settlement_price,
+                abs(settled),
+                action.cash_paid / settled,
                 action.session,
                 exit_fees=0.0,
                 exit_slippage=0.0,
             )
         )
-        kept = 1 - fraction / abs(scaled)
-        adjusted.opening_fees *= kept
-        adjusted.opening_slippage *= kept
-    adjusted.quantity = new_quantity
+        kept = new_quantity / scaled
+        fees, slippage = fees * kept, slippage * kept
     if new_quantity == 0:
         states.pop(action.security_id)
-    else:
-        states[action.security_id] = adjusted
+        return
+    states[action.security_id] = _OpenTrade(
+        quantity=new_quantity,
+        average_price=adjusted.average_price,
+        opened_on=adjusted.opened_on,
+        opening_fees=fees,
+        opening_slippage=slippage,
+    )
 
 
 def closed_trades(

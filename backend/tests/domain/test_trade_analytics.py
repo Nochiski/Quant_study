@@ -24,8 +24,10 @@ def _fill(
     return RawFill(fill_id, "order", date(2024, 1, day), "A", side, quantity, price, fee, 0)
 
 
-def _split(day: int, ratio: str, old: str, new: str, cash_paid: float = 0.0) -> RawCorporateAction:
-    return RawCorporateAction(date(2024, 1, day), "A", ratio, old, new, cash_paid)
+def _split(
+    day: int, ratio: str, old: str, new: str, settled: str = "0", cash_paid: float = 0.0
+) -> RawCorporateAction:
+    return RawCorporateAction(date(2024, 1, day), "A", ratio, old, new, settled, cash_paid)
 
 
 def test_split_before_a_sell_rescales_the_open_trade_instead_of_booking_a_fake_loss() -> None:
@@ -44,7 +46,9 @@ def test_reverse_split_cash_in_lieu_is_a_closed_fraction_and_pnl_matches_cash_fl
     # 3주(10원)를 1:2 병합 → 1.5주 중 0.5주는 정산가 24원으로 현금 12원, 남은 1주를 24원에 판다.
     fills = (_fill("1", 1, "buy", "3", 10), _fill("2", 3, "sell", "1", 24))
 
-    trades = closed_trades(fills, (), actions=(_split(2, "0.5", "3", "1", cash_paid=12.0),))
+    trades = closed_trades(
+        fills, (), actions=(_split(2, "0.5", "3", "1", settled="0.5", cash_paid=12.0),)
+    )
 
     assert [(t.quantity, t.entry_price, t.exit_price, t.closed_on.day) for t in trades] == [
         ("0.5", 20, 24, 2),
@@ -52,6 +56,61 @@ def test_reverse_split_cash_in_lieu_is_a_closed_fraction_and_pnl_matches_cash_fl
     ]
     # 비용이 없으면 실현 손익 합 = 받은 현금(12 + 24) − 낸 현금(30).
     assert sum(t.pnl for t in trades) == pytest.approx(6)
+
+
+def test_repeating_decimal_ratio_does_not_invent_a_fraction_the_engine_did_not_settle() -> None:
+    # 원장 1:3 병합 비율은 float 문자열이다. 3 × 0.3333…3 은 1e-9 반올림으로 정확히 1주이고 엔진은
+    # 단주가 없다고 기록한다. 비율로 다시 곱하면 0.000…1주짜리 가짜 청산 거래가 생겼다.
+    fills = (_fill("1", 1, "buy", "3", 10), _fill("2", 3, "sell", "1", 30))
+
+    trades = closed_trades(
+        fills, (), actions=(_split(2, "0.3333333333333333", "3", "1", settled="0"),)
+    )
+
+    assert [(t.quantity, t.pnl) for t in trades] == [("1", pytest.approx(0))]
+
+
+@pytest.mark.parametrize(
+    ("fills", "actions", "cash_flow"),
+    [
+        # 숏 3주(10원) → 1.5배 분할: −4주 + 단주 −0.5주를 8원에 되사 −4원, 남은 4주를 8원에 되산다.
+        (
+            (_fill("1", 1, "sell", "3", 10), _fill("2", 3, "buy", "4", 8)),
+            (_split(2, "1.5", "-3", "-4", settled="-0.5", cash_paid=-4.0),),
+            30 - 4 - 32,
+        ),
+        # 마지막 체결 뒤의 1:2 병합으로 1주가 0주가 되고 0.5주는 24원에 정산된다.
+        (
+            (_fill("1", 1, "buy", "1", 10),),
+            (_split(2, "0.5", "1", "0", settled="0.5", cash_paid=12.0),),
+            12 - 10,
+        ),
+        # 같은 세션에 분할이 두 번(10 → 20 → 40주) 적용된 뒤 40주를 25원에 판다.
+        (
+            (_fill("1", 1, "buy", "10", 100), _fill("2", 3, "sell", "40", 25)),
+            (_split(2, "2", "10", "20"), _split(2, "2", "20", "40")),
+            1000 - 1000,
+        ),
+    ],
+    ids=["short-split", "reverse-split-to-zero-after-last-fill", "two-actions-one-session"],
+)
+def test_closed_trades_after_actions_add_up_to_the_cash_flow(
+    fills: tuple[RawFill, ...], actions: tuple[RawCorporateAction, ...], cash_flow: float
+) -> None:
+    trades = closed_trades(fills, (), actions=actions)
+    # 다 닫힌 뒤에는 실현 손익 합이 현금 흐름과 같고, 숏은 숏으로 닫힌다.
+    assert sum(t.pnl for t in trades) == pytest.approx(cash_flow)
+    assert {t.side for t in trades} == {"short" if fills[0].side == "sell" else "long"}
+
+
+def test_partial_sell_after_split_allocates_opening_fees_on_the_split_quantity() -> None:
+    # 10주(100원, 수수료 10) → 2:1 분할 20주(50원) → 5주를 60원(수수료 1)에 판다.
+    # 여는 수수료는 5/20 만 이 거래에 든다.
+    fills = (_fill("1", 1, "buy", "10", 100, 10), _fill("2", 3, "sell", "5", 60, 1))
+
+    (trade,) = closed_trades(fills, (), actions=(_split(2, "2", "10", "20"),))
+
+    assert (trade.quantity, trade.fees, trade.pnl) == ("5", 3.5, 46.5)
 
 
 @pytest.mark.parametrize(

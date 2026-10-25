@@ -114,7 +114,7 @@ def test_trades_after_a_real_engine_split_match_the_cash_actually_gained(core: s
     assert sum(trade.pnl for trade in artifacts.trades) == pytest.approx(last.cash - 10_000.0)
     assert {trade.side for trade in artifacts.trades} == {"long"}
     assert [
-        (item.ratio, item.old_quantity, item.new_quantity)
+        (item.ratio, item.old_quantity, item.new_quantity, item.settled_quantity)
         for item in artifacts.corporate_actions or ()
-    ] == [("1.5", "7", "10")]
+    ] == [("1.5", "7", "10", "0.5")]
     assert len(outcomes) == len(artifacts.trades)

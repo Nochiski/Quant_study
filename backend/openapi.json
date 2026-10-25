@@ -8399,6 +8399,20 @@
       },
       "RawArtifactBundle": {
         "properties": {
+          "corporate_actions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RawCorporateAction"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corporate Actions"
+          },
           "costs": {
             "items": {
               "$ref": "#/components/schemas/RawCost"
@@ -8478,6 +8492,46 @@
           "trades"
         ],
         "title": "RawArtifactBundle",
+        "type": "object"
+      },
+      "RawCorporateAction": {
+        "description": "엔진이 보유에 실제로 적용한 분할·병합(`CORPORATE_ACTION_APPLIED`)을 그대로 옮긴 기록.\n\n엔진은 같은 세션의 어떤 체결보다 먼저 적용한다. 수량은 정수 문자열이고 `ratio` 는 구주 1주당\n신주 수(Decimal 문자열)다. 새 수량은 `old × ratio` 를 0 쪽으로 내린 값이고, 버린 단주는 정산\n세션 시가로 `cash_paid` 만큼 현금 정산된다(숏이면 음수).",
+        "properties": {
+          "cash_paid": {
+            "title": "Cash Paid",
+            "type": "number"
+          },
+          "new_quantity": {
+            "title": "New Quantity",
+            "type": "string"
+          },
+          "old_quantity": {
+            "title": "Old Quantity",
+            "type": "string"
+          },
+          "ratio": {
+            "title": "Ratio",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "security_id",
+          "ratio",
+          "old_quantity",
+          "new_quantity",
+          "cash_paid"
+        ],
+        "title": "RawCorporateAction",
         "type": "object"
       },
       "RawCost": {

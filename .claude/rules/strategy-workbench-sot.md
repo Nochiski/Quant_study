@@ -253,7 +253,7 @@ HTTP·CLI 요청, research 요청 codec, 결과 `RunManifest.run_spec`은 기존
 
 비용 입력 조립은 `domain/backtest/_cost_inputs.py`의 `cost_inputs`가 소유한다. 정렬과 ADV 관측은 한 번 계산하고 참여 한도는 20행, 충격은 최소 1행이라는 기존 의미를 각 소비자가 적용한다. 입력 부족 사유는 `_impact.py`가 소유하며 `impact_input_warnings`는 실제 체결 종목·세션과 교차한 부족만 경고한다. 정상 0변동성·계수 0은 부족이 아니다(#341·#342).
 
-청산 거래 재구성과 전체·창 지표 합계는 `domain/backtest/_trade_analytics.py`가 소유한다. 체결 원장의 입력 순서를 보존하고 식별자 문자열로 정렬하지 않는다. 실행 어댑터는 원장 행을 domain 값으로 변환만 한다(#362 DR06).
+청산 거래 재구성과 전체·창 지표 합계는 `domain/backtest/_trade_analytics.py`가 소유한다. 체결 원장의 입력 순서를 보존하고 식별자 문자열로 정렬하지 않는다. 실행 어댑터는 원장 행을 domain 값으로 변환만 한다(#362 DR06). 열린 거래는 엔진이 보유에 실제로 적용한 분할·병합(`CORPORATE_ACTION_APPLIED` → `RawCorporateAction`, 결과 `artifacts.corporate_actions`)을 그 세션 첫 체결 앞에서 같은 비율로 따르고(수량 × ratio, 평균단가 ÷ ratio), 엔진이 버린 단주의 현금 정산은 닫힌 거래 한 건이다. 분할 규칙은 엔진(`Portfolio.apply_corporate_action`)이 소유하고 재구성은 적용 기록을 따를 뿐 비율을 다시 정하지 않는다. 재구성한 보유와 적용 기록의 옛 수량이 다르면 조용히 넘기지 않고 멈춘다(#628). 옛 결과(`corporate_actions` None)의 저장된 청산 거래는 다시 계산하지 않는다.
 
 엔진 여력의 정본은 Python `PythonBuyingPower`·Rust `BuyingPower`의 `L×equity−gross` 상태다. 견적은 같은 상태의 자본·총노출·레버리지·보유 수량·평가가를 읽고, 확정 소비와 공유한 장부 투영(`power_projection.project_valuation`, Rust `buying_power::project_valuation`)으로 최대 실행 가능 정수 수량을 찾는다. 분모 역산이나 epsilon으로 경계를 보정하지 않는다. 매수·숏·바스켓이 별도 비용 배수를 정의하지 않는다. 비용 한도를 넘기는 신규 진입은 줄이고 기존의 노출 감소 청산 허용은 유지한다(#342 V2-05).
 

@@ -5163,6 +5163,10 @@ export type ProvidersView = {
  */
 export type RawArtifactBundle = {
   /**
+   * Corporate Actions
+   */
+  corporate_actions?: Array<RawCorporateAction> | null;
+  /**
    * Costs
    */
   costs: Array<RawCost>;
@@ -5198,6 +5202,42 @@ export type RawArtifactBundle = {
    * Trades
    */
   trades: Array<RawTrade>;
+};
+
+/**
+ * RawCorporateAction
+ *
+ * 엔진이 보유에 실제로 적용한 분할·병합(`CORPORATE_ACTION_APPLIED`)을 그대로 옮긴 기록.
+ *
+ * 엔진은 같은 세션의 어떤 체결보다 먼저 적용한다. 수량은 정수 문자열이고 `ratio` 는 구주 1주당
+ * 신주 수(Decimal 문자열)다. 새 수량은 `old × ratio` 를 0 쪽으로 내린 값이고, 버린 단주는 정산
+ * 세션 시가로 `cash_paid` 만큼 현금 정산된다(숏이면 음수).
+ */
+export type RawCorporateAction = {
+  /**
+   * Cash Paid
+   */
+  cash_paid: number;
+  /**
+   * New Quantity
+   */
+  new_quantity: string;
+  /**
+   * Old Quantity
+   */
+  old_quantity: string;
+  /**
+   * Ratio
+   */
+  ratio: string;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Session
+   */
+  session: string;
 };
 
 /**

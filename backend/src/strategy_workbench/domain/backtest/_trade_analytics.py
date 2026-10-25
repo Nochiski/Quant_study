@@ -15,6 +15,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 from ._models import (
     CARRY_COST_KINDS,
     RawArtifactBundle,
+    RawCorporateAction,
     RawCost,
     RawFill,
     RawTrade,
@@ -31,10 +32,108 @@ class _OpenTrade:
     opening_slippage: float
 
 
-def closed_trades(fills: Sequence[RawFill], costs: Sequence[RawCost]) -> tuple[RawTrade, ...]:
-    """체결의 입력 순서가 원장 순서다. fill_id 문자열로 다시 정렬하지 않는다."""
+def _quantity_text(quantity: float) -> str:
+    # 지수 표기 금지(#135): `Decimal("700.0").normalize()`는 `7E+2`라 `str()`이 "7E+2"를 냈다.
+    # `format(…, "f")`는 같은 값을 "700"으로 — fills·positions의 정수 문자열과 표현이 맞는다.
+    return format(Decimal(str(quantity)).normalize(), "f")
+
+
+def _closing_trade(
+    security_id: str,
+    state: _OpenTrade,
+    closed_quantity: float,
+    exit_price: float,
+    closed_on: date,
+    *,
+    exit_fees: float,
+    exit_slippage: float,
+) -> RawTrade:
+    """열린 거래의 `closed_quantity` 만큼을 닫는다. 여는 비용은 닫는 몫만큼 나눠 싣는다."""
+    open_fraction = closed_quantity / abs(state.quantity)
+    fees = state.opening_fees * open_fraction + exit_fees
+    gross_pnl = (
+        (exit_price - state.average_price) * closed_quantity * (1 if state.quantity > 0 else -1)
+    )
+    return RawTrade(
+        security_id=security_id,
+        opened_on=state.opened_on,
+        closed_on=closed_on,
+        side="long" if state.quantity > 0 else "short",
+        quantity=_quantity_text(closed_quantity),
+        entry_price=state.average_price,
+        exit_price=exit_price,
+        pnl=gross_pnl - fees,
+        fees=fees,
+        slippage_cost=state.opening_slippage * open_fraction + exit_slippage,
+    )
+
+
+def _apply_corporate_action(
+    states: dict[str, _OpenTrade], trades: list[RawTrade], action: RawCorporateAction
+) -> None:
+    """엔진이 적용한 분할·병합을 열린 거래에 똑같이 적용한다(수량 × ratio, 평균단가 ÷ ratio).
+
+    분할로 수량이 바뀐 열린 거래를 옛 수량으로 들고 있으면, 분할 뒤 매도가 거짓 손실과 반대 방향
+    잔량을 만든다. 엔진이 버린 단주(`cash_paid`)는 정산가로 닫힌 거래 한 건이다.
+    """
+    state = states.get(action.security_id)
+    old_quantity = float(Decimal(action.old_quantity))
+    if state is None or state.quantity != old_quantity:
+        raise ValueError(
+            "corporate action does not match the reconstructed open trade — "
+            f"security_id={action.security_id} session={action.session} "
+            f"old_quantity={action.old_quantity} "
+            f"reconstructed={None if state is None else state.quantity}"
+        )
+    ratio = Decimal(action.ratio)
+    scaled = float(Decimal(action.old_quantity) * ratio)
+    new_quantity = float(Decimal(action.new_quantity))
+    adjusted = _OpenTrade(
+        quantity=scaled,
+        average_price=state.average_price / float(ratio),
+        opened_on=state.opened_on,
+        opening_fees=state.opening_fees,
+        opening_slippage=state.opening_slippage,
+    )
+    fraction = abs(scaled - new_quantity)
+    if fraction > 0:
+        # 정산가 = 정산 현금 ÷ 버린 단주(숏이면 둘 다 음수라 양수다).
+        settlement_price = action.cash_paid / (scaled - new_quantity)
+        trades.append(
+            _closing_trade(
+                action.security_id,
+                adjusted,
+                fraction,
+                settlement_price,
+                action.session,
+                exit_fees=0.0,
+                exit_slippage=0.0,
+            )
+        )
+        kept = 1 - fraction / abs(scaled)
+        adjusted.opening_fees *= kept
+        adjusted.opening_slippage *= kept
+    adjusted.quantity = new_quantity
+    if new_quantity == 0:
+        states.pop(action.security_id)
+    else:
+        states[action.security_id] = adjusted
+
+
+def closed_trades(
+    fills: Sequence[RawFill],
+    costs: Sequence[RawCost],
+    *,
+    actions: Sequence[RawCorporateAction],
+) -> tuple[RawTrade, ...]:
+    """체결의 입력 순서가 원장 순서다. fill_id 문자열로 다시 정렬하지 않는다.
+
+    `actions` 는 엔진이 보유에 적용한 분할·병합이다. 엔진은 같은 세션의 어떤 체결보다 먼저
+    적용하므로 그 세션의 첫 체결 앞에서 열린 거래에 적용한다.
+    """
     states: dict[str, _OpenTrade] = {}
     trades: list[RawTrade] = []
+    pending = deque(sorted(actions, key=lambda item: item.session))
     # 새 체결의 확정 거래세를 소비한다. 세금 칸이 없던 역사 입력만 같은 세션·종목의
     # 비용 기록 순서로 복원한다. 명시적 0과 구판의 None을 구분한다.
     taxes: dict[tuple[date, str], deque[float]] = {}
@@ -43,6 +142,8 @@ def closed_trades(fills: Sequence[RawFill], costs: Sequence[RawCost]) -> tuple[R
             taxes.setdefault((cost.session, cost.security_id), deque()).append(cost.amount)
     for fill in fills:
         security_id, session = fill.security_id, fill.session
+        while pending and pending[0].session <= session:
+            _apply_corporate_action(states, trades, pending.popleft())
         side, quantity, price = fill.side, float(fill.quantity), fill.price
         fee, slippage_per_share = fill.fee, fill.slippage_per_share
         pending_taxes = taxes.get((session, security_id))
@@ -77,26 +178,15 @@ def closed_trades(fills: Sequence[RawFill], costs: Sequence[RawCost]) -> tuple[R
         closed_quantity = min(open_quantity, fill_quantity)
         open_fraction = closed_quantity / open_quantity
         exit_fraction = closed_quantity / fill_quantity
-        fees = state.opening_fees * open_fraction + fee * exit_fraction
-        slippage_cost = state.opening_slippage * open_fraction + slip * exit_fraction
-        gross_pnl = (
-            (price - state.average_price) * closed_quantity * (1 if state.quantity > 0 else -1)
-        )
         trades.append(
-            RawTrade(
-                security_id=security_id,
-                opened_on=state.opened_on,
-                closed_on=session,
-                side="long" if state.quantity > 0 else "short",
-                # 지수 표기 금지(#135): `Decimal("700.0").normalize()`는 `7E+2`라 `str()`이
-                # "7E+2"를 냈다. `format(…, "f")`는 같은 값을 "700"으로 — fills·positions의
-                # 정수 문자열과 표현이 맞는다.
-                quantity=format(Decimal(str(closed_quantity)).normalize(), "f"),
-                entry_price=state.average_price,
-                exit_price=price,
-                pnl=gross_pnl - fees,
-                fees=fees,
-                slippage_cost=slippage_cost,
+            _closing_trade(
+                security_id,
+                state,
+                closed_quantity,
+                price,
+                session,
+                exit_fees=fee * exit_fraction,
+                exit_slippage=slip * exit_fraction,
             )
         )
         remaining_open = open_quantity - closed_quantity
@@ -119,6 +209,9 @@ def closed_trades(fills: Sequence[RawFill], costs: Sequence[RawCost]) -> tuple[R
             )
         else:
             states.pop(security_id, None)
+    # 마지막 체결 뒤의 분할·병합도 단주 정산이 있으면 닫힌 거래다.
+    while pending:
+        _apply_corporate_action(states, trades, pending.popleft())
     return tuple(trades)
 
 

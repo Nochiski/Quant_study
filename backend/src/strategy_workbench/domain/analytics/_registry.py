@@ -7,7 +7,9 @@ from ._models import MetricCategory, MetricDefinition, MetricUnit
 # v3(#274): 샤프·소르티노·롤링 샤프를 한국은행 기준금리 초과수익으로 잰다.
 # v4(#274): 샤프 표준오차 지표를 더하고 롤링 샤프 창을 21세션에서 126세션(6개월)으로 늘린다.
 # v5(#281 V4-01): 샤프 표준오차에 왜도·첨도를 넣고 분모를 n−1로 두며, PSR(기준 0)을 더한다.
-REGISTRY_VERSION = "metric-registry-v5"
+# v6(#628): 청산 거래 재구성이 엔진이 적용한 분할·병합을 따른다. 분할 뒤 매도한 run 의 승률·손익비·
+# 청산 거래 수가 바뀐다(단주 현금 정산은 닫힌 거래 한 건).
+REGISTRY_VERSION = "metric-registry-v6"
 
 
 class MetricRegistry:

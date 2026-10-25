@@ -139,6 +139,8 @@ test.describe("AI 어시스턴트", () => {
       ).toBeVisible();
       const items = formatted.getByRole("listitem");
       await expect(items).toHaveCount(2);
+      // 항목이 list-item 이어야 점 기호(::marker)가 그려진다 — 개수만 보면 기호가 사라져도 통과한다.
+      await expect(items.first()).toHaveCSS("display", "list-item");
       await expect(
         items.first().locator("code", { hasText: "turnover_buffer_count" }),
       ).toBeVisible();

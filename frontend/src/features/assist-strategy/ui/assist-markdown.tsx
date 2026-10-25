@@ -1,12 +1,11 @@
-import { useMemo, type ReactNode } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 
-import { t } from "../../../shared/config";
 import {
   parseMarkdown,
   type MarkdownBlock,
   type MarkdownInline,
 } from "../model/assist-markdown";
-import { safeExternalLink } from "../model/render-safety";
+import { AssistExternalLink } from "./assist-external-link";
 
 const renderInlines = (inlines: readonly MarkdownInline[]): ReactNode[] =>
   inlines.map((inline, index) => {
@@ -27,28 +26,15 @@ const renderInlines = (inlines: readonly MarkdownInline[]): ReactNode[] =>
         return <em key={index}>{renderInlines(inline.children)}</em>;
       case "del":
         return <del key={index}>{renderInlines(inline.children)}</del>;
-      case "link": {
-        // 출처 목록과 같은 규칙: `http`·`https`만 링크이고, 이름 옆에 실제 도착지 호스트를 늘 보인다.
-        // 모델이 믿음직한 이름으로 다른 곳을 가리킬 수 있기 때문이다(B-03 리뷰 P2).
-        const link = safeExternalLink(inline.url);
-        if (link === null) {
-          return <span key={index}>{renderInlines(inline.children)}</span>;
-        }
+      case "link":
+        // 출처 목록과 같은 규칙: `http`·`https`만 링크이고 이름 옆에 실제 도착지 호스트를 보인다.
         return (
-          <span key={index}>
-            <a href={link.href} target="_blank" rel="noopener noreferrer">
+          <Fragment key={index}>
+            <AssistExternalLink url={inline.url}>
               {renderInlines(inline.children)}
-            </a>{" "}
-            <span className="assist-sources__host">
-              {/* 함수 replacer라 호스트 안의 `$&`가 치환 패턴으로 해석되지 않는다. */}
-              {t("assistant.chat.source.host").replace(
-                "{host}",
-                () => link.host,
-              )}
-            </span>
-          </span>
+            </AssistExternalLink>
+          </Fragment>
         );
-      }
     }
   });
 
@@ -61,7 +47,11 @@ const renderBlocks = (blocks: readonly MarkdownBlock[]): ReactNode[] =>
         // 대화 안의 제목은 페이지 문서 구조에 끼지 않게 heading 요소 대신 굵은 문단으로 그린다.
         return (
           <p
-            className={`assist-md__heading assist-md__heading--${Math.min(block.level, 3)}`}
+            className={
+              block.level === 1
+                ? "assist-md__heading assist-md__heading--top"
+                : "assist-md__heading"
+            }
             key={index}
           >
             {renderInlines(block.inlines)}

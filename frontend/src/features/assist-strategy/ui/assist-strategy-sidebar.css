@@ -167,17 +167,13 @@
 
 .assist-md ul,
 .assist-md ol {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
   padding-left: var(--space-5);
 }
 
-/* 목록 항목 안의 문단·중첩 목록도 같은 간격으로 쌓는다. */
-.assist-md li {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+/* 항목은 list-item 으로 둬야 점·번호(::marker)가 생긴다. flex 로 바꾸면 기호가 사라진다. */
+.assist-md li + li,
+.assist-md li > * + * {
+  margin-top: var(--space-1);
 }
 
 .assist-md li::marker {
@@ -185,10 +181,10 @@
 }
 
 .assist-md__heading {
-  font-weight: 700;
+  font-weight: var(--font-weight-strong);
 }
 
-.assist-md__heading--1 {
+.assist-md__heading--top {
   font-size: var(--text-size-subsection);
 }
 
@@ -243,7 +239,7 @@
 
 .assist-md__table th {
   background: var(--surface-subtle);
-  font-weight: 600;
+  font-weight: var(--font-weight-label);
 }
 
 /* 모델·도구·서버가 만든 문자열은 어디에 있든 줄을 바꾼다. 긴 무공백 한 줄이 폭을 밀어낸다. */

@@ -39,6 +39,14 @@ describe("parseInlines", () => {
     ["**모멘텀**은 오른다", "strong(모멘텀)은 오른다"],
     ["*기울임*과 ***둘 다***", "em(기울임)과 strong(em(둘 다))"],
     ["*a **b** c*", "em(a strong(b) c)"],
+    // 같은 표기가 안쪽에서 다시 열리면 바깥 짝을 건너뛴다.
+    ["**a **b** c**", "strong(a strong(b) c)"],
+    // 굵게로 닫히지 않은 두 글자 묶음은 기울임으로 다시 읽지 않는다(스트리밍 중 `**굵게*`).
+    ["**굵게*", "**굵게*"],
+    // 코드 스팬이 강조보다 먼저 묶인다.
+    ["`a` **b `c**` d**", "code(a) strong(b code(c**) d)"],
+    // 이스케이프한 별표는 닫는 표기가 아니다 — 굵게 없이 표기 글자가 그대로 남는다.
+    ["**a\\**", "**a**"],
     ["~~취소~~", "del(취소)"],
     // 공백으로 둘러싼 별표는 곱셈 기호다.
     ["2 * 3 * 4", "2 * 3 * 4"],
@@ -72,6 +80,11 @@ describe("parseInlines", () => {
     [
       "<https://example.com/x>",
       "link(https://example.com/x→https://example.com/x)",
+    ],
+    // 링크 이름 안에서는 링크를 다시 만들지 않는다(<a> 안의 <a>).
+    [
+      "[[a](https://x.example)](https://y.example)",
+      "link([a](https://x.example)→https://y.example)",
     ],
     // 주소가 없는 대괄호는 글자다.
     ["[참고] 내용", "[참고] 내용"],
@@ -192,8 +205,31 @@ describe("parseMarkdown", () => {
     ]);
   });
 
-  it("구분 줄이 없으면 세로 막대가 있어도 표가 아니다", () => {
+  it("구분 줄이 없거나 칸 수가 머리 줄과 다르면 세로 막대가 있어도 표가 아니다", () => {
     expect(parseMarkdown("a | b\nc | d")[0].kind).toBe("paragraph");
+    expect(
+      parseMarkdown("결과 | 비고\n---\n본문").map((block) => block.kind),
+    ).toEqual(["paragraph", "rule", "paragraph"]);
+  });
+
+  it("중첩 상한보다 깊은 안쪽은 문단으로 읽어 스택을 넘기지 않는다", () => {
+    const deepest = (blocks: ReturnType<typeof parseMarkdown>): number =>
+      Math.max(
+        0,
+        ...blocks.map((block) =>
+          block.kind === "list"
+            ? 1 + Math.max(0, ...block.items.map(deepest))
+            : block.kind === "quote"
+              ? 1 + deepest(block.blocks)
+              : 0,
+        ),
+      );
+    expect(
+      deepest(parseMarkdown(">".repeat(5000) + " 끝")),
+    ).toBeLessThanOrEqual(17);
+    expect(
+      deepest(parseMarkdown("- ".repeat(2500) + "끝")),
+    ).toBeLessThanOrEqual(17);
   });
 
   it("CRLF 줄바꿈도 같은 블록이 된다", () => {

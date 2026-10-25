@@ -576,30 +576,25 @@ describe("AssistStrategySidebar", () => {
     expect(container.querySelector("b")).toBeNull();
   });
 
-  it("모델 답변의 마크다운은 서식으로 보이고 http가 아닌 링크는 글자로 남는다", async () => {
+  it("모델 답변의 마크다운 링크는 http만 링크가 되고 도착지 호스트를 함께 보인다", async () => {
+    // 서식 자체(굵게·목록·코드)는 e2e US-DM-02가 본다. 여기서는 렌더 안전 분기만 본다.
     const user = userEvent.setup();
-    const { container } = mount();
+    mount();
     const connection = await ask(user);
-    // 굵게 표기가 두 델타에 걸쳐 온다. 닫히기 전에는 글자이고, 닫히면 굵게가 된다.
-    connection.push(textDelta(0, "**이어서 해볼"));
-    expect(await screen.findByText("**이어서 해볼")).toBeInTheDocument();
     connection.push(
       textDelta(
-        1,
-        " 것**\n- `turnover_buffer_count`로 교체를 줄입니다.\n- [자료](javascript:alert(1)) 확인",
+        0,
+        "[보고서](https://example.com/report) 와 [수상한 자료](javascript:alert(1))",
       ),
     );
 
-    const strong = await screen.findByText("이어서 해볼 것");
-    expect(strong.tagName).toBe("STRONG");
-    const items = screen.getAllByRole("listitem");
-    expect(items).toHaveLength(2);
-    expect(within(items[0]).getByText("turnover_buffer_count").tagName).toBe(
-      "CODE",
-    );
-    expect(screen.getByText("자료")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "자료" })).toBeNull();
-    expect(container.textContent).not.toContain("**");
+    const link = await screen.findByRole("link", { name: "보고서" });
+    expect(link).toHaveAttribute("href", "https://example.com/report");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByText("도착지 example.com")).toBeInTheDocument();
+    expect(screen.getByText("수상한 자료")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "수상한 자료" })).toBeNull();
   });
 
   it("제안 카드의 버튼은 제안과 턴 시작 시점 원문을 콜백에 넘긴다", async () => {

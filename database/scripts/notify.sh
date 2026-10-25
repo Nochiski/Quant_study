@@ -17,8 +17,9 @@ BODY="${3:-}"
 if [ "${QL_NOTIFY_TELEGRAM:-0}" != "1" ]; then
   NOTIFY_LOG="${QL_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)}/logs/notify.log"
   mkdir -p "$(dirname "$NOTIFY_LOG")" 2>/dev/null
+  # 로캘이 C 이면 ${BODY:0:900} 이 바이트로 잘린다 — 끝에서 잘린 글자 조각은 iconv -c 가 버린다(#630)
   printf '%s %s %s | %s\n' "$(date -u +%FT%TZ)" "$LEVEL" "$TITLE" \
-    "$(printf '%s' "${BODY:0:900}" | tr '\n\t' '  ')" >> "$NOTIFY_LOG" 2>/dev/null
+    "$(printf '%s' "${BODY:0:900}" | iconv -c -f UTF-8 -t UTF-8 2>/dev/null | tr '\n\t' '  ')" >> "$NOTIFY_LOG" 2>/dev/null
   echo "notify: logged only ($LEVEL: $TITLE)"
   exit 0
 fi

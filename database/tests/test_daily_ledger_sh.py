@@ -89,6 +89,7 @@ fi
 name="$2"
 case " ${*:3} " in *" --cover "*) name=kw_cover; echo "${*:3}" >> "$QL_HOME/kw_cover_args.txt" ;; esac
 echo "$name" >> "$QL_HOME/calls.txt"
+[ "$name" = "daily.dart_daily" ] && [ -n "${DART_LINE:-}" ] && echo "  $DART_LINE"
 if [ "$name" = "daily.dart_daily" ] && [ -n "${PARALLEL_PROBE:-}" ]; then
   touch "$QL_HOME/dart_started"; probe wise_started dart_saw_wise
 fi
@@ -747,6 +748,24 @@ def test_evening_cover_judgement_leads_the_summary(tmp_path: Path) -> None:
     rc, _, _, _ = _run(tmp_path)
     assert rc == 0
     assert _read(tmp_path, "notify_body.txt").startswith("[kw_daily] cover 판정 D=대역")
+
+
+@pytest.mark.parametrize("pad", [0, 1, 2])
+def test_요약_900바이트_절단은_글자_중간을_끊지_않는다(tmp_path: Path, pad: int) -> None:
+    """요약(`cut -c1-900`)이 3바이트 글자 중간에서 끊겨 알림 본문이 깨진 UTF-8 이 되지 않는다(#630 CI).
+
+    GNU `cut -c` 는 멀티바이트를 모르고 바이트로 자른다(서버·CI) — `LC_ALL=C` 로 맥 cut 도 같게 만든다.
+    앞 ASCII 를 0·1·2 자로 바꿔 900바이트 경계가 글자의 세 자리에 모두 떨어지게 한다.
+    """
+    root = _root(tmp_path)
+    _seed_universe_ok(root, 1)
+    env = _env(root, QL_WEEKDAY="3", LC_ALL="C", DART_LINE="a" * pad + "가" * 400)
+    p = subprocess.run(["bash", str(root / "scripts" / "daily_ledger.sh"), "--date", "20260929"],
+                       env=env, capture_output=True, text=True, errors="replace", timeout=60,
+                       check=False)
+    assert p.returncode == 0, p.stderr
+    body = (root / "notify_body.txt").read_bytes().decode("utf-8")
+    assert "가" * 100 in body
 
 
 def test_skip_kw_also_skips_evening_cover(tmp_path: Path) -> None:

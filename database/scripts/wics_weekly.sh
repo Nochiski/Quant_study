@@ -45,7 +45,7 @@ echo "════ 종료 rc=$RC $(kst) ════"
 echo "$RC" > "$RCF"
 } 2>&1 | tee -a "$LOG"
 RC=$(cat "$RCF" 2>/dev/null || echo 9); rm -f "$RCF"
-SUMMARY=$(grep -E "^WICS 스냅샷|L1 검산|차 [+-]|!!!|fail|empty=" "$LOG" | tail -6 | tr '\n' ' ' | cut -c1-900)
+SUMMARY=$(grep -E "^WICS 스냅샷|L1 검산|차 [+-]|!!!|fail|empty=" "$LOG" | tail -6 | tr '\n' ' ' | cut -c1-900 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
 if [ -n "$DRY" ]; then exit "$RC"; fi
 case "$RC" in
   0) scripts/notify.sh info "WICS 주간 스냅샷 dt=$D 완료" "$SUMMARY | 로그 $LOG" ;;

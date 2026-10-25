@@ -26,6 +26,7 @@ printf '{"ok":false}'
 
 
 def _run(tmp_path: Path, *, telegram: bool, level: str = "crit", ql_env: bool = True,
+         body: str = "본문 첫 줄\n둘째 줄", lc_all: str | None = None,
          ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """ql_env=False 면 QL_ENV 를 빼고, HOME 의 옛 시스템 폴더에 토큰이 든 더미 파일을
     둔다(폴백 대조)."""
@@ -51,8 +52,11 @@ def _run(tmp_path: Path, *, telegram: bool, level: str = "crit", ql_env: bool = 
         env["QL_ENV"] = str(env_file)
     if telegram:
         env["QL_NOTIFY_TELEGRAM"] = "1"
-    proc = subprocess.run(["bash", str(SCRIPT), level, "병합 시험", "본문 첫 줄\n둘째 줄"],
-                          env=env, capture_output=True, text=True, timeout=60, check=False)
+    if lc_all is not None:
+        env["LC_ALL"] = lc_all
+    proc = subprocess.run(["bash", str(SCRIPT), level, "병합 시험", body],
+                          env=env, capture_output=True, text=True, errors="replace", timeout=60,
+                          check=False)
     return proc, ql_home / "logs" / "notify.log", curl_log
 
 
@@ -66,6 +70,18 @@ def test_기본값은_어느_등급도_텔레그램을_부르지_않고_notify_l
     assert lines[0].split(" ", 1)[1] == f"{level} 병합 시험 | 본문 첫 줄 둘째 줄"
     assert not curl_log.exists()          # 가짜 curl 호출 0
     assert "logged only" in proc.stdout
+
+
+@pytest.mark.parametrize("pad", [0, 1, 2])
+def test_본문_900자_자르기는_C_로캘에서도_글자_중간을_끊지_않는다(tmp_path: Path, pad: int) -> None:
+    """크론처럼 로캘이 C 이면 `${BODY:0:900}` 이 바이트로 잘린다 — notify.log 가 깨진 UTF-8 이 되지 않는다(#630).
+
+    앞 ASCII 를 0·1·2 자로 바꿔 900바이트 경계가 3바이트 글자의 세 자리에 모두 떨어지게 한다.
+    """
+    proc, notify_log, _ = _run(tmp_path, telegram=False, lc_all="C", body="a" * pad + "가" * 400)
+    assert proc.returncode == 0, proc.stderr
+    line = notify_log.read_bytes().decode("utf-8")
+    assert "가" * 100 in line
 
 
 def test_대조_켜면_가짜_curl_이_한_번_불린다(tmp_path: Path) -> None:

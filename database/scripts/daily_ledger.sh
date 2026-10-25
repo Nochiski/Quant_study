@@ -241,7 +241,7 @@ echo "──── 휴장 달력 갱신 시작 $(kst) ────"
 CAL_OUT=$($PY -m daily.calendar_refresh ${DRY:+--check} 2>&1); CAL_RC=$?
 printf '%s\n' "$CAL_OUT"
 echo "──── 휴장 달력 갱신 종료 rc=$CAL_RC $(kst) ────"
-CAL_SUM=$(printf '%s\n' "$CAL_OUT" | tail -1 | cut -c1-700)
+CAL_SUM=$(printf '%s\n' "$CAL_OUT" | tail -1 | cut -c1-700 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
 if [ -z "$DRY" ] && [ "$CAL_RC" -ne 0 ]; then
   if [ "$CAL_RC" -eq 1 ] && [[ "$CAL_SUM" == "휴장 달력 "* ]]; then
     scripts/notify.sh warn "휴장 달력 경고" "$CAL_SUM | 로그 $LOG"
@@ -265,7 +265,7 @@ if [ -n "$EXPORT_V3" ]; then
     printf '%s\n' "$EXP_OUT"
     echo "──── 휴장 파일 내보내기 종료 rc=$EXP_RC $(kst) ────"
     if [ "$EXP_RC" -ne 0 ]; then
-      EXP_SUM=$(printf '%s\n' "$EXP_OUT" | tail -1 | cut -c1-700)
+      EXP_SUM=$(printf '%s\n' "$EXP_OUT" | tail -1 | cut -c1-700 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
       scripts/notify.sh crit "휴장 파일 내보내기 실패(rc=$EXP_RC)" "${EXP_SUM:-출력 없음} | 로그 $LOG"
     fi
   fi
@@ -379,10 +379,11 @@ supp_wise_wait
 cat "$RUN" >> "$LOG"
 # 저녁 키움 보강 판정 줄(T-13)은 맨 앞 — 뒤 단계(DART) 출력이 tail 창에서 밀어내지 않게 따로 집는다
 # WISE 줄은 tail 창 밖에서 결과 한 줄만 붙인다 — 수집 단계(KIS·DART) 결과를 밀어내지 않게(N-53)
+# GNU cut -c 는 멀티바이트를 모르고 바이트로 자른다 — 끝에서 잘린 글자 조각은 iconv -c 가 버린다(#630)
 SUMMARY=$({ grep -E "^\[kw_daily\] cover 판정" "$RUN" | tail -1
             grep -E "^  |──── .* 종료" "$RUN" | grep -vE "WISE 스냅샷|④ 종료|^  · 대상" | tail -8
             grep -E "^  WISE 스냅샷 (건너뜀|[0-9]{8} 실패 콜)" "$RUN" | tail -1; } \
-  | tr '\n' ' ' | cut -c1-900)
+  | tr '\n' ' ' | cut -c1-900 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
 if [ -n "$FAILED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "daily_ledger 실패: $FAILED" "$SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 2

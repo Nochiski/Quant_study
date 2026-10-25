@@ -167,7 +167,7 @@ SUM_KW=$(grep -E "^\[kw_daily\] (fetch status|commit )" "$RUN" | tail -2 | tr '\
 SUM_DART=$(grep -E "^── DART 일일 증분|^  공시 " "$RUN" | tail -2 | tr '\n' ' ')
 SUMMARY=$(printf 'D=%s | 키움 %s| DART %s| 종료 키움 %s%s' \
   "$D" "${SUM_KW:-없음 }" "${SUM_DART:-없음 }" "${KW_DONE:-?}" \
-  "${REFILL_RC:+ | 장 마감 재반영 rc=$REFILL_RC}" | cut -c1-900)
+  "${REFILL_RC:+ | 장 마감 재반영 rc=$REFILL_RC}" | cut -c1-900 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
 if [ -n "$SKIPPED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh info "daily_evening $SKIPPED — 건너뜀" "D=$D | 로그 $LOG"
   rm -f "$RUN"; exit 0

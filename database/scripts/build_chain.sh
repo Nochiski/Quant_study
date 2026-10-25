@@ -334,7 +334,7 @@ cat "$RUN" >> "$LOG"
 SUMMARY=$(printf 'D=%s snapshot=%s stage %s(%d분) equity %s(%d분) | %s' \
   "$D" "${SNAP:-없음}" "$H_STAGE" "$((STAGE_S / 60))" "$H_EQUITY" "$((EQUITY_S / 60))" \
   "$(grep -E '^stage 건전성|^  스냅샷|^  인계|^  snapshot gc' "$RUN" | tail -4 | tr '\n' ' ')" \
-  | cut -c1-900)
+  | cut -c1-900 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
 # 판정: stage·equity 실패 또는 인계 파일 실패 = crit(rc 2). 인계가 실패하면 소비자 포인터가 어제 판이라
 # "준비 완료" 를 보내면 안 된다. GC 실패만 남으면 판은 쓸 수 있으니 준비 info + warn 을 따로 보낸다(V2-7).
 if [ "$H_STAGE" != "ok" ] || [ "$H_EQUITY" != "ok" ] || [[ "$FAILED" == *"인계 파일"* ]]; then

@@ -229,7 +229,7 @@ if [ "$RC" = 0 ] || [ "$RC" = 6 ]; then        # 이번 실행의 게이트 줄(
       "$SC_FB — 그날 모델 판에 주 모델 spec 이 없다(N-47 · Q-E1, 바꾸기 전에 지은 날) — 정지 아님 | 로그 $LOG"
   fi
 fi
-SUMMARY=$(grep -E "^compat |compat 실패|Error|Traceback" "$LOG" | tail -6 | tr '\n' ' ' | cut -c1-900)
+SUMMARY=$(grep -E "^compat |compat 실패|Error|Traceback" "$LOG" | tail -6 | tr '\n' ' ' | cut -c1-900 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
 case "$RC" in
   0)
     if [ -n "$SHADOW" ]; then

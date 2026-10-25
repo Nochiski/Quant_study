@@ -27,7 +27,7 @@ echo "════ 종료 $(TZ=Asia/Seoul date '+%H:%M:%S KST') rc master=$RC_M 
 cat "$RUN" >> "$LOG"
 # master_daily.py 는 한 시장이 실패해도 rc 0 으로 끝나고 `✖` 만 찍는다 — 그 줄을 실패로 센다
 N_FAIL=$(grep -c "✖" "$RUN" || true)
-SUMMARY=$(grep -E "스냅샷|✓|✖|cont-yn" "$RUN" | tail -4 | tr '\n' ' ' | cut -c1-600)
+SUMMARY=$(grep -E "스냅샷|✓|✖|cont-yn" "$RUN" | tail -4 | tr '\n' ' ' | cut -c1-600 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
 if [ "$RC_M" -ne 0 ] || [ "$N_FAIL" -gt 0 ]; then
   scripts/notify.sh crit "daily_master 실패" "rc master=$RC_M 시장실패=$N_FAIL | $SUMMARY | 로그 $LOG"
   rm -f "$RUN"

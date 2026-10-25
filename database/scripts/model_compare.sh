@@ -43,7 +43,7 @@ echo "════ 종료 rc=$RC $(kst) ════"
 echo "$RC" > "$RCF"
 } 2>&1 | tee -a "$LOG"
 RC=$(cat "$RCF" 2>/dev/null || echo 9); rm -f "$RCF"
-SUMMARY=$(grep -E "verdict=|✗|오류" "$LOG" | tail -8 | tr '\n' ' ' | cut -c1-900)
+SUMMARY=$(grep -E "verdict=|✗|오류" "$LOG" | tail -8 | tr '\n' ' ' | cut -c1-900 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
 case "$RC" in
   0) scripts/notify.sh info "점수 대조 D=$D 통과" "$SUMMARY | 리포트 $OUT/${D}_*.md" ;;
   1) scripts/notify.sh warn "점수 대조 D=$D 불일치" "게이트 미달 — 원인 분류를 리포트에서 확인 | $SUMMARY | 리포트 $OUT/${D}_*.md" ;;

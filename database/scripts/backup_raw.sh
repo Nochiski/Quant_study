@@ -106,7 +106,7 @@ TOTAL=$([ -d "$DEST" ] && du -sh "$DEST" 2>/dev/null | cut -f1 || echo "-")
 echo "════ 종료 $(kst) 성공[${OK_LIST:- 없음}] 실패[${FAILED:- 없음}] 사본 $TOTAL · 보관 $KEPT 유지 / $PURGED 삭제 ════"
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"
-SUMMARY=$(grep -E "^  |^════ 종료" "$RUN" | tail -10 | tr '\n' ' ' | cut -c1-900)
+SUMMARY=$(grep -E "^  |^════ 종료" "$RUN" | tail -10 | tr '\n' ' ' | cut -c1-900 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)
 if [ -n "$FAILED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "backup_raw 실패:$FAILED" "$SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 2

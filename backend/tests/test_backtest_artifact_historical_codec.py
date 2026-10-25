@@ -707,6 +707,6 @@ def test_historical_taxed_sell_decodes_and_reconstructs_without_current_writer(
         "run-safe-001", sha256=hashlib.sha256(payload).hexdigest()
     )
     assert [fill.sell_tax for fill in result.artifacts.fills] == [None, None]
-    (trade,) = closed_trades(result.artifacts.fills, result.artifacts.costs)
+    (trade,) = closed_trades(result.artifacts.fills, result.artifacts.costs, actions=())
     assert trade.fees == 2.375
     assert trade.pnl == 27.625

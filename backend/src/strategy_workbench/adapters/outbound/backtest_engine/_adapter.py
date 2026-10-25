@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
+from backtest_engine.engine.portfolio import scale_quantity
 from backtest_engine.engine.slippage import FixedBpsSlippage, SqrtImpactSlippage
 from backtest_engine.engine.tape import evaluate_tape
 from backtest_engine.errors import EquityWipedOut
@@ -14,6 +15,7 @@ from backtest_engine.ports.market_data import LoadStatus
 from backtest_engine.ports.universe import Membership, UniverseResult
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
+    CorporateActionApplied,
     CorporateActionEvent,
     CorporateActionType,
     OrderUpdateEvent,
@@ -66,6 +68,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestSeries,
     DataWarning,
     RawArtifactBundle,
+    RawCorporateAction,
     RawCost,
     RawFill,
     RawOrder,
@@ -281,7 +284,11 @@ class BacktestEngineExecutorAdapter:
         # 대량 시세·체결은 columnar 테이블로 받고 주문 상태는 원본 이벤트 조회로 보존한다.
         # 상태 사유는 adapter에서 문구를 해석하거나 다시 판정하지 않는다.
         tables = engine.event_store.result_tables()
-        artifacts, outcomes = _artifacts(tables, engine.event_store.order_updates())
+        artifacts, outcomes = _artifacts(
+            tables,
+            engine.event_store.order_updates(),
+            actions=engine.event_store.corporate_actions_applied(),
+        )
         run_sessions = tuple(item.session for item in artifacts.snapshots)
         benchmark, carried = _benchmark_series(
             request.dataset, request.spec.initial_cash, run_sessions
@@ -710,8 +717,13 @@ def _base_rate_warnings(carried: Sequence[date]) -> tuple[DataWarning, ...]:
 def _artifacts(
     tables: ResultTables,
     updates: Sequence[OrderUpdateEvent] | None = None,
+    *,
+    actions: Sequence[CorporateActionApplied],
 ) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:
     """엔진 결과 테이블을 워크벤치 raw artifact로 옮긴다.
+
+    `actions` 는 엔진이 보유에 실제로 적용한 분할·병합이다. 청산 거래 재구성이 열린 거래를 같은
+    비율로 맞추는 데 쓰고 결과에도 그대로 싣는다 — 빠뜨리면 분할 뒤 매도가 거짓 손익을 만든다.
 
     세션 날짜와 종목 코드는 행마다 다시 만들지 않는다 — position 행이 세션 × 보유 종목 수라
     행당 `.date()` 한 번이 그대로 유니버스 크기의 비용이 된다.
@@ -817,7 +829,25 @@ def _artifacts(
         )
         for session_index, instrument_index, target_notional, rounded_notional in tables.roundings
     )
-    trades = closed_trades(fills, raw_costs)
+    corporate_actions = tuple(
+        RawCorporateAction(
+            session=item.ts.date(),
+            security_id=item.instrument.symbol,
+            ratio=format(item.action.ratio.normalize(), "f"),
+            old_quantity=format(item.old_quantity.normalize(), "f"),
+            new_quantity=format(item.new_quantity.normalize(), "f"),
+            # 단주는 엔진 수량 규칙(scale_quantity)으로 정한다. 소비자는 다시 곱하지 않는다.
+            settled_quantity=format(
+                (
+                    scale_quantity(item.old_quantity, item.action.ratio) - item.new_quantity
+                ).normalize(),
+                "f",
+            ),
+            cash_paid=item.cash_paid,
+        )
+        for item in actions
+    )
+    trades = closed_trades(fills, raw_costs, actions=corporate_actions)
     outcomes = tuple(
         TradeOutcome(
             security_id=item.security_id,
@@ -850,6 +880,7 @@ def _artifacts(
                 )
                 for item in updates
             ),
+            corporate_actions=corporate_actions,
         ),
         outcomes,
     )

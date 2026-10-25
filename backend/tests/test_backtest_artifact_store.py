@@ -436,6 +436,25 @@ def test_order_diagnostic_records_survive_artifact_codec_and_distinguish_empty_h
     assert store.load("empty-updates", sha256=committed_empty.sha256).artifacts.order_updates == ()
 
 
+def test_corporate_actions_survive_artifact_store_without_collapsing_absence(
+    tmp_path: Path,
+) -> None:
+    from strategy_workbench.domain.backtest.facade.runs import RawCorporateAction
+
+    original = _result()
+    action = RawCorporateAction(date(2026, 1, 6), "A", "1.5", "7", "10", "0.5", 30.0)
+    store = LocalArtifactStore(tmp_path)
+    # 옛 결과(기록 없음 None)·새 결과의 빈 기록()·기록 있음이 저장을 지나도 서로 바뀌지 않는다.
+    for run_id, actions in (("absent", None), ("empty", ()), ("applied", (action,))):
+        result = replace(
+            original,
+            manifest=replace(original.manifest, run_id=run_id),
+            artifacts=replace(original.artifacts, corporate_actions=actions),
+        )
+        committed = store.commit(result)
+        assert store.load(run_id, sha256=committed.sha256).artifacts.corporate_actions == actions
+
+
 @pytest.mark.parametrize("sell_tax", [2.75, 0.0, None])
 def test_fill_tax_survives_artifact_store_without_collapsing_legacy_absence(
     tmp_path: Path, sell_tax: float | None

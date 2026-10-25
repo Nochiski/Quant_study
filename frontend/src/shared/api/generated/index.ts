@@ -715,6 +715,7 @@ export type {
   ProviderProfileView,
   ProvidersView,
   RawArtifactBundle,
+  RawCorporateAction,
   RawCost,
   RawFill,
   RawOrder,

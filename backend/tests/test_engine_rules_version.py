@@ -47,9 +47,11 @@ from tests.test_negative_cash_recovery import recovery_scenario
 # scenario trace/decision은 그대로이며 actual_cash_fee_application은 새 경계를 고정한다.
 # borrow_cost_negative_cash_recovery는 비용 후 음수 현금에서 매도/환매로 회복하는 경로다.
 # v7는 실행 어댑터가 빈 거래일을 보존하는 경로도 벤치마크 유무별 결과로 고정한다.
+# #628은 결과 번들에 엔진이 적용한 분할·병합 기록(`corporate_actions`)을 더한다. 체결·비용 규칙은
+# 그대로라 판본은 두고 digest 만 고친다(기록만 더한 변경과 같은 리드 결정).
 _PINNED = (
     "backtest-engine-v7",
-    "b7cc160f7bd5a41ab2be80c268e59587e36cfe26e9bc176c53af4ba662569bdf",
+    "f4a66e0a29dc4511282e35a54e38b1b18a2e7c7440ac7a2995f1fe60f8309611",
 )
 
 

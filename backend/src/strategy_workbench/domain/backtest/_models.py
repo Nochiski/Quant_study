@@ -577,6 +577,26 @@ class RawRounding:
 
 
 @dataclass(frozen=True)
+class RawCorporateAction:
+    """엔진이 보유에 실제로 적용한 분할·병합(`CORPORATE_ACTION_APPLIED`)을 그대로 옮긴 기록.
+
+    엔진은 같은 세션의 어떤 체결보다 먼저 적용한다. 수량은 정수 문자열이고 `ratio` 는 구주 1주당
+    신주 수(Decimal 문자열)다. 엔진은 `old × ratio` 를 1e-9 에서 반올림한 이론 수량을 0 쪽으로 내려
+    `new_quantity` 로 두고, 버린 단주 `settled_quantity`(이론 수량 − 새 수량, 숏이면 음수)를 정산
+    세션 시가로 `cash_paid` 만큼 현금 정산한다. 단주는 엔진 규칙(`scale_quantity`)으로 정한 값이라
+    소비자가 비율로 다시 곱하지 않는다.
+    """
+
+    session: date
+    security_id: str
+    ratio: str
+    old_quantity: str
+    new_quantity: str
+    settled_quantity: str
+    cash_paid: float
+
+
+@dataclass(frozen=True)
 class RawArtifactBundle:
     snapshots: tuple[RawSnapshot, ...]
     positions: tuple[RawPosition, ...]
@@ -591,6 +611,8 @@ class RawArtifactBundle:
     schema_version: str = "backtest-artifacts-v2"
     # None은 과거 결과에 상태 기록 자체가 없음을 뜻한다. 새 결과의 빈 기록은 ()다.
     order_updates: tuple[RawOrderUpdate, ...] | None = None
+    # 보유에 적용된 분할·병합. None은 과거 결과에 기록 자체가 없음을, 새 결과의 빈 기록은 ()다.
+    corporate_actions: tuple[RawCorporateAction, ...] | None = None
 
 
 @dataclass(frozen=True)

@@ -108,7 +108,9 @@ class ContinuousBacktestExecutorAdapter:
             cancelled=lambda: False,
         )
         artifacts, outcomes = _artifacts(
-            engine.event_store.result_tables(), engine.event_store.order_updates()
+            engine.event_store.result_tables(),
+            engine.event_store.order_updates(),
+            actions=engine.event_store.corporate_actions_applied(),
         )
         points = tuple(
             AnalysisPoint(

@@ -103,6 +103,17 @@ def test_closed_trades_after_actions_add_up_to_the_cash_flow(
     assert {t.side for t in trades} == {"short" if fills[0].side == "sell" else "long"}
 
 
+def test_cash_in_lieu_takes_its_share_of_opening_fees() -> None:
+    # 3주(10원, 여는 수수료 3) → 1:2 병합 1.5주: 단주 0.5주가 수수료 1/3, 남은 1주가 2/3 을 진다.
+    fills = (_fill("1", 1, "buy", "3", 10, 3), _fill("2", 3, "sell", "1", 24))
+
+    trades = closed_trades(
+        fills, (), actions=(_split(2, "0.5", "3", "1", settled="0.5", cash_paid=12.0),)
+    )
+
+    assert [t.fees for t in trades] == [pytest.approx(1), pytest.approx(2)]
+
+
 def test_partial_sell_after_split_allocates_opening_fees_on_the_split_quantity() -> None:
     # 10주(100원, 수수료 10) → 2:1 분할 20주(50원) → 5주를 60원(수수료 1)에 판다.
     # 여는 수수료는 5/20 만 이 거래에 든다.
@@ -123,7 +134,17 @@ def test_partial_sell_after_split_allocates_opening_fees_on_the_split_quantity()
             (_fill("1", 1, "buy", "10", 100), _fill("2", 2, "sell", "10", 100)),
             _split(3, "2", "10", "20"),
         ),
+        # 엔진 단주는 1주 미만이고 보유와 같은 방향이다.
+        (
+            (_fill("1", 1, "buy", "3", 10),),
+            _split(2, "0.5", "3", "0", settled="1.5", cash_paid=36.0),
+        ),
+        (
+            (_fill("1", 1, "buy", "3", 10),),
+            _split(2, "0.5", "3", "1", settled="-0.5", cash_paid=-12.0),
+        ),
     ],
+    ids=["old-quantity-mismatch", "no-open-trade", "settled-not-a-fraction", "settled-wrong-sign"],
 )
 def test_action_that_disagrees_with_the_reconstructed_holding_is_rejected(
     fills: tuple[RawFill, ...], action: RawCorporateAction

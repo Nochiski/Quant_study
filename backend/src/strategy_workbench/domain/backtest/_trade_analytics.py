@@ -88,6 +88,14 @@ def _apply_corporate_action(
     new_quantity = float(Decimal(action.new_quantity))
     # 단주는 엔진이 정한 값이다. 비율을 다시 곱하면 1e-9 반올림이 빠져 가짜 단주 거래가 생긴다.
     settled = float(Decimal(action.settled_quantity))
+    # 엔진 단주는 1주 미만이고 보유와 같은 방향이다. 어기면 읽은 기록이 엔진 규칙과 어긋난 것이다.
+    if abs(settled) >= 1 or settled * old_quantity < 0:
+        raise ValueError(
+            "corporate action settled fraction breaks the engine quantity rule — "
+            f"security_id={action.security_id} session={action.session} "
+            f"old_quantity={action.old_quantity} settled_quantity={action.settled_quantity} "
+            "expected=|settled|<1 with the sign of old_quantity"
+        )
     scaled = new_quantity + settled
     adjusted = _OpenTrade(
         quantity=scaled,

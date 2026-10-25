@@ -118,3 +118,39 @@ def test_trades_after_a_real_engine_split_match_the_cash_actually_gained(core: s
         for item in artifacts.corporate_actions or ()
     ] == [("1.5", "7", "10", "0.5")]
     assert len(outcomes) == len(artifacts.trades)
+
+
+@pytest.mark.parametrize(
+    "core", ["python", pytest.param("rust", marks=RUST_CORE)], ids=["python", "rust"]
+)
+@pytest.mark.parametrize(
+    ("held", "new_quantity", "settled"), [(3, "1", "0"), (7, "2", "0.333333333")]
+)
+def test_repeating_decimal_reverse_split_settles_exactly_what_the_engine_settled(
+    core: str, held: int, new_quantity: str, settled: str
+) -> None:
+    """원장 1:3 병합 비율(float 문자열 0.3333…3). 단주는 엔진의 1e-9 반올림 규칙으로 정한다.
+
+    3주는 정확히 1주라 단주 거래가 없어야 한다 — 비율을 다시 곱하면 0.000…1주 가짜 거래가 생겼다.
+    """
+    sell_all = SetPositionTarget(
+        target=QuantityTarget(INSTRUMENT, Decimal(0)),
+        execution=ExecutionPolicy.market_next_open(),
+    )
+    engine, _, _ = run(
+        bars_with_split(60.0, 70.0),
+        (split("0.3333333333333333"),),
+        script=(buy(held), None, sell_all),
+        core=core,
+    )
+    artifacts, _ = _artifacts(
+        engine.event_store.result_tables(),
+        actions=engine.event_store.corporate_actions_applied(),
+    )
+
+    (action,) = artifacts.corporate_actions or ()
+    assert (action.new_quantity, action.settled_quantity) == (new_quantity, settled)
+    # 단주가 없으면 청산 거래는 남은 수량을 판 한 건뿐이다.
+    expected = 1 if settled == "0" else 2
+    assert len(artifacts.trades) == expected
+    assert artifacts.trades[-1].quantity == new_quantity

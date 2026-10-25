@@ -44,6 +44,13 @@ type StrategyDocumentSearch = {
   asOf?: string;
   security?: string;
   draft?: string;
+  run?: string;
+  /** 새 전략 단계별 안내를 보인다(RD-04-D). 끄면 같은 초안을 편집기로 본다. */
+  guide?: boolean;
+  /** 안내의 지금 단계 id(`guideSteps`). 모르는 값이면 화면이 첫 단계로 본다. */
+  step?: string;
+  /** 안내 오른쪽 칸의 탭(AI 도우미·문서 미리보기). 없으면 AI 공급자 연결 여부로 화면이 고른다. */
+  assist?: "assistant" | "preview";
 };
 type BacktestHistorySearch = {
   offset?: number;
@@ -70,6 +77,11 @@ const strategyDocumentSearch = (
     asOf: typeof search.asOf === "string" ? search.asOf : undefined,
     security: typeof search.security === "string" ? search.security : undefined,
     draft: isNewDraftId(search.draft) ? search.draft : undefined,
+    run: typeof search.run === "string" && search.run.trim() !== "" ? search.run.trim() : undefined,
+    guide: search.guide === true || search.guide === "true" ? true : undefined,
+    step: typeof search.step === "string" && search.step !== "" ? search.step : undefined,
+    assist:
+      search.assist === "assistant" || search.assist === "preview" ? search.assist : undefined,
   };
 };
 
@@ -83,9 +95,17 @@ const StrategyRevisionPage = lazyRouteComponent(
   () => import("../../pages/research-strategy-revision"),
   "StrategyRevisionPage",
 );
+const ResearchHomePage = lazyRouteComponent(
+  () => import("../../pages/research-home"),
+  "ResearchHomePage",
+);
 const StrategiesPage = lazyRouteComponent(
   () => import("../../pages/research-strategies"),
   "StrategiesPage",
+);
+const StrategySessionPage = lazyRouteComponent(
+  () => import("../../pages/research-strategies"),
+  "StrategySessionPage",
 );
 const BacktestsPage = lazyRouteComponent(
   () => import("../../pages/research-backtests"),
@@ -102,6 +122,10 @@ const ExperimentPage = lazyRouteComponent(
 const NewExperimentPage = lazyRouteComponent(
   () => import("../../pages/research-experiment-new"),
   "NewExperimentPage",
+);
+const FactorLibraryPage = lazyRouteComponent(
+  () => import("../../pages/research-factors"),
+  "FactorLibraryPage",
 );
 const SettingsPage = lazyRouteComponent(
   () => import("../../pages/settings"),
@@ -165,13 +189,17 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  beforeLoad: () => {
+  // 연구 홈(재설계 P6). 옛 빌더 북마크(`?step=…&run=…`)만 예전처럼 새 전략 편집기로 보낸다.
+  beforeLoad: ({ search }) => {
+    const legacy = search as Record<string, unknown>;
+    if (legacy.step === undefined && legacy.run === undefined) return;
     throw redirect({
       to: "/research/strategies/new",
       search: {},
       replace: true,
     });
   },
+  component: ResearchHomePage,
 });
 
 const legacyBuilderRoute = createRoute({
@@ -198,6 +226,12 @@ const strategiesRoute = createRoute({
   path: "/research/strategies",
   validateSearch: strategyHistorySearch,
   component: StrategiesPage,
+});
+
+const strategySessionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/strategies/$strategyId",
+  component: StrategySessionPage,
 });
 
 const strategyRevisionRoute = createRoute({
@@ -238,6 +272,12 @@ const backtestRunRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/research/backtests/$runId",
   component: BacktestRunPage,
+});
+
+const factorLibraryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/factors",
+  component: FactorLibraryPage,
 });
 
 const experimentsRoute = createRoute({
@@ -299,12 +339,14 @@ const routeTree = rootRoute.addChildren([
   legacyBuilderRoute,
   strategiesRoute,
   newStrategyRoute,
+  strategySessionRoute,
   strategyRevisionRoute,
   backtestsRoute,
   backtestRunRoute,
   experimentsRoute,
   newExperimentRoute,
   experimentRoute,
+  factorLibraryRoute,
   settingsRoute,
   operationsRoute.addChildren([
     deploymentsRoute,

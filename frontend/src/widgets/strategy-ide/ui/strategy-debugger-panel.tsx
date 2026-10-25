@@ -1,12 +1,14 @@
-import { useMemo, type ComponentProps } from "react";
+import { useContext, useMemo, type ComponentProps } from "react";
 
 import { StrategyDebugger } from "../../../features/debug-strategy";
 import type { RunEnvironment } from "../../../shared/api";
+import type { RunParameterContext } from "../../../entities/backtest";
 import {
   ExecutionPlanPanel,
   type DocumentState,
   type ExecutionPlansState,
 } from "../../../features/edit-strategy";
+import { OpenEditorWorkspaceContext } from "../model/workspace-context";
 import { buildStrategyDebuggerAvailability } from "../model/strategy-debugger-context";
 
 type StrategyDebuggerPanelProps = {
@@ -14,6 +16,7 @@ type StrategyDebuggerPanelProps = {
   executionPlans: ExecutionPlansState;
   /** 실행 설정 패널이 검증한 실행 설정. 없으면 추적이 막힌다(P3-02). */
   environment: RunEnvironment | null;
+  parameters?: RunParameterContext;
   publicationOwnerKey: string;
   asOf?: string;
   security?: string;
@@ -29,6 +32,7 @@ export const StrategyDebuggerPanel = ({
   document,
   executionPlans,
   environment,
+  parameters,
   publicationOwnerKey,
   asOf,
   security,
@@ -36,10 +40,11 @@ export const StrategyDebuggerPanel = ({
   onSearchSelection,
   onSelectPointer,
 }: StrategyDebuggerPanelProps) => {
+  const openEditor = useContext(OpenEditorWorkspaceContext);
   const availability = useMemo(
     () =>
-      buildStrategyDebuggerAvailability(document, executionPlans, environment),
-    [document, environment, executionPlans],
+      buildStrategyDebuggerAvailability(document, executionPlans, environment, parameters),
+    [document, environment, executionPlans, parameters],
   );
   return (
     <StrategyDebugger
@@ -56,6 +61,10 @@ export const StrategyDebuggerPanel = ({
           state={executionPlans}
           selectedPointer={selectedPointer}
           onSelectPointer={onSelectPointer}
+          onInspectPointer={(pointer) => {
+            openEditor?.();
+            onSelectPointer(pointer);
+          }}
         />
       }
     />

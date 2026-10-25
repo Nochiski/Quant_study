@@ -427,3 +427,21 @@ def test_the_os_cause_is_kept_for_local_diagnosis_but_stays_out_of_the_message(
     assert str(tmp_path) not in repr(error)
     assert all(str(tmp_path) not in str(argument) for argument in error.args)
     assert error.path is not None, "경로를 프로그램으로 읽는 통로는 속성이다"
+
+
+# icacls 는 콘솔(OEM) 코드 페이지로 출력한다. 로캘·UTF-8 모드로 못 읽는 바이트를 흉내 낸다.
+_UNDECODABLE_STDERR = (
+    "import sys; sys.stderr.buffer.write(bytes([0xFF, 0xFE, 0xB8])); raise SystemExit(5)"
+)
+
+
+def test_run_icacls_reports_the_failure_when_its_output_is_not_decodable(tmp_path: Path) -> None:
+    """출력을 디코딩하지 못해도 원래 실패(종료 코드)가 저장 오류로 남는다.
+
+    디코딩 실패로 stderr 가 None 이 되면 `len` 이 TypeError 를 내 권한 오류를 가렸다.
+    """
+    path = tmp_path / "secrets.json"
+    path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SecretStoreStorageError, match="returncode=5"):
+        run_icacls((sys.executable, "-c", _UNDECODABLE_STDERR, str(path)))

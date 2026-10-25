@@ -13,8 +13,6 @@ from dataclasses import fields as dataclass_fields
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -31,6 +29,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     StrategySpec,
     canonical_strategy_payload,
 )
+from tests.authoring_yaml import load_authoring_yaml
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 
@@ -185,7 +184,7 @@ def test_factor_label_is_optional_and_derived_from_factor_id() -> None:
 def test_minimal_document_passes_the_runtime_schema() -> None:
     """schema 1.2 S3: hydrate가 받아 주는 생략형 문서를 runtime schema도 통과시킨다."""
     schema = strategy_document_schema()
-    minimal = yaml.safe_load(
+    minimal = load_authoring_yaml(
         (FIXTURES / "quality_momentum.minimal.yaml").read_text(encoding="utf-8")
     )
     for key in ("description", "eligibility", "parameters"):
@@ -360,9 +359,10 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
         "#/$defs/RiskStep/risk_field_id": "equity-field",
     }
     assert set(references.values()) == {"node", "parameter", "factor"}
-    # 문서 안 팩터를 가리키는 참조는 리스크 역가중 팩터 하나뿐이다(P2-06, spec D3 S6).
+    # 역가중과 동점 해소는 같은 문서 팩터 참조 네임스페이스를 쓴다.
     assert [path for path, namespace in references.items() if namespace == "factor"] == [
-        "#/$defs/RiskStep/risk_factor_id"
+        "#/$defs/PortfolioStep/tie_breaker_factor_id",
+        "#/$defs/RiskStep/risk_factor_id",
     ]
     defines = _properties_with(schema, "x-defines")
     assert defines == {

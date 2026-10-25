@@ -1,7 +1,8 @@
 .contract-inspector {
   display: grid;
   gap: var(--space-3);
-  padding: 0 var(--space-4) var(--space-4);
+  min-width: 0;
+  padding: var(--panel-padding);
   overflow: auto;
 }
 
@@ -30,7 +31,8 @@
   overflow-wrap: anywhere;
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: var(--text-size-small);
+  font-size: var(--text-size-label);
+  line-height: var(--line-height-heading);
 }
 
 .contract-inspector__rows {
@@ -46,7 +48,8 @@
 
 .contract-inspector__rows dt {
   color: var(--text-muted);
-  font-size: var(--text-size-small);
+  font-size: var(--text-size-label);
+  line-height: var(--line-height-heading);
 }
 
 .contract-inspector__rows dd {
@@ -60,7 +63,7 @@
 .contract-inspector code {
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
-  font-size: 0.875em;
+  font-size: var(--text-size-small);
 }
 
 .contract-inspector__inline-values {
@@ -122,4 +125,30 @@
 
 .contract-inspector__description code {
   color: var(--text-subtle);
+}
+
+.contract-inspector__technical {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.contract-inspector__technical > summary {
+  color: var(--text-muted);
+  font-size: var(--text-size-label);
+}
+.contract-inspector__technical[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
+/* 필드의 뜻은 작업을 판단하는 본문이며 기술 메타의 작은 글자와 구분한다. */
+.contract-inspector__section h3 {
+  font-family: var(--font-sans);
+  font-size: var(--text-size-subsection);
+}
+.contract-inspector__description p {
+  font-size: var(--text-size-body);
+  line-height: var(--line-height-body);
+}
+.contract-inspector__technical h3 {
+  font-size: var(--text-size-label);
 }

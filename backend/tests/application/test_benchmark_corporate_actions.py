@@ -28,6 +28,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
 )
+from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -154,6 +155,7 @@ def _run(data: BacktestDataPort, tmp_path: Path, run_id: str) -> BacktestRunResu
         LocalArtifactStore(tmp_path),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
+        run_execution=ThreadRunExecution,
     )
     runs.start(
         BacktestRunSpec(
@@ -228,6 +230,7 @@ def _dataset(
 ) -> BacktestDataset:
     return BacktestDataset(
         data_snapshot_id="unit",
+        sessions=tuple(sorted({bar.session for bar in bars})),
         bars=bars,
         memberships=(),
         corporate_actions=actions,

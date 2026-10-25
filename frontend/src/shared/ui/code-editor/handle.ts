@@ -92,6 +92,8 @@ export type CodeEditorHandle = {
    * 탭에서도 툴바 버튼이 비활성 여부를 판정한다(spec D9).
    */
   historyDepth(): EditorHistoryDepth;
+  /** 이력 깊이가 바뀔 때 알린다. snapshot은 깊이가 같으면 같은 객체다. */
+  subscribeHistory(listener: () => void): () => void;
   /** Opaque undo history (plus document) for view switching; never inspected by callers. */
   getHistoryState(): unknown;
   restoreHistoryState(state: unknown): void;

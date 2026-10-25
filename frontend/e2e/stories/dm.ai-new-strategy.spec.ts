@@ -10,6 +10,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
+  collapseAssistant,
   ask,
   assistant,
   ensureProvider,
@@ -43,7 +44,7 @@ const toolbarControls = (page: Page) =>
  * 편집기 칸의 조작이 옆 칸이나 겹쳐 뜬 패널에 깔리지 않고 제자리에서 눌린다. 1440px에서 편집기 칸이
  * 266px로 눌려 "검증"이 계약 칸 밑에 깔렸고(#269), 겹쳐 뜬 서랍이 편집기 오른쪽 칸을 덮었고(#290 리뷰
  * P2-1), 512px 이하 칸에서는 Graph·Diff 탭이 이력 버튼 밑에 깔렸다(#296). 조작마다 사용자가 그 조작을 보려고
- * 굴린 자리에서 찍는다 — 1280×800에서 "중간 결과 접기"는 첫 화면 밖이다.
+ * 굴린 자리에서 찍는다. 중간 결과는 별도 작업공간의 명시 진입 버튼을 확인한다.
  */
 const expectEditorReachable = async (
   page: Page,
@@ -53,7 +54,8 @@ const expectEditorReachable = async (
     ["Graph 탭", page.getByRole("tab", { name: "그래프" })],
     ["YAML 탭", page.getByRole("tab", { name: "YAML" })],
     ["문서 상태", page.getByRole("status", { name: "문서 상태" })],
-    ["중간 결과 접기", page.getByRole("button", { name: "중간 결과 접기" })],
+    ["전략 편집", page.getByRole("button", { name: "전략 편집", exact: true })],
+    ["중간 결과", page.getByRole("button", { name: "중간 결과", exact: true })],
   ],
 ) => {
   for (const [name, control] of controls) {
@@ -73,8 +75,8 @@ const assistantHead = (page: Page): DrawerHead => ({
   controls: [
     ["제목", assistant(page).getByRole("heading", { name: "AI 어시스턴트" })],
     [
-      "사이드바 닫기",
-      assistant(page).getByRole("button", { name: "사이드바 닫기" }),
+      "AI 어시스턴트 접기",
+      assistant(page).getByRole("button", { name: "AI 어시스턴트 접기" }),
     ],
   ],
 });
@@ -120,6 +122,8 @@ test(
     test.setTimeout(240_000);
     await ensureProvider(page);
     await openEditor(page, "/research/strategies/new");
+    // 보조 영역은 기본 접힘이다. 이 시나리오에서 비교할 구조·AI 조합을 직접 연다.
+    await page.getByRole("button", { name: "전략 구조", exact: true }).click();
     // 빈 새 전략은 아직 전략이 아니다: 실행할 수 없다.
     await expect(backtest(page)).toBeDisabled();
 
@@ -140,34 +144,17 @@ test(
     ).toContainText("실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.");
     await expect(backtest(page)).toBeDisabled();
 
-    // 사이드바를 연 1440px: 편집기가 최소 폭을 지키도록 사이드바가 계약 자리에 겹쳐 뜬다.
-    await expectEditorReachable(page, "1440+AI");
-    // 전략 구조를 접으면 사이드바가 계약 옆에 붙는다(편집기 512px).
-    await page.getByRole("button", { name: "전략 구조 접기" }).click();
-    const assistantHandle = page.getByRole("separator", {
-      name: "AI 어시스턴트 크기 조절",
-    });
-    await expect(assistantHandle).toBeVisible();
-    await expectEditorReachable(page, "1440 전략 구조 접음+AI");
-    // 사이드바를 가장 넓히면 편집기 칸이 툴바 한 줄보다 좁아진다(312px). 툴바 버튼이 다음 줄로 내려가
-    // 옆 칸 밑에 깔리지 않는다(#290 리뷰 P3-2). 탭 목록은 이 폭에서 가로로 스크롤한다.
-    await assistantHandle.focus();
-    await page.keyboard.press("End");
-    await expectEditorReachable(
-      page,
-      "1440 사이드바 최대 폭",
-      toolbarControls(page),
-    );
-    await page.keyboard.press("Home");
-    // 1280px(편집기 472px): 사이드바를 연 채로는 계약 자리에 겹쳐 뜨고, 닫으면 기본 배치다. 탭 줄이 다음
-    // 줄로 내려간다.
-    await page.getByRole("button", { name: "전략 구조", exact: true }).click();
+    // AI 는 화면 위에 떠 있는 창이라 본문 폭을 나눠 갖지 않는다. 창을 최소화하면 편집기 조작이 어느 폭에서도
+    // 옆 칸이나 떠 있는 요소 밑에 깔리지 않는다(#269·#290·#296 회귀 범위).
+    await assistant(page).getByRole("button", { name: "AI 어시스턴트 접기" }).click();
+    await expect(assistant(page)).toHaveCount(0);
+    await expectEditorReachable(page, "1440");
     await page.setViewportSize({ width: 1280, height: 800 });
-    await expectEditorReachable(page, "1280+AI");
-    await assistant(page)
-      .getByRole("button", { name: "사이드바 닫기" })
-      .click();
     await expectEditorReachable(page, "1280");
+    await page.getByRole("button", { name: "중간 결과", exact: true }).click();
+    await expect(page.getByRole("region", { name: "중간 결과", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "전략 편집", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "편집기", exact: true })).toBeVisible();
     await page.setViewportSize({ width: 1440, height: 900 });
 
     // 요약 띠의 "실행 설정 채우기"로 패널을 열어 기간·유니버스를 정한다.
@@ -177,7 +164,7 @@ test(
     // 실행 화면으로 가기 전에 이탈 확인이 반드시 한 번 뜬다(`DirtyLeaveGuard`).
     await expect(backtest(page)).toBeEnabled();
     await backtest(page).click();
-    const leaveGuard = page.getByRole("button", { name: "나가기" });
+    const leaveGuard = page.getByRole("button", { name: "결과 보기" });
     await expect(leaveGuard).toBeVisible({ timeout: 60_000 });
     await expect(page).toHaveURL(/\/research\/strategies\/new/u);
     await leaveGuard.click();
@@ -185,7 +172,7 @@ test(
 
     const runStatus = page.getByRole("status", { name: "실행 상태" });
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
-    await expect(runStatus).toContainText("completed", { timeout: 120_000 });
+    await expect(runStatus).toContainText("완료", { timeout: 120_000 });
     await expect(
       page.getByRole("article", { name: "백테스트 결과" }),
     ).toBeVisible({ timeout: 120_000 });
@@ -193,12 +180,33 @@ test(
 );
 
 test(
-  "US-DM-03 사이드바와 계약 서랍을 어느 입구로 펼쳐도 머리 줄이 펼친 자리에서 눌린다",
+  "US-DM-03 AI 창과 계약 서랍을 어느 입구로 펼쳐도 머리 줄이 펼친 자리에서 눌린다",
   { tag: ["@story", "@US-DM-03"] },
   async ({ page }) => {
     await ensureProvider(page);
     await openEditor(page, "/research/strategies/new");
-    const assistantToggle = page.getByRole("button", {
+    // 처음 연 편집기는 AI 창을 최소화한 채 시작해 버튼을 가리지 않는다(PR #624 결정). 상단 바 토글로 열면 창은 화면
+    // 위에 떠 있고 뷰포트 안에 있다.
+    const floating = page.getByRole("complementary", { name: "AI 어시스턴트", exact: true });
+    await expect(floating).toBeHidden();
+    await expect(page.getByRole("button", { name: "AI 어시스턴트", exact: true })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await page.getByRole("button", { name: "AI 어시스턴트", exact: true }).click();
+    await expect(floating).toBeVisible();
+    const box = await floating.boundingBox();
+    const viewport = page.viewportSize()!;
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+    await expect(
+      floating.getByRole("textbox", { name: "어시스턴트에게 보낼 메시지" }),
+    ).toHaveAttribute("placeholder", /^생각을 말로 적어 주세요/u);
+    // 최소화한 창을 여는 입구들을 본다 — 처음부터 열린 창을 먼저 접는다.
+    await collapseAssistant(page);
+    const launcherButton = page.getByRole("button", {
       name: "AI 어시스턴트",
       exact: true,
     });
@@ -209,9 +217,10 @@ test(
     // 경우마다 페이지 맨 위에서 연다. 계약 칸 내용이 본문을 늘려 페이지가 창보다 길다.
     const toTop = () => page.evaluate(() => window.scrollTo(0, 0));
 
-    // (가) 1440: 계약이 열린 채 사이드바를 연다 — 계약 자리에 겹쳐 뜬 서랍. 여는 입구 셋을 모두 본다.
+    // 계약을 연 채 창을 연다. 여는 입구 셋(상단 바 토글·Alt+A·명령 팔레트) 모두 초점이 창으로 가고 제목 줄이 눌린다.
+    await contractToggle.click();
     const entrances = [
-      ["상단 바", () => assistantToggle.click()],
+      ["상단 바 토글", () => launcherButton.click()],
       ["Alt+A", () => page.keyboard.press("Alt+A")],
       [
         "명령 팔레트",
@@ -226,61 +235,16 @@ test(
     ] as const;
     for (const [entrance, open] of entrances) {
       await toTop();
-      await expectHeadAfterOpening(
-        page,
-        `1440 ${entrance}`,
-        open,
-        assistantHead(page),
-      );
+      await expectHeadAfterOpening(page, `1440 ${entrance}`, open, assistantHead(page));
       await page.keyboard.press("Alt+A");
     }
 
-    // (나) 1440: 계약을 접고 사이드바를 붙인 뒤 계약을 연다 — 붙은 사이드바 자리에 겹쳐 뜬 계약 서랍.
-    await toTop();
+    // 1200(좁은 화면): 계약은 서랍으로 뜨고 머리 줄이 눌린다. AI 창과 자리를 다투지 않는다.
     await page.getByRole("button", { name: "계약 접기" }).click();
-    await expectHeadAfterOpening(
-      page,
-      "1440 붙은 사이드바",
-      () => assistantToggle.click(),
-      assistantHead(page),
-    );
-    await expectHeadAfterOpening(
-      page,
-      "1440 사이드바를 붙인 뒤 계약 서랍",
-      () => contractToggle.click(),
-      contractHead(page),
-    );
-    await page.getByRole("button", { name: "계약 접기" }).click();
-    await page.keyboard.press("Alt+A");
-    await contractToggle.click();
-
-    // 1280: 계약이 붙은 기본 배치에서 사이드바를 연다 — 계약 자리에 겹쳐 뜬 서랍.
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await toTop();
-    await expectHeadAfterOpening(
-      page,
-      "1280 사이드바 서랍",
-      () => assistantToggle.click(),
-      assistantHead(page),
-    );
-    await page.keyboard.press("Alt+A");
-
-    // 1200(좁은 화면): 오른쪽 패널이 모두 접히고, 사이드바와 계약은 각각 서랍으로 뜬다.
     await page.setViewportSize({ width: 1200, height: 800 });
     await toTop();
-    await expectHeadAfterOpening(
-      page,
-      "1200 사이드바 서랍",
-      () => assistantToggle.click(),
-      assistantHead(page),
-    );
-    await page.keyboard.press("Alt+A");
+    await expectHeadAfterOpening(page, "1200 계약 서랍", () => contractToggle.click(), contractHead(page));
     await toTop();
-    await expectHeadAfterOpening(
-      page,
-      "1200 계약 서랍",
-      () => contractToggle.click(),
-      contractHead(page),
-    );
+    await expectHeadAfterOpening(page, "1200 AI 창", () => launcherButton.click(), assistantHead(page));
   },
 );

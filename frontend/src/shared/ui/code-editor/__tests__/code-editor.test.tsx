@@ -38,6 +38,32 @@ describe("CodeEditor", () => {
     ).toBeInTheDocument();
   });
 
+  it("hands out its handle only once the editor view exists", async () => {
+    // 부모는 핸들을 받자마자 선택·포커스를 옮긴다(outline reveal). view 보다 핸들이 먼저 나가면 그
+    // 명령이 조용히 사라졌다. #324 조사에서 분리해 재현한 이 준비 순서 결함을 고정한다.
+    const announced: string[] = [];
+    const bind = (handle: CodeEditorHandle | null) => {
+      if (handle !== null) {
+        announced.push(handle.getText());
+        handle.setSelection(8, 9);
+      }
+    };
+    render(
+      <CodeEditor
+        ref={bind}
+        value={'title: "a"\n'}
+        language="yaml"
+        ariaLabel="편집기"
+        onChange={vi.fn()}
+      />,
+    );
+    await screen.findByRole("textbox", { name: "편집기" });
+    expect(announced[0]).toBe('title: "a"\n');
+    const content = screen.getByRole("textbox", { name: "편집기" });
+    const view = EditorView.findFromDOM(content)!;
+    expect(view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to)).toBe("a");
+  });
+
   it("reports text changes made through the handle and maps offsets to positions", async () => {
     const onSelectionChange = vi.fn();
     const { ref, onChange } = await mount({ onSelectionChange });
@@ -163,6 +189,36 @@ describe("CodeEditor", () => {
     expect(ref.current?.getText()).toBe('title: "changed"\n');
     expect(ref.current?.historyDepth()).toEqual({ undo: 1, redo: 0 });
     act(() => expect(ref.current?.redo()).toBe(false));
+  });
+
+  it("이력 변경을 구독하고 변하지 않은 깊이의 snapshot을 재사용한다", async () => {
+    const { ref } = await mount();
+    const editor = ref.current!;
+    const listener = vi.fn();
+    const unsubscribe = editor.subscribeHistory(listener);
+    const initial = editor.historyDepth();
+    act(() => editor.setSelection(0, 0));
+    expect(editor.historyDepth()).toBe(initial);
+    expect(listener).not.toHaveBeenCalled();
+
+    act(() => editor.replaceRange(0, editor.getText().length, "changed\n"));
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(editor.historyDepth()).toEqual({ undo: 1, redo: 0 });
+    const saved = editor.getHistoryState();
+    act(() => editor.undo());
+    expect(editor.historyDepth()).toEqual({ undo: 0, redo: 1 });
+    act(() => editor.loadText("another document\n"));
+    expect(editor.historyDepth()).toEqual({ undo: 0, redo: 0 });
+    act(() => editor.restoreHistoryState(saved));
+    expect(editor.historyDepth()).toEqual({ undo: 1, redo: 0 });
+    expect(listener).toHaveBeenCalledTimes(4);
+
+    unsubscribe();
+    act(() => editor.redo());
+    expect(listener).toHaveBeenCalledTimes(4);
+    act(() => editor.undo());
+    expect(editor.historyDepth()).toEqual({ undo: 0, redo: 1 });
+    expect(listener).toHaveBeenCalledTimes(4);
   });
 
   it("round-trips undo history through the opaque state", async () => {

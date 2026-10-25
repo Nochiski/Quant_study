@@ -17,25 +17,28 @@ excluded from `spec_hash`, and the save flow (P1-06/P1-07) assigns the real stra
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from functools import cached_property
 from typing import Any
 
 from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
+    backtest_run_options_schema,
     environment_from_retired_settings,
     run_environment_schema,
     run_environment_schema_hash,
 )
+from strategy_workbench.domain.canonical.facade.encoding import canonical_json_hash
 from strategy_workbench.domain.factor.facade.expression import FieldMetadata
 from strategy_workbench.domain.factor.facade.operators import (
     OperatorDefinition,
     operator_definitions,
 )
+from strategy_workbench.domain.strategy.facade.diff import DiffKind, tree_differences
 from strategy_workbench.domain.strategy.facade.document import (
+    CURRENT_SCHEMA_VERSION,
     ENVIRONMENT_UNAVAILABLE_CODE,
     LEGACY_SHAPE_CODE,
     NotUpgradeableDocumentError,
@@ -179,6 +182,7 @@ class RunEnvironmentSchema:
 
     schema_hash: str
     schema: dict[str, Any]  # reason: JSON Schema 는 DTO 가 아니라 열린 문서다
+    options_schema: dict[str, Any]  # reason: 실행 옵션 JSON Schema도 같은 응답 판에 포함한다
 
 
 @dataclass(frozen=True)
@@ -212,13 +216,7 @@ class StrategyOperatorCatalog:
 
 def operator_catalog_hash(operators: tuple[OperatorDefinition, ...]) -> str:
     """정의 전부의 canonical JSON sha256. 정의가 하나라도 바뀌면 ETag가 바뀐다."""
-    material = json.dumps(
-        [asdict(definition) for definition in operators],
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return canonical_json_hash([asdict(definition) for definition in operators])
 
 
 def contract_hash(schema_hash: str, factor_registry_version: str, dataset_snapshot_id: str) -> str:
@@ -252,9 +250,8 @@ class StrategyAuthoringService:
     @cached_property
     def _schema(self) -> StrategyDocumentSchema:
         schema = strategy_document_schema()
-        version = schema["properties"]["schema_version"]
         return StrategyDocumentSchema(
-            schema_version=version.get("const") or max(version["enum"]),
+            schema_version=CURRENT_SCHEMA_VERSION,
             schema_hash=strategy_document_schema_hash(schema),
             schema=schema,
         )
@@ -266,7 +263,12 @@ class StrategyAuthoringService:
     @cached_property
     def _run_environment_schema(self) -> RunEnvironmentSchema:
         schema = run_environment_schema()
-        return RunEnvironmentSchema(schema_hash=run_environment_schema_hash(schema), schema=schema)
+        options = backtest_run_options_schema()
+        return RunEnvironmentSchema(
+            schema_hash=run_environment_schema_hash(schema, options),
+            schema=schema,
+            options_schema=options,
+        )
 
     def run_environment_schema(self) -> RunEnvironmentSchema:
         """실행 설정의 런타임 스키마(`domain/backtest` 소유 모델에서 유도, 순수·캐시)."""
@@ -341,7 +343,7 @@ class StrategyAuthoringService:
         if not reparsed.ok or reparsed.tree is None:
             detail = ", ".join(f"{d.code}@{d.pointer}" for d in reparsed.diagnostics[:3])
             raise DocumentUpgradeDriftError("", f"rewritten text does not parse: {detail}")
-        mismatch = _first_mismatch(expected, reparsed.tree, "")
+        mismatch = _first_mismatch(expected, reparsed.tree)
         if mismatch is not None:
             raise DocumentUpgradeDriftError(*mismatch)
         compiled = self._compile_parsed(reparsed)
@@ -465,29 +467,16 @@ def _environment_of(
     return result.environment, warnings
 
 
-def _first_mismatch(expected: object, actual: object, pointer: str) -> tuple[str, str] | None:
+def _first_mismatch(expected: object, actual: object) -> tuple[str, str] | None:
     """Deepest JSON Pointer where two parsed trees differ, or None when they are equal."""
-    if isinstance(expected, Mapping) and isinstance(actual, Mapping):
-        for key in sorted(set(expected) | set(actual)):
-            child = f"{pointer}/{str(key).replace('~', '~0').replace('/', '~1')}"
-            if key not in expected or key not in actual:
-                side = "dict-path only" if key in expected else "rewritten text only"
-                return child, f"key present in {side}"
-            found = _first_mismatch(expected[key], actual[key], child)
-            if found is not None:
-                return found
+    entry = next(tree_differences(expected, actual), None)
+    if entry is None:
         return None
-    if isinstance(expected, (list, tuple)) and isinstance(actual, (list, tuple)):
-        if len(expected) != len(actual):
-            return pointer, f"length dict-path={len(expected)} rewritten={len(actual)}"
-        for index, (left, right) in enumerate(zip(expected, actual, strict=True)):
-            found = _first_mismatch(left, right, f"{pointer}/{index}")
-            if found is not None:
-                return found
-        return None
-    if expected != actual or type(expected) is not type(actual):
-        return pointer, f"dict-path={expected!r} rewritten={actual!r}"
-    return None
+    if entry.kind is DiffKind.ADDED:
+        return entry.pointer, "present in rewritten text only"
+    if entry.kind is DiffKind.REMOVED:
+        return entry.pointer, "present in dict-path only"
+    return entry.pointer, f"dict-path={entry.before!r} rewritten={entry.after!r}"
 
 
 def _pointer_from_path(path: str) -> str:
@@ -497,6 +486,4 @@ def _pointer_from_path(path: str) -> str:
 def _semantic_kind(kind: ValidationKind) -> DiagnosticKind:
     if kind is ValidationKind.CAPABILITY:
         return DiagnosticKind.CAPABILITY
-    if kind is ValidationKind.SYNTAX:  # pragma: no cover - validator never emits syntax today
-        return DiagnosticKind.STRUCTURAL
     return DiagnosticKind.SEMANTIC

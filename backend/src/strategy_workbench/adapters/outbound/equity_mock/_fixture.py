@@ -122,10 +122,8 @@ def build_demo_fixture() -> MockEquityFixture:
             recommended_lag_sessions=0,
             description=(
                 "원주가 × 그날까지 적용된 분할·증자·병합 계수의 누적곱. 첫 관측 수준을 고정하고 "
-                "사건 뒤 가격을 올리므로 과거 값이 바뀌지 않는다(PIT). 실데이터에서는 원장이 그날 "
-                "사건을 접지 못한 적용일이 원장이 가린 셀(MASKED)이고(#220), 원장이 조정하지 않는 "
-                "사건(유상증자 권리락 등)은 조정 없이 남는다. 수익률·모멘텀·이평·변동성 계산에 "
-                "쓴다. mock 분할: sec-005930-1 2020-05-08 50:1."
+                "사건 뒤 가격을 올리므로 과거 값이 바뀌지 않는다(PIT). 수익률·모멘텀·이평·변동성 "
+                "계산에 쓴다. mock 분할: sec-005930-1 2020-05-08 50:1."
             ),
             disclosure_basis="원주가 세션 확정 + 사건 계수 공개",
             evidence="KRX 일별매매정보 종가 × mock 분할 사건 계수",
@@ -171,7 +169,7 @@ def build_demo_fixture() -> MockEquityFixture:
             available_date_basis="filing available_date",
             # 랙은 원장 dataset_profile 과 같아야 한다(#230). 접수일 다음 세션부터 쓴다.
             recommended_lag_sessions=1,
-            description="공시 available_date 이후에만 보인다.",
+            description="공시 접수일 이후에만 보인다.",
             disclosure_basis="DART 접수일 기준 사용 가능",
             evidence="DART 재무제표 자본총계 표준계정",
             coverage=FieldCoverageCapability(
@@ -202,7 +200,7 @@ def build_demo_fixture() -> MockEquityFixture:
             # 없으면 값을 내지 않는다(3개월·연간 값으로 대신하지 않는다).
             description=(
                 "최근 4분기 합(TTM). 보고서 종류와 무관하게 늘 12개월 값이며, 창의 마지막 분기 "
-                "보고서 접수일(available_date)부터 보인다. 4분기를 채울 수 없으면 값이 없다."
+                "보고서 접수일부터 보인다. 4분기를 채울 수 없으면 값이 없다."
             ),
             disclosure_basis="DART 정기보고서 접수일 기준 사용 가능",
             evidence="DART 재무제표 당기순이익 표준계정의 분기 축 4행 합",
@@ -254,7 +252,7 @@ def build_demo_fixture() -> MockEquityFixture:
             frequency=FieldFrequency.DAILY,
             available_date_basis="session",
             recommended_lag_sessions=1,
-            description="실제 0, 결측, 미수집을 CellKind로 구분한다.",
+            description="실제 0, 결측, 미수집을 구분한다.",
             disclosure_basis="거래일별 투자자 매매 집계",
             evidence="KRX 투자자별 거래실적",
             coverage=FieldCoverageCapability(
@@ -277,9 +275,62 @@ def build_demo_fixture() -> MockEquityFixture:
     profiles = (
         *profiles,
         _factor_field_profile(
+            field_id="flow.foreign_ownership",
+            dataset_id="flow_daily",
+            label="외국인 보유비중",
+            unit="pct",
+            value_type=FieldValueType.RATIO,
+            recommended_lag_sessions=1,
+            coverage=replace(
+                full_coverage,
+                supported_cell_kinds=(CellKind.OBSERVED, CellKind.MISSING, CellKind.NOT_COLLECTED),
+            ),
+        ),
+        _factor_field_profile(
+            field_id="flow.foreign_limit_exhaustion",
+            dataset_id="flow_daily",
+            label="외국인 한도소진율",
+            unit="pct",
+            value_type=FieldValueType.RATIO,
+            recommended_lag_sessions=1,
+            coverage=replace(
+                full_coverage,
+                supported_cell_kinds=(CellKind.OBSERVED, CellKind.MISSING, CellKind.NOT_COLLECTED),
+            ),
+        ),
+        _factor_field_profile(
+            field_id="flow.pension_net_buy",
+            dataset_id="flow_daily",
+            label="연기금등 순매수(대금, 키움)",
+            unit="KRW",
+            value_type=FieldValueType.AMOUNT,
+            recommended_lag_sessions=1,
+            coverage=replace(
+                full_coverage,
+                supported_cell_kinds=(CellKind.OBSERVED, CellKind.MISSING, CellKind.NOT_COLLECTED),
+            ),
+        ),
+        _factor_field_profile(
+            field_id="short.short_sale_volume",
+            dataset_id="short_daily",
+            label="공매도 거래량(키움)",
+            unit="shares",
+            value_type=FieldValueType.COUNT,
+            recommended_lag_sessions=1,
+            coverage=replace(
+                full_coverage,
+                supported_cell_kinds=(
+                    CellKind.OBSERVED,
+                    CellKind.MISSING,
+                    CellKind.NOT_COLLECTED,
+                    CellKind.SOURCE_OMITTED_ZERO,
+                ),
+            ),
+        ),
+        _factor_field_profile(
             field_id="classification.sector",
             dataset_id="classification_pit",
-            label="Sector classification",
+            label="업종 분류",
             unit="category",
             value_type=FieldValueType.CATEGORY,
             coverage=full_coverage,
@@ -287,7 +338,7 @@ def build_demo_fixture() -> MockEquityFixture:
         _factor_field_profile(
             field_id="short.short_balance_ratio",
             dataset_id="short_daily",
-            label="Short balance ratio",
+            label="공매도 잔고 비율",
             unit="ratio",
             value_type=FieldValueType.RATIO,
             coverage=full_coverage,
@@ -296,7 +347,7 @@ def build_demo_fixture() -> MockEquityFixture:
             field_id="credit.margin_balance",
             dataset_id="credit_daily",
             # 원장 정본은 신용융자 잔고 주식수 축이다(금액축은 단위 미상이라 나가지 않는다, #207).
-            label="Margin balance (shares)",
+            label="신용융자 잔고(주식수)",
             unit="shares",
             value_type=FieldValueType.COUNT,
             coverage=masked_coverage,
@@ -307,7 +358,7 @@ def build_demo_fixture() -> MockEquityFixture:
             field_id="price.shares_outstanding",
             dataset_id="price_daily",
             # 신용잔고율(잔고 ÷ 상장주식수)의 분모다(#234). 원장 정본과 같은 주식수 축이다.
-            label="Shares outstanding",
+            label="상장주식수",
             unit="shares",
             value_type=FieldValueType.COUNT,
             coverage=full_coverage,
@@ -317,7 +368,7 @@ def build_demo_fixture() -> MockEquityFixture:
         _factor_field_profile(
             field_id="event.earnings_surprise",
             dataset_id="event_pit",
-            label="Earnings surprise",
+            label="실적 서프라이즈",
             unit="ratio",
             value_type=FieldValueType.RATIO,
             coverage=full_coverage,
@@ -506,6 +557,20 @@ def build_demo_fixture() -> MockEquityFixture:
             ),
         )
     )
+    # 새 원장 필드의 손 관측도 같은 PIT 포트를 거친다. 비중은 퍼센트 원값이다.
+    for security in securities:
+        for session in sessions:
+            for field_id, value in (
+                ("flow.foreign_ownership", 52.79),
+                ("flow.foreign_limit_exhaustion", 62.79),
+                ("flow.pension_net_buy", -123_000_000.0),
+                ("short.short_sale_volume", 1_000.0),
+            ):
+                observations.append(
+                    Observation(
+                        security.security_id, field_id, session, session, value, CellKind.OBSERVED
+                    )
+                )
     observed = tuple(observations)
     return MockEquityFixture(
         snapshot=DataSnapshot(

@@ -3,10 +3,14 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(
-  resolve(process.cwd(), "src/entities/backtest/ui/backtest-run-detail.css"),
-  "utf8",
-);
+const css = ["backtest-run-detail.css", "line-chart.css", "performance-chart.css"]
+  .map((file) =>
+    readFileSync(
+      resolve(process.cwd(), "src/entities/backtest/ui", file),
+      "utf8",
+    ),
+  )
+  .join("\n");
 
 describe("백테스트 결과 CSS 소유권", () => {
   it("간격·글꼴·모서리 값을 semantic token으로만 지정한다", () => {

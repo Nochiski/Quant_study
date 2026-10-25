@@ -1,167 +1,25 @@
+import { BacktestMetricTable, type MetricExplanation } from "./backtest-metrics";
+import { BacktestOrderEvents } from "./backtest-order-events";
 import type {
+  AccountReport,
   BacktestRunResult,
-  MetricDefinition,
   MetricValue,
 } from "../../../shared/api";
-import { t, tOptional } from "../../../shared/config";
-import { useId, useRef } from "react";
+import { t, tFill, tOptional } from "../../../shared/config";
+import { type ReactNode, useId, useRef } from "react";
+import { EXPLAINING_WARNING_CODES } from "../model/metric-copy";
 import {
-  EXPLAINING_WARNING_CODES,
-  HIGHLIGHTED_METRIC_IDS,
-  metricPlainCopy,
-  metricUnavailableCopy,
-} from "../model/metric-copy";
-import {
+  runEnvironmentApplies,
   runEnvironmentLabel,
   runEnvironmentValueLabel,
   type RunEnvironmentField,
 } from "../model/run-environment-fields";
 import "./backtest-run-detail.css";
-
-type ChartSeries = {
-  label: string;
-  color: string;
-  values: Array<number | null>;
-};
-
-const chartPath = (
-  values: Array<number | null>,
-  minimum: number,
-  span: number,
-) => {
-  const width = 620;
-  const height = 180;
-  const last = Math.max(values.length - 1, 1);
-  return values
-    .map((value, index) => {
-      if (value === null) return null;
-      const x = (index / last) * width;
-      const y = height - ((value - minimum) / span) * height;
-      const previous = values[index - 1];
-      return `${index === 0 || previous === null ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .filter((value): value is string => value !== null)
-    .join(" ");
-};
-
-const LineChart = ({
-  title,
-  series,
-  emptyText = t("backtest.result.chartEmpty"),
-}: {
-  title: string;
-  series: ChartSeries[];
-  emptyText?: string;
-}) => {
-  const finite = series.flatMap((item) =>
-    item.values.filter((value): value is number => value !== null),
-  );
-  if (finite.length === 0) {
-    return (
-      <section className="result-chart">
-        <header>
-          <h4>{title}</h4>
-        </header>
-        <p className="inline-state">{emptyText}</p>
-      </section>
-    );
-  }
-  const minimum = Math.min(...finite);
-  const maximum = Math.max(...finite);
-  const span = Math.max(maximum - minimum, Math.abs(maximum) * 0.01, 1e-9);
-
-  return (
-    <section className="result-chart">
-      <header>
-        <h4>{title}</h4>
-        <div className="chart-legend">
-          {series.map((item) => (
-            <span key={item.label} style={{ color: item.color }}>
-              {item.label}
-            </span>
-          ))}
-        </div>
-      </header>
-      <svg
-        aria-label={`${title} ${t("backtest.result.chart")}`}
-        preserveAspectRatio="none"
-        role="img"
-        viewBox="0 0 620 180"
-      >
-        <line x1="0" x2="620" y1="179" y2="179" />
-        <line x1="0" x2="620" y1="90" y2="90" />
-        {series.map((item) => (
-          <path
-            d={chartPath(item.values, minimum, span)}
-            key={item.label}
-            style={{ stroke: item.color }}
-          />
-        ))}
-      </svg>
-      <footer>
-        <span>
-          {minimum.toLocaleString(undefined, { maximumFractionDigits: 3 })}
-        </span>
-        <span>
-          {maximum.toLocaleString(undefined, { maximumFractionDigits: 3 })}
-        </span>
-      </footer>
-    </section>
-  );
-};
-
-const formatMetric = (
-  metric: MetricValue,
-  definition: MetricDefinition,
-): string => {
-  if (metric.value === null) return "N/A";
-  const precision = definition.precision ?? 4;
-  if (definition.unit === "percent") {
-    return `${(metric.value * 100).toFixed(Math.min(precision, 2))}%`;
-  }
-  if (definition.unit === "currency") {
-    return `₩${metric.value.toLocaleString("ko-KR", {
-      maximumFractionDigits: precision,
-    })}`;
-  }
-  if (definition.unit === "count" || definition.unit === "sessions") {
-    return metric.value.toFixed(0);
-  }
-  return metric.value.toFixed(precision);
-};
-
-/** 사용 불가 지표 칸에서 이유를 적은 데이터 경고로 가는 연결. */
-type MetricExplanation = { href: string; open: () => void };
-
-const MetricCell = ({
-  metric,
-  definition,
-  explanation = null,
-}: {
-  metric: MetricValue;
-  definition: MetricDefinition;
-  explanation?: MetricExplanation | null;
-}) => (
-  <>
-    <strong className={metric.value === null ? "is-unavailable" : ""}>
-      {formatMetric(metric, definition)}
-    </strong>
-    {metric.value === null && metric.unavailable_reason && (
-      <small>
-        {metricUnavailableCopy(metric.unavailable_reason)}
-        {explanation === null ? null : (
-          <>
-            {" "}
-            {/* 접힌 manifest 를 먼저 펼친 뒤 기본 이동으로 그 경고까지 스크롤한다. */}
-            <a href={explanation.href} onClick={explanation.open}>
-              {t("backtest.result.metricUnavailable.explain")}
-            </a>
-          </>
-        )}
-      </small>
-    )}
-  </>
-);
+import { LineChart } from "./line-chart";
+import { MonthlyReturns } from "./monthly-returns";
+import { PerformanceChart } from "./performance-chart";
+import { ResultAxes } from "./result-axes";
+import { ResultSummary, type ResultMetrics } from "./result-summary";
 
 /**
  * 실행된 실행 설정의 행. 칸 목록·순서·이름·단위·enum 값 이름은 실행 설정 스키마에서 읽는다
@@ -178,7 +36,9 @@ const environmentRows = (
     ...(fields ?? []).map((field) => ({
       key: field.name,
       label: runEnvironmentLabel(field),
-      value: runEnvironmentValueLabel(field, record[field.name]),
+      value: runEnvironmentApplies(field, record)
+        ? runEnvironmentValueLabel(field, record[field.name])
+        : t("backtest.result.environment.notApplied"),
     })),
     ...Object.entries(record)
       .filter(([key]) => !known.has(key))
@@ -190,11 +50,40 @@ const environmentRows = (
   ];
 };
 
+/** 보조 차트의 화면 읽기용 요약: 마지막 값을 말한다. 값이 없으면 차트가 빈 문구를 보인다. */
+const lastValueSummary = (
+  title: string,
+  values: ReadonlyArray<number | null>,
+  format: (value: number) => string,
+) => {
+  const last = [...values].reverse().find((value) => value !== null) ?? null;
+  return last === null
+    ? undefined
+    : tFill("backtest.chart.lastValueSummary", { title, value: format(last) });
+};
+
 export const BacktestRunDetail = ({
   result,
   environmentFields = null,
+  account,
+  accountReport,
+  validationReport,
+  capacityCheck,
+  regression,
+  holdings,
 }: {
   result: BacktestRunResult;
+  /** 계좌 보고서 요약. "결과 한눈에"의 최종 평가액 카드가 읽는다. */
+  account?: AccountReport["summary"];
+  accountReport?: ReactNode;
+  /** 보유 종목과 매매. 월별 수익 뒤, 청산 거래 앞에 둔다. */
+  holdings?: ReactNode;
+  /** 용량 확인. 청산 거래 뒤, 전체 지표 표 앞에 둔다(RD-07-E). */
+  capacityCheck?: ReactNode;
+  /** 팩터 회귀 패널. "종목 선정이 효과가 있었나" 카드 안에 둔다(RD-07-C). */
+  regression?: ReactNode;
+  /** 현재 계열 검증 조회는 page가 소유하며 원본 결과와 별도 영역에 조합한다. */
+  validationReport?: ReactNode;
   /** 실행 설정 스키마의 칸. page 가 스키마 query 에서 넘긴다. 없으면 기록된 키 그대로 보인다. */
   environmentFields?: readonly RunEnvironmentField[] | null;
 }) => {
@@ -223,6 +112,11 @@ export const BacktestRunDetail = ({
       .filter((item) => item.scope === "full")
       .map((item) => [item.metric_id, item]),
   );
+  const metrics: ResultMetrics = {
+    metric: (metricId) => fullMetrics.get(metricId),
+    definition: (metricId) => definitions.get(metricId),
+    explanationFor,
+  };
   return (
     <article className="run-detail" aria-labelledby={titleId}>
       <header className="run-detail__header">
@@ -230,67 +124,70 @@ export const BacktestRunDetail = ({
           <span className="section-kicker">{t("backtest.result.kicker")}</span>
           <h3 id={titleId}>{t("backtest.result.title")}</h3>
           <p>
-            {result.manifest.engine_core.toUpperCase()} core · registry{" "}
+            {result.manifest.run_spec.core?.toUpperCase() ?? "—"} ·{" "}
+            {t("backtest.result.registry")}{" "}
             <code>{result.manifest.metric_registry_version}</code>
           </p>
         </div>
         <span className="run-id">{result.manifest.run_id.slice(0, 12)}</span>
       </header>
 
-      <section
-        className="metric-highlights"
-        aria-label={t("backtest.result.highlights")}
+      <nav
+        className="run-detail__navigation"
+        aria-label={t("backtest.result.navigation")}
       >
-        {HIGHLIGHTED_METRIC_IDS.map((metricId) => {
-          const metric = fullMetrics.get(metricId);
-          const definition = definitions.get(metricId);
-          if (metric === undefined || definition === undefined) return null;
-          // 영어 이름은 registry `label` 그대로, 쉬운 이름·뜻은 i18n이 소유한다(결과 설명 spec R4).
-          const plain = metricPlainCopy(metricId);
-          return (
-            <div key={metricId}>
-              <span>{definition.label}</span>
-              <MetricCell
-                definition={definition}
-                explanation={explanationFor(metric)}
-                metric={metric}
-              />
-              {plain === null ? null : (
-                <p className="metric-highlights__plain">
-                  <dfn>{plain.name}</dfn> {plain.description}
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </section>
+        <a href={`#${titleId}-summary`}>{t("backtest.summary.title")}</a>
+        {validationReport ? (
+          <a href={`#${titleId}-validation`}>{t("backtest.evidence.title")}</a>
+        ) : null}
+        <a href={`#${titleId}-charts`}>{t("backtest.chart.title")}</a>
+        <a href={`#${titleId}-axes`}>{t("backtest.axes.title")}</a>
+        <a href={`#${titleId}-monthly`}>{t("backtest.monthly.title")}</a>
+        {holdings ? (
+          <a href={`#${titleId}-holdings`}>{t("backtest.holdings.title")}</a>
+        ) : null}
+        <a href={`#${titleId}-trades`}>{t("backtest.result.trades")}</a>
+        {accountReport ? (
+          <a href={`#${titleId}-account`}>{t("backtest.account.title")}</a>
+        ) : null}
+        <a href={`#${titleId}-metrics`}>{t("backtest.result.metrics")}</a>
+        <a
+          href={`#${titleId}-manifest`}
+          onClick={() => {
+            if (drawer.current) drawer.current.open = true;
+          }}
+        >
+          {t("backtest.result.manifest")}
+        </a>
+      </nav>
 
-      <div className="result-chart-grid">
-        <LineChart
-          series={[
-            {
-              label: t("backtest.result.series.strategy"),
-              color: "var(--chart-series-1)",
-              values: result.series.equity.map((item) => item.equity),
-            },
-            {
-              label: t("backtest.result.series.benchmark"),
-              color: "var(--chart-series-2)",
-              values: result.series.equity.map((item) => item.benchmark_equity),
-            },
-          ]}
-          title={t("backtest.result.chart.equity")}
-        />
-        <LineChart
-          series={[
-            {
-              label: t("backtest.result.series.drawdown"),
-              color: "var(--chart-series-3)",
-              values: result.series.drawdown.map((item) => item.drawdown),
-            },
-          ]}
-          title={t("backtest.result.chart.drawdown")}
-        />
+      <ResultSummary id={`${titleId}-summary`} metrics={metrics} account={account} />
+
+      {validationReport ? (
+        <section
+          id={`${titleId}-validation`}
+          tabIndex={-1}
+          className="result-evidence"
+          aria-label={t("backtest.evidence.title")}
+        >
+          <h4>{t("backtest.evidence.title")}</h4>
+          {validationReport}
+          <p className="result-evidence__disclaimer">
+            {t("backtest.evidence.disclaimer")}
+          </p>
+        </section>
+      ) : null}
+
+      <PerformanceChart
+        id={`${titleId}-charts`}
+        series={result.series}
+        benchmarkId={result.manifest.run_spec.benchmark_security_id}
+      />
+
+      <section
+        className="result-chart-grid"
+        aria-label={t("backtest.chart.more")}
+      >
         <LineChart
           series={[
             {
@@ -300,6 +197,11 @@ export const BacktestRunDetail = ({
             },
           ]}
           title={t("backtest.result.chart.rollingSharpe")}
+          summary={lastValueSummary(
+            t("backtest.result.chart.rollingSharpe"),
+            result.series.rolling_sharpe.map((item) => item.value),
+            (value) => value.toFixed(2),
+          )}
           // 창보다 짧은 실행만 창 길이로 이유를 말한다. 흔들림 0 등 다른 이유면 일반 문구다(#303).
           emptyText={
             result.series.rolling_sharpe_window_sessions != null &&
@@ -330,80 +232,37 @@ export const BacktestRunDetail = ({
             },
           ]}
           title={t("backtest.result.chart.exposure")}
+          summary={lastValueSummary(
+            t("backtest.result.chart.exposure"),
+            result.artifacts.snapshots.map((item) => item.gross_exposure),
+            (value) => `${(value * 100).toFixed(1)}%`,
+          )}
         />
-      </div>
-
-      <section className="monthly-panel">
-        <header>
-          <h4>{t("backtest.result.monthly")}</h4>
-          <span>{t("backtest.result.monthly.description")}</span>
-        </header>
-        <div className="monthly-grid">
-          {result.series.monthly_returns.map((item) => (
-            <div
-              className={item.value >= 0 ? "is-positive" : "is-negative"}
-              key={`${item.year}-${item.month}`}
-            >
-              <span>
-                {item.year}.{String(item.month).padStart(2, "0")}
-              </span>
-              <strong>{(item.value * 100).toFixed(2)}%</strong>
-            </div>
-          ))}
-        </div>
       </section>
 
-      <section className="raw-metric-panel">
-        <header>
-          <div>
-            <h4>{t("backtest.result.metrics")}</h4>
-            <p>{t("backtest.result.metrics.description")}</p>
-          </div>
-          <span>
-            {result.metrics.length} {t("backtest.result.values")}
-          </span>
-        </header>
-        <div className="result-table-wrap">
-          <table className="result-table">
-            <thead>
-              <tr>
-                <th>{t("backtest.result.column.scope")}</th>
-                <th>{t("backtest.result.column.metric")}</th>
-                <th>{t("backtest.result.column.category")}</th>
-                <th>{t("backtest.result.column.value")}</th>
-                <th>{t("backtest.result.column.samples")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.metrics.map((metric, index) => {
-                const definition = definitions.get(metric.metric_id);
-                if (definition === undefined) return null;
-                return (
-                  <tr key={`${metric.scope}-${metric.metric_id}-${index}`}>
-                    <td>
-                      {metric.scope_label ?? metric.scope.replaceAll("_", " ")}
-                    </td>
-                    <td>
-                      <code>{metric.metric_id}</code>
-                    </td>
-                    <td>{definition.category.replaceAll("_", " ")}</td>
-                    <td>
-                      <MetricCell
-                        definition={definition}
-                        explanation={explanationFor(metric)}
-                        metric={metric}
-                      />
-                    </td>
-                    <td>{metric.sample_count}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <ResultAxes
+        id={`${titleId}-axes`}
+        metrics={metrics}
+        regression={regression}
+      />
 
-      <section className="trade-panel">
+      <MonthlyReturns
+        id={`${titleId}-monthly`}
+        points={result.series.monthly_returns}
+      />
+
+      {holdings ? (
+        <section
+          id={`${titleId}-holdings`}
+          className="run-detail__holdings"
+          tabIndex={-1}
+          aria-label={t("backtest.holdings.title")}
+        >
+          {holdings}
+        </section>
+      ) : null}
+
+      <section className="trade-panel" id={`${titleId}-trades`} tabIndex={-1}>
         <header>
           <h4>{t("backtest.result.trades")}</h4>
           <span>
@@ -415,18 +274,26 @@ export const BacktestRunDetail = ({
         {result.artifacts.trades.length === 0 ? (
           <p className="inline-state">{t("backtest.result.trades.empty")}</p>
         ) : (
-          <div className="result-table-wrap">
+          <div
+            className="result-table-wrap"
+            role="region"
+            tabIndex={0}
+            aria-label={t("backtest.result.trades")}
+          >
             <table className="result-table">
+              <caption className="sr-only">
+                {t("backtest.result.trades")}
+              </caption>
               <thead>
                 <tr>
-                  <th>{t("backtest.result.column.security")}</th>
-                  <th>{t("backtest.result.column.side")}</th>
-                  <th>{t("backtest.result.column.opened")}</th>
-                  <th>{t("backtest.result.column.closed")}</th>
-                  <th>{t("backtest.result.column.quantity")}</th>
-                  <th>{t("backtest.result.column.pnl")}</th>
-                  <th>{t("backtest.result.column.fees")}</th>
-                  <th>{t("backtest.result.column.slippage")}</th>
+                  <th scope="col">{t("backtest.result.column.security")}</th>
+                  <th scope="col">{t("backtest.result.column.side")}</th>
+                  <th scope="col">{t("backtest.result.column.opened")}</th>
+                  <th scope="col">{t("backtest.result.column.closed")}</th>
+                  <th scope="col">{t("backtest.result.column.quantity")}</th>
+                  <th scope="col">{t("backtest.result.column.pnl")}</th>
+                  <th scope="col">{t("backtest.result.column.fees")}</th>
+                  <th scope="col">{t("backtest.result.column.slippage")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -435,7 +302,9 @@ export const BacktestRunDetail = ({
                     <td>
                       <code>{trade.security_id}</code>
                     </td>
-                    <td>{trade.side}</td>
+                    <td>
+                      {tOptional(`backtest.side.${trade.side}`) ?? trade.side}
+                    </td>
                     <td>{trade.opened_on}</td>
                     <td>{trade.closed_on}</td>
                     <td>{trade.quantity}</td>
@@ -454,8 +323,31 @@ export const BacktestRunDetail = ({
         )}
       </section>
 
+      <BacktestOrderEvents artifacts={result.artifacts} />
+
+      {capacityCheck}
+
+      {accountReport ? (
+        <section
+          id={`${titleId}-account`}
+          tabIndex={-1}
+          aria-label={t("backtest.account.title")}
+        >
+          {accountReport}
+        </section>
+      ) : null}
+
+      <BacktestMetricTable
+        definitions={result.metric_definitions}
+        metrics={result.metrics}
+        id={`${titleId}-metrics`}
+        explanationFor={explanationFor}
+      />
+
       <details
-        className="manifest-drawer"
+        id={`${titleId}-manifest`}
+        tabIndex={-1}
+        className="manifest-drawer ui-disclosure"
         aria-label={t("backtest.result.manifest")}
         ref={drawer}
       >
@@ -473,11 +365,15 @@ export const BacktestRunDetail = ({
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.core")}</dt>
-                <dd>{result.manifest.engine_core.toUpperCase()}</dd>
+                <dd>{result.manifest.run_spec.core?.toUpperCase() ?? "—"}</dd>
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.initialCash")}</dt>
-                <dd>{result.manifest.initial_cash.toLocaleString("ko-KR")}</dd>
+                <dd>
+                  {result.manifest.run_spec.initial_cash?.toLocaleString(
+                    "ko-KR",
+                  ) ?? "—"}
+                </dd>
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.benchmark")}</dt>
@@ -485,7 +381,7 @@ export const BacktestRunDetail = ({
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.annualizationDays")}</dt>
-                <dd>{result.manifest.annualization_days}</dd>
+                <dd>{result.manifest.run_spec.annualization_days ?? "—"}</dd>
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.metricWindows")}</dt>
@@ -494,7 +390,7 @@ export const BacktestRunDetail = ({
                     ? result.manifest.run_spec.metric_windows
                         .map(
                           (window) =>
-                            `${window.scope}: ${window.start} → ${window.end}`,
+                            `${t(`backtest.scope.${window.scope}`)}: ${window.start} → ${window.end}`,
                         )
                         .join(" · ")
                     : "—"}

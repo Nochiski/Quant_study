@@ -174,3 +174,23 @@ def test_a_window_without_sessions_is_answered_without_bars(
     )
 
     assert (dataset.bars, dataset.history_bars) == ((), ())
+
+
+@pytest.mark.parametrize("name", ["mock", "equity_duckdb"])
+def test_dataset_calendar_is_independent_of_requested_bars(
+    request: pytest.FixtureRequest, name: str
+) -> None:
+    adapter = _adapter(request, name)
+    sessions = tuple(date(2024, 1, day) for day in (8, 9, 10, 11, 12))
+    # 종목 요청이 하나도 없어도 달력은 공급한다. 워밍업 날짜는 실행 달력에 섞이지 않는다.
+    dataset = adapter.load_backtest_dataset(
+        BacktestDataQuery(sessions[0], sessions[-1], (), None, history_sessions_before_start=2)
+    )
+    assert dataset.sessions == sessions
+    assert dataset.bars == ()
+    if name == "equity_duckdb":
+        suspended = adapter.load_backtest_dataset(
+            BacktestDataQuery(sessions[0], sessions[-1], ("000660:1",), None)
+        )
+        assert suspended.sessions == sessions
+        assert date(2024, 1, 10) not in {bar.session for bar in suspended.bars}

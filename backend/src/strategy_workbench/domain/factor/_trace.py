@@ -1,20 +1,22 @@
 """Bounded factor node trace: the evaluator's per-node values as an immutable projection.
 
-WORKFLOW P1.5-02. The trace reuses the evaluator's computed-node cache (same values, no second
-evaluation path) and explains every `None` with a status so correctness parity (P1.5-04) and the
-later debug API (P5-01) can show *why* a value is missing: warm-up, missing input, divide by zero,
-missing group, missing reference. 원장이 가린 칸 때문에 결측이 된 칸(`masked`)은 평가기가 값 구간
-규칙으로 정한 칸을 그대로 읽는다 — 추적이 규칙을 다시 적지 않는다(#350). Selection is bounded by
-node ids, security ids, dates and a row cap; ordering is deterministic (topological node order,
-then as_of, then security_id).
+WORKFLOW P1.5-02. 추적은 평가기가 채운 노드 캐시를 뷰(`TraceNodeCache`)로 읽는다 — 값은 같고 두
+번째 평가 경로가 없다. 객체 평가기(`_NodeEvaluator.cache`)와 열 평가기(`FactorNodeCache`)의 캐시가
+같은 뷰를 내므로 어느 캐시로 만들어도 trace 가 같다(columnar-tape T3-06). The trace explains every
+`None` with a status so correctness parity (P1.5-04) and the later debug API (P5-01) can show *why*
+a value is missing: warm-up, missing input, divide by zero, missing group, missing reference.
+원장이 가린 칸 때문에 결측이 된 칸(`masked`)은 평가기가 값 구간 규칙으로 정한 칸을 그대로 읽는다 —
+추적이 규칙을 다시 적지 않는다(#350). Selection is bounded by node ids, security ids, dates and a
+row cap; ordering is deterministic (topological node order, then as_of, then security_id).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
+from typing import Protocol
 
 from ._evaluation import (
     FactorComputedValue,
@@ -25,14 +27,14 @@ from ._evaluation import (
     _compute_nodes,
     _evaluation_from_computed,
     _indices_by_security,
-    _NodeEvaluator,
     _noop_checkpoint,
     _noop_progress,
-    values_from_indices,
 )
+from ._history import node_read_window
 from ._nodes import (
     BinaryNode,
     BinaryOperator,
+    ConditionalNode,
     ConstantNode,
     ExpressionNode,
     FactorGraph,
@@ -41,8 +43,6 @@ from ._nodes import (
     ParameterNode,
     TimeSeriesNode,
     TimeSeriesOperator,
-    UnaryNode,
-    UnaryOperator,
 )
 from ._planning import ResolvedFactorParameter, _operation, _topological_order
 from ._validation import node_dependencies
@@ -56,6 +56,18 @@ class TraceValueStatus(StrEnum):
     GROUP_MISSING = "group_missing"
     # 원장이 가린 셀이거나, 값이 대표하는 시점 구간에 가린 셀이 들어 결측이 된 칸(#337·#350)
     MASKED = "masked"
+
+
+class TraceNodeCache(Protocol):
+    """trace 가 읽는 노드 캐시 뷰. 노드 값과 MASKED 판정은 평가기가 소유하고 trace 는 읽기만 한다.
+
+    객체 평가기(`_NodeEvaluator.cache`)와 열 평가기(`FactorNodeCache`)가 같은 읽기를 낸다. 값은
+    객체 평가기 칸과 같은 Python 값(float·bool·None)이다.
+    """
+
+    def value(self, node_id: str, row: int) -> FactorComputedValue: ...
+
+    def is_masked(self, node_id: str, row: int) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -99,32 +111,6 @@ class FactorTrace:
     truncated: bool
 
 
-def trace_factor_graph(
-    graph: FactorGraph,
-    *,
-    observations: tuple[FactorObservation, ...],
-    missing: MissingPolicy,
-    parameters: tuple[ResolvedFactorParameter, ...] = (),
-    selection: TraceSelection | None = None,
-    checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> FactorTrace:
-    """Project the evaluator node cache into a bounded, explained, deterministically ordered trace.
-
-    Values come from the same cache `evaluate_factor_graph` reads, so they never diverge.
-    """
-    bounds, nodes, order = _trace_context(graph, observations, selection, checkpoint=checkpoint)
-    evaluator = _compute_nodes(
-        graph,
-        observations=observations,
-        missing=missing,
-        parameters=parameters,
-        checkpoint=checkpoint,
-    )
-    return _project_trace(
-        graph, observations, bounds, nodes, order, evaluator, checkpoint=checkpoint
-    )
-
-
 def evaluate_factor_graph_with_trace(
     graph: FactorGraph,
     *,
@@ -137,9 +123,7 @@ def evaluate_factor_graph_with_trace(
 ) -> tuple[FactorEvaluation, FactorTrace]:
     """Evaluate once and derive both the executable output and bounded debug projection.
 
-    This is the truthful pipeline entry point for P5: the portfolio score and trace rows share
-    the exact in-memory node cache. Callers do not run `evaluate_factor_graph` and
-    `trace_factor_graph` independently.
+    포트폴리오 점수와 trace는 같은 메모리 캐시를 읽는다. 테스트도 운영과 같은 진입점을 쓴다.
     """
     bounds, nodes, order = _trace_context(graph, observations, selection, checkpoint=checkpoint)
     evaluator = _compute_nodes(
@@ -152,7 +136,9 @@ def evaluate_factor_graph_with_trace(
     )
     return (
         _evaluation_from_computed(graph, observations, evaluator.computed, checkpoint=checkpoint),
-        _project_trace(graph, observations, bounds, nodes, order, evaluator, checkpoint=checkpoint),
+        _project_trace(
+            graph, observations, bounds, nodes, order, evaluator.cache, checkpoint=checkpoint
+        ),
     )
 
 
@@ -179,21 +165,91 @@ def _trace_context(
     return bounds, nodes, order
 
 
+@dataclass(eq=False)
+class _TraceStatuses:
+    """선택 바깥 입력도 실제 읽은 칸의 원인을 메모한다. 중첩 클로저 대신 메서드 재귀(깊이는 그래프
+    깊이)로 원인을 따라가며 패널 수명을 보존한다. 칸 값과 가림은 노드 캐시 뷰로만 읽는다."""
+
+    nodes: dict[str, ExpressionNode]
+    cache: TraceNodeCache
+    observations: tuple[FactorObservation, ...]
+    by_security: dict[str, list[int]]
+    checkpoint: Callable[[], None]
+    positions: dict[int, int]
+    statuses: dict[tuple[str, int], TraceValueStatus] = field(default_factory=dict)
+
+    def status_for(self, node_id: str, index: int) -> TraceValueStatus:
+        key = (node_id, index)
+        if key in self.statuses:
+            return self.statuses[key]
+        cache = self.cache
+        value = cache.value(node_id, index)
+        if value is not None:
+            return TraceValueStatus.OK
+        node = self.nodes[node_id]
+        input_ids = tuple(node_dependencies(node))
+        inputs = tuple(cache.value(dependency, index) for dependency in input_ids)
+        indices = self.by_security[self.observations[index].security_id]
+        window = node_read_window(node).bounds(self.positions[index])
+        dependencies = input_ids
+        if isinstance(node, ConditionalNode):
+            # 조건식은 실제 선택한 가지의 원인만 잇는다. 선택하지 않은 가지의 워밍업은 무관하다.
+            dependencies = (
+                (input_ids[1],)
+                if inputs[0] is True
+                else (input_ids[2],)
+                if inputs[0] is False
+                else (input_ids[0],)
+            )
+        input_warming = False
+        # 값이 있는 칸은 위에서 OK로 끝났다. 여기서는 창이 이력 안에 있는지만 본다.
+        if window.start >= 0:
+            input_warming = any(
+                cache.value(dependency, source_index) is None
+                and self.status_for(dependency, source_index) is TraceValueStatus.WARM_UP
+                for dependency in dependencies
+                for source_index in _checkpointed(indices[window], self.checkpoint)
+            )
+        status = _status(
+            node,
+            value,
+            inputs,
+            input_ids,
+            index,
+            self.observations,
+            self.by_security,
+            cache,
+            input_warming=input_warming,
+            own_warming=window.start < 0,
+            checkpoint=self.checkpoint,
+        )
+        self.statuses[key] = status
+        return status
+
+
 def _project_trace(
     graph: FactorGraph,
     observations: tuple[FactorObservation, ...],
     bounds: TraceSelection,
     nodes: dict[str, ExpressionNode],
     order: tuple[str, ...],
-    evaluator: _NodeEvaluator,
+    cache: TraceNodeCache,
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> FactorTrace:
-    computed = evaluator.computed
+    """이미 채운 노드 캐시를 선택 범위만큼 trace 로 투영한다. 캐시는 뷰로만 읽는다."""
     wanted_nodes = order if bounds.node_ids is None else [n for n in order if n in bounds.node_ids]
 
     positions = _positions(observations, bounds, checkpoint=checkpoint)
     by_security = _indices_by_security(observations, checkpoint=checkpoint)
+    ordinal = {
+        index: position
+        for indices in by_security.values()
+        for position, index in _checkpointed(enumerate(indices), checkpoint)
+    }
+    status_for = _TraceStatuses(
+        nodes, cache, observations, by_security, checkpoint, ordinal
+    ).status_for
     row_count = 0
     truncated = False
     traced_nodes: list[NodeTrace] = []
@@ -202,31 +258,19 @@ def _project_trace(
             truncated = True  # no empty trailing NodeTrace: a capped node is simply absent
             break
         node = nodes[node_id]
-        values = computed[node_id]
         input_ids = tuple(node_dependencies(node))
         rows: list[TracedValue] = []
         for index in _checkpointed(positions, checkpoint):
             if row_count >= bounds.max_rows:
                 truncated = True
                 break
-            inputs = tuple(computed[dependency][index] for dependency in input_ids)
-            first_series = computed[input_ids[0]] if input_ids else []
+            inputs = tuple(cache.value(dependency, index) for dependency in input_ids)
             rows.append(
                 TracedValue(
                     as_of=observations[index].as_of,
                     security_id=observations[index].security_id,
-                    value=values[index],
-                    status=_status(
-                        node,
-                        values[index],
-                        inputs,
-                        first_series,
-                        index,
-                        observations,
-                        by_security,
-                        evaluator.masked[node_id],
-                        checkpoint=checkpoint,
-                    ),
+                    value=cache.value(node_id, index),
+                    status=status_for(node_id, index),
                     inputs=inputs,
                 )
             )
@@ -289,24 +333,26 @@ def _status(
     node: ExpressionNode,
     value: FactorComputedValue,
     inputs: tuple[FactorComputedValue, ...],
-    first_series: list[FactorComputedValue],
+    input_ids: tuple[str, ...],
     index: int,
     observations: tuple[FactorObservation, ...],
     by_security: dict[str, list[int]],
-    masked: frozenset[int],
+    cache: TraceNodeCache,
     *,
+    input_warming: bool,
+    own_warming: bool,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> TraceValueStatus:
     if value is not None:
         return TraceValueStatus.OK
     if isinstance(node, (ConstantNode, ParameterNode)):  # pragma: no cover - never None
         return TraceValueStatus.OK
-    if _warming_up(node, index, observations, by_security):
+    if own_warming:
         return TraceValueStatus.WARM_UP
     # 평가기가 원장이 가린 칸 때문에 결측으로 둔 칸이다 — 두 입력이 모두 값이어도 그 사이에 가린
     # 칸이 들면 여기다(#337). 판정은 평가기의 값 구간 규칙이 하고, 추적은 그 결과를 읽기만
     # 한다(#350)
-    if index in masked:
+    if cache.is_masked(node.node_id, index):
         return TraceValueStatus.MASKED
     if isinstance(node, BinaryNode):
         if (
@@ -315,42 +361,28 @@ def _status(
             and _as_number(inputs[1]) == 0
         ):
             return TraceValueStatus.DIVIDE_BY_ZERO
-        return TraceValueStatus.MISSING_INPUT
+        return TraceValueStatus.WARM_UP if input_warming else TraceValueStatus.MISSING_INPUT
     if isinstance(node, GroupNode):
         observation = observations[index]
         group = next(
             (f.value for f in observation.fields if f.field_id == node.group_field_id), None
         )
         return (
-            TraceValueStatus.MISSING_INPUT
+            (TraceValueStatus.WARM_UP if input_warming else TraceValueStatus.MISSING_INPUT)
             if isinstance(group, str)
             else TraceValueStatus.GROUP_MISSING
         )
+    if input_warming:
+        return TraceValueStatus.WARM_UP
     if isinstance(node, TimeSeriesNode) and node.operator is TimeSeriesOperator.MOMENTUM:
         # 이력은 충분하다: 창에 None 이 있었거나 모멘텀이 0 에서 시작했다
         indices = by_security[observations[index].security_id]
-        end = indices.index(index) - node.lag + 1
-        window = values_from_indices(
-            first_series, indices[end - node.window : end], checkpoint=checkpoint
-        )
+        bounds = node_read_window(node).bounds(indices.index(index))
+        window = [
+            number
+            for source in _checkpointed(indices[bounds], checkpoint)
+            if (number := _as_number(cache.value(input_ids[0], source))) is not None
+        ]
         if len(window) == node.window and window[0] == 0:
             return TraceValueStatus.DIVIDE_BY_ZERO
     return TraceValueStatus.MISSING_INPUT
-
-
-def _warming_up(
-    node: ExpressionNode,
-    index: int,
-    observations: tuple[FactorObservation, ...],
-    by_security: dict[str, list[int]],
-) -> bool:
-    """시간 연산(`lag`·창 연산)이 읽을 칸이 그 종목의 첫 관측보다 앞이다."""
-    if isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
-        lag, window = node.periods or 0, 1
-    elif isinstance(node, TimeSeriesNode):
-        lag, window = node.lag, node.window
-    else:
-        return False
-    indices = by_security[observations[index].security_id]
-    end = indices.index(index) - lag + 1
-    return end - window < 0 or end <= 0

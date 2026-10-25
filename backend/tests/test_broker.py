@@ -97,7 +97,7 @@ def test_fill_price_rule_table(
     _name: str, open_order: OpenOrder, expected_price: float | None
 ) -> None:
     outcome = BrokerSim(fee_bps=0.0).execute(
-        open_order, BAR, buying_power=1_000_000.0, fill_id="F-1"
+        open_order, BAR, buying_power=1_000_000.0, fill_id="F-1", sell_tax_rate=0.0
     )
     if expected_price is None:
         assert outcome.fill is None
@@ -112,7 +112,11 @@ def test_fill_price_rule_table(
 def test_stop_limit_triggered_but_limit_unmet_reports_triggered() -> None:
     # 매수: stop 108에서 발동, 발동가 108 > limit 107 → 체결 없음, TRIGGERED 상태
     outcome = BrokerSim(fee_bps=0.0).execute(
-        order(OrderType.STOP_LIMIT, B, limit=107, stop=108), BAR, 1_000_000.0, "F-1"
+        order(OrderType.STOP_LIMIT, B, limit=107, stop=108),
+        BAR,
+        1_000_000.0,
+        "F-1",
+        sell_tax_rate=0.0,
     )
     assert outcome.fill is None
     assert outcome.status is ExecutionStatus.TRIGGERED_UNFILLED
@@ -120,7 +124,9 @@ def test_stop_limit_triggered_but_limit_unmet_reports_triggered() -> None:
 
 def test_cash_cap_applies_to_limit_fill_price() -> None:
     # limit buy 95 체결가 95, 현금 500 → 5주
-    outcome = BrokerSim(fee_bps=0.0).execute(order(L, B, limit=95), BAR, 500.0, "F-1")
+    outcome = BrokerSim(fee_bps=0.0).execute(
+        order(L, B, limit=95), BAR, 500.0, "F-1", sell_tax_rate=0.0
+    )
     assert outcome.status is ExecutionStatus.CASH_LIMITED
     assert outcome.fill is not None
     assert outcome.fill.quantity == Decimal(5)
@@ -131,7 +137,7 @@ def test_partial_remaining_is_executed_not_original_quantity() -> None:
     open_order = OpenOrder(
         order=order(OrderType.MARKET, B).order, remaining=Decimal(3), triggered=False
     )
-    outcome = BrokerSim(fee_bps=0.0).execute(open_order, BAR, 1_000_000.0, "F-1")
+    outcome = BrokerSim(fee_bps=0.0).execute(open_order, BAR, 1_000_000.0, "F-1", sell_tax_rate=0.0)
     assert outcome.fill is not None
     assert outcome.fill.quantity == Decimal(3)
 
@@ -142,7 +148,9 @@ def test_partial_remaining_is_executed_not_original_quantity() -> None:
 def test_participation_caps_fill_to_share_of_volume() -> None:
     # volume 1,000 × 10% = 100주
     broker = BrokerSim(fee_bps=0.0, max_participation=0.1)
-    outcome = broker.execute(order(OrderType.MARKET, B, quantity=500), BAR, 1_000_000.0, "F-1")
+    outcome = broker.execute(
+        order(OrderType.MARKET, B, quantity=500), BAR, 1_000_000.0, "F-1", sell_tax_rate=0.0
+    )
     assert outcome.status is ExecutionStatus.LIQUIDITY_LIMITED
     assert outcome.fill is not None
     assert outcome.fill.quantity == Decimal(100)
@@ -151,14 +159,18 @@ def test_participation_caps_fill_to_share_of_volume() -> None:
 def test_zero_volume_bar_fills_nothing() -> None:
     empty = make_ohlc(day(2), INSTRUMENT, 100.0, 110.0, 90.0, 105.0, volume=0)
     broker = BrokerSim(fee_bps=0.0, max_participation=0.1)
-    outcome = broker.execute(order(OrderType.MARKET, B), empty, 1_000_000.0, "F-1")
+    outcome = broker.execute(
+        order(OrderType.MARKET, B), empty, 1_000_000.0, "F-1", sell_tax_rate=0.0
+    )
     assert outcome.fill is None
     assert outcome.status is ExecutionStatus.NOT_FILLED
 
 
 def test_participation_and_cash_cap_take_the_smaller() -> None:
     broker = BrokerSim(fee_bps=0.0, max_participation=0.1)  # 유동성 캡 100주
-    outcome = broker.execute(order(OrderType.MARKET, B, quantity=500), BAR, 5_000.0, "F-1")
+    outcome = broker.execute(
+        order(OrderType.MARKET, B, quantity=500), BAR, 5_000.0, "F-1", sell_tax_rate=0.0
+    )
     assert outcome.fill is not None
     assert outcome.fill.quantity == Decimal(50)  # 현금 5,000 / 100 = 50 < 100
     assert outcome.status is ExecutionStatus.CASH_LIMITED
@@ -171,7 +183,11 @@ def test_action_policy_participation_overrides_broker_default() -> None:
     action = SetPositionTarget(target=QuantityTarget(INSTRUMENT, Decimal(500)), execution=policy)
     broker = BrokerSim(fee_bps=0.0, max_participation=0.5)
     outcome = broker.execute(
-        order(OrderType.MARKET, B, quantity=500, source_action=action), BAR, 1_000_000.0, "F-1"
+        order(OrderType.MARKET, B, quantity=500, source_action=action),
+        BAR,
+        1_000_000.0,
+        "F-1",
+        sell_tax_rate=0.0,
     )
     assert outcome.fill is not None
     assert outcome.fill.quantity == Decimal(50)  # 1,000 × 5%
@@ -180,7 +196,11 @@ def test_action_policy_participation_overrides_broker_default() -> None:
 def test_fok_not_fully_fillable_is_rejected_without_fill() -> None:
     broker = BrokerSim(fee_bps=0.0, max_participation=0.1)
     outcome = broker.execute(
-        order(OrderType.MARKET, B, quantity=500, tif=TimeInForce.FOK), BAR, 1_000_000.0, "F-1"
+        order(OrderType.MARKET, B, quantity=500, tif=TimeInForce.FOK),
+        BAR,
+        1_000_000.0,
+        "F-1",
+        sell_tax_rate=0.0,
     )
     assert outcome.fill is None
     assert outcome.status is ExecutionStatus.FOK_REJECTED
@@ -190,7 +210,11 @@ def test_fok_not_fully_fillable_is_rejected_without_fill() -> None:
 def test_ioc_fills_what_it_can() -> None:
     broker = BrokerSim(fee_bps=0.0, max_participation=0.1)
     outcome = broker.execute(
-        order(OrderType.MARKET, B, quantity=500, tif=TimeInForce.IOC), BAR, 1_000_000.0, "F-1"
+        order(OrderType.MARKET, B, quantity=500, tif=TimeInForce.IOC),
+        BAR,
+        1_000_000.0,
+        "F-1",
+        sell_tax_rate=0.0,
     )
     assert outcome.fill is not None
     assert outcome.fill.quantity == Decimal(100)
@@ -198,8 +222,8 @@ def test_ioc_fills_what_it_can() -> None:
 
 def test_fixed_slippage_moves_market_fill_against_the_order() -> None:
     broker = BrokerSim(fee_bps=0.0, slippage=FixedBpsSlippage(bps=10.0))
-    buy = broker.execute(order(OrderType.MARKET, B), BAR, 1_000_000.0, "F-1")
-    sell = broker.execute(order(OrderType.MARKET, SL), BAR, 1_000_000.0, "F-2")
+    buy = broker.execute(order(OrderType.MARKET, B), BAR, 1_000_000.0, "F-1", sell_tax_rate=0.0)
+    sell = broker.execute(order(OrderType.MARKET, SL), BAR, 1_000_000.0, "F-2", sell_tax_rate=0.0)
     assert buy.fill is not None and sell.fill is not None
     assert buy.fill.price == pytest.approx(100.1)
     assert buy.fill.slippage_per_share == pytest.approx(0.1)
@@ -210,19 +234,19 @@ def test_fixed_slippage_moves_market_fill_against_the_order() -> None:
 def test_limit_fill_never_worse_than_limit_after_slippage() -> None:
     broker = BrokerSim(fee_bps=0.0, slippage=FixedBpsSlippage(bps=10.0))
     # limit buy 95, 장중 체결가 95 + 0.095 슬리피지 → 95로 clip, 기록 슬리피지 0
-    outcome = broker.execute(order(L, B, limit=95), BAR, 1_000_000.0, "F-1")
+    outcome = broker.execute(order(L, B, limit=95), BAR, 1_000_000.0, "F-1", sell_tax_rate=0.0)
     assert outcome.fill is not None
     assert outcome.fill.price == pytest.approx(95.0)
     assert outcome.fill.slippage_per_share == pytest.approx(0.0)
     # limit buy 105, 시가 100 체결 + 0.1 → 100.1 (limit 안이라 clip 없음)
-    outcome = broker.execute(order(L, B, limit=105), BAR, 1_000_000.0, "F-2")
+    outcome = broker.execute(order(L, B, limit=105), BAR, 1_000_000.0, "F-2", sell_tax_rate=0.0)
     assert outcome.fill is not None
     assert outcome.fill.price == pytest.approx(100.1)
 
 
 def test_fee_is_charged_on_slipped_notional() -> None:
     broker = BrokerSim(fee_bps=10.0, slippage=FixedBpsSlippage(bps=10.0))
-    outcome = broker.execute(order(OrderType.MARKET, B), BAR, 1_000_000.0, "F-1")
+    outcome = broker.execute(order(OrderType.MARKET, B), BAR, 1_000_000.0, "F-1", sell_tax_rate=0.0)
     assert outcome.fill is not None
     assert outcome.fill.fee == pytest.approx(10 * 100.1 * 0.001)
 
@@ -236,6 +260,8 @@ def test_liquidity_cap_uses_exact_decimal_arithmetic() -> None:
     """DEFECT-101: 90 × 0.7 = 63 (float 곱셈 62.999… 로 62가 되면 안 된다)."""
     bar = make_ohlc(day(2), INSTRUMENT, 100.0, 110.0, 90.0, 105.0, volume=90)
     broker = BrokerSim(fee_bps=0.0, max_participation=0.7)
-    outcome = broker.execute(order(OrderType.MARKET, B, quantity=1_000), bar, 1_000_000.0, "F-1")
+    outcome = broker.execute(
+        order(OrderType.MARKET, B, quantity=1_000), bar, 1_000_000.0, "F-1", sell_tax_rate=0.0
+    )
     assert outcome.fill is not None
     assert outcome.fill.quantity == Decimal(63)

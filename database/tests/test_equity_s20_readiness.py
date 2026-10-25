@@ -122,10 +122,22 @@ def test_그룹별_개수가_문서의_V7_Q8_G10_I5_F9_M3_R4_E8_과_같다() -> 
 def test_registry_대응은_레지스트리_50_안에서만_고른다() -> None:
     registry = _registry_ids()
     assert len(registry) == 50
-    mapped = {f.registry_factor_id for f in rules_s20.FACTORS if f.registry_factor_id}
-    assert mapped <= registry
-    assert len(mapped) == len({f.registry_factor_id for f in rules_s20.FACTORS
-                               if f.registry_factor_id})       # 1:1 (중복 대응 금지)
+    mapped = [f.registry_factor_id for f in rules_s20.FACTORS if f.registry_factor_id]
+    assert set(mapped) <= registry
+    # 1:1 (중복 대응 금지) — 목록 길이와 집합 크기를 견준다(집합끼리 견주면 늘 같다)
+    assert len(mapped) == len(set(mapped))
+
+
+def test_자사주_매입_공시_레지스트리는_결정공시_축_E05에_잇는다() -> None:
+    """레지스트리 `event.buyback_announcement` 의 재료는 결정 공시 금액(`event.buyback_amount`)이다.
+
+    I03(자사주 순매입률)은 사업보고서 확정치(`event.treasury_acquired`·`treasury_disposed`)라 재료가
+    다르다 — 09-06 S20 이 I03 에 달았던 대응을 E05 로 옮겼다(e1.20.0).
+    """
+    by_id = {f.factor_id: f for f in rules_s20.FACTORS}
+    assert by_id["E05"].registry_factor_id == "event.buyback_announcement"
+    assert by_id["I03"].registry_factor_id is None
+    assert "event.buyback_amount" in by_id["E05"].required_field_ids
 
 
 def test_G04는_원장_EPS_가_아니라_순이익과_주식수를_요구한다() -> None:
@@ -252,8 +264,8 @@ def test_커버_실측에_걸린_판정은_손계산으로_잰다(built) -> None
     """골든 픽스처는 모집단 비의존 선언값만 담는다(§9 S19 1차) — 커버율에서 나온 판정은 여기서.
 
     M01 은 재료(`price.adj_close`) 커버가 100% 라 ready 이고 시작일이 캘린더 하한이다.
-    E05·E06 은 `corp_event` 가 MVP 4유형만 적재해 재료 커버가 0 → `no_observations`,
-    시작일 NULL(재료가 없는데 날짜를 적으면 표가 거짓말을 한다).
+    E05·E06 은 09-06 에 `corp_event` 가 MVP 4유형만 적재해 재료 커버가 0 → `no_observations`·
+    시작일 NULL 이었다. e1.9.0 이 자사주·CB 를 실어 지금은 ready 이고 시작일은 첫 공시일이다.
     """
     _, r = built
     got = {f: (s, str(d) if d is not None else None, b) for f, s, d, b in _rows(

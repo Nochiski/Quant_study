@@ -62,8 +62,9 @@ export const ConflictBanner = ({
         <span className="conflict__note">{t("conflict.note")}</span>
       </div>
       <div className="conflict__actions">
+        {/* 주 행동은 내 편집을 잃지 않는 "새 리비전으로 저장"이다(RD-12-A). 서버 판 열기는 보조다. */}
         <Link
-          className="ui-button ui-button--primary ui-button--small"
+          className="ui-button ui-button--secondary ui-button--small"
           to="/research/strategies/$strategyId/revisions/$revision"
           params={{ strategyId, revision: String(latestRevision) }}
           search={{

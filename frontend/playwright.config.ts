@@ -9,11 +9,15 @@ import {
   previewPort,
 } from "./e2e/ports.mjs";
 import {
+  runtimeArtifactRoot,
   runtimeAssistantDatabasePath,
   runtimeAssistantSecretsPath,
+  runtimeCredentialsEnvPath,
   runtimeDatabasePath,
   runtimeResearchDatabasePath,
+  runtimeContinuousDatabasePath,
   TRIAL_HOLD_SECONDS,
+  IDEAS_API_PREFIX,
 } from "./e2e/runtime";
 
 const frontendDirectory = dirname(fileURLToPath(import.meta.url));
@@ -24,7 +28,10 @@ const runtimeDatabase = runtimeDatabasePath();
 // 설정 디렉터리라, 넘기지 않으면 e2e가 개발자의 실제 대화 이력과 `secrets.json`에 쓴다.
 const runtimeAssistantDatabase = runtimeAssistantDatabasePath();
 const runtimeAssistantSecrets = runtimeAssistantSecretsPath();
+const runtimeCredentialsEnv = runtimeCredentialsEnvPath();
 const runtimeResearchDatabase = runtimeResearchDatabasePath();
+const runtimeContinuousDatabase = runtimeContinuousDatabasePath();
+const runtimeArtifacts = runtimeArtifactRoot();
 const ci = process.env.CI !== undefined;
 // 실데이터 opt-in: `E2E_REAL_EQUITY_ROOT`(로컬 equity 루트, `ledger_sync sync` 산출)가 있으면 backend 를
 // duckdb 어댑터로 띄우고 `real-equity` project 만 수집한다. 없으면 mock 어댑터 + 릴리스 게이트 project 만.
@@ -129,22 +136,31 @@ export default defineConfig({
       // `.venv` 안 파일 변경 감지가 곧바로 재시작을 일으켜 브라우저 게이트가 한 번도
       // 통과하지 못했다. E2E 는 코드가 바뀌지 않으므로 같은 앱을 reload 없이 띄운다.
       command:
-        "uv run uvicorn strategy_workbench.bootstrap.facade.http:build_runtime_http_app " +
+        "uv run uvicorn " +
+        (realEquity
+          ? "strategy_workbench.bootstrap.facade.http:build_runtime_http_app "
+          : "tests.e2e_ideas_app:build_e2e_http_app ") +
         `--factory --host 127.0.0.1 --port ${backendPort()}`,
       cwd: backendDirectory,
       env: {
         ...process.env,
         STRATEGY_WORKBENCH_DB_PATH: runtimeDatabase,
         STRATEGY_WORKBENCH_RESEARCH_DB_PATH: runtimeResearchDatabase,
+        STRATEGY_WORKBENCH_CONTINUOUS_DB_PATH: runtimeContinuousDatabase,
+        STRATEGY_WORKBENCH_ARTIFACT_ROOT: runtimeArtifacts,
         // 포트를 옮기면 preview origin 도 바뀐다. 허용 목록에 넣지 않으면 브라우저 요청이
         // CORS 로 막혀 서버는 멀쩡한데 화면만 빈다.
         STRATEGY_WORKBENCH_ALLOWED_ORIGINS: preview,
         STRATEGY_WORKBENCH_EQUITY_ADAPTER: realEquity ? "duckdb" : "mock",
         STRATEGY_WORKBENCH_EQUITY_ROOT: realEquityRoot,
+        STRATEGY_WORKBENCH_E2E_IDEAS_PREFIX: IDEAS_API_PREFIX,
         STRATEGY_WORKBENCH_ASSISTANT_DB_PATH: runtimeAssistantDatabase,
         STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH: runtimeAssistantSecrets,
+        STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH: runtimeCredentialsEnv,
         // 대본 공급자. 실 SDK·키·네트워크 없이 어시스턴트 시나리오가 돈다(WORKFLOW B-05).
         STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER: "1",
+        // 대본 키움 probe. 키움·키·네트워크 없이 연결 설정 스토리가 돈다(S06 ②-3, US-SM-18).
+        STRATEGY_WORKBENCH_BROKER_FAKE_PROBE: "1",
         // 실험 trial run 을 붙잡는 훅. 실험 스토리 e2e 가 대기·일시정지·취소를 본다(검증 랩 V5-01).
         STRATEGY_WORKBENCH_E2E_TRIAL_HOLD_SECONDS: String(TRIAL_HOLD_SECONDS),
       },

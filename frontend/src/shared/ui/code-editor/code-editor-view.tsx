@@ -48,14 +48,23 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+} from "react";
 
+import { useCommittedRef } from "../../lib/react";
 import type {
   CodeEditorHandle,
   CodeEditorProps,
   EditorCompletionSource,
   EditorDiagnostic,
   EditorHoverSource,
+  EditorHistoryDepth,
 } from "./handle";
 import "./code-editor.css";
 
@@ -164,18 +173,12 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
   ) {
     const host = useRef<HTMLDivElement>(null);
     const view = useRef<EditorView | null>(null);
-    const callbacks = useRef({
+    const callbacks = useCommittedRef({
       onChange,
       onSelectionChange,
       onComposingChange,
       onEscape,
     });
-    callbacks.current = {
-      onChange,
-      onSelectionChange,
-      onComposingChange,
-      onEscape,
-    };
     const languageCompartment = useRef(new Compartment());
     // 문서를 갈아 끼울 때 이력을 비우려고 compartment에 둔다: 확장을 잠시 떼면 `historyField`가 사라지고
     // 다시 붙이면 빈 이력으로 초기화된다(CM6에서 이력을 지우는 방법).
@@ -187,22 +190,28 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
     const extensionsRef = useRef<Extension[]>([]);
     // Latest props, so a restored state is reconfigured to what the editor shows now, not to
     // what it was created with.
-    const latest = useRef({
+    const latest = useCommittedRef({
       language,
       readOnly,
       completionSource,
       hoverSource,
       ariaLabel,
     });
-    latest.current = {
-      language,
-      readOnly,
-      completionSource,
-      hoverSource,
-      ariaLabel,
-    };
 
-    useEffect(() => {
+    // 핸들(`useImperativeHandle`, 아래)보다 먼저 view 를 만든다. 부모는 핸들을 받자마자 선택·포커스를
+    // 옮기는데(outline reveal 등), passive effect 에서 만들면 핸들이 view 없이 먼저 나가 그 명령이
+    // 조용히 사라졌다. #324 부하 flake와 별개로 이 준비 순서는 회귀 테스트로 고정한다.
+    const historySnapshot = useRef<EditorHistoryDepth>({ undo: 0, redo: 0 });
+    const historyListeners = useRef(new Set<() => void>());
+    const publishHistory = useCallback((state: EditorState) => {
+      const next = { undo: undoDepth(state), redo: redoDepth(state) };
+      const previous = historySnapshot.current;
+      if (previous.undo === next.undo && previous.redo === next.redo) return;
+      historySnapshot.current = next;
+      for (const listener of historyListeners.current) listener();
+    }, []);
+
+    useLayoutEffect(() => {
       const parent = host.current;
       if (!parent) return;
       const extensions = [
@@ -257,6 +266,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
           },
         }),
         EditorView.updateListener.of((update) => {
+          publishHistory(update.state);
           if (update.docChanged) {
             callbacks.current.onChange(
               update.state.doc.toString(),
@@ -284,6 +294,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
               HISTORY_FIELDS,
             )
           : EditorState.create({ doc: value, extensions });
+      publishHistory(state);
       const created = new EditorView({ state, parent });
       view.current = created;
       return () => {
@@ -345,7 +356,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
       () => () => {
         callbacks.current.onComposingChange?.(false);
       },
-      [],
+      [callbacks],
     );
 
     const lastDiagnostics = useRef<string>("");
@@ -448,10 +459,10 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
           const current = view.current;
           return current === null ? false : redo(current);
         },
-        historyDepth: () => {
-          const state = view.current?.state;
-          if (state === undefined) return { undo: 0, redo: 0 };
-          return { undo: undoDepth(state), redo: redoDepth(state) };
+        historyDepth: () => historySnapshot.current,
+        subscribeHistory: (listener) => {
+          historyListeners.current.add(listener);
+          return () => { historyListeners.current.delete(listener); };
         },
         getHistoryState: () =>
           view.current?.state.toJSON(HISTORY_FIELDS) ?? null,
@@ -495,7 +506,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
           });
         },
       }),
-      [],
+      [latest],
     );
 
     return <div ref={host} className="code-editor" data-language={language} />;

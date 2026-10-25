@@ -41,9 +41,6 @@ from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (
     DEFAULT_MODEL,
     AnthropicLlmAdapter,
 )
-from strategy_workbench.application.assistant_chat.facade.ports import (  # noqa: E402  # reason: 위와 같음
-    LlmProviderPort,
-)
 from strategy_workbench.domain.assistant.facade.models import (  # noqa: E402  # reason: 위와 같음
     MIN_CALL_OUTPUT_TOKENS,
     ChatEvent,
@@ -359,12 +356,6 @@ def test_the_call_asks_for_summarized_adaptive_thinking_and_high_effort() -> Non
 
 def test_default_model_is_the_spec_model() -> None:
     assert AnthropicLlmAdapter().default_model() == DEFAULT_MODEL == "claude-opus-5"
-
-
-def test_the_adapter_satisfies_the_outgoing_port() -> None:
-    provider: LlmProviderPort = AnthropicLlmAdapter()
-
-    assert provider.kind is ProviderKind.ANTHROPIC
 
 
 def test_the_secret_and_base_url_reach_the_client_factory_per_call() -> None:

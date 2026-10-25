@@ -1,3 +1,4 @@
+import { currentCompileOutcome, currentParseOutcome } from "./document-state";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DocumentState } from "./document-state";
@@ -56,16 +57,14 @@ const chainPhase = (
     // 같은 버전이면 편집기 change가 아직 reducer에 닿지 않은 것이고, 버전이 지났으면 사용자가
     // 기다리는 동안 문서를 또 고친 것이다.
     return state.sourceVersion === armed.version ? "waiting" : "cancelled";
-  if (state.compiledVersion === state.sourceVersion) {
+  if (currentCompileOutcome(state) !== null) {
     if (canRun) return "ready";
     // 팩터 계획처럼 compile 뒤에 이어지는 검증이 아직 돌고 있으면 닫힘이 끝난 판정이 아니다.
     return settling ? "waiting" : "blocked";
   }
   // 구문 오류면 compile 자체가 시작되지 않는다 — 그대로 두면 영원히 기다린다.
-  const parseFailed =
-    state.parsedVersion === state.sourceVersion &&
-    state.parse !== null &&
-    state.parse.status !== "ok";
+  const parsed = currentParseOutcome(state);
+  const parseFailed = parsed !== null && parsed.status !== "ok";
   return parseFailed ? "blocked" : "waiting";
 };
 

@@ -20,10 +20,13 @@ from strategy_workbench.application.assistant_chat.facade.ports import LlmProvid
 from strategy_workbench.application.assistant_chat.facade.profiles import (
     ProviderNotInstalledError,
 )
+from strategy_workbench.application.strategy_design.facade.ports import StrategyNotFoundError
 from strategy_workbench.bootstrap import _assistant as assistant_module
+from strategy_workbench.bootstrap import _file_guard
 from strategy_workbench.bootstrap import _http as http_module
 from strategy_workbench.bootstrap._assistant import (
     _AuthoringStrategyCompiler,  # pyright: ignore[reportPrivateUsage]  # reason: composition root가 소유한 port 구현이라 공개 facade가 없다
+    _RunServiceBacktestResults,  # pyright: ignore[reportPrivateUsage]  # reason: composition root가 소유한 port 구현이라 공개 facade가 없다
 )
 from strategy_workbench.bootstrap.facade.container import (
     PROVIDER_ADAPTER_FACTORIES,
@@ -198,6 +201,7 @@ def test_the_secrets_file_may_not_live_inside_the_repository() -> None:
             factor_registry=_factor_registry(),
             strategy_authoring=container.strategy_authoring,
             backtest_runs=container.backtest_runs,
+            experiments=container.experiments,
         )
 
 
@@ -234,6 +238,9 @@ def test_the_runtime_settings_fall_back_to_the_documented_defaults(
     assert DEFAULT_ASSISTANT_DB_PATH.parts[-2:] == (".local", "assistant.sqlite3")
     # `None`은 "OS 규칙이 정하는 사용자 설정 디렉터리"라는 뜻이고, 그 계산의 owner는 어댑터다.
     assert settings.secrets_path is None
+    # 서버는 늘 내 문서 `auto_trading/.env`에 공급자를 둔다. conftest가 그 기본값을 tmp로 옮긴다.
+    assert settings.credentials_env_path is not None
+    assert Path(settings.credentials_env_path).parts[-2:] == ("auto_trading", ".env")
     assert settings.allow_insecure_base_url is False
     # 대본 공급자는 기본이 꺼짐이다. 켜진 채로 배포되면 사용자가 받는 답이 전부 대본이 된다.
     assert settings.provider_factories is PROVIDER_ADAPTER_FACTORIES
@@ -671,3 +678,31 @@ def test_building_the_container_with_a_real_path_locks_the_database_file(tmp_pat
     assert database.exists()
     if sys.platform != "win32":
         assert stat.S_IMODE(os.stat(database).st_mode) == 0o600
+
+
+def test_unresolvable_lineage_folds_validation_evidence_into_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """US-DM-12 리뷰 P3-3: 계열 원장을 못 읽어도 결과 설명은 막지 않는다(요약 `validation` null)."""
+    container = _container_parts()
+
+    def missing(run_id: str) -> object:
+        raise StrategyNotFoundError(f"strategy is gone — run_id={run_id}")
+
+    monkeypatch.setattr(container.backtest_runs, "validation_report", missing)
+    port = _RunServiceBacktestResults(container.backtest_runs, container.experiments)
+    assert port.validation_facts("run-1") is None
+
+
+def test_the_acl_runner_reports_the_failure_when_its_output_is_not_decodable() -> None:
+    """icacls 출력(콘솔 코드 페이지)을 디코딩하지 못해도 원래 실패가 권한 오류로 남는다.
+
+    디코딩 실패로 stderr 가 None 이 되면 `strip` 이 AttributeError 를 내 권한 오류를 가렸다.
+    """
+    command = (
+        sys.executable,
+        "-c",
+        "import sys; sys.stderr.buffer.write(bytes([0xFF, 0xFE, 0xB8])); raise SystemExit(5)",
+    )
+    with pytest.raises(_file_guard.FilePermissionError, match="returncode=5"):
+        _file_guard._run_icacls(command)

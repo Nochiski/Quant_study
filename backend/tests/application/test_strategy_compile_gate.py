@@ -202,6 +202,23 @@ def test_a_field_the_adapter_dropped_says_why_instead_of_asking_to_check_the_id(
     assert "계약을 찾을 수 없습니다" not in diagnostic.message
 
 
+def test_an_unpicked_field_in_the_graph_asks_to_pick_one_like_outside_the_graph() -> None:
+    """안내 알파 팩터 단계에서 빈 필드 노드(`field_id: ""`)도 그래프 밖 빈 칸과 같은 문장을 쓴다.
+    내부 원문(`field_id=''`)을 보이지 않고, 같은 코드·위치로 막는 것은 그대로다(재검토 3)."""
+    source = GOLDEN.replace("field_id: price.adj_close", 'field_id: ""')
+
+    compiled = _compile(source, _Catalog(_ADJ_CLOSE))
+
+    assert _errors(compiled) == [
+        ("strategy.expression.field_missing", "/factors/0/graph/nodes/0"),
+    ]
+    [diagnostic] = [
+        item for item in compiled.diagnostics if item.code == "strategy.expression.field_missing"
+    ]
+    assert diagnostic.message == "아직 필드를 고르지 않았습니다. 목록에서 필드를 고르세요."
+    assert "field_id=" not in diagnostic.message
+
+
 def test_without_an_adapter_an_unknown_field_still_compiles() -> None:
     source = GOLDEN.replace("field_id: price.adj_close", "field_id: price.closee")
 
@@ -257,6 +274,42 @@ def test_a_group_node_compiles_when_the_adapter_provides_a_group_field() -> None
     compiled = _compile(_with_factor(_GROUP_FACTOR), _Catalog(_CLOSE, _ADJ_CLOSE, _SECTOR_AS_GROUP))
 
     assert compiled.ok, _errors(compiled)
+
+
+def test_an_unpicked_group_field_asks_to_pick_one_like_every_other_field_slot() -> None:
+    """빈 그룹 필드(`group_field_id: ""`)도 필드 id 를 받는 다른 자리와 같은 문장이다
+    (최종 리뷰 1)."""
+    source = _with_factor(_GROUP_FACTOR.replace("classification.sector", '""'))
+
+    compiled = _compile(source, _Catalog(_CLOSE, _ADJ_CLOSE, _SECTOR_AS_GROUP))
+
+    [diagnostic] = [
+        item for item in compiled.diagnostics if item.code.endswith("group_field_missing")
+    ]
+    assert diagnostic.node_id == "neutral"
+    assert diagnostic.message == "아직 필드를 고르지 않았습니다. 목록에서 필드를 고르세요."
+
+
+def test_a_group_field_the_adapter_dropped_says_why_like_a_field_node() -> None:
+    """어댑터가 뺀 그룹 필드도 필드 노드와 같이 그 사유를 싣는다(5차 리뷰 3)."""
+    # 다른 그룹 필드는 있어 연산자는 쓸 수 있고, 이 그룹 필드만 어댑터가 뺐다.
+    source = _with_factor(_GROUP_FACTOR.replace("classification.sector", "classification.industry"))
+    compiled = _compile(
+        source,
+        _Catalog(
+            _CLOSE,
+            _ADJ_CLOSE,
+            _SECTOR_AS_GROUP,
+            unavailable={"classification.industry": _DROPPED},
+        ),
+    )
+
+    [diagnostic] = [
+        item for item in compiled.diagnostics if item.code.endswith("group_field_missing")
+    ]
+    assert _DROPPED in diagnostic.message
+    assert "field_id='classification.industry'" in diagnostic.message
+    assert "계약을 찾을 수 없습니다" not in diagnostic.message
 
 
 def test_without_an_adapter_a_group_node_compiles_as_before() -> None:
@@ -399,6 +452,17 @@ def test_an_unknown_field_outside_the_graph_is_a_compile_error(slot: str) -> Non
     assert "price.closex" in diagnostic.message
     assert _HANGUL.search(diagnostic.message.split("field_id=")[0]), diagnostic.message
     assert diagnostic.range is not None, "편집기가 그 필드 줄을 짚을 수 있다"
+
+
+@pytest.mark.parametrize("slot", sorted(_OUTSIDE_GRAPH_REFERENCES))
+def test_an_unpicked_field_outside_the_graph_asks_to_pick_one(slot: str) -> None:
+    """안내에서 막 추가한 빈 행(`field_id: ""`)은 고칠 id 가 없다. 내부 원문(`field_id=''`·
+    `path=`) 없이 필드를 고르라는 문장만 보인다 — 같은 코드·위치로 막는 것은 그대로다."""
+    compiled = _compile(_outside_graph_source(slot, '""'), MockEquityDataAdapter.demo())
+
+    assert _errors(compiled) == [("strategy.field.missing", _OUTSIDE_GRAPH_REFERENCES[slot][1])]
+    [diagnostic] = [item for item in compiled.diagnostics if item.code == "strategy.field.missing"]
+    assert diagnostic.message == "아직 필드를 고르지 않았습니다. 목록에서 필드를 고르세요."
 
 
 @pytest.mark.parametrize("slot", sorted(_OUTSIDE_GRAPH_REFERENCES))

@@ -1,5 +1,6 @@
 import type {
   RunEnvironment,
+  BacktestRunSpec,
   StrategyTraceRequest,
   StrategyTraceResponse,
 } from "../../../shared/api";
@@ -37,12 +38,14 @@ export type StrategyDebuggerContext = {
    * 값의 기간(`start`·`end`)을 읽는다.
    */
   environment: RunEnvironment;
+  parameterValues?: NonNullable<BacktestRunSpec["parameter_values"]>;
+  parameterSourceRunId?: string;
   factors: StrategyDebuggerFactor[];
 };
 
 /** `environment` 는 실행 설정 패널의 기간·유니버스가 아직 정해지지 않았다는 뜻이다. */
 export type StrategyDebuggerUnavailableReason =
-  "document" | "preparing" | "no-factors" | "execution-plan" | "environment";
+  "document" | "preparing" | "no-factors" | "execution-plan" | "environment" | "parameters";
 
 export type StrategyTraceSelection = {
   /** 요약은 첫 팩터의 지문으로 검증하며 종목별 추적을 요청하지 않는다. */
@@ -157,11 +160,12 @@ export const prepareStrategyTrace = (
     securityIds.length > 100
   )
     return { kind: "blocked", reason: "security" };
-  const factor = selection.summaryOnly
-    ? context.factors[0]
-    : context.factors.find(
-        (candidate) => candidate.factorId === selection.factorId,
-      );
+  const factor =
+    selection.summaryOnly && selection.factorId === ""
+      ? context.factors[0]
+      : context.factors.find(
+          (candidate) => candidate.factorId === selection.factorId,
+        );
   if (factor === undefined) return { kind: "blocked", reason: "factor" };
   if (
     !selection.summaryOnly &&
@@ -181,6 +185,7 @@ export const prepareStrategyTrace = (
   > = {
     strategy_source: context.strategySource,
     environment: context.environment,
+    ...(context.parameterValues === undefined ? {} : { parameter_values: context.parameterValues }),
     security_ids: securityIds,
     factor_id: factor.factorId,
     ...(selection.asOf === "" ? {} : { as_of: selection.asOf }),
@@ -252,6 +257,7 @@ export const prepareStrategyTrace = (
       context.expectedSnapshotId,
       context.expectedRegistryVersion,
       factor.expectedPlanHash,
+      context.parameterSourceRunId ?? null,
       { ...commonRequest, strategy_source: sourceOwner },
       nodeIds,
       selection.nodeId,
@@ -406,6 +412,7 @@ export const responseMatchesStrategyTrace = (
   const requestedNodes = new Set(request.node_ids ?? []);
   const expectsOrderDelta = request.starting_holdings != null;
   return (
+    Object.entries(request.parameter_values ?? {}).every(([name, value]) => response.parameter_values?.[name] === value) &&
     response.spec_hash === prepared.expected.specHash &&
     response.provenance.spec_hash === prepared.expected.specHash &&
     response.snapshot_id === prepared.expected.snapshotId &&

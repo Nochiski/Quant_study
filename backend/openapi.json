@@ -1,6 +1,230 @@
 {
   "components": {
     "schemas": {
+      "AccountReport": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "evaluation_basis": {
+            "const": "initial_capital",
+            "default": "initial_capital",
+            "title": "Evaluation Basis",
+            "type": "string"
+          },
+          "interpretation": {
+            "default": "외부 입출금 없는 단일 실행의 초기자본 대비 비용 후 계좌 결과입니다. 초기자본에는 기준 날짜를 붙이지 않으며, 수익률은 최종자산 / 초기자본 − 1입니다. 비용은 최종자산에 이미 반영되어 다시 차감하지 않습니다. 기존 전체 구간(FULL) 수익률은 첫 계좌 기록을 기준으로 하므로 이 수익률과 다를 수 있습니다. 최종자산은 보유 평가를 포함하며 청산 현금이나 정지·상폐 정산 완료를 뜻하지 않습니다. ",
+            "title": "Interpretation",
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/AccountReportProvenance"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AccountReportStatus"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountReportSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/DataWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "summary",
+          "detail",
+          "provenance",
+          "warnings"
+        ],
+        "title": "AccountReport",
+        "type": "object"
+      },
+      "AccountReportProvenance": {
+        "properties": {
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "environment_hash": {
+            "title": "Environment Hash",
+            "type": "string"
+          },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
+          },
+          "metric_registry_version": {
+            "title": "Metric Registry Version",
+            "type": "string"
+          },
+          "run_fingerprint": {
+            "title": "Run Fingerprint",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "strategy_hash": {
+            "title": "Strategy Hash",
+            "type": "string"
+          },
+          "strategy_provenance": {
+            "$ref": "#/components/schemas/StrategyProvenance"
+          },
+          "target_tape_hash": {
+            "title": "Target Tape Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_fingerprint",
+          "engine_version",
+          "strategy_hash",
+          "data_snapshot_id",
+          "target_tape_hash",
+          "metric_registry_version",
+          "environment_hash",
+          "strategy_provenance",
+          "schema_version",
+          "factor_evaluation_version"
+        ],
+        "title": "AccountReportProvenance",
+        "type": "object"
+      },
+      "AccountReportStatus": {
+        "enum": [
+          "available",
+          "empty_snapshots",
+          "invalid_input"
+        ],
+        "title": "AccountReportStatus",
+        "type": "string"
+      },
+      "AccountReportSummary": {
+        "properties": {
+          "final_cash": {
+            "title": "Final Cash",
+            "type": "number"
+          },
+          "final_equity": {
+            "title": "Final Equity",
+            "type": "number"
+          },
+          "first_snapshot_date": {
+            "format": "date",
+            "title": "First Snapshot Date",
+            "type": "string"
+          },
+          "initial_cash": {
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "last_snapshot_date": {
+            "format": "date",
+            "title": "Last Snapshot Date",
+            "type": "string"
+          },
+          "pnl": {
+            "title": "Pnl",
+            "type": "number"
+          },
+          "snapshot_count": {
+            "title": "Snapshot Count",
+            "type": "integer"
+          },
+          "total_return": {
+            "title": "Total Return",
+            "type": "number"
+          }
+        },
+        "required": [
+          "initial_cash",
+          "first_snapshot_date",
+          "last_snapshot_date",
+          "final_cash",
+          "final_equity",
+          "pnl",
+          "total_return",
+          "snapshot_count"
+        ],
+        "title": "AccountReportSummary",
+        "type": "object"
+      },
+      "AddLibraryVersionBody": {
+        "properties": {
+          "expected_latest": {
+            "title": "Expected Latest",
+            "type": "integer"
+          },
+          "factor": {
+            "additionalProperties": true,
+            "title": "Factor",
+            "type": "object"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "parameters": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Parameters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "factor",
+          "expected_latest"
+        ],
+        "title": "AddLibraryVersionBody",
+        "type": "object"
+      },
       "ApplicableCondition": {
         "properties": {
           "equals": {
@@ -357,6 +581,26 @@
         "title": "AssistantSecretMissingDetail",
         "type": "object"
       },
+      "AssistantStorageUnavailableDetail": {
+        "description": "공급자 저장 파일(내 문서 `auto_trading/.env`) 자체를 읽거나 쓸 수 없다(3차 리뷰 4).\n\n연결 테스트 전에 거절한다. 사용자가 파일을 고치거나 지워야 풀린다. 경로·값은 싣지 않는다.",
+        "properties": {
+          "code": {
+            "const": "assistant.storage_unavailable",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantStorageUnavailableDetail",
+        "type": "object"
+      },
       "AssistantTurnContextMismatchDetail": {
         "description": "턴 요청의 `context`가 세션 모드와 맞지 않는다(결과 설명 spec R5).\n\n전략 세션은 편집기 상태를 턴마다 받아야 하고, 결과 세션은 받지 않는다.",
         "properties": {
@@ -415,6 +659,7 @@
                 "assistant.provider_not_installed": "#/components/schemas/AssistantProviderNotInstalledDetail",
                 "assistant.provider_secret_missing": "#/components/schemas/AssistantSecretMissingDetail",
                 "assistant.result_unavailable": "#/components/schemas/AssistantResultUnavailableDetail",
+                "assistant.storage_unavailable": "#/components/schemas/AssistantStorageUnavailableDetail",
                 "assistant.turn_context_mismatch": "#/components/schemas/AssistantTurnContextMismatchDetail"
               },
               "propertyName": "code"
@@ -434,6 +679,9 @@
               },
               {
                 "$ref": "#/components/schemas/AssistantSecretMissingDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantStorageUnavailableDetail"
               },
               {
                 "$ref": "#/components/schemas/AssistantDocumentRefInvalidDetail"
@@ -497,7 +745,9 @@
                   "backtest.run.no_positions",
                   "backtest.run.benchmark_unknown",
                   "backtest.run.internal",
-                  "backtest.run.interrupted"
+                  "backtest.run.interrupted",
+                  "backtest.run.worker_exited",
+                  "backtest.run.worker_mismatch"
                 ],
                 "type": "string"
               },
@@ -538,6 +788,18 @@
             ],
             "title": "Stage",
             "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
@@ -603,6 +865,37 @@
           "parameter_id"
         ],
         "title": "BacktestParameterInvalidDetail",
+        "type": "object"
+      },
+      "BacktestRequestRetiredDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.run.request_retired",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestRequestRetiredDetail",
+        "type": "object"
+      },
+      "BacktestRequestRetiredResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BacktestRequestRetiredDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestRequestRetiredResponse",
         "type": "object"
       },
       "BacktestResearchWindowViolationDetail": {
@@ -824,7 +1117,7 @@
         "type": "object"
       },
       "BacktestRunSpec": {
-        "description": "A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.\n\n`strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`\nso a run can name a saved revision (P1-09). The run service rejects a request carrying both\nor neither (one coded 422, `backtest.run.invalid`).\nAfter resolution the run spec stored in the manifest carries both: `strategy` is the exact\nspec that was executed and `strategy_source` says where it came from.",
+        "description": "A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.\n\n`strategy` stays for existing HTTP and CLI callers; new callers use `strategy_source`\nso a run can name a saved revision (P1-09). The run service rejects a request carrying both\nor neither (one coded 422, `backtest.run.invalid`).\nAfter resolution the run spec stored in the manifest carries both: `strategy` is the exact\nspec that was executed and `strategy_source` says where it came from.",
         "properties": {
           "annualization_days": {
             "default": 252,
@@ -970,7 +1263,9 @@
                   "backtest.run.no_positions",
                   "backtest.run.benchmark_unknown",
                   "backtest.run.internal",
-                  "backtest.run.interrupted"
+                  "backtest.run.interrupted",
+                  "backtest.run.worker_exited",
+                  "backtest.run.worker_mismatch"
                 ],
                 "type": "string"
               },
@@ -1006,6 +1301,18 @@
             ],
             "title": "Stage",
             "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
@@ -1045,6 +1352,16 @@
           "experiment_paused": {
             "title": "Experiment Paused",
             "type": "boolean"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunHeadline"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "kind": {
             "$ref": "#/components/schemas/RunKind"
@@ -1341,6 +1658,52 @@
           "start"
         ],
         "title": "BlockedTrialAttempt",
+        "type": "object"
+      },
+      "BrokerErrorDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "broker.request_invalid",
+              "broker.credentials_invalid",
+              "broker.storage_unavailable"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BrokerErrorDetail",
+        "type": "object"
+      },
+      "BrokerErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BrokerErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BrokerErrorResponse",
         "type": "object"
       },
       "CandidateDecision": {
@@ -1829,6 +2192,39 @@
         "title": "ChoiceParameter",
         "type": "object"
       },
+      "ClosedHolding": {
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/HoldingChange"
+          },
+          "previous_quantity": {
+            "title": "Previous Quantity",
+            "type": "string"
+          },
+          "realized_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Pnl"
+          },
+          "security": {
+            "$ref": "#/components/schemas/SecurityLabel"
+          }
+        },
+        "required": [
+          "security",
+          "change",
+          "previous_quantity",
+          "realized_pnl"
+        ],
+        "title": "ClosedHolding",
+        "type": "object"
+      },
       "ComparisonNode": {
         "properties": {
           "kind": {
@@ -1985,6 +2381,21 @@
         "title": "ConditionalNode",
         "type": "object"
       },
+      "ConnectionOutcome": {
+        "enum": [
+          "connected",
+          "not_saved",
+          "mode_mismatch",
+          "ip_not_allowed",
+          "auth_failed",
+          "account_mismatch",
+          "no_response",
+          "refused",
+          "unreadable"
+        ],
+        "title": "ConnectionOutcome",
+        "type": "string"
+      },
       "ConstantNode": {
         "properties": {
           "kind": {
@@ -2007,6 +2418,661 @@
           "kind"
         ],
         "title": "ConstantNode",
+        "type": "object"
+      },
+      "ConstraintOperator": {
+        "enum": [
+          "lt",
+          "le",
+          "gt",
+          "ge",
+          "eq",
+          "ne"
+        ],
+        "title": "ConstraintOperator",
+        "type": "string"
+      },
+      "ContinuousAccountErrorDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "continuous.mock_only",
+              "continuous.unfinished",
+              "continuous.unsupported",
+              "continuous.no_cell",
+              "continuous.source_invalid",
+              "continuous.prepare_failed",
+              "continuous.request_invalid",
+              "continuous.request_conflict",
+              "continuous.busy",
+              "continuous.execution_failed",
+              "continuous.interrupted",
+              "continuous.not_found",
+              "continuous.result_unreadable"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ContinuousAccountErrorDetail",
+        "type": "object"
+      },
+      "ContinuousAccountErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/ContinuousAccountErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ContinuousAccountErrorResponse",
+        "type": "object"
+      },
+      "ContinuousAccountLatest": {
+        "properties": {
+          "data_mode": {
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "evaluation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContinuousAccountState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "interpretation": {
+            "default": "동결된 창별 학습 선택을 하나의 초기자본과 실제 보유 수량으로 이어 실행한 비용 후 계좌 평가입니다. 각 선택은 학습 종료일 종가에 선택 가능했다고 가정한 재현 정책이며 과거 실제 선택 시각의 증명이 아닙니다. 현재 mock 자료만 실행하며 실자료 수익성이나 실거래 준비를 뜻하지 않습니다. 수익률은 최종자산 / 초기자본 − 1이고 비용은 이미 반영되어 다시 차감하지 않습니다. 최종자산은 보유 평가를 포함하며 청산 현금이나 정지·상폐 정산 완료를 뜻하지 않습니다.",
+            "title": "Interpretation",
+            "type": "string"
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/ContinuousReadiness"
+          },
+          "status": {
+            "enum": [
+              "not_started",
+              "running",
+              "completed",
+              "failed",
+              "interrupted"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "readiness",
+          "evaluation",
+          "status",
+          "data_mode"
+        ],
+        "title": "ContinuousAccountLatest",
+        "type": "object"
+      },
+      "ContinuousAccountManifest": {
+        "properties": {
+          "annualization_days": {
+            "title": "Annualization Days",
+            "type": "integer"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ContinuousCandidateProvenance"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/FrozenWindowChoice"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "core": {
+            "$ref": "#/components/schemas/ExecutionCore"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "data_mode": {
+            "const": "mock",
+            "default": "mock",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/RunEnvironment"
+          },
+          "environment_hash": {
+            "title": "Environment Hash",
+            "type": "string"
+          },
+          "evaluation_basis": {
+            "const": "continuous_account",
+            "default": "continuous_account",
+            "title": "Evaluation Basis",
+            "type": "string"
+          },
+          "evaluation_fingerprint": {
+            "default": "",
+            "title": "Evaluation Fingerprint",
+            "type": "string"
+          },
+          "evaluation_id": {
+            "title": "Evaluation Id",
+            "type": "string"
+          },
+          "evaluator_version": {
+            "const": "continuous-account-v1",
+            "default": "continuous-account-v1",
+            "title": "Evaluator Version",
+            "type": "string"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "factor_evaluation_version": {
+            "title": "Factor Evaluation Version",
+            "type": "string"
+          },
+          "frame_sources": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduledFrameSource"
+            },
+            "title": "Frame Sources",
+            "type": "array"
+          },
+          "initial_cash": {
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "metric_registry_version": {
+            "title": "Metric Registry Version",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/ContinuousScheduleProvenance"
+          },
+          "scheduled_tape_hash": {
+            "title": "Scheduled Tape Hash",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "continuous-account-result-v1",
+            "default": "continuous-account-result-v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "selection_time_policy": {
+            "const": "assumed_train_end_close",
+            "default": "assumed_train_end_close",
+            "title": "Selection Time Policy",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evaluation_id",
+          "experiment_id",
+          "created_at",
+          "engine_version",
+          "data_snapshot_id",
+          "factor_evaluation_version",
+          "environment",
+          "environment_hash",
+          "schedule",
+          "scheduled_tape_hash",
+          "strategy_id",
+          "revision",
+          "source",
+          "choices",
+          "candidates",
+          "initial_cash",
+          "core",
+          "annualization_days",
+          "frame_sources",
+          "metric_registry_version"
+        ],
+        "title": "ContinuousAccountManifest",
+        "type": "object"
+      },
+      "ContinuousAccountResult": {
+        "properties": {
+          "artifacts": {
+            "$ref": "#/components/schemas/RawArtifactBundle"
+          },
+          "curve": {
+            "items": {
+              "$ref": "#/components/schemas/ContinuousCurvePoint"
+            },
+            "title": "Curve",
+            "type": "array"
+          },
+          "interpretation": {
+            "default": "동결된 창별 학습 선택을 하나의 초기자본과 실제 보유 수량으로 이어 실행한 비용 후 계좌 평가입니다. 각 선택은 학습 종료일 종가에 선택 가능했다고 가정한 재현 정책이며 과거 실제 선택 시각의 증명이 아닙니다. 현재 mock 자료만 실행하며 실자료 수익성이나 실거래 준비를 뜻하지 않습니다. 수익률은 최종자산 / 초기자본 − 1이고 비용은 이미 반영되어 다시 차감하지 않습니다. 최종자산은 보유 평가를 포함하며 청산 현금이나 정지·상폐 정산 완료를 뜻하지 않습니다.",
+            "title": "Interpretation",
+            "type": "string"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/ContinuousAccountManifest"
+          },
+          "metric_definitions": {
+            "items": {
+              "$ref": "#/components/schemas/MetricDefinition"
+            },
+            "title": "Metric Definitions",
+            "type": "array"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/AccountReportSummary"
+          },
+          "total_fees": {
+            "title": "Total Fees",
+            "type": "number"
+          },
+          "total_sell_tax": {
+            "title": "Total Sell Tax",
+            "type": "number"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/DataWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "manifest",
+          "summary",
+          "curve",
+          "artifacts",
+          "total_fees",
+          "total_sell_tax",
+          "warnings",
+          "metric_definitions",
+          "metrics"
+        ],
+        "title": "ContinuousAccountResult",
+        "type": "object"
+      },
+      "ContinuousAccountStartRequest": {
+        "properties": {
+          "client_request_id": {
+            "format": "uuid",
+            "title": "Client Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_request_id"
+        ],
+        "title": "ContinuousAccountStartRequest",
+        "type": "object"
+      },
+      "ContinuousAccountState": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "continuous.mock_only",
+                  "continuous.unfinished",
+                  "continuous.unsupported",
+                  "continuous.no_cell",
+                  "continuous.source_invalid",
+                  "continuous.prepare_failed",
+                  "continuous.request_invalid",
+                  "continuous.request_conflict",
+                  "continuous.busy",
+                  "continuous.execution_failed",
+                  "continuous.interrupted",
+                  "continuous.not_found",
+                  "continuous.result_unreadable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          },
+          "evaluation_id": {
+            "title": "Evaluation Id",
+            "type": "string"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "number"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContinuousAccountResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stage": {
+            "enum": [
+              "preparing",
+              "pipeline",
+              "compiling",
+              "engine",
+              "completed",
+              "failed",
+              "interrupted"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContinuousAccountStatus"
+          }
+        },
+        "required": [
+          "evaluation_id",
+          "experiment_id",
+          "status",
+          "progress",
+          "stage",
+          "created_at"
+        ],
+        "title": "ContinuousAccountState",
+        "type": "object"
+      },
+      "ContinuousAccountStatus": {
+        "enum": [
+          "running",
+          "completed",
+          "failed",
+          "interrupted"
+        ],
+        "title": "ContinuousAccountStatus",
+        "type": "string"
+      },
+      "ContinuousCandidateProvenance": {
+        "properties": {
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "factor_plan_hashes": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Factor Plan Hashes",
+            "type": "array"
+          },
+          "parameter_values": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Parameter Values",
+            "type": "array"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "strategy_hash": {
+            "title": "Strategy Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "strategy_hash",
+          "source_hash",
+          "parameter_values",
+          "factor_plan_hashes"
+        ],
+        "title": "ContinuousCandidateProvenance",
+        "type": "object"
+      },
+      "ContinuousCurvePoint": {
+        "properties": {
+          "equity": {
+            "title": "Equity",
+            "type": "number"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "equity"
+        ],
+        "title": "ContinuousCurvePoint",
+        "type": "object"
+      },
+      "ContinuousReadiness": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "continuous.mock_only",
+                  "continuous.unfinished",
+                  "continuous.unsupported",
+                  "continuous.no_cell",
+                  "continuous.source_invalid",
+                  "continuous.prepare_failed",
+                  "continuous.request_invalid",
+                  "continuous.request_conflict",
+                  "continuous.busy",
+                  "continuous.execution_failed",
+                  "continuous.interrupted",
+                  "continuous.not_found",
+                  "continuous.result_unreadable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready",
+          "code",
+          "detail"
+        ],
+        "title": "ContinuousReadiness",
+        "type": "object"
+      },
+      "ContinuousScheduleProvenance": {
+        "description": "도메인이 확정한 파생 사실을 HTTP·저장 경계에서 빠뜨리지 않는 명시 투영.",
+        "properties": {
+          "execution_timing": {
+            "title": "Execution Timing",
+            "type": "string"
+          },
+          "policy_version": {
+            "title": "Policy Version",
+            "type": "string"
+          },
+          "schedule_hash": {
+            "title": "Schedule Hash",
+            "type": "string"
+          },
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/WindowSelection"
+            },
+            "title": "Selections",
+            "type": "array"
+          },
+          "sessions": {
+            "items": {
+              "format": "date",
+              "type": "string"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "target_scope": {
+            "title": "Target Scope",
+            "type": "string"
+          },
+          "time_in_force": {
+            "title": "Time In Force",
+            "type": "string"
+          },
+          "transitions": {
+            "items": {
+              "$ref": "#/components/schemas/SelectionTransition"
+            },
+            "title": "Transitions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "schedule_hash",
+          "policy_version",
+          "execution_timing",
+          "time_in_force",
+          "target_scope",
+          "sessions",
+          "selections",
+          "transitions"
+        ],
+        "title": "ContinuousScheduleProvenance",
         "type": "object"
       },
       "CreateProviderProfileRequest": {
@@ -2072,6 +3138,72 @@
           "document_ref"
         ],
         "title": "CreateSessionRequest",
+        "type": "object"
+      },
+      "CredentialsFileBody": {
+        "properties": {
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "AI 공급자·키움 모의 연결을 저장하는 `.env`의 절대 경로. 예전 저장(사용자 설정 폴더)을 쓰는 서버는 null이다.",
+            "title": "Path"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/CredentialsFileProblemBody"
+            },
+            "title": "Problems",
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "problems"
+        ],
+        "title": "CredentialsFileBody",
+        "type": "object"
+      },
+      "CredentialsFileProblemBody": {
+        "properties": {
+          "fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "message": {
+            "description": "사용자에게 그대로 보일 한글 문장. 값은 담지 않는다.",
+            "title": "Message",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "section": {
+            "enum": [
+              "file",
+              "ai",
+              "kiwoom"
+            ],
+            "title": "Section",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section",
+          "reason",
+          "fields",
+          "message"
+        ],
+        "title": "CredentialsFileProblemBody",
         "type": "object"
       },
       "CrossSectionalNode": {
@@ -2292,6 +3424,172 @@
         "title": "DatasetRevision",
         "type": "object"
       },
+      "DeflatedSharpeEvidence": {
+        "description": "조회한 계열 원장을 근거로 한 세션 단위 통계.\n\n원래 실행 결과·선택 당시 스냅숏을 변경하지 않는다. 대표 행 자체는 기존 원장 조회가 제공한다.\n판본 목록과 미상 수는 분산에 쓰는 대표 샤프가 있는 시도만 대상으로 한다.",
+        "properties": {
+          "annualization_days": {
+            "description": "해당 실행에 기록된 연환산 거래일.",
+            "title": "Annualization Days",
+            "type": "integer"
+          },
+          "expected_maximum_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "계산한 운 기준선 SR₀(세션 단위). N=1이면 0, 계산 전 부재 판정이면 null이다.",
+            "title": "Expected Maximum Sharpe"
+          },
+          "lineage_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "계열 합치기를 해소한 생존 계열. 계열 없는 초안은 null이다.",
+            "title": "Lineage Id"
+          },
+          "merged_lineage_ids": {
+            "description": "이 생존 계열에 합쳐진 계열 식별자.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Merged Lineage Ids",
+            "type": "array"
+          },
+          "registry_mixed": {
+            "description": "알려진 대표 판본들과 해당 실행 판본을 합친 집합에 둘 이상 판본이 있는지 여부.",
+            "title": "Registry Mixed",
+            "type": "boolean"
+          },
+          "representative_count": {
+            "description": "샤프가 있는 시도 대표 자료 수. N과 다를 수 있으며 재확인 실행은 포함하지 않는다.",
+            "title": "Representative Count",
+            "type": "integer"
+          },
+          "representative_registry_versions": {
+            "description": "대표 샤프가 있는 시도들의 알려진 지표 판본 집합(정렬). 현재 실행의 판본 목록이 아니다.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Representative Registry Versions",
+            "type": "array"
+          },
+          "session_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "해당 실행의 FULL 연율 샤프를 연환산 거래일로 환산한 세션 샤프. 계산하지 않았으면 null이다.",
+            "title": "Session Sharpe"
+          },
+          "session_standard_error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "같은 실행의 FULL 샤프 표준오차를 환산한 세션 단위 값. 계산하지 않았으면 null이다.",
+            "title": "Session Standard Error"
+          },
+          "trial_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "현재 계열 원장의 시도 수 N. 재확인/결과 없음은 제외하고 파산 시도는 포함한다. 계열이 없으면 null이다.",
+            "title": "Trial Count"
+          },
+          "trial_sharpe_variance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "계산한 대표 세션 샤프의 표본분산(n−1). N=1이면 0, 계산 전 부재 판정이면 null이다.",
+            "title": "Trial Sharpe Variance"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeflatedSharpeUnavailableReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "값이 없을 때의 단일 판정 사유. 값이 있으면 null이다."
+          },
+          "unknown_registry_count": {
+            "description": "대표 샤프가 있지만 지표 판본이 기록되지 않은 시도 수. 판본 일치를 추측하지 않는다.",
+            "title": "Unknown Registry Count",
+            "type": "integer"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "현재 계열 원장으로 계산한 DSR(0~1). 저장된 PSR이나 후보 선택 당시 스냅숏이 아니다.",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value",
+          "unavailable_reason",
+          "lineage_id",
+          "merged_lineage_ids",
+          "trial_count",
+          "representative_count",
+          "trial_sharpe_variance",
+          "expected_maximum_sharpe",
+          "session_sharpe",
+          "session_standard_error",
+          "annualization_days",
+          "representative_registry_versions",
+          "unknown_registry_count",
+          "registry_mixed"
+        ],
+        "title": "DeflatedSharpeEvidence",
+        "type": "object"
+      },
+      "DeflatedSharpeUnavailableReason": {
+        "enum": [
+          "no_lineage",
+          "no_counted_trials",
+          "sharpe_unavailable",
+          "standard_error_unavailable",
+          "nonpositive_standard_error",
+          "insufficient_representatives"
+        ],
+        "title": "DeflatedSharpeUnavailableReason",
+        "type": "string"
+      },
       "DiagnosticAnchor": {
         "description": "진단이 가리키는 자리. 고칠 곳이 값이 아니라 키 자체인 진단(예: 모르는 키)은 키다.\n\n편집기는 자기 parse 지도(UTF-16)에서 이 자리를 다시 찾는다. 어느 코드가 키를 가리키는지는\nbackend 가 정하고 frontend 는 목록을 옮겨 적지 않는다(#357 C-P3-13).",
         "enum": [
@@ -2422,6 +3720,70 @@
           "stop_reason"
         ],
         "title": "DoneView",
+        "type": "object"
+      },
+      "DraftDiff": {
+        "description": "저장 리비전과 현재 원문의 의미 차이. 저장 상태를 바꾸지 않는다.",
+        "properties": {
+          "base_revision": {
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "base_spec_hash": {
+            "title": "Base Spec Hash",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/DiffEntry"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "target_spec_hash": {
+            "title": "Target Spec Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "base_revision",
+          "base_spec_hash",
+          "target_spec_hash",
+          "source_hash",
+          "changes"
+        ],
+        "title": "DraftDiff",
+        "type": "object"
+      },
+      "DraftDiffRequest": {
+        "properties": {
+          "base_revision": {
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "format",
+          "base_revision"
+        ],
+        "title": "DraftDiffRequest",
         "type": "object"
       },
       "DrawdownPoint": {
@@ -2621,6 +3983,23 @@
         "title": "EquityCurvePoint",
         "type": "object"
       },
+      "ExcludedFactorPeriods": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/FactorPeriodGap"
+          }
+        },
+        "required": [
+          "reason",
+          "count"
+        ],
+        "title": "ExcludedFactorPeriods",
+        "type": "object"
+      },
       "ExclusionReason": {
         "enum": [
           "not_in_universe",
@@ -2671,6 +4050,10 @@
             "title": "Selections",
             "type": "array"
           },
+          "settled": {
+            "title": "Settled",
+            "type": "boolean"
+          },
           "status": {
             "$ref": "#/components/schemas/ExperimentStatus"
           },
@@ -2690,7 +4073,8 @@
           "status",
           "trial_counts",
           "selections",
-          "finished"
+          "finished",
+          "settled"
         ],
         "title": "Experiment",
         "type": "object"
@@ -2749,6 +4133,139 @@
         ],
         "title": "ExperimentAdmissionErrorResponse",
         "type": "object"
+      },
+      "ExperimentAuditEvent": {
+        "properties": {
+          "attempt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ExperimentAuditKind"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "paused": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "run_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trial_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Index"
+          },
+          "window_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Index"
+          }
+        },
+        "required": [
+          "occurred_at",
+          "kind"
+        ],
+        "title": "ExperimentAuditEvent",
+        "type": "object"
+      },
+      "ExperimentAuditKind": {
+        "enum": [
+          "created",
+          "controls_changed",
+          "trial_submitted",
+          "trial_rejected",
+          "window_picked",
+          "window_no_cell",
+          "window_rejected",
+          "run_started",
+          "run_finished",
+          "candidate_selected",
+          "cancelled"
+        ],
+        "title": "ExperimentAuditKind",
+        "type": "string"
       },
       "ExperimentControls": {
         "description": "실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은\n끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.\n\n칸에 기본값을 두지 않는다 — 응답 스키마에서 늘 있는 칸이라 화면이 기본값을 복제하지 않는다(#402\n리뷰 P3-1). 만든 실험의 처음 값은 `DEFAULT_EXPERIMENT_CONTROLS` 하나다.",
@@ -2870,7 +4387,14 @@
               "experiment.capacity.invalid_amounts",
               "experiment.kind.mismatch",
               "experiment.not_found",
+              "experiment.robustness.not_single",
+              "experiment.robustness.period_too_short",
+              "experiment.robustness.run_not_found",
+              "experiment.robustness.running",
+              "experiment.robustness.too_many_parameters",
+              "experiment.search.invalid_constraint",
               "experiment.search.invalid_values",
+              "experiment.search.no_feasible_point",
               "experiment.search.too_many_points",
               "experiment.search.unknown_parameter",
               "experiment.selection.not_completed",
@@ -2975,6 +4499,16 @@
             "title": "Run Count",
             "type": "integer"
           },
+          "time_estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeEstimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "trial_count": {
             "title": "Trial Count",
             "type": "integer"
@@ -2991,7 +4525,8 @@
           "lineage_id",
           "trial_count",
           "new_trial_count",
-          "trial_count_after"
+          "trial_count_after",
+          "time_estimate"
         ],
         "title": "ExperimentPreview",
         "type": "object"
@@ -3029,6 +4564,17 @@
           "run": {
             "$ref": "#/components/schemas/BacktestRunSpec"
           },
+          "source_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Run Id"
+          },
           "split": {
             "anyOf": [
               {
@@ -3054,6 +4600,14 @@
       "ExperimentRequest": {
         "description": "실험 만들기·미리 계산 요청.",
         "properties": {
+          "constraints": {
+            "description": "탐색 축 사이의 조합 제약(예: fast < slow). 모두 만족하는 칸만 실행하고, 걸러진 칸은 실행되지 않아 시도 수에도 들지 않는다. 비우면 곱집합 전체다.",
+            "items": {
+              "$ref": "#/components/schemas/ParameterConstraint"
+            },
+            "title": "Constraints",
+            "type": "array"
+          },
           "run": {
             "$ref": "#/components/schemas/BacktestRunSpec"
           },
@@ -3200,7 +4754,6 @@
       "ExperimentSelectionRequest": {
         "properties": {
           "reason": {
-            "pattern": "\\S",
             "title": "Reason",
             "type": "string"
           },
@@ -3335,89 +4888,6 @@
           "selectable"
         ],
         "title": "ExperimentTrialState",
-        "type": "object"
-      },
-      "FactorAnalytics": {
-        "properties": {
-          "coverage": {
-            "title": "Coverage",
-            "type": "number"
-          },
-          "decay": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Decay"
-          },
-          "information_coefficient": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Information Coefficient"
-          },
-          "observation_count": {
-            "title": "Observation Count",
-            "type": "integer"
-          },
-          "quantile_spread": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quantile Spread"
-          },
-          "rank_information_coefficient": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rank Information Coefficient"
-          },
-          "turnover": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Turnover"
-          },
-          "valid_count": {
-            "title": "Valid Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "information_coefficient",
-          "rank_information_coefficient",
-          "quantile_spread",
-          "coverage",
-          "turnover",
-          "decay",
-          "observation_count",
-          "valid_count"
-        ],
-        "title": "FactorAnalytics",
         "type": "object"
       },
       "FactorAvailability": {
@@ -3682,32 +5152,15 @@
         "title": "FactorDirection",
         "type": "string"
       },
-      "FactorEvaluation": {
-        "properties": {
-          "output_node_id": {
-            "title": "Output Node Id",
-            "type": "string"
-          },
-          "values": {
-            "items": {
-              "$ref": "#/components/schemas/FactorValue"
-            },
-            "title": "Values",
-            "type": "array"
-          }
-        },
-        "required": [
-          "output_node_id",
-          "values"
-        ],
-        "title": "FactorEvaluation",
-        "type": "object"
-      },
       "FactorExecutionPlan": {
         "properties": {
           "as_of_policy": {
             "default": "available_date_lte_as_of",
             "title": "As Of Policy",
+            "type": "string"
+          },
+          "evaluation_version": {
+            "title": "Evaluation Version",
             "type": "string"
           },
           "graph_hash": {
@@ -3757,7 +5210,8 @@
           "steps",
           "required_field_ids",
           "minimum_history_sessions",
-          "missing_policy"
+          "missing_policy",
+          "evaluation_version"
         ],
         "title": "FactorExecutionPlan",
         "type": "object"
@@ -3857,6 +5311,40 @@
         "title": "FactorExplanation",
         "type": "object"
       },
+      "FactorExposure": {
+        "properties": {
+          "beta": {
+            "title": "Beta",
+            "type": "number"
+          },
+          "factor": {
+            "$ref": "#/components/schemas/FactorKind"
+          },
+          "standard_error": {
+            "title": "Standard Error",
+            "type": "number"
+          },
+          "t_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "T Value"
+          }
+        },
+        "required": [
+          "factor",
+          "beta",
+          "standard_error",
+          "t_value"
+        ],
+        "title": "FactorExposure",
+        "type": "object"
+      },
       "FactorGraph": {
         "properties": {
           "nodes": {
@@ -3891,6 +5379,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/ConditionalNode"
+                },
+                {
+                  "$ref": "#/components/schemas/FillNode"
                 }
               ]
             },
@@ -3981,53 +5472,36 @@
         "title": "FactorGraphValidation",
         "type": "object"
       },
-      "FactorMatrixCacheKey": {
-        "properties": {
-          "as_of_end": {
-            "format": "date",
-            "title": "As Of End",
-            "type": "string"
-          },
-          "as_of_start": {
-            "format": "date",
-            "title": "As Of Start",
-            "type": "string"
-          },
-          "data_snapshot_id": {
-            "title": "Data Snapshot Id",
-            "type": "string"
-          },
-          "fingerprint": {
-            "title": "Fingerprint",
-            "type": "string"
-          },
-          "parameters": {
-            "items": {
-              "$ref": "#/components/schemas/ResolvedFactorParameter"
-            },
-            "title": "Parameters",
-            "type": "array"
-          },
-          "plan_hash": {
-            "title": "Plan Hash",
-            "type": "string"
-          },
-          "registry_version": {
-            "title": "Registry Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "fingerprint",
-          "data_snapshot_id",
-          "plan_hash",
-          "registry_version",
-          "parameters",
-          "as_of_start",
-          "as_of_end"
+      "FactorKind": {
+        "enum": [
+          "market",
+          "size",
+          "value",
+          "momentum"
         ],
-        "title": "FactorMatrixCacheKey",
-        "type": "object"
+        "title": "FactorKind",
+        "type": "string"
+      },
+      "FactorMatchStatus": {
+        "description": "전략 문서의 팩터 항목이 라이브러리와 어떤 관계인가.",
+        "enum": [
+          "current",
+          "outdated",
+          "modified"
+        ],
+        "title": "FactorMatchStatus",
+        "type": "string"
+      },
+      "FactorPeriodGap": {
+        "enum": [
+          "base_rate_not_covered",
+          "no_market_weight",
+          "size_value_empty",
+          "size_momentum_empty",
+          "no_factor_period"
+        ],
+        "title": "FactorPeriodGap",
+        "type": "string"
       },
       "FactorPreference": {
         "enum": [
@@ -4037,88 +5511,131 @@
         "title": "FactorPreference",
         "type": "string"
       },
-      "FactorPreview": {
+      "FactorRegressionFit": {
         "properties": {
-          "analytics": {
-            "$ref": "#/components/schemas/FactorAnalytics"
+          "alpha_annualized": {
+            "title": "Alpha Annualized",
+            "type": "number"
           },
-          "cache_key": {
-            "$ref": "#/components/schemas/FactorMatrixCacheKey"
+          "alpha_per_session": {
+            "title": "Alpha Per Session",
+            "type": "number"
           },
-          "data_snapshot_id": {
-            "title": "Data Snapshot Id",
-            "type": "string"
+          "alpha_standard_error": {
+            "title": "Alpha Standard Error",
+            "type": "number"
           },
-          "evaluation": {
-            "$ref": "#/components/schemas/FactorEvaluation"
-          },
-          "plan": {
-            "$ref": "#/components/schemas/FactorExecutionPlan"
-          }
-        },
-        "required": [
-          "data_snapshot_id",
-          "plan",
-          "cache_key",
-          "evaluation",
-          "analytics"
-        ],
-        "title": "FactorPreview",
-        "type": "object"
-      },
-      "FactorPreviewRequest": {
-        "description": "Preview request. The data snapshot is owned by the adapter (P1.5-01).\n\n`expected_data_snapshot_id` is optional provenance the client saw in the catalog; when it\ndiffers from the adapter's actual snapshot the preview fails closed instead of silently\ncomputing against different data.",
-        "properties": {
-          "as_of_end": {
-            "format": "date",
-            "title": "As Of End",
-            "type": "string"
-          },
-          "as_of_start": {
-            "format": "date",
-            "title": "As Of Start",
-            "type": "string"
-          },
-          "expected_data_snapshot_id": {
+          "alpha_t_value": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Expected Data Snapshot Id"
+            "title": "Alpha T Value"
           },
-          "graph": {
-            "$ref": "#/components/schemas/FactorGraph"
+          "exposures": {
+            "items": {
+              "$ref": "#/components/schemas/FactorExposure"
+            },
+            "title": "Exposures",
+            "type": "array"
           },
-          "missing": {
+          "hac_lag": {
+            "title": "Hac Lag",
+            "type": "integer"
+          },
+          "r_squared": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/MissingPolicy"
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "R Squared"
+          }
+        },
+        "required": [
+          "alpha_per_session",
+          "alpha_annualized",
+          "alpha_standard_error",
+          "alpha_t_value",
+          "exposures",
+          "r_squared",
+          "hac_lag"
+        ],
+        "title": "FactorRegressionFit",
+        "type": "object"
+      },
+      "FactorRegressionReport": {
+        "description": "회귀 결과. `fit` 이 없으면 `unavailable_reason` 이 있다.",
+        "properties": {
+          "annualization_days": {
+            "title": "Annualization Days",
+            "type": "integer"
+          },
+          "excluded_periods": {
+            "items": {
+              "$ref": "#/components/schemas/ExcludedFactorPeriods"
+            },
+            "title": "Excluded Periods",
+            "type": "array"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorRegressionFit"
               },
               {
                 "type": "null"
               }
             ]
           },
-          "parameters": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ResolvedFactorParameter"
-            },
-            "title": "Parameters",
-            "type": "array"
+          "observation_count": {
+            "title": "Observation Count",
+            "type": "integer"
+          },
+          "strategy_period_count": {
+            "title": "Strategy Period Count",
+            "type": "integer"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorRegressionUnavailableReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "graph",
-          "as_of_start",
-          "as_of_end"
+          "observation_count",
+          "strategy_period_count",
+          "excluded_periods",
+          "annualization_days",
+          "fit",
+          "unavailable_reason"
         ],
-        "title": "FactorPreviewRequest",
+        "title": "FactorRegressionReport",
         "type": "object"
+      },
+      "FactorRegressionUnavailableReason": {
+        "enum": [
+          "insufficient_observations",
+          "singular_design",
+          "data_snapshot_changed",
+          "data_unavailable",
+          "computing",
+          "computation_failed"
+        ],
+        "title": "FactorRegressionUnavailableReason",
+        "type": "string"
       },
       "FactorSignal": {
         "properties": {
@@ -4197,37 +5714,6 @@
         ],
         "title": "FactorValidationSeverity",
         "type": "string"
-      },
-      "FactorValue": {
-        "properties": {
-          "as_of": {
-            "format": "date",
-            "title": "As Of",
-            "type": "string"
-          },
-          "security_id": {
-            "title": "Security Id",
-            "type": "string"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
-          }
-        },
-        "required": [
-          "as_of",
-          "security_id",
-          "value"
-        ],
-        "title": "FactorValue",
-        "type": "object"
       },
       "FailureCode": {
         "description": "턴이 정상 종료하지 못한 사유.\n\n`Failure.message`는 이 코드별 고정 문장에 진단 컨텍스트만 붙인다. SDK 예외 문자열·응답 본문을\n그대로 넣지 않는다(spec D2: 비밀 스크럽). 예외는 코드로만 매핑한다.",
@@ -4625,6 +6111,36 @@
         "title": "FieldValueType",
         "type": "string"
       },
+      "FillNode": {
+        "description": "입력의 결측 칸을 상수로 채운다(#608).\n\n실행 결측 정책(`RunEnvironment.missing`)과 달리 그래프 안 한 자리에서만 채우고, 원장이 가린 칸은\n채우지 않는다(#298). 있는 것끼리 가중 평균(빈 입력은 가중치에서 뺀다)·\"비교값이 없으면 변화 0\"\n같은 규칙을 문서에 명시하는 용도다.",
+        "properties": {
+          "fill_value": {
+            "title": "Fill Value",
+            "type": "number"
+          },
+          "input_node_id": {
+            "title": "Input Node Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "fill",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "input_node_id",
+          "fill_value",
+          "kind"
+        ],
+        "title": "FillNode",
+        "type": "object"
+      },
       "FloatParameter": {
         "properties": {
           "default": {
@@ -4668,6 +6184,91 @@
           "kind"
         ],
         "title": "FloatParameter",
+        "type": "object"
+      },
+      "FrozenWindowChoice": {
+        "properties": {
+          "data_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Snapshot Id"
+          },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
+          },
+          "parameter_values": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Parameter Values",
+            "type": "array"
+          },
+          "training_run_id": {
+            "title": "Training Run Id",
+            "type": "string"
+          },
+          "trial_index": {
+            "title": "Trial Index",
+            "type": "integer"
+          },
+          "validation_run_id": {
+            "title": "Validation Run Id",
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/components/schemas/WalkForwardWindow"
+          },
+          "window_index": {
+            "title": "Window Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_index",
+          "window",
+          "trial_index",
+          "training_run_id",
+          "validation_run_id",
+          "parameter_values"
+        ],
+        "title": "FrozenWindowChoice",
         "type": "object"
       },
       "GroupNode": {
@@ -4724,8 +6325,174 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HoldingChange": {
+        "description": "한 세션에서 한 종목의 보유가 어떻게 바뀌었나.",
+        "enum": [
+          "opened",
+          "added",
+          "reduced",
+          "held",
+          "sold",
+          "removed"
+        ],
+        "title": "HoldingChange",
+        "type": "string"
+      },
+      "HoldingPeriod": {
+        "description": "계좌 기록 세션에서 끊김 없이 들고 있던 구간(양끝 포함).",
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "open": {
+            "title": "Open",
+            "type": "boolean"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "open"
+        ],
+        "title": "HoldingPeriod",
+        "type": "object"
+      },
+      "HoldingRow": {
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/HoldingChange"
+          },
+          "filled_quantity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filled Quantity"
+          },
+          "market_value": {
+            "title": "Market Value",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security": {
+            "$ref": "#/components/schemas/SecurityLabel"
+          },
+          "unrealized_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unrealized Return"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          }
+        },
+        "required": [
+          "security",
+          "quantity",
+          "market_value",
+          "weight",
+          "unrealized_return",
+          "change",
+          "filled_quantity"
+        ],
+        "title": "HoldingRow",
+        "type": "object"
+      },
+      "HoldingsOverview": {
+        "properties": {
+          "fill_count": {
+            "title": "Fill Count",
+            "type": "integer"
+          },
+          "final_holding_count": {
+            "title": "Final Holding Count",
+            "type": "integer"
+          },
+          "first_session": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Session"
+          },
+          "last_session": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Session"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "securities": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityTradeSummary"
+            },
+            "title": "Securities",
+            "type": "array"
+          },
+          "trade_sessions": {
+            "items": {
+              "$ref": "#/components/schemas/TradeSessionSummary"
+            },
+            "title": "Trade Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "first_session",
+          "last_session",
+          "fill_count",
+          "final_holding_count",
+          "trade_sessions",
+          "securities"
+        ],
+        "title": "HoldingsOverview",
+        "type": "object"
+      },
       "ImpactModel": {
-        "description": "체결가에 얹는 시장충격 모델(spec D7).\n\n`fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×\n√(체결 수량 / ADV)(`_impact.py`)를 뜻한다. `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.",
+        "description": "체결가에 얹는 시장충격 모델(spec D7).\n\n`fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×\n√(Q / ADV)(`_impact.py`, Q = 참여 한도 적용 후·여력 제한 전 주문 수량)를 뜻한다.\n`sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.",
         "enum": [
           "fixed_bps",
           "sqrt"
@@ -4800,6 +6567,425 @@
           "kind"
         ],
         "title": "IntegerParameter",
+        "type": "object"
+      },
+      "KiwoomMockConnectionBody": {
+        "properties": {
+          "account_tail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Tail"
+          },
+          "saved": {
+            "title": "Saved",
+            "type": "boolean"
+          },
+          "unreadable": {
+            "default": false,
+            "description": "저장된 항목이 깨져 읽지 못했다. 다시 저장하거나 지우면 고쳐진다.",
+            "title": "Unreadable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "saved",
+          "account_tail"
+        ],
+        "title": "KiwoomMockConnectionBody",
+        "type": "object"
+      },
+      "KiwoomMockConnectionCheckBody": {
+        "properties": {
+          "account_tail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Tail"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ConnectionOutcome"
+          }
+        },
+        "required": [
+          "outcome",
+          "message",
+          "account_tail"
+        ],
+        "title": "KiwoomMockConnectionCheckBody",
+        "type": "object"
+      },
+      "LibraryDiagnosticBody": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "pointer",
+          "severity"
+        ],
+        "title": "LibraryDiagnosticBody",
+        "type": "object"
+      },
+      "LibraryErrorDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "library.request_invalid",
+              "library.factor.invalid",
+              "library.factor.not_found",
+              "library.factor.key_exists",
+              "library.version.unchanged",
+              "library.version.conflict"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LibraryDiagnosticBody"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostics"
+          },
+          "existing_library_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Existing Library Id"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "LibraryErrorDetail",
+        "type": "object"
+      },
+      "LibraryErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/LibraryErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "LibraryErrorResponse",
+        "type": "object"
+      },
+      "LibraryFactorAvailabilityBody": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Fields",
+            "type": "array"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "missing_fields",
+          "reasons"
+        ],
+        "title": "LibraryFactorAvailabilityBody",
+        "type": "object"
+      },
+      "LibraryFactorBody": {
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/LibraryFactorAvailabilityBody"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "hidden": {
+            "title": "Hidden",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "library_id": {
+            "title": "Library Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryFactorVersionBody"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "library_id",
+          "key",
+          "name",
+          "description",
+          "hidden",
+          "created_at",
+          "latest_version",
+          "versions",
+          "availability"
+        ],
+        "title": "LibraryFactorBody",
+        "type": "object"
+      },
+      "LibraryFactorList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryFactorBody"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "LibraryFactorList",
+        "type": "object"
+      },
+      "LibraryFactorMatchBody": {
+        "properties": {
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "factor_index": {
+            "title": "Factor Index",
+            "type": "integer"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "library_id": {
+            "title": "Library Id",
+            "type": "string"
+          },
+          "matched_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FactorMatchStatus"
+          }
+        },
+        "required": [
+          "factor_index",
+          "factor_id",
+          "library_id",
+          "status",
+          "matched_version",
+          "latest_version"
+        ],
+        "title": "LibraryFactorMatchBody",
+        "type": "object"
+      },
+      "LibraryFactorMatchesBody": {
+        "properties": {
+          "compiled": {
+            "title": "Compiled",
+            "type": "boolean"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryFactorMatchBody"
+            },
+            "title": "Matches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "compiled",
+          "matches"
+        ],
+        "title": "LibraryFactorMatchesBody",
+        "type": "object"
+      },
+      "LibraryFactorVersionBody": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "factor": {
+            "additionalProperties": true,
+            "title": "Factor",
+            "type": "object"
+          },
+          "identity": {
+            "title": "Identity",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "parameters": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "identity",
+          "factor",
+          "parameters",
+          "created_at",
+          "note"
+        ],
+        "title": "LibraryFactorVersionBody",
+        "type": "object"
+      },
+      "LibraryMatchesBody": {
+        "properties": {
+          "format": {
+            "enum": [
+              "yaml",
+              "json"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "source"
+        ],
+        "title": "LibraryMatchesBody",
+        "type": "object"
+      },
+      "LibraryVisibilityBody": {
+        "properties": {
+          "hidden": {
+            "title": "Hidden",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hidden"
+        ],
+        "title": "LibraryVisibilityBody",
         "type": "object"
       },
       "Market": {
@@ -5037,6 +7223,15 @@
         ],
         "title": "MonthlyReturnPoint",
         "type": "object"
+      },
+      "NoRecommendation": {
+        "description": "추천 칸이 없는 이유. 화면은 번역만 한다.",
+        "enum": [
+          "no_scored_cell",
+          "non_positive_score"
+        ],
+        "title": "NoRecommendation",
+        "type": "string"
       },
       "NodeContract": {
         "properties": {
@@ -5319,6 +7514,55 @@
         "title": "PanelPreviewCostEstimate",
         "type": "object"
       },
+      "ParameterConstraint": {
+        "description": "탐색 축 값과 다른 탐색 축 값(`right_parameter`) 또는 상수(`right_value`)의 관계.\n\n둘 중 정확히 하나를 쓴다. 비교하는 두 쪽은 같은 종류(유한한 숫자끼리, 또는 같은 타입의 선택지\n값끼리)여야 하고, 크기 비교(`lt`·`le`·`gt`·`ge`)는 숫자 값끼리만 한다.",
+        "properties": {
+          "left": {
+            "title": "Left",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/ConstraintOperator"
+          },
+          "right_parameter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Right Parameter"
+          },
+          "right_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Right Value"
+          }
+        },
+        "required": [
+          "left",
+          "operator"
+        ],
+        "title": "ParameterConstraint",
+        "type": "object"
+      },
       "ParameterMap": {
         "description": "파라미터 지도(V4-03). 칸 판정 규칙은 `domain/experiment/_plateau.py` 다.",
         "properties": {
@@ -5328,6 +7572,16 @@
             },
             "title": "Cells",
             "type": "array"
+          },
+          "no_recommendation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoRecommendation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -5575,6 +7829,27 @@
           "engine": {
             "$ref": "#/components/schemas/EngineCompatibility"
           },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "문서 기본값을 포함해 해소한 평가 파라미터. tape.strategy_hash는 저장 문서 의미이고 값별 계산 출력은 tape_hash로 구분한다.",
+            "title": "Parameter Values",
+            "type": "object"
+          },
           "tape": {
             "$ref": "#/components/schemas/TargetTape"
           },
@@ -5605,6 +7880,26 @@
                 "type": "null"
               }
             ]
+          },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Parameter Values",
+            "type": "object"
           },
           "spec": {
             "$ref": "#/components/schemas/StrategySpec"
@@ -5724,6 +8019,21 @@
             "$ref": "#/components/schemas/PortfolioSide",
             "default": "long_only"
           },
+          "tie_breaker_direction": {
+            "$ref": "#/components/schemas/FactorDirection",
+            "default": "high"
+          },
+          "tie_breaker_factor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tie Breaker Factor Id"
+          },
           "turnover_buffer_count": {
             "default": 0,
             "title": "Turnover Buffer Count",
@@ -5762,6 +8072,7 @@
               "mapping": {
                 "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
                 "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
+                "backtest.run.parameter_invalid": "#/components/schemas/BacktestParameterInvalidDetail",
                 "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
                 "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
@@ -5781,6 +8092,9 @@
               },
               {
                 "$ref": "#/components/schemas/BacktestRunFieldInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestParameterInvalidDetail"
               },
               {
                 "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
@@ -6085,6 +8399,20 @@
       },
       "RawArtifactBundle": {
         "properties": {
+          "corporate_actions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RawCorporateAction"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corporate Actions"
+          },
           "costs": {
             "items": {
               "$ref": "#/components/schemas/RawCost"
@@ -6098,6 +8426,20 @@
             },
             "title": "Fills",
             "type": "array"
+          },
+          "order_updates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RawOrderUpdate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Updates"
           },
           "orders": {
             "items": {
@@ -6150,6 +8492,51 @@
           "trades"
         ],
         "title": "RawArtifactBundle",
+        "type": "object"
+      },
+      "RawCorporateAction": {
+        "description": "엔진이 보유에 실제로 적용한 분할·병합(`CORPORATE_ACTION_APPLIED`)을 그대로 옮긴 기록.\n\n엔진은 같은 세션의 어떤 체결보다 먼저 적용한다. 수량은 정수 문자열이고 `ratio` 는 구주 1주당\n신주 수(Decimal 문자열)다. 엔진은 `old × ratio` 를 1e-9 에서 반올림한 이론 수량을 0 쪽으로 내려\n`new_quantity` 로 두고, 버린 단주 `settled_quantity`(이론 수량 − 새 수량, 숏이면 음수)를 정산\n세션 시가로 `cash_paid` 만큼 현금 정산한다. 단주는 엔진 규칙(`scale_quantity`)으로 정한 값이라\n소비자가 비율로 다시 곱하지 않는다.",
+        "properties": {
+          "cash_paid": {
+            "title": "Cash Paid",
+            "type": "number"
+          },
+          "new_quantity": {
+            "title": "New Quantity",
+            "type": "string"
+          },
+          "old_quantity": {
+            "title": "Old Quantity",
+            "type": "string"
+          },
+          "ratio": {
+            "title": "Ratio",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "settled_quantity": {
+            "title": "Settled Quantity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "security_id",
+          "ratio",
+          "old_quantity",
+          "new_quantity",
+          "settled_quantity",
+          "cash_paid"
+        ],
+        "title": "RawCorporateAction",
         "type": "object"
       },
       "RawCost": {
@@ -6224,6 +8611,17 @@
           "security_id": {
             "title": "Security Id",
             "type": "string"
+          },
+          "sell_tax": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sell Tax"
           },
           "session": {
             "format": "date",
@@ -6300,6 +8698,64 @@
           "time_in_force"
         ],
         "title": "RawOrder",
+        "type": "object"
+      },
+      "RawOrderUpdate": {
+        "description": "엔진 주문 상태 기록을 그대로 투영한다. 사유 코드는 견적 owner만 판정한다.",
+        "properties": {
+          "cap_volume": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap Volume"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "order_id",
+          "status"
+        ],
+        "title": "RawOrderUpdate",
         "type": "object"
       },
       "RawPosition": {
@@ -6909,36 +9365,15 @@
         "title": "ResearchWarningSeverity",
         "type": "string"
       },
-      "ResolvedFactorParameter": {
-        "properties": {
-          "parameter_id": {
-            "title": "Parameter Id",
-            "type": "string"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "integer"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "boolean"
-              }
-            ],
-            "title": "Value"
-          }
-        },
-        "required": [
-          "parameter_id",
-          "value"
+      "RetentionGap": {
+        "description": "곡선이 났는데도(`WalkForwardGap` 없음) 유지율이 비는 이유. 화면은 번역만 한다.",
+        "enum": [
+          "out_of_sample_unavailable",
+          "no_train_sharpe",
+          "non_positive_train_sharpe"
         ],
-        "title": "ResolvedFactorParameter",
-        "type": "object"
+        "title": "RetentionGap",
+        "type": "string"
       },
       "ReviseDocumentRequest": {
         "properties": {
@@ -7154,6 +9589,68 @@
         "title": "RiskStep",
         "type": "object"
       },
+      "RobustnessPreview": {
+        "description": "\"튼튼한지 확인하기\" 미리 계산.\n\n숫자 파라미터지만 팩터 출력이 읽지 않아 펴지 않고 지금 값에 둔 파라미터(`robustness_search`)를\n함께 싣는다 — 확인 창이 그 사정을 말한다.",
+        "properties": {
+          "combination_count": {
+            "title": "Combination Count",
+            "type": "integer"
+          },
+          "design": {
+            "$ref": "#/components/schemas/ExperimentDesign"
+          },
+          "lineage_id": {
+            "title": "Lineage Id",
+            "type": "string"
+          },
+          "new_trial_count": {
+            "title": "New Trial Count",
+            "type": "integer"
+          },
+          "run_count": {
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "time_estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeEstimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trial_count": {
+            "title": "Trial Count",
+            "type": "integer"
+          },
+          "trial_count_after": {
+            "title": "Trial Count After",
+            "type": "integer"
+          },
+          "unread_parameters": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unread Parameters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "design",
+          "combination_count",
+          "run_count",
+          "lineage_id",
+          "trial_count",
+          "new_trial_count",
+          "trial_count_after",
+          "time_estimate"
+        ],
+        "title": "RobustnessPreview",
+        "type": "object"
+      },
       "RollingMetricPoint": {
         "properties": {
           "session": {
@@ -7268,6 +9765,11 @@
       "RunEnvironmentSchema": {
         "description": "실행 설정(`RunEnvironment`)의 런타임 JSON Schema; `schema_hash` 가 ETag 다.\n\n전략 authoring 문서 스키마(`StrategyDocumentSchema`)와 별개 산출물이다 — 문서에는\n`schema_version` 이 있고 실행 설정에는 없다. 프론트 실행 설정 패널이 기본값·enum 을 손으로\n적지 않게 하는 경로다(spec D6).",
         "properties": {
+          "options_schema": {
+            "additionalProperties": true,
+            "title": "Options Schema",
+            "type": "object"
+          },
           "schema": {
             "additionalProperties": true,
             "title": "Schema",
@@ -7280,9 +9782,137 @@
         },
         "required": [
           "schema_hash",
-          "schema"
+          "schema",
+          "options_schema"
         ],
         "title": "RunEnvironmentSchema",
+        "type": "object"
+      },
+      "RunFactorRegression": {
+        "description": "불변 실행과 그 데이터 판으로 잰 팩터 회귀. 계열 통계(N·t 기준)는 조회 시점 원장이다.",
+        "properties": {
+          "alpha_t_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "알파 t 값의 기준(N ≥ 20 이면 3.0, 아니면 2.0, Harvey·Liu·Zhu 2016). 계열이 없어 N 을 모르면 null.",
+            "title": "Alpha T Threshold"
+          },
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "단면을 계산한 팩터 평가 규칙 판본. 같은 run 이라도 이 판본이나 레지스트리 판본이 바뀌면 값이 달라질 수 있다. 파이프라인을 돌리지 못했으면 null.",
+            "title": "Factor Evaluation Version"
+          },
+          "factor_registry_version": {
+            "title": "Factor Registry Version",
+            "type": "string"
+          },
+          "momentum_factor_id": {
+            "title": "Momentum Factor Id",
+            "type": "string"
+          },
+          "report": {
+            "$ref": "#/components/schemas/FactorRegressionReport"
+          },
+          "run_fingerprint": {
+            "title": "Run Fingerprint",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "trial_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "조회 시점 계열 원장의 시도 수 N. 계열 없는 실행은 null.",
+            "title": "Trial Count"
+          },
+          "value_factor_id": {
+            "title": "Value Factor Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_fingerprint",
+          "data_snapshot_id",
+          "momentum_factor_id",
+          "value_factor_id",
+          "factor_registry_version",
+          "factor_evaluation_version",
+          "trial_count",
+          "alpha_t_threshold",
+          "report"
+        ],
+        "title": "RunFactorRegression",
+        "type": "object"
+      },
+      "RunHeadline": {
+        "description": "완료 run 의 머리 지표(FULL 범위). 목록이 결과 파일을 열지 않고 읽는 투영이다(재설계 결정 1).\n\n값은 결과의 지표 레지스트리 값 그대로이고 사용 불가면 None 이다. 다시 계산하지 않는다.",
+        "properties": {
+          "max_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe"
+          },
+          "total_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Return"
+          }
+        },
+        "required": [
+          "total_return",
+          "sharpe",
+          "max_drawdown"
+        ],
+        "title": "RunHeadline",
         "type": "object"
       },
       "RunKind": {
@@ -7298,10 +9928,6 @@
       "RunManifest": {
         "description": "What a finished run was made of.\n\n`strategy_hash` and `strategy_provenance.spec_hash` always carry the same value: one run\nexecuted one strategy.",
         "properties": {
-          "annualization_days": {
-            "title": "Annualization Days",
-            "type": "integer"
-          },
           "completed_at": {
             "format": "date-time",
             "title": "Completed At",
@@ -7316,9 +9942,6 @@
             "title": "Data Snapshot Id",
             "type": "string"
           },
-          "engine_core": {
-            "$ref": "#/components/schemas/ExecutionCore"
-          },
           "engine_version": {
             "title": "Engine Version",
             "type": "string"
@@ -7330,21 +9953,20 @@
             "title": "Environment Hash",
             "type": "string"
           },
-          "fee_bps": {
-            "title": "Fee Bps",
-            "type": "number"
-          },
-          "initial_cash": {
-            "title": "Initial Cash",
-            "type": "number"
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
           },
           "metric_registry_version": {
             "title": "Metric Registry Version",
             "type": "string"
-          },
-          "participation_rate": {
-            "title": "Participation Rate",
-            "type": "number"
           },
           "run_fingerprint": {
             "title": "Run Fingerprint",
@@ -7358,13 +9980,9 @@
             "$ref": "#/components/schemas/BacktestRunSpec"
           },
           "schema_version": {
-            "default": "backtest-run-v2",
+            "default": "backtest-run-v3",
             "title": "Schema Version",
             "type": "string"
-          },
-          "slippage_bps": {
-            "title": "Slippage Bps",
-            "type": "number"
           },
           "strategy_hash": {
             "title": "Strategy Hash",
@@ -7390,7 +10008,6 @@
           "run_id",
           "created_at",
           "completed_at",
-          "engine_core",
           "engine_version",
           "run_fingerprint",
           "run_spec",
@@ -7398,11 +10015,6 @@
           "data_snapshot_id",
           "target_tape_hash",
           "metric_registry_version",
-          "initial_cash",
-          "annualization_days",
-          "fee_bps",
-          "slippage_bps",
-          "participation_rate",
           "environment",
           "environment_hash",
           "strategy_provenance"
@@ -7441,6 +10053,53 @@
         "title": "RunStatus",
         "type": "string"
       },
+      "RunValidationReport": {
+        "description": "PSR은 저장된 FULL 지표(없으면 미기록), DSR은 observed_at에 조회한 원장 기준이다.",
+        "properties": {
+          "dsr": {
+            "$ref": "#/components/schemas/DeflatedSharpeEvidence"
+          },
+          "metric_registry_version": {
+            "title": "Metric Registry Version",
+            "type": "string"
+          },
+          "observed_at": {
+            "description": "application 시계로 기록한 현재 계열 원장 조회 시점. 완료/선택 시각이 아니며 동시 쓰기와의 DB 스냅숏 격리를 추가하지 않는다.",
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "psr": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MetricValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "저장된 FULL PSR MetricValue 그대로. null은 미기록이고 MetricValue.value null은 원래 부재 사유를 따른다. 재계산하지 않는다."
+          },
+          "run_fingerprint": {
+            "title": "Run Fingerprint",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_fingerprint",
+          "metric_registry_version",
+          "observed_at",
+          "psr",
+          "dsr"
+        ],
+        "title": "RunValidationReport",
+        "type": "object"
+      },
       "SaveDocumentRequest": {
         "properties": {
           "format": {
@@ -7456,6 +10115,78 @@
           "format"
         ],
         "title": "SaveDocumentRequest",
+        "type": "object"
+      },
+      "SaveKiwoomMockConnectionBody": {
+        "properties": {
+          "account_number": {
+            "description": "모의 계좌번호 10자리('-' 허용). 요청 전용이며 응답에는 끝 4자리만 실린다.",
+            "title": "Account Number",
+            "type": "string",
+            "writeOnly": true
+          },
+          "app_key": {
+            "description": "키움 모의투자 App Key. 요청 전용이며 어떤 응답에도 실리지 않는다.",
+            "title": "App Key",
+            "type": "string",
+            "writeOnly": true
+          },
+          "secret_key": {
+            "description": "키움 모의투자 App Secret. 요청 전용이며 어떤 응답에도 실리지 않는다.",
+            "title": "Secret Key",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "app_key",
+          "secret_key",
+          "account_number"
+        ],
+        "title": "SaveKiwoomMockConnectionBody",
+        "type": "object"
+      },
+      "SaveLibraryFactorBody": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "factor": {
+            "additionalProperties": true,
+            "title": "Factor",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "parameters": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Parameters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "factor"
+        ],
+        "title": "SaveLibraryFactorBody",
         "type": "object"
       },
       "SaveStrategyDraftRequest": {
@@ -7571,6 +10302,52 @@
         "title": "SavedStrategy",
         "type": "object"
       },
+      "ScheduledFrameSource": {
+        "description": "선택 근거 창과 체결일 소속 창을 구분한다. 창이 바뀌어도 근거를 소급 교체하지 않는다.",
+        "properties": {
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "execution_on": {
+            "format": "date",
+            "title": "Execution On",
+            "type": "string"
+          },
+          "execution_window_index": {
+            "title": "Execution Window Index",
+            "type": "integer"
+          },
+          "selection_window_index": {
+            "title": "Selection Window Index",
+            "type": "integer"
+          },
+          "signal_as_of": {
+            "format": "date",
+            "title": "Signal As Of",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "strategy_hash": {
+            "title": "Strategy Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selection_window_index",
+          "execution_window_index",
+          "candidate_id",
+          "strategy_hash",
+          "source_hash",
+          "signal_as_of",
+          "execution_on"
+        ],
+        "title": "ScheduledFrameSource",
+        "type": "object"
+      },
       "SearchActivityView": {
         "properties": {
           "query": {
@@ -7649,7 +10426,7 @@
         "type": "object"
       },
       "SearchSpec": {
-        "description": "탐색 축들의 곱집합이 그리드다. 축 순서는 전략 문서의 파라미터 선언 순서다.\n\n축이 없으면 문서 기본값 한 칸(좌표 `()`)이다.",
+        "description": "탐색 축들의 곱집합이 그리드다. 축 순서는 전략 문서의 파라미터 선언 순서다.\n\n축이 없으면 문서 기본값 한 칸(좌표 `()`)이다. 제약(`constraints`)을 모두 만족하는 칸만 실행한다.",
         "properties": {
           "axes": {
             "items": {
@@ -7657,12 +10434,107 @@
             },
             "title": "Axes",
             "type": "array"
+          },
+          "constraints": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ParameterConstraint"
+            },
+            "title": "Constraints",
+            "type": "array"
           }
         },
         "required": [
           "axes"
         ],
         "title": "SearchSpec",
+        "type": "object"
+      },
+      "SecurityFillRow": {
+        "properties": {
+          "fee": {
+            "title": "Fee",
+            "type": "number"
+          },
+          "fill_id": {
+            "title": "Fill Id",
+            "type": "string"
+          },
+          "notional": {
+            "title": "Notional",
+            "type": "number"
+          },
+          "price": {
+            "title": "Price",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "sell_tax": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sell Tax"
+          },
+          "side": {
+            "title": "Side",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fill_id",
+          "side",
+          "quantity",
+          "price",
+          "notional",
+          "fee",
+          "sell_tax"
+        ],
+        "title": "SecurityFillRow",
+        "type": "object"
+      },
+      "SecurityLabel": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          }
+        },
+        "required": [
+          "security_id",
+          "ticker",
+          "name"
+        ],
+        "title": "SecurityLabel",
         "type": "object"
       },
       "SecurityRef": {
@@ -7693,6 +10565,166 @@
         "title": "SecurityRef",
         "type": "object"
       },
+      "SecurityTradeSession": {
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/HoldingChange"
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityFillRow"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "quantity_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity After"
+          },
+          "realized_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Pnl"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "change",
+          "quantity_after",
+          "fills",
+          "realized_pnl"
+        ],
+        "title": "SecurityTradeSession",
+        "type": "object"
+      },
+      "SecurityTradeSummary": {
+        "properties": {
+          "fill_count": {
+            "title": "Fill Count",
+            "type": "integer"
+          },
+          "final_quantity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Quantity"
+          },
+          "final_unrealized_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Unrealized Return"
+          },
+          "holding_periods": {
+            "items": {
+              "$ref": "#/components/schemas/HoldingPeriod"
+            },
+            "title": "Holding Periods",
+            "type": "array"
+          },
+          "realized_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Pnl"
+          },
+          "security": {
+            "$ref": "#/components/schemas/SecurityLabel"
+          }
+        },
+        "required": [
+          "security",
+          "holding_periods",
+          "fill_count",
+          "realized_pnl",
+          "final_quantity",
+          "final_unrealized_return"
+        ],
+        "title": "SecurityTradeSummary",
+        "type": "object"
+      },
+      "SecurityTradesReport": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "security": {
+            "$ref": "#/components/schemas/SecurityLabel"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityTradeSession"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SecurityTradesStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "security",
+          "status",
+          "sessions",
+          "detail"
+        ],
+        "title": "SecurityTradesReport",
+        "type": "object"
+      },
+      "SecurityTradesStatus": {
+        "enum": [
+          "available",
+          "security_not_traded"
+        ],
+        "title": "SecurityTradesStatus",
+        "type": "string"
+      },
       "SelectionMethod": {
         "enum": [
           "top_n",
@@ -7700,6 +10732,41 @@
         ],
         "title": "SelectionMethod",
         "type": "string"
+      },
+      "SelectionTransition": {
+        "properties": {
+          "candidate_changed": {
+            "title": "Candidate Changed",
+            "type": "boolean"
+          },
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "execution_on": {
+            "format": "date",
+            "title": "Execution On",
+            "type": "string"
+          },
+          "signal_as_of": {
+            "format": "date",
+            "title": "Signal As Of",
+            "type": "string"
+          },
+          "window_index": {
+            "title": "Window Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_index",
+          "candidate_id",
+          "signal_as_of",
+          "execution_on",
+          "candidate_changed"
+        ],
+        "title": "SelectionTransition",
+        "type": "object"
       },
       "SellTax": {
         "description": "매도 체결에 붙는 거래세 방식(spec D7).\n\n`krx_statutory` 는 시장·날짜별 법정 세율표(`_krx_tax.py`)를, `custom` 은 `sell_tax_bps` 하나를,\n`none` 은 세금 없음을 뜻한다.",
@@ -7750,6 +10817,154 @@
           "usage"
         ],
         "title": "SessionHistoryView",
+        "type": "object"
+      },
+      "SessionHoldings": {
+        "properties": {
+          "cash": {
+            "title": "Cash",
+            "type": "number"
+          },
+          "cash_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash Weight"
+          },
+          "closed": {
+            "items": {
+              "$ref": "#/components/schemas/ClosedHolding"
+            },
+            "title": "Closed",
+            "type": "array"
+          },
+          "equity": {
+            "title": "Equity",
+            "type": "number"
+          },
+          "holdings": {
+            "items": {
+              "$ref": "#/components/schemas/HoldingRow"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/SessionTradeTotals"
+          }
+        },
+        "required": [
+          "session",
+          "equity",
+          "cash",
+          "cash_weight",
+          "holdings",
+          "closed",
+          "totals"
+        ],
+        "title": "SessionHoldings",
+        "type": "object"
+      },
+      "SessionHoldingsReport": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "holdings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionHoldings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionHoldingsStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "session",
+          "status",
+          "holdings",
+          "detail"
+        ],
+        "title": "SessionHoldingsReport",
+        "type": "object"
+      },
+      "SessionHoldingsStatus": {
+        "enum": [
+          "available",
+          "session_not_recorded"
+        ],
+        "title": "SessionHoldingsStatus",
+        "type": "string"
+      },
+      "SessionTradeTotals": {
+        "properties": {
+          "buy_count": {
+            "title": "Buy Count",
+            "type": "integer"
+          },
+          "buy_notional": {
+            "title": "Buy Notional",
+            "type": "number"
+          },
+          "fees": {
+            "title": "Fees",
+            "type": "number"
+          },
+          "sell_count": {
+            "title": "Sell Count",
+            "type": "integer"
+          },
+          "sell_notional": {
+            "title": "Sell Notional",
+            "type": "number"
+          },
+          "taxes": {
+            "title": "Taxes",
+            "type": "number"
+          }
+        },
+        "required": [
+          "buy_count",
+          "buy_notional",
+          "sell_count",
+          "sell_notional",
+          "fees",
+          "taxes"
+        ],
+        "title": "SessionTradeTotals",
         "type": "object"
       },
       "SessionUsageView": {
@@ -8603,6 +11818,65 @@
         "title": "StrategyExplanationStep",
         "type": "object"
       },
+      "StrategyFactorPreview": {
+        "properties": {
+          "missing": {
+            "$ref": "#/components/schemas/MissingPolicy"
+          },
+          "missing_count": {
+            "title": "Missing Count",
+            "type": "integer"
+          },
+          "top": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyFactorPreviewRow"
+            },
+            "title": "Top",
+            "type": "array"
+          },
+          "valid_count": {
+            "title": "Valid Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "valid_count",
+          "missing_count",
+          "missing",
+          "top"
+        ],
+        "title": "StrategyFactorPreview",
+        "type": "object"
+      },
+      "StrategyFactorPreviewRow": {
+        "properties": {
+          "security": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecurityRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "security_id",
+          "value",
+          "security"
+        ],
+        "title": "StrategyFactorPreviewRow",
+        "type": "object"
+      },
       "StrategyIdentity": {
         "properties": {
           "revision": {
@@ -8885,6 +12159,7 @@
               "selection_percentile": 0.1,
               "short_selection_count": 20,
               "side": "long_only",
+              "tie_breaker_direction": "high",
               "turnover_buffer_count": 0,
               "weighting": "equal"
             }
@@ -9124,6 +12399,26 @@
             "title": "Offset",
             "type": "integer"
           },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Parameter Values",
+            "type": "object"
+          },
           "security_ids": {
             "description": "Securities to trace. An empty list skips per-security rows and returns only the as-of summary.",
             "items": {
@@ -9186,9 +12481,44 @@
             "title": "As Of",
             "type": "string"
           },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
+          },
           "factor_id": {
             "title": "Factor Id",
             "type": "string"
+          },
+          "factor_preview": {
+            "$ref": "#/components/schemas/StrategyFactorPreview"
+          },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "기본값을 포함한 해소 평가 값. spec_hash/provenance는 문서 의미, plan_hash는 계산 구조이며 파라미터 값 변경으로 바꾸지 않는다.",
+            "title": "Parameter Values",
+            "type": "object"
           },
           "plan_hash": {
             "title": "Plan Hash",
@@ -9263,7 +12593,8 @@
           "trace",
           "raw",
           "raw_truncated",
-          "target"
+          "target",
+          "factor_preview"
         ],
         "title": "StrategyTraceResponse",
         "type": "object"
@@ -9514,6 +12845,17 @@
             "title": "Execution Timing",
             "type": "string"
           },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
+          },
           "frames": {
             "items": {
               "$ref": "#/components/schemas/TargetFrame"
@@ -9583,6 +12925,24 @@
           "text"
         ],
         "title": "ThinkingSummaryView",
+        "type": "object"
+      },
+      "TimeEstimate": {
+        "properties": {
+          "sample_count": {
+            "title": "Sample Count",
+            "type": "integer"
+          },
+          "total_seconds": {
+            "title": "Total Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total_seconds",
+          "sample_count"
+        ],
+        "title": "TimeEstimate",
         "type": "object"
       },
       "TimeSeriesNode": {
@@ -9913,6 +13273,7 @@
               "mapping": {
                 "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
                 "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
+                "backtest.run.parameter_invalid": "#/components/schemas/BacktestParameterInvalidDetail",
                 "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
                 "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
@@ -9950,6 +13311,9 @@
                 "$ref": "#/components/schemas/BacktestRunFieldInvalidDetail"
               },
               {
+                "$ref": "#/components/schemas/BacktestParameterInvalidDetail"
+              },
+              {
                 "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
               },
               {
@@ -9976,6 +13340,40 @@
         ],
         "title": "TraceValueStatus",
         "type": "string"
+      },
+      "TradeSessionSummary": {
+        "properties": {
+          "closed_count": {
+            "title": "Closed Count",
+            "type": "integer"
+          },
+          "fill_count": {
+            "title": "Fill Count",
+            "type": "integer"
+          },
+          "holding_count": {
+            "title": "Holding Count",
+            "type": "integer"
+          },
+          "opened_count": {
+            "title": "Opened Count",
+            "type": "integer"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "holding_count",
+          "opened_count",
+          "closed_count",
+          "fill_count"
+        ],
+        "title": "TradeSessionSummary",
+        "type": "object"
       },
       "TrialAttempt": {
         "description": "trial 의 실행 시도 하나. 배정되면 `run_id`, 접수가 거절되면 거절 코드와 문장이 있다.",
@@ -10262,6 +13660,17 @@
             "title": "Run Id",
             "type": "string"
           },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
           "session_sharpe": {
             "anyOf": [
               {
@@ -10272,6 +13681,17 @@
               }
             ],
             "title": "Session Sharpe"
+          },
+          "span_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Span Days"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
@@ -10342,7 +13762,7 @@
         "type": "object"
       },
       "TurnContextPayload": {
-        "description": "한 턴이 보는 문서 상태. 서버가 문서를 들지 않으므로 요청마다 실려 온다(spec D7).",
+        "description": "한 턴이 보는 편집기 상태. 저장 문서와 별개로 아직 저장하지 않은 원문·진단을 요청에 싣는다.",
         "properties": {
           "diagnostics": {
             "default": [],
@@ -10581,6 +14001,35 @@
           "average_members"
         ],
         "title": "UniverseCoverageSummary",
+        "type": "object"
+      },
+      "UniverseDefinition": {
+        "description": "연결된 시장 데이터 어댑터가 실행에 쓸 수 있다고 답하는 유니버스 하나.\n\n실행 설정의 `universe_id` 가 고를 수 있는 값의 owner 는 어댑터다. 표시명·설명은 사람이 읽는\n문장이라 어댑터가 완성해 싣는다(화면은 다시 조립하지 않는다).",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "market": {
+            "title": "Market",
+            "type": "string"
+          },
+          "universe_id": {
+            "title": "Universe Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "universe_id",
+          "market",
+          "label",
+          "description"
+        ],
+        "title": "UniverseDefinition",
         "type": "object"
       },
       "UniverseHistoryQuery": {
@@ -10880,7 +14329,6 @@
       },
       "ValidationKind": {
         "enum": [
-          "syntax",
           "semantic",
           "capability"
         ],
@@ -10893,6 +14341,14 @@
           "warning"
         ],
         "title": "ValidationSeverity",
+        "type": "string"
+      },
+      "WalkForwardEvaluationBasis": {
+        "description": "연결곡선이 측정하는 대상. 실제 계좌 연속 평가는 별도 계약으로 구분해야 한다.",
+        "enum": [
+          "window_restart_returns"
+        ],
+        "title": "WalkForwardEvaluationBasis",
         "type": "string"
       },
       "WalkForwardGap": {
@@ -10918,6 +14374,10 @@
             "title": "Curve",
             "type": "array"
           },
+          "evaluation_basis": {
+            "$ref": "#/components/schemas/WalkForwardEvaluationBasis",
+            "default": "window_restart_returns"
+          },
           "gap": {
             "anyOf": [
               {
@@ -10927,6 +14387,11 @@
                 "type": "null"
               }
             ]
+          },
+          "interpretation": {
+            "default": "이 곡선은 검증 창마다 같은 초기자본으로 다시 실행한 뒤, 각 창의 첫 snapshot 이후 수익률만 연결한 비교 결과입니다. 초기자본에서 첫 snapshot까지의 진입비용·손익은 포함하지 않으며, 창 경계의 현금·보유 수량을 이월하지 않습니다. 실제 연속 계좌의 손익이 아닙니다.",
+            "title": "Interpretation",
+            "type": "string"
           },
           "out_of_sample_sharpe": {
             "anyOf": [
@@ -10949,6 +14414,27 @@
               }
             ],
             "title": "Retention"
+          },
+          "retention_gap": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetentionGap"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "train_sharpe_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Train Sharpe Mean"
           },
           "windows": {
             "items": {
@@ -11030,7 +14516,9 @@
                   "backtest.run.no_positions",
                   "backtest.run.benchmark_unknown",
                   "backtest.run.internal",
-                  "backtest.run.interrupted"
+                  "backtest.run.interrupted",
+                  "backtest.run.worker_exited",
+                  "backtest.run.worker_mismatch"
                 ],
                 "type": "string"
               },
@@ -11175,6 +14663,42 @@
         "title": "WindowPick",
         "type": "object"
       },
+      "WindowSelection": {
+        "description": "학습만으로 동결한 후보. known_as_of는 해당 날짜 종가 이후를 뜻한다.\n\ncandidate_id는 외부에서 동결한 불변 신원이다. 이 타입은 후보 내용이나 학습 출처를\n증명하지 않는다. WindowPick.created_at은 실행 당시 시각이므로 이를 대신할 수 없다.",
+        "properties": {
+          "candidate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Id"
+          },
+          "known_as_of": {
+            "format": "date",
+            "title": "Known As Of",
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/components/schemas/WalkForwardWindow"
+          },
+          "window_index": {
+            "title": "Window Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_index",
+          "window",
+          "candidate_id",
+          "known_as_of"
+        ],
+        "title": "WindowSelection",
+        "type": "object"
+      },
       "WindowSelectionRule": {
         "description": "창마다 학습 구간 성과로 파라미터 칸 하나를 고르는 기준.",
         "enum": [
@@ -11296,11 +14820,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AssistantUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Deleteassistantprovider"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "A coded assistant rejection or a malformed request envelope"
           }
         },
         "summary": "Delete Assistant Provider",
@@ -11348,11 +14880,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AssistantUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Activateassistantprovider"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "A coded assistant rejection or a malformed request envelope"
           }
         },
         "summary": "Activate Assistant Provider",
@@ -12121,6 +15661,75 @@
         "summary": "Get Backtest Status"
       }
     },
+    "/api/v1/backtests/{run_id}/account-report": {
+      "get": {
+        "operationId": "getBacktestAccountReport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Account Report"
+      }
+    },
     "/api/v1/backtests/{run_id}/cancel": {
       "post": {
         "description": "사용자가 run 에서 빠진다. 실험이 써서 계속 돌면 `kept_by_owners` 가 참이다.",
@@ -12227,6 +15836,301 @@
         "summary": "Stream Backtest Events"
       }
     },
+    "/api/v1/backtests/{run_id}/factor-regression": {
+      "get": {
+        "operationId": "getBacktestFactorRegression",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunFactorRegression"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Factor Regression"
+      }
+    },
+    "/api/v1/backtests/{run_id}/holdings": {
+      "get": {
+        "operationId": "getBacktestHoldings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldingsOverview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Holdings"
+      }
+    },
+    "/api/v1/backtests/{run_id}/holdings/securities/{security_id}": {
+      "get": {
+        "operationId": "getBacktestSecurityTrades",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "security_id",
+            "required": true,
+            "schema": {
+              "title": "Security Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityTradesReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Security Trades"
+      }
+    },
+    "/api/v1/backtests/{run_id}/holdings/sessions/{session}": {
+      "get": {
+        "operationId": "getBacktestSessionHoldings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Session",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionHoldingsReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Session Holdings"
+      }
+    },
     "/api/v1/backtests/{run_id}/request": {
       "get": {
         "description": "Expose the server-owned accepted assumptions for audit and exact reruns.",
@@ -12262,6 +16166,16 @@
               }
             },
             "description": "The backtest run does not exist"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRequestRetiredResponse"
+                }
+              }
+            },
+            "description": "The stored request names a retired strategy schema"
           },
           "422": {
             "content": {
@@ -12346,6 +16260,202 @@
         "summary": "Get Backtest Result"
       }
     },
+    "/api/v1/backtests/{run_id}/robustness-check": {
+      "post": {
+        "description": "결과 실행의 기본 설계로 실험을 만들고 대기열에 넣는다(US-DM-11).",
+        "operationId": "createRobustnessCheck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Experiment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                    }
+                  ],
+                  "title": "Response 404 Createrobustnesscheck"
+                }
+              }
+            },
+            "description": "The result run or its base strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                    }
+                  ],
+                  "title": "Response 409 Createrobustnesscheck"
+                }
+              }
+            },
+            "description": "A check of this run is still running, or the base revision is stale"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "A coded experiment design or base run diagnostic"
+          }
+        },
+        "summary": "Create Robustness Check"
+      }
+    },
+    "/api/v1/backtests/{run_id}/robustness-check/preview": {
+      "post": {
+        "description": "결과 실행의 \"튼튼한지 확인하기\" 미리 계산 — 기본 설계와 새로 세는 시도 수(US-DM-11).",
+        "operationId": "previewRobustnessCheck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RobustnessPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                    }
+                  ],
+                  "title": "Response 404 Previewrobustnesscheck"
+                }
+              }
+            },
+            "description": "The result run or its base strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                    }
+                  ],
+                  "title": "Response 409 Previewrobustnesscheck"
+                }
+              }
+            },
+            "description": "A check of this run is still running, or the base revision is stale"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "A coded experiment design or base run diagnostic"
+          }
+        },
+        "summary": "Preview Robustness Check"
+      }
+    },
+    "/api/v1/backtests/{run_id}/robustness-checks": {
+      "get": {
+        "description": "결과 실행에서 \"튼튼한지 확인하기\"로 만든 실험, 최근에 만든 순. 없으면 빈 목록.",
+        "operationId": "listRobustnessChecks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Experiment"
+                  },
+                  "title": "Response Listrobustnesschecks",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Robustness Checks"
+      }
+    },
     "/api/v1/backtests/{run_id}/summary": {
       "get": {
         "description": "이력 한 행. 결과 화면이 실행 종류(단일·실험 trial·워크포워드 검증)를 서버 판정으로\n읽는다.",
@@ -12394,6 +16504,236 @@
           }
         },
         "summary": "Get Backtest Summary"
+      }
+    },
+    "/api/v1/backtests/{run_id}/validation-report": {
+      "get": {
+        "operationId": "getBacktestValidationReport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunValidationReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Validation Report"
+      }
+    },
+    "/api/v1/broker-connections/kiwoom-mock": {
+      "delete": {
+        "operationId": "deleteKiwoomMockConnection",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrokerErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Delete Connection"
+      },
+      "get": {
+        "operationId": "getKiwoomMockConnection",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KiwoomMockConnectionBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Connection"
+      },
+      "put": {
+        "operationId": "saveKiwoomMockConnection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveKiwoomMockConnectionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KiwoomMockConnectionBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrokerErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Save Connection"
+      }
+    },
+    "/api/v1/broker-connections/kiwoom-mock/verify": {
+      "post": {
+        "description": "토큰 발급과 계좌 대조만 한다. 사용자가 누를 때만 키를 쓴다. 주문하지 않는다.",
+        "operationId": "verifyKiwoomMockConnection",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KiwoomMockConnectionCheckBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Verify Connection"
+      }
+    },
+    "/api/v1/continuous-accounts/{evaluation_id}": {
+      "get": {
+        "operationId": "getContinuousAccount",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get"
       }
     },
     "/api/v1/equity/catalog": {
@@ -12647,6 +16987,29 @@
           }
         },
         "summary": "Equity Universe Preview"
+      }
+    },
+    "/api/v1/equity/universes": {
+      "get": {
+        "description": "연결된 시장 데이터가 실행에 쓸 수 있는 유니버스(id·표시명·설명).\n\n실행 설정 드롭다운의 출처다.",
+        "operationId": "listEquityUniverses",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UniverseDefinition"
+                  },
+                  "title": "Response Listequityuniverses",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Equity Universes"
       }
     },
     "/api/v1/experiments": {
@@ -12992,6 +17355,70 @@
         "summary": "Get Experiment"
       }
     },
+    "/api/v1/experiments/{experiment_id}/audit": {
+      "get": {
+        "description": "실험 생성·조작·trial attempt·실행 시작과 끝·창 선택·후보 선택·취소를 시각 순으로\n보인다(로드맵 M6 감사 기록).",
+        "operationId": "getExperimentAudit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExperimentAuditEvent"
+                  },
+                  "title": "Response Getexperimentaudit",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment state refuses it"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Experiment Audit"
+      }
+    },
     "/api/v1/experiments/{experiment_id}/cancel": {
       "post": {
         "operationId": "cancelExperiment",
@@ -13109,6 +17536,152 @@
           }
         },
         "summary": "Get Experiment Capacity"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/continuous-account": {
+      "get": {
+        "operationId": "getExperimentContinuousAccount",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountLatest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Latest"
+      },
+      "post": {
+        "operationId": "runExperimentContinuousAccount",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContinuousAccountStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Run"
       }
     },
     "/api/v1/experiments/{experiment_id}/controls": {
@@ -13275,6 +17848,74 @@
           }
         },
         "summary": "Get Experiment Parameter Map"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/remaining-time": {
+      "get": {
+        "description": "남은 실행의 시간 어림(로드맵 M6 ETA). 실험 조회·진행 스트림과 따로 둔다 — 계열 원장을\n읽어 목록·스트림 폴링마다 치르지 않게 한다. 근거가 없으면 null.",
+        "operationId": "getExperimentRemainingTime",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TimeEstimate"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Getexperimentremainingtime"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment state refuses it"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Experiment Remaining Time"
       }
     },
     "/api/v1/experiments/{experiment_id}/selections": {
@@ -13546,6 +18187,375 @@
         "summary": "Get Experiment Walk Forward"
       }
     },
+    "/api/v1/factor-library": {
+      "get": {
+        "operationId": "listLibraryFactors",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_hidden",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Hidden",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "List Factors"
+      },
+      "post": {
+        "operationId": "saveLibraryFactor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveLibraryFactorBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Save"
+      }
+    },
+    "/api/v1/factor-library/matches": {
+      "post": {
+        "operationId": "matchLibraryFactors",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryMatchesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorMatchesBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Matches"
+      }
+    },
+    "/api/v1/factor-library/{library_id}": {
+      "get": {
+        "operationId": "getLibraryFactor",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Factor"
+      },
+      "patch": {
+        "operationId": "setLibraryFactorVisibility",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryVisibilityBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Set Visibility"
+      }
+    },
+    "/api/v1/factor-library/{library_id}/versions": {
+      "post": {
+        "operationId": "addLibraryFactorVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddLibraryVersionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Add Version"
+      }
+    },
     "/api/v1/factors/catalog": {
       "get": {
         "operationId": "getFactorCatalog",
@@ -13690,44 +18700,6 @@
           }
         },
         "summary": "Explain Factor Graph"
-      }
-    },
-    "/api/v1/factors/preview": {
-      "post": {
-        "operationId": "previewFactorGraph",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FactorPreviewRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FactorPreview"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Preview Factor Graph"
       }
     },
     "/api/v1/factors/validate": {
@@ -13876,6 +18848,24 @@
           }
         },
         "summary": "Run Environment Schema"
+      }
+    },
+    "/api/v1/settings/credentials-file": {
+      "get": {
+        "operationId": "getCredentialsFile",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialsFileBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Credentials File"
       }
     },
     "/api/v1/strategies": {
@@ -14246,6 +19236,64 @@
           }
         },
         "summary": "Diff Strategy Revisions"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/draft-diff": {
+      "post": {
+        "description": "저장 리비전과 편집 중 원문을 같은 도메인 의미 diff로 비교한다.",
+        "operationId": "diffStrategyDraft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftDiffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftDiff"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDocumentInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Diffstrategydraft"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Diff Strategy Draft"
       }
     },
     "/api/v1/strategies/{strategy_id}/revisions": {

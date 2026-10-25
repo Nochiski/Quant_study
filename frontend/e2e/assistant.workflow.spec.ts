@@ -100,6 +100,14 @@ test.describe("AI 어시스턴트", () => {
       await card.getByRole("button", { name: "연결 테스트" }).click();
       await expect(card.getByRole("status")).toContainText("연결 확인됨");
       expect(await page.content()).not.toContain(SECRET);
+
+      // 저장 위치는 서버가 해석한 실제 파일 경로다. e2e는 격리 런타임의 `auto_trading.env`를 쓴다
+      // (`e2e/runtime.ts`). 임시 폴더는 OS가 심볼릭 링크를 풀어 적으므로 파일 이름까지만 맞춘다.
+      // 저장 위치는 두 섹션이 함께 쓰는 파일이라 설정 화면에 한 번만 보인다(마지막 리뷰 8).
+      const location = page.getByTestId("credentials-file-location");
+      await expect(location).toHaveCount(1);
+      await expect(location).toContainText("저장 위치:");
+      await expect(location).toContainText(/auto_trading\.env$/);
     },
   );
 
@@ -213,6 +221,7 @@ test.describe("AI 어시스턴트", () => {
       await ensureProvider(page);
       await saveStrategyRevision(page, "B-05 제안 적용");
       const before = await currentSource(page);
+      // 접힌 창을 펼치는 흐름을 본다 — 편집기의 AI 창은 최소화한 채 시작한다(PR #624 결정).
       await openAssistant(page);
       // 펼치는 순간 상단 토글이 스스로 언마운트되므로 패널이 포커스를 받는다(B-04 3차 리뷰 P1-1).
       // 그러지 않으면 키보드 사용자는 방금 연 사이드바를 찾아 처음부터 탭해야 한다.
@@ -284,14 +293,14 @@ test.describe("AI 어시스턴트", () => {
       ).toBeVisible();
 
       // 저장하지 않은 문서를 떠나므로 이탈 확인을 거친다.
-      const leaveGuard = page.getByRole("button", { name: "나가기" });
+      const leaveGuard = page.getByRole("button", { name: "결과 보기" });
       await expect(leaveGuard).toBeVisible({ timeout: 60_000 });
       await leaveGuard.click();
 
       await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
       await expect(
         page.getByRole("status", { name: "실행 상태" }),
-      ).toContainText("completed", { timeout: 180_000 });
+      ).toContainText("완료", { timeout: 180_000 });
       await expect(
         page.getByRole("article", { name: "백테스트 결과" }),
       ).toBeVisible({ timeout: 180_000 });
@@ -331,7 +340,7 @@ test.describe("AI 어시스턴트", () => {
       await freshExplain;
 
       // 계획이 도착하면 실행이 시작되고, 저장하지 않은 문서를 떠나므로 이탈 확인이 뜬다.
-      const leaveGuard = page.getByRole("button", { name: "나가기" });
+      const leaveGuard = page.getByRole("button", { name: "결과 보기" });
       await expect(leaveGuard).toBeVisible({ timeout: 60_000 });
       await expect(
         page.getByText(/백테스트를 시작하지 않았습니다/u),
@@ -341,7 +350,7 @@ test.describe("AI 어시스턴트", () => {
       await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
       await expect(
         page.getByRole("status", { name: "실행 상태" }),
-      ).toContainText("completed", { timeout: 180_000 });
+      ).toContainText("완료", { timeout: 180_000 });
     },
   );
 

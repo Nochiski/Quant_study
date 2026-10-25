@@ -18,12 +18,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import ROUND_FLOOR, Decimal
 from enum import Enum
 from typing import Protocol
 
+from backtest_engine.engine.capacity import maximum_quantity
+from backtest_engine.engine.costs import sell_tax_amount
 from backtest_engine.engine.orders import OpenOrder
+from backtest_engine.engine.power_projection import ExecutionState
 from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.engine.slippage import NoSlippage
 from backtest_engine.ports.execution import SlippageModel
@@ -33,7 +36,7 @@ from backtest_engine.types.actions import (
     SetPortfolioTarget,
     SetPositionTarget,
 )
-from backtest_engine.types.events import FillEvent, OrderEvent
+from backtest_engine.types.events import LIQUIDITY_CAP_ZERO, FillEvent, OrderEvent
 from backtest_engine.types.market import Bar
 from backtest_engine.types.orders import Side, TimeInForce
 
@@ -69,6 +72,8 @@ class Quote:
     slippage_per_share: float
     status: ExecutionStatus
     detail: str | None
+    reason_code: str | None = None
+    cap_volume: int | None = None
 
 
 def participation_of(order: OrderEvent) -> float | None:
@@ -126,6 +131,11 @@ class QuoteCore(Protocol):
         held: Decimal,
         fee_rate: float,
         fok: bool,
+        sell_tax_rate: float = 0.0,
+        leverage: float = 1.0,
+        held_mark: float | None = None,
+        valuation: tuple[float, float] | None = None,
+        execution_state: ExecutionState | None = None,
     ) -> QuoteNumbers: ...
 
 
@@ -143,6 +153,11 @@ class PythonQuoteCore:
         held: Decimal,
         fee_rate: float,
         fok: bool,
+        sell_tax_rate: float = 0.0,
+        leverage: float = 1.0,
+        held_mark: float | None = None,
+        valuation: tuple[float, float] | None = None,
+        execution_state: ExecutionState | None = None,
     ) -> QuoteNumbers:
         if slip < 0:
             raise ValueError(f"slippage must be >= 0 — slip={slip}")
@@ -165,17 +180,28 @@ class PythonQuoteCore:
             limit = float(limit_price)
             price = min(price, limit) if buy else max(price, limit)
         applied = abs(price - base_price)
+        # 체결 원장이 허용하지 않는 가격은 청산·신규 진입 모두 견적 경계에서 거절한다.
+        if price <= 0:
+            return QuoteNumbers(price, Decimal(0), applied, ExecutionStatus.REJECTED_NO_CASH)
 
-        short_entry = Decimal(0) if buy else quantity - max(held, Decimal(0))
-        if buy or short_entry > 0:
-            if buy:
-                affordable = _affordable_quantity(buying_power, price, fee_rate)
-            else:
-                # 보유분 매도는 무제한이고 그만큼 노출이 줄어 여력이 늘어난다. 숏 진입분만
-                # (청산 후 여력)으로 자른다.
-                closing = max(held, Decimal(0))
-                freed_power = buying_power + float(closing) * price
-                affordable = _affordable_quantity(freed_power, price, fee_rate) + closing
+        closing = max(-held if buy else held, Decimal(0))
+        if quantity > closing or execution_state is not None:
+            equity, gross = valuation or (buying_power / leverage, 0.0)
+            affordable = Decimal(
+                maximum_quantity(
+                    int(quantity),
+                    buy=buy,
+                    price=price,
+                    held=held,
+                    fee_rate=fee_rate,
+                    tax_rate=sell_tax_rate,
+                    leverage=leverage,
+                    equity=equity,
+                    gross=gross,
+                    mark=price if held_mark is None else held_mark,
+                    state=execution_state,
+                )
+            )
             if affordable <= 0:
                 return QuoteNumbers(price, Decimal(0), applied, ExecutionStatus.REJECTED_NO_CASH)
             if affordable < quantity:
@@ -185,14 +211,6 @@ class PythonQuoteCore:
         if fok and quantity < remaining:
             return QuoteNumbers(price, Decimal(0), applied, ExecutionStatus.FOK_REJECTED)
         return QuoteNumbers(price, quantity, applied, status)
-
-
-def _affordable_quantity(buying_power: float, price: float, fee_rate: float) -> Decimal:
-    """수수료까지 포함해 여력으로 살 수 있는 최대 정수 수량."""
-    if price <= 0 or buying_power <= 0:
-        return Decimal(0)
-    raw = buying_power / (price * (1.0 + fee_rate))
-    return Decimal(raw).quantize(Decimal(1), rounding=ROUND_FLOOR)
 
 
 class BrokerSim:
@@ -227,6 +245,8 @@ class BrokerSim:
         bar: Bar,
         buying_power: float,
         fill_id: str,
+        *,
+        sell_tax_rate: float,
     ) -> ExecutionOutcome:
         """대기 주문 하나를 해당 세션 bar로 체결 시도한다 (quote → fill).
 
@@ -237,7 +257,7 @@ class BrokerSim:
         quote = self.quote(open_order, bar, buying_power)
         if quote.quantity <= 0:
             return ExecutionOutcome(fill=None, status=quote.status, detail=quote.detail)
-        fill = self.fill(quote, open_order, bar, fill_id)
+        fill = self.fill(quote, open_order, bar, fill_id, sell_tax_rate=sell_tax_rate)
         return ExecutionOutcome(fill=fill, status=quote.status, detail=quote.detail)
 
     def quote(
@@ -246,6 +266,11 @@ class BrokerSim:
         bar: Bar,
         buying_power: float,
         held: Decimal = Decimal(0),
+        sell_tax_rate: float = 0.0,
+        leverage: float = 1.0,
+        held_mark: float | None = None,
+        valuation: tuple[float, float] | None = None,
+        execution_state: ExecutionState | None = None,
     ) -> Quote:
         """체결 없이 "이 세션에 얼마에 몇 주 체결되는가"만 정한다. quantity 0이면 체결 없음.
 
@@ -294,6 +319,11 @@ class BrokerSim:
             held,
             self._fee_rate,
             order.time_in_force is TimeInForce.FOK,
+            sell_tax_rate,
+            leverage,
+            held_mark,
+            valuation,
+            execution_state,
         )
         detail = self._detail(numbers, order, bar, volume, open_order.remaining, buying_power)
         return Quote(
@@ -303,6 +333,52 @@ class BrokerSim:
             numbers.slippage_per_share,
             numbers.status,
             detail,
+            LIQUIDITY_CAP_ZERO if numbers.status is ExecutionStatus.NOT_FILLED else None,
+            volume if numbers.status is ExecutionStatus.NOT_FILLED else None,
+        )
+
+    def constrain_quote(
+        self,
+        entry: OpenOrder,
+        quote: Quote,
+        quantity: Decimal,
+        bar: Bar,
+        buying_power: float,
+        held: Decimal,
+        leverage: float,
+        held_mark: float | None,
+        valuation: tuple[float, float],
+        execution_state: ExecutionState,
+        sell_tax_rate: float,
+    ) -> Quote:
+        """비례 축소 후 예산만 재판정한다. 최초 견적의 가격·충격 Q 계약은 유지한다."""
+        numbers = self._quote_core.quote_numbers(
+            entry.order.side,
+            quote.price,
+            quantity,
+            bar.cap_volume,
+            None,
+            0.0,
+            None,
+            buying_power,
+            held,
+            self._fee_rate,
+            False,
+            sell_tax_rate,
+            leverage,
+            held_mark,
+            valuation,
+            execution_state,
+        )
+        if numbers.quantity == quantity:
+            return replace(quote, quantity=quantity)
+        return replace(
+            quote,
+            quantity=numbers.quantity,
+            status=numbers.status,
+            detail=self._detail(
+                numbers, entry.order, bar, bar.cap_volume, entry.remaining, buying_power
+            ),
         )
 
     @staticmethod
@@ -353,6 +429,8 @@ class BrokerSim:
         bar: Bar,
         fill_id: str,
         quantity: Decimal | None = None,
+        *,
+        sell_tax_rate: float,
     ) -> FillEvent:
         """견적을 체결 기록으로 만든다. quantity로 견적보다 적게(바스켓 비례 축소) 체결 가능."""
         order = open_order.order
@@ -374,4 +452,5 @@ class BrokerSim:
             fee=self.fee_for(notional),
             slippage_per_share=quote.slippage_per_share,
             cap_volume=bar.cap_volume,
+            sell_tax=sell_tax_amount(order.side, filled, quote.price, sell_tax_rate),
         )

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 _T = TypeVar("_T")
@@ -22,6 +23,14 @@ def experiment_slots(run_slots: int) -> int:
     슬롯이 1개면 비우지 않는다 — 비우면 실험이 영영 돌지 못한다.
     """
     return run_slots - 1 if run_slots >= 2 else run_slots
+
+
+@dataclass(frozen=True)
+class RunLaneControls:
+    """실행 접수와 원자적으로 적용할 레인 조작. 저장 정본은 실험 기록이다."""
+
+    paused: bool
+    weight: int
 
 
 class RunQueue(Generic[_T]):
@@ -51,6 +60,12 @@ class RunQueue(Generic[_T]):
         else:
             self._weights[lane] = weight
 
+    def forget(self, lane: str) -> None:
+        """더 쓰는 실행이 없는 실험의 조작과 차례 잔량을 버린다."""
+        self._paused.discard(lane)
+        self._weights.pop(lane, None)
+        self._served.pop(lane, None)
+
     def is_paused(self, lane: str) -> bool:
         return lane in self._paused
 
@@ -75,18 +90,18 @@ class RunQueue(Generic[_T]):
                     self._served.pop(lane, None)
                 return
 
+    def peek(self, *, experiments: bool) -> _T | None:
+        """`pop` 이 꺼낼 run. 아무것도 바꾸지 않는다 — 꺼내기 전에 판정하는 메모리 가드가 쓴다
+        (run-worker spec D8: 꺼냈다 되돌리면 레인의 차례 수가 흐려진다)."""
+        found = self._next(experiments=experiments)
+        return None if found is None else found[1][0]
+
     def pop(self, *, experiments: bool) -> _T | None:
         """다음 run. `experiments` 가 거짓이면(실험 몫 슬롯이 찼다) 단일 실행만 꺼낸다."""
-        lane: str | None
-        if None in self._lanes:
-            lane = None
-        elif experiments:
-            lane = next((lane for lane in self._lanes if lane not in self._paused), None)
-            if lane is None:
-                return None
-        else:
+        found = self._next(experiments=experiments)
+        if found is None:
             return None
-        queue = self._lanes[lane]
+        lane, queue = found
         item = queue.popleft()
         # 차례 중이던 실험 레인이 멈춰 다른 실험 레인이 꺼내면 그 차례는 끝난다(단일 실행은 끼어들
         # 뿐 차례를 끊지 않는다).
@@ -101,3 +116,13 @@ class RunQueue(Generic[_T]):
             del self._lanes[lane]
             self._lanes[lane] = queue
         return item
+
+    def _next(self, *, experiments: bool) -> tuple[str | None, deque[_T]] | None:
+        """다음에 꺼낼 (레인, 그 대기열). 꺼낼 run 이 없으면 None 이다(레인 None 은 단일 실행)."""
+        if None in self._lanes:
+            return None, self._lanes[None]
+        if experiments:
+            for lane, queue in self._lanes.items():
+                if lane not in self._paused:
+                    return lane, queue
+        return None

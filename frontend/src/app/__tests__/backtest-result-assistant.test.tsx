@@ -66,19 +66,13 @@ const resultFixture = (): BacktestRunResult => ({
     run_id: RUN_ID,
     created_at: "2026-09-27T00:00:00Z",
     completed_at: "2026-09-27T00:00:05Z",
-    engine_core: "rust",
     engine_version: "test",
     run_fingerprint: "f".repeat(32),
-    run_spec: { benchmark_security_id: "005930", metric_windows: [] },
+    run_spec: { core: "rust", initial_cash: 100_000_000, annualization_days: 252, benchmark_security_id: "005930", metric_windows: [] },
     strategy_hash: "a".repeat(64),
     data_snapshot_id: "snapshot",
     target_tape_hash: "b".repeat(64),
     metric_registry_version: "metric-registry-v1",
-    initial_cash: 100_000_000,
-    annualization_days: 252,
-    fee_bps: 15,
-    slippage_bps: 10,
-    participation_rate: 0.1,
     environment: {
       start: "2023-01-02",
       end: "2026-04-30",
@@ -135,6 +129,13 @@ const server = setupServer(
   ),
   http.get(`${API}/api/v1/backtests/:runId/request`, () =>
     HttpResponse.json({ core: "rust", metric_windows: [] }),
+  ),
+  http.get(`${API}/api/v1/backtests/:runId/account-report`, () =>
+    HttpResponse.json({ detail: { code: "backtest.result.unreadable" } }, { status: 410 }),
+  ),
+  // AI 설명 회귀에서는 검증 조회 실패도 기존 결과 읽기와 대화를 막지 않는다.
+  http.get(`${API}/api/v1/backtests/:runId/validation-report`, () =>
+    HttpResponse.json({}, { status: 503 }),
   ),
   http.get(`${API}/api/v1/backtests/:runId/result`, () =>
     HttpResponse.json(resultFixture()),
@@ -275,12 +276,13 @@ const ask = async (
 };
 
 describe("백테스트 결과 화면의 AI 패널", () => {
-  it("핵심 지표마다 영어 이름 옆에 쉬운 이름과 한 줄 뜻을 보인다", async () => {
+  it("계좌 보고서를 읽지 못해도 원본 핵심 지표와 쉬운 뜻을 유지한다", async () => {
     mount();
 
     const highlights = await screen.findByRole("region", {
-      name: "핵심 성과 지표",
+      name: "결과 한눈에",
     });
+    expect(await screen.findByText("계좌 요약을 불러오지 못했습니다. 기존 성과 결과는 아래에서 볼 수 있습니다.")).toBeVisible();
     const sharpe = within(highlights)
       .getByText("Sharpe ratio", { exact: true })
       .closest("div");
@@ -359,7 +361,7 @@ describe("백테스트 결과 화면의 AI 패널", () => {
 
     expect(
       await screen.findByRole("status", { name: "실행 상태" }),
-    ).toHaveTextContent("running");
+    ).toHaveTextContent("실행 중");
     expect(
       screen.queryByRole("button", { name: "AI에게 결과 묻기" }),
     ).toBeNull();

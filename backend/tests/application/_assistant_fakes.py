@@ -19,6 +19,7 @@ from strategy_workbench.application.assistant_chat.facade.ports import (
     ChatSessionNotFoundError,
     ProviderProfileNotFoundError,
     ProviderSecretMissingError,
+    ResultValidationFacts,
     TurnNotFoundError,
 )
 from strategy_workbench.domain.assistant.facade.models import (
@@ -43,6 +44,9 @@ class InMemoryProviderProfileRepository:
 
     def __init__(self) -> None:
         self._profiles: list[ProviderProfile] = []
+
+    def ensure_writable(self) -> None:
+        """메모리 저장소는 늘 쓸 수 있다."""
 
     def list(self) -> tuple[ProviderProfile, ...]:
         return tuple(self._profiles)
@@ -277,11 +281,19 @@ class FakeBacktestResults:
     다시 시작해 결과가 사라졌다"를 흉내 낼 수 있다.
     """
 
-    def __init__(self, results: Mapping[str, BacktestRunResult] | None = None) -> None:
+    def __init__(
+        self,
+        results: Mapping[str, BacktestRunResult] | None = None,
+        validations: Mapping[str, ResultValidationFacts] | None = None,
+    ) -> None:
         self.results: dict[str, BacktestRunResult] = dict(results or {})
+        self.validations: dict[str, ResultValidationFacts] = dict(validations or {})
 
     def completed_result(self, run_id: str) -> BacktestRunResult | None:
         return self.results.get(run_id)
+
+    def validation_facts(self, run_id: str) -> ResultValidationFacts | None:
+        return self.validations.get(run_id) if run_id in self.results else None
 
 
 class ManualTurnThread:

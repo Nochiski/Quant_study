@@ -58,7 +58,13 @@ main
 | API contract | backend 전체 → `uv run python scripts/export_openapi.py openapi.json` → `npm run api:generate` → frontend 전체 |
 | frontend | focused vitest → `npm run typecheck` → `npm run lint` → `npm test` → `npm run build` |
 | E2E 포함 | 위 + `npm run test:e2e`(머신 잠금 러너) |
+| **실데이터 확인(모든 기능 PR, 우선)** | mock 게이트와 별개로 로컬 원장(duckdb 어댑터)에 연결한 서버로 그 기능을 끝까지 돌린다 — [실데이터 확인 절차·열람 기록](./REAL-DATA-CHECKS.md) |
 
+- **실데이터 우선(2026-10-17 사용자 결정)**: 기능 PR은 mock 테스트 통과만으로 끝내지 않는다. 구현하면 먼저
+  실데이터 서버로 그 기능의 경로(계산이 끝까지 도는가, 값이 채워지는가, 소요 시간, 실데이터에서만 나는 오류)를
+  확인하고, 결과와 본 범위를 [REAL-DATA-CHECKS.md](./REAL-DATA-CHECKS.md)의 열람 기록에 한 줄 남기며, PR 본문 테스트
+  계획에 "실데이터 확인" 결과를 적는다. 구간은 2020-01-02 이후만 쓰고 봉인(2016~2019)은 열지 않는다. 기술 확인이지
+  성과 판정이 아니다 — 수치를 보고 전략·설계를 바꾸면 그 사실도 기록한다(연구 로드맵 6절 노출 기록).
 - 실행 설정 모델이 바뀌면 `uv run python tools/export_runtime_schema.py`로 스키마 fixture를 재생성한다.
 - `uv sync`를 돌렸으면 게이트 전에 `maturin develop --release`를 다시 돌린다(editable `backtest_core` 휠 제거).
 - PR 크기는 [YAML Strategy Workbench WORKFLOW 12절](../strategy-workbench-yaml-ui/WORKFLOW.md)을 따른다. 상한을
@@ -245,12 +251,12 @@ application 화살표 없음).
 
 ### V3-04 — 대기열 확장
 
-**Intent**: #161 대기열을 전역 슬롯 상한·단일 실행 전용 슬롯·실험 간 공정 분배·`run_fingerprint` 중복 제거·
+**Intent**: #161 대기열을 전역 슬롯 상한·단일 실행 전용 슬롯·실험 간 공정 분배·`run_input_key` 기반 진행 실행 잇기·
 재시작 복구·실험 단위 일시정지/재개/우선순위로 넓힌다(spec D6).
 
 **Acceptance**: #161의 `MAX_CONCURRENT_RUNS` 상수와 SoT 행을 설정 하나(기본값 = 그 상수, 환경 변수
 `STRATEGY_WORKBENCH_RUN_SLOTS`로 덮어씀)로 대체, 슬롯 2개 이상일 때만 단일 실행 전용 1개, 굶주림 없음, 공정
-분배, 같은 `run_fingerprint` 입력은 도는 run 만 잇고 끝난 결과는 재사용하지 않는다(재확인은 원장에 남는다,
+분배, `run_input_key`·provenance·계열·시도 키가 같은 입력은 도는 run 만 잇고 끝난 결과는 재사용하지 않는다(재확인은 원장에 남는다,
 2026-09-30 리드 결정. 시도 키로 결과를 공유하지 않는다), 재기동 복구, 일시정지 뒤
 순서, 실험 SSE(keepalive), e2e가 실행을 붙잡아 둘 수 있는 테스트 훅, `_gc_policy` 주기 기반 재설계.
 `RunStatus` 값 불변.
@@ -288,7 +294,8 @@ domain 한 곳(`pick_window_cell`)이다. 검증 실행은 새 선택이 아니�
 **V3-05 인계**: (1) 검증 실행이 실패·취소·접수 거절로 끝나면 다시 넘기지 않는다. 보고는 요약을 비우고 이유
 코드(`test_failed`)와 창별 실행 상태·실패 코드를 싣는다(#365 리뷰 P2-1). 재시도 경로가 필요하면 V5-01 화면과
 함께 정한다. (2) 워크포워드 결과는 `GET /api/v1/experiments/{id}/walk-forward` 한 곳이고 화면(곡선·유지율·
-창별 선택 표·이유 번역)은 V5-01 이다.
+창별 선택 표·이유 번역) 중 유지율·선택 표·이유 번역은 V5-01(#407)에 들어갔다.
+이어 붙인 곡선과 US-CS-09 e2e는 V5-02가 맡는다(아래 V5 표가 화면별 owner 정본이다).
 
 ---
 
@@ -300,8 +307,8 @@ domain 한 곳(`pick_window_cell`)이다. 검증 실행은 새 선택이 아니�
 
 ### V4-02 — DSR과 선택 기록
 
-`domain/experiment`의 DSR 함수(원장의 N·시도 대표 샤프의 분산), 알파 t 기준 상수(N ≥ 20이면 3.0), 인라인 초안
-결과는 DSR 없음. selection record API(spec D9)는 V3-03에 들어갔다. **V3-03 인계**: 실험 trial 은 한 칸의 창들이
+`domain/experiment`의 DSR 함수(원장의 N·시도 대표 샤프의 분산), 알파 t 기준 상수(N ≥ 20이면 3.0), 계열 없는 인라인 초안
+결과는 DSR 없음(spec D2: 명시한 유효 계열이 있는 초안은 포함). selection record API(spec D9)는 V3-03에 들어갔다. **V3-03 인계**: 실험 trial 은 한 칸의 창들이
 한 시도라(`experiment_trial_key`) 그 시도의 대표 샤프가 먼저 **완료된** 창의 학습 샤프가 된다 — 슬롯·대기 순서에
 따라 창이 바뀌어 DSR 입력이 실행 타이밍에 달린다. 실험 시도의 대표 샤프를 정하는 규칙을 이 PR 에서 정한다(#334
 리뷰 P3-7). **V3-05 확인**: 워크포워드 검증 실행도 같은 시도 키지만 그 칸의 학습 실행이 완료된 뒤에야 넘기므로
@@ -374,6 +381,26 @@ domain 한 곳(`pick_window_cell`)이다. 검증 실행은 새 선택이 아니�
 평가 경로 재사용, 새 팩터 정의 금지), OLS + HAC(Newey–West) 표준오차. 데이터를 읽는 application 노드와 포트를
 이 PR에서 정한다. 손계산 소형 데이터로 계수·t값 검증.
 
+**결정(2026-10-17, 업계 관행 기준)**: (1) 데이터 노드는 `application/backtest_run` 이다. 이미 주입된
+`PortfolioDesignService.run_pipeline` 을 run 의 실행 설정(결측 정책만 `drop`)으로 다시 돌려 모멘텀·가치 기본 graph 값과
+그 graph 가 읽는 수정주가·시가총액·자본총계 필드를 단면으로 받는다 — 새 port·application 화살표가 없다. S03
+`signal_research` 는 duckdb·CLI 전용이고 라벨이 미래 구간이라 쓰지 않는다. (2) 팩터 구성은 Fama·French(1993) 3팩터와
+Carhart(1997) 모멘텀의 세션 판이다: 규모 중앙값 × 가치(모멘텀) 30·70 분위 독립 2×3 정렬, 여섯 포트폴리오 시가총액 가중,
+자본총계 0 이하 가치 정렬 제외, 매 구간 PIT 값으로 다시 정렬(AQR timely 방향). 규모 팩터는 새 정의 없이 시가총액 필드로
+정렬한다. 브레이크포인트는 유니버스 전체(NYSE 같은 기준 시장 구분이 없다). (3) 회귀는 전략·시장 초과수익(기준금리
+ACT/365, 샤프와 같은 `interval_risk_free`)의 일별 OLS, Newey·West HAC(Bartlett, lag ⌊4(n/100)^(2/9)⌋, 소표본 보정
+n/(n−k) — statsmodels HAC 의 보정 판과 같은 방향)이고 하한 60 구간이다. 연율 알파는 세션 알파 × 연환산 거래일. (4) 결측은
+채우지 않고 빠진 구간을 사유별로 센다. run 과 다른 데이터 판이면 회귀하지 않는다(`data_snapshot_changed`). (5) 알파 t
+기준은 조회 시점 계열 N 으로 `alpha_t_threshold`, 계열 없으면 null. 결과는 `GET /api/v1/backtests/{run_id}/factor-regression`
+한 곳이다. 손계산(2×2 HAC, 7 종목 2×3)과 독립 numpy 구현 대조로 검증했다.
+
+**V4-05 인계**: (1) V5-06 검증 카드는 `RunFactorRegression` 을 칠하기만 하고(연율 알파·t·β·표준오차·R²·관측 수·빠진 구간
+사유·t 기준) 다시 계산하지 않는다. 사유 어휘는 `FactorRegressionUnavailableReason`·`FactorPeriodGap` 번역이다. (2) mock
+유니버스가 3 종목이라 mock 에서는 늘 `insufficient_observations` 다 — V5-06 e2e 가 숫자 경로를 보려면 mock 종목 확대나
+e2e 전용 단면이 필요하다. (3) 조회마다 파이프라인을 다시 돈다(실데이터 유니버스에서 수 초~수십 초). 서비스 잠금으로 한 번에 하나만 돌아
+동시 조회가 메모리를 늘리지 않는다(리뷰 P2-1). 화면은 로딩 상태를 두고, 느리면 결과 산출물에 함께 저장할지 그때 정한다. (4) 알려진 한계: 상장 종료 종목의 마지막 구간 손실은 팩터에 들지
+않는다. 일별 회귀의 비동시 거래 편향(Dimson 보정 없음). 섹터(업종) 팩터는 PIT 섹터 자료가 생긴 뒤다.
+
 ---
 
 ## 8. Phase 5 — 화면
@@ -383,10 +410,10 @@ Dependency 칸이 정본이다.
 
 | PR | 범위 | 스토리 |
 |---|---|---|
-| V5-01 | `/research/experiments` 목록·대기열·새 실험·모니터·완료 알림, 내비 "실험" 활성화 | US-SM-14, US-SM-15 |
-| V5-02 | 결과 화면 검증 카드(단일 실행 빈 칸·“튼튼한지 확인하기”·계산 근거 펼침·워크포워드 곡선·DSR), AI 결과 설명에 검증 요약, 추적·미리보기 요청에 parameter_values 추가(V3-02 인계) | US-DM-10, US-DM-11, US-CS-09 |
+| V5-01 | `/research/experiments` 목록·대기열·새 실험·모니터·완료 알림·워크포워드 유지율/창별 선택 표/이유 번역, 내비 "실험" 활성화 | US-SM-14, US-SM-15 |
+| V5-02 | 결과 화면 검증 카드(단일 실행 빈 칸·“튼튼한지 확인하기”·계산 근거 펼침·워크포워드 곡선·DSR; US-CS-09 e2e), AI 결과 설명에 검증 요약, 추적·미리보기 요청에 parameter_values 추가(V3-02 인계) | US-DM-10, US-DM-11, US-CS-09 |
 | V5-03 | 백테스트 이력 종류 칼럼·필터, 전략 이력 시도 원장 탭·계열 합치기 | US-SM-12 |
-| V5-04 | 후보 탐색 히트맵(팔레트 토큰), 봉우리, 창별 선택, selection 이유, 추적·미리보기 요청에 parameter_values 추가(V3-02 인계) | US-CS-10 |
+| V5-04 | 후보 탐색 히트맵(팔레트 토큰), 봉우리, 후보 selection 이유; 창별 자동 선택 표는 V5-01 것을 소비하고 추적·미리보기 parameter_values는 V5-02 계약을 소비 | US-CS-10 |
 | V5-05 | 실행 설정 잠금 UX(시작일 교정 버튼)·시도 영향 미리 알림(비용 칸 어휘는 V2-01~03이 소유) | US-SM-13, US-SM-16 |
 | V5-06 | 용량 스윕 화면, 검증 카드의 팩터 회귀 항목 | US-CS-11, US-CS-12 |
 | V5-07 | IDE 제목 옆 계열 시도 배지, 상단 바 “실험으로 보내기”(lang2 P4-04 뒤), 레시피 탐색 토글(lang2 P5-02 뒤) | US-SM-12 |

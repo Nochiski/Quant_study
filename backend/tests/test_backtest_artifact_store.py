@@ -37,7 +37,6 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     BacktestSeries,
     DataWarning,
-    ExecutionCore,
     MetricWindow,
     RawArtifactBundle,
     RawCost,
@@ -79,6 +78,7 @@ def _result() -> BacktestRunResult:
     )
     run_spec = BacktestRunSpec(
         strategy=strategy,
+        initial_cash=100.0,
         environment=environment,
         benchmark_security_id="KRX:069500",
         metric_windows=(
@@ -92,7 +92,6 @@ def _result() -> BacktestRunResult:
             run_id="run-safe-001",
             created_at=created,
             completed_at=created,
-            engine_core=ExecutionCore.RUST,
             engine_version="test",
             run_fingerprint="fingerprint",
             run_spec=run_spec,
@@ -100,11 +99,6 @@ def _result() -> BacktestRunResult:
             data_snapshot_id="snapshot",
             target_tape_hash="tape",
             metric_registry_version=registry.version,
-            initial_cash=100.0,
-            annualization_days=252,
-            fee_bps=environment.fee_bps,
-            slippage_bps=environment.slippage_bps,
-            participation_rate=environment.participation_rate,
             environment=environment,
             environment_hash=environment_hash(environment),
             strategy_provenance=StrategyProvenance(
@@ -302,7 +296,7 @@ def test_a_missing_altered_or_undecodable_result_file_is_a_coded_error(tmp_path:
     assert str(tmp_path) not in message and "'x'" not in message
 
 
-def test_opening_the_store_removes_staging_left_by_a_killed_commit(
+def test_boot_cleanup_removes_staging_left_by_a_killed_commit(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     commit = LocalArtifactStore(tmp_path).commit(_result())
@@ -310,8 +304,11 @@ def test_opening_the_store_removes_staging_left_by_a_killed_commit(
     orphan.mkdir()
     (orphan / "result.json").write_bytes(b"{partial")
 
+    # 여는 것만으로는 지우지 않는다 — 같은 루트의 다른 프로세스가 도는 commit 일 수 있다(spec D4).
+    store = LocalArtifactStore(tmp_path)
+    assert orphan.exists()
     with caplog.at_level(logging.WARNING):
-        store = LocalArtifactStore(tmp_path)
+        store.remove_orphan_staging()
 
     assert not orphan.exists()
     assert "orphan run artifact staging removed — name=.run-killed.0123abcd.tmp" in caplog.text
@@ -319,7 +316,7 @@ def test_opening_the_store_removes_staging_left_by_a_killed_commit(
     assert store.load("run-safe-001", sha256=commit.sha256) == _result()
 
 
-def test_staging_that_cannot_be_removed_does_not_block_opening_the_store(
+def test_staging_that_cannot_be_removed_does_not_block_the_boot_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     orphan = tmp_path / ".run-locked.0123abcd.tmp"
@@ -329,7 +326,143 @@ def test_staging_that_cannot_be_removed_does_not_block_opening_the_store(
         raise PermissionError(f"locked: {path}")
 
     monkeypatch.setattr(shutil, "rmtree", locked)
-    LocalArtifactStore(tmp_path)
+    LocalArtifactStore(tmp_path).remove_orphan_staging()
 
     assert orphan.exists()
     assert "orphan run artifact staging not removed — name=.run-locked.0123abcd.tmp" in caplog.text
+
+
+def _write_legacy_flat_manifest(tmp_path: Path) -> tuple[LocalArtifactStore, Path, dict]:
+    store = LocalArtifactStore(tmp_path)
+    store.commit(_result())
+    path = tmp_path / "run-safe-001" / "result.json"
+    payload = json.loads(path.read_bytes())
+    manifest = payload["manifest"]
+    request = manifest["run_spec"]
+    manifest.update(
+        schema_version="backtest-run-v2",
+        engine_core=request["core"],
+        initial_cash=request["initial_cash"],
+        annualization_days=request["annualization_days"],
+        **{
+            name: manifest["environment"][name]
+            for name in ("fee_bps", "slippage_bps", "participation_rate")
+        },
+    )
+    return store, path, payload
+
+
+def test_v2_flat_manifest_loads_without_rewriting_the_archive(tmp_path: Path) -> None:
+    store, path, payload = _write_legacy_flat_manifest(tmp_path)
+    original = json.dumps(payload).encode()
+    path.write_bytes(original)
+    loaded = store.load("run-safe-001", sha256=hashlib.sha256(original).hexdigest())
+    assert loaded == replace(
+        _result(), manifest=replace(_result().manifest, schema_version="backtest-run-v2")
+    )
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("field", ["fee_bps", "slippage_bps", "participation_rate"])
+def test_v2_inconsistent_cost_copy_remains_unreadable(tmp_path: Path, field: str) -> None:
+    store, path, payload = _write_legacy_flat_manifest(tmp_path)
+    payload["manifest"][field] += 1
+    original = json.dumps(payload).encode()
+    path.write_bytes(original)
+    with pytest.raises(BacktestArtifactUnreadableError, match="two execution cost models"):
+        store.load("run-safe-001", sha256=hashlib.sha256(original).hexdigest())
+
+
+def test_new_v3_result_writes_only_owned_execution_values(tmp_path: Path) -> None:
+    store = LocalArtifactStore(tmp_path)
+    result = _result()
+    commit = store.commit(result)
+    payload = json.loads((tmp_path / "run-safe-001" / "result.json").read_bytes())
+    manifest = payload["manifest"]
+    assert manifest["schema_version"] == "backtest-run-v3"
+    assert not {
+        "engine_core",
+        "initial_cash",
+        "annualization_days",
+        "fee_bps",
+        "slippage_bps",
+        "participation_rate",
+    }.intersection(manifest)
+    assert manifest["run_spec"]["initial_cash"] == result.manifest.run_spec.initial_cash
+    assert manifest["environment"]["fee_bps"] == result.manifest.environment.fee_bps
+    assert store.load("run-safe-001", sha256=commit.sha256) == result
+
+
+def test_unversioned_factor_manifest_remains_unknown_and_keeps_its_stored_identity(
+    tmp_path: Path,
+) -> None:
+    store = LocalArtifactStore(tmp_path)
+    original = _result()
+    store.commit(original)
+    path = tmp_path / original.manifest.run_id / "result.json"
+    before = path.read_bytes()
+    legacy = before.replace(b',"factor_evaluation_version":null', b"")
+    assert legacy != before
+    path.write_bytes(legacy)
+    loaded = store.load(original.manifest.run_id, sha256=hashlib.sha256(legacy).hexdigest())
+    assert loaded.manifest.factor_evaluation_version is None
+    assert loaded.manifest.run_fingerprint == original.manifest.run_fingerprint
+    assert path.read_bytes() == legacy
+
+
+def test_order_diagnostic_records_survive_artifact_codec_and_distinguish_empty_history(
+    tmp_path: Path,
+) -> None:
+    from strategy_workbench.domain.backtest.facade.runs import RawOrderUpdate
+
+    original = _result()
+    update = RawOrderUpdate(
+        date(2026, 1, 5), "o-1", "open", "source detail", "liquidity_cap_zero", 0
+    )
+    result = replace(original, artifacts=replace(original.artifacts, order_updates=(update,)))
+    store = LocalArtifactStore(tmp_path)
+    committed = store.commit(result)
+    decoded = store.load(result.manifest.run_id, sha256=committed.sha256)
+    assert decoded.artifacts.order_updates is not None
+    assert decoded.artifacts.order_updates == (update,)
+    assert decoded.artifacts.order_updates[0].cap_volume == 0
+
+    empty = replace(
+        result,
+        manifest=replace(result.manifest, run_id="empty-updates"),
+        artifacts=replace(result.artifacts, order_updates=()),
+    )
+    committed_empty = store.commit(empty)
+    assert store.load("empty-updates", sha256=committed_empty.sha256).artifacts.order_updates == ()
+
+
+def test_corporate_actions_survive_artifact_store_without_collapsing_absence(
+    tmp_path: Path,
+) -> None:
+    from strategy_workbench.domain.backtest.facade.runs import RawCorporateAction
+
+    original = _result()
+    action = RawCorporateAction(date(2026, 1, 6), "A", "1.5", "7", "10", "0.5", 30.0)
+    store = LocalArtifactStore(tmp_path)
+    # 옛 결과(기록 없음 None)·새 결과의 빈 기록()·기록 있음이 저장을 지나도 서로 바뀌지 않는다.
+    for run_id, actions in (("absent", None), ("empty", ()), ("applied", (action,))):
+        result = replace(
+            original,
+            manifest=replace(original.manifest, run_id=run_id),
+            artifacts=replace(original.artifacts, corporate_actions=actions),
+        )
+        committed = store.commit(result)
+        assert store.load(run_id, sha256=committed.sha256).artifacts.corporate_actions == actions
+
+
+@pytest.mark.parametrize("sell_tax", [2.75, 0.0, None])
+def test_fill_tax_survives_artifact_store_without_collapsing_legacy_absence(
+    tmp_path: Path, sell_tax: float | None
+) -> None:
+    result = _result()
+    fill = replace(result.artifacts.fills[0], side="sell", sell_tax=sell_tax)
+    result = replace(result, artifacts=replace(result.artifacts, fills=(fill,)))
+    store = LocalArtifactStore(tmp_path)
+    committed = store.commit(result)
+    decoded = store.load(result.manifest.run_id, sha256=committed.sha256)
+    assert decoded.artifacts.fills[0].sell_tax == sell_tax

@@ -34,17 +34,23 @@ CORP_EVENT = rules_s05.CORP_EVENT
 
 # 2026-09-07: 자사주 취득·CB 발행을 싣기 시작해 모집단이 34 → 68 로 늘었다(E05·E06 / 결정 1).
 # 두 유형은 가격 조정 사건이 아니라 **사실만 싣는다** — ratio NULL · amount_krw 가 값을 나른다.
-N_POOL = 68
-N_SRC = 55                                     # 범위 안 후보 = EG1 우변
+# 2026-10-20(#589): 자사주 취득 금액을 주식 종류별 class-row 로 나눴다. 절단본 자사주 공시 33건 중
+# 기타주식(estk) 금액이 있는 것은 삼성전자 11건(상장 우선주 005935 하나 → 우선주 leg 11)과 대신증권
+# 4건(상장 우선주 003545·003547 둘 → class_ambiguous 4)이다. 대신증권 4건 중 2건(2025-08-28·
+# 2026-03-09)은 기타주식만 사서 보통주 leg 가 없다. 그래서 자사주 pool 33 → 31 + 11 + 4 = 46,
+# 범위 안 32 → 41(보통주 30 + 우선주 11, 2026-08-21 결정 1건은 캘린더 밖).
+N_POOL = 81
+N_SRC = 64                                     # 범위 안 후보 = EG1 우변
 N_SRC_BY_SOURCE = {"event_fric": 0, "event_pifric": 1, "event_cr": 3, "capital": 16,
-                   "event_tsstk_aq": 32, "event_cvbd_is": 1, "krx_listing": 2}
+                   "event_tsstk_aq": 41, "event_cvbd_is": 1, "krx_listing": 2}
 N_RAW_BY_SOURCE = {"event_fric": 0, "event_pifric": 1, "event_cr": 3, "capital": 28,
                    "krx_listing": 2}
-N_SCOPE_OUT = {"in_scope": 55, "out_of_calendar": 1, "pre_listing": 6, "unlisted_class": 6}
-N_OUT = 41
+N_SCOPE_OUT = {"in_scope": 64, "out_of_calendar": 1, "pre_listing": 6, "unlisted_class": 6,
+               "class_ambiguous": 4}
+N_OUT = 50
 N_REJECT = 0
 N_DEDUP = 14
-N_BY_TYPE = {"bonus": 1, "capred": 5, "cb_issue": 1, "split": 2, "treasury_buy": 32}
+N_BY_TYPE = {"bonus": 1, "capred": 5, "cb_issue": 1, "split": 2, "treasury_buy": 41}
 
 
 # ── 합성 입력 위 산출식 단독 실행 (S06 `run_adj_sql` 과 같은 방식) ──────────────
@@ -102,6 +108,7 @@ _STG_TYPES: dict[str, dict[str, str]] = {
                      "crstk_estk_cnt": "DOUBLE", "available_date": "DATE",
                      "available_basis": "VARCHAR"},
     "stg_event_tsstk_aq": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "aq_dd": "DATE",
+                           "aqpln_stk_ostk": "DOUBLE", "aqpln_stk_estk": "DOUBLE",
                            "aqpln_prc_ostk": "DOUBLE", "aqpln_prc_estk": "DOUBLE",
                            "available_date": "DATE", "available_basis": "VARCHAR"},
     "stg_event_cvbd_is": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "bddd": "DATE",
@@ -126,11 +133,17 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                   cvbd: list[dict[str, object]] | None = None,
                   prices: list[dict[str, object]] | None = None,
                   etf_tickers: frozenset[str] = frozenset(),
+                  corp_ticker: list[dict[str, object]] | None = None,
+                  spans: list[dict[str, object]] | None = None,
                   const: dict[str, object] | None = None) -> dict[str, dict[str, object]]:
     """`sql/corp_event.sql` 을 합성 입력 뷰 위에서 그대로 실행한다(프레임·게이트 없이 산출식만).
 
     `listing` 은 (ticker, date, list_shrs[, par_value_krw]) 를 주면 되고 corp_ticker·security_span
-    은 거기서 유도한다 — corp_code = 'C' + ticker, 첫 상장일 = 그 티커의 첫 행. `prices` 는 equity
+    은 거기서 유도한다 — corp_code = 'C' + ticker, 첫 상장일 = 그 티커의 첫 행. 한 법인에 보통주·
+    우선주 여러 티커를 두려면 `corp_ticker` 로 (ticker, isin8, corp_code, is_common) 행을 직접 준다.
+    재상장(구간 둘)이나 끝이 캘린더와 어긋난 구간처럼 listing 으로 유도되지 않는 security_span 은
+    `spans` 로 (ticker, first_date, last_date, end_reason) 행을 직접 준다 — 주면 유도하지 않는다.
+    `prices` 는 equity
     `price_daily` 의 (ticker, date, close, base_price_krw) — 없으면 빈 뷰(C-04 기준가 확인 축).
     `security.sec_type` 은 `etf_tickers` 면 'etf', 아니면 'stock'(C-04 기준가 후보에서 ETF 제외).
     """
@@ -150,14 +163,23 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
               [{"ticker": t, "sec_type": "etf" if t in etf_tickers else "stock"} for t in tickers],
               {"ticker": "VARCHAR", "sec_type": "VARCHAR"})
         _view(con, "corp_ticker",
+              corp_ticker if corp_ticker is not None else
               [{"ticker": t, "isin8": f"KR7{t}", "corp_code": "C" + t, "is_common": True}
                for t in tickers],
               {"ticker": "VARCHAR", "isin8": "VARCHAR", "corp_code": "VARCHAR",
                "is_common": "BOOLEAN"})
-        _view(con, "security_span",
-              [{"ticker": t, "first_date": min(r["date"] for r in listing if r["ticker"] == t)}
-               for t in tickers],
-              {"ticker": "VARCHAR", "first_date": "DATE"})
+        # 구간 끝이 캘린더 끝이면 원천 끝까지 상장(coverage_gap), 아니면 그날 폐지(delisted) —
+        # security_span.sql 의 end_reason 규칙과 같은 모양이다.
+        if spans is None:
+            spans = []
+            for t in tickers:
+                days = [r["date"] for r in listing if r["ticker"] == t]
+                spans.append({"ticker": t, "first_date": min(days), "last_date": max(days),
+                              "end_reason": ("coverage_gap" if max(days) == cal[-1]
+                                             else "delisted")})
+        _view(con, "security_span", spans,
+              {"ticker": "VARCHAR", "first_date": "DATE", "last_date": "DATE",
+               "end_reason": "VARCHAR"})
         prev = [None, *cal[:-1]]
         _view(con, "trading_calendar", [{"date": d, "prev_td": p} for d, p in zip(cal, prev,
                                                                                  strict=True)],
@@ -284,9 +306,9 @@ def test_EG1은_범위_안_후보에서_dedup과_격리를_뺀_것이다(built: 
     assert x["n_dedup"] == N_DEDUP
     assert x["n_by_event_type"] == N_BY_TYPE
     assert x["n_out_by_source"] == {"capital": 2, "event_cr": 3, "event_cvbd_is": 1,
-                                    "event_pifric": 1, "event_tsstk_aq": 32,
+                                    "event_pifric": 1, "event_tsstk_aq": 41,
                                     "krx_listing": 2}
-    assert x["n_by_effective_basis"] == {"disclosure_body": 39, "krx_shares_change": 2}
+    assert x["n_by_effective_basis"] == {"disclosure_body": 48, "krx_shares_change": 2}
 
 
 def test_범위_밖_행은_격리도_산출도_아니고_metric에만_남는다(
@@ -298,6 +320,7 @@ def test_범위_밖_행은_격리도_산출도_아니고_metric에만_남는다(
     assert sum(x["n_pool_by_scope"].values()) == N_POOL
     assert x["n_pool_by_scope_source"]["pre_listing"] == {"capital": 6}
     assert x["n_pool_by_scope_source"]["unlisted_class"] == {"capital": 6}
+    assert x["n_pool_by_scope_source"]["class_ambiguous"] == {"event_tsstk_aq": 4}
     assert x["class_unknown_kinds"] == []
     # 절단본 MVP 행의 종류는 보통주·우선주·상환전환우선주뿐 — 전부 정규 표기, unknown 0
     assert x["n_class_unknown_mvp"] == 0 and x["n_class_mapped_by_alias"] == 0
@@ -476,7 +499,8 @@ def test_효력일이_공시일보다_임계_이상_앞서면_effective_before_a
     eg7 = _gate(r, "EG7")
     assert eg7.status is GateStatus.FAIL
     assert eg7.metrics["reject_by_reason"] == {"effective_before_announce": 14}
-    assert r.n_rows == 37          # 계수 4 + 자사주·CB 33 (2026-09-07 유형 확장)
+    # 계수 4 + 자사주·CB 42 (2026-09-07 유형 확장 33 → 2026-10-20 종류별 class-row, #589)
+    assert r.n_rows == 46
     assert _gate(r, "EG1").detail == "upstream_failed"
 
 
@@ -575,12 +599,12 @@ def test_손픽스처_FX_2_003과_범위_밖_4종과_격리_3종(tmp_path: Path,
     r = _build_chain(stage_root, tmp_path / "equity", _with(_seed(), thresholds={"EG7": 0.5}),
                      fixtures_path=fx)
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
-    assert r.n_rows == 41 and r.n_reject == 3      # 손픽스처 8 + 절단본 자사주·CB 33
+    assert r.n_rows == 50 and r.n_reject == 3      # 손픽스처 8 + 절단본 자사주·CB 42
     eg1 = _gate(r, "EG1").metrics
-    assert eg1["rhs"] == 45 and eg1["lhs"] == 42       # 손픽스처 12/9 + 자사주·CB 33
+    assert eg1["rhs"] == 54 and eg1["lhs"] == 51       # 손픽스처 12/9 + 자사주·CB 42
     x = _gate(r, "EG3_corp_event").metrics
-    assert x["n_pool_by_scope"] == {"in_scope": 45, "unlisted_class": 2, "out_of_calendar": 3,
-                                    "pre_listing": 1, "class_unknown": 1}
+    assert x["n_pool_by_scope"] == {"in_scope": 54, "unlisted_class": 2, "out_of_calendar": 3,
+                                    "pre_listing": 1, "class_unknown": 1, "class_ambiguous": 4}
     assert x["n_pool_by_scope_source"]["out_of_calendar"] == {"capital": 1, "event_fric": 1,
                                                              "event_tsstk_aq": 1}
     assert x["n_pool_by_scope_source"]["unlisted_class"] == {"capital": 1, "event_fric": 1}
@@ -588,7 +612,7 @@ def test_손픽스처_FX_2_003과_범위_밖_4종과_격리_3종(tmp_path: Path,
     assert x["class_unknown_kinds"] == ["-"]
     assert x["n_class_unknown_mvp"] == 1 and x["n_class_mapped_by_alias"] == 0
     assert x["n_src_by_source"] == {"event_fric": 4, "event_pifric": 1, "event_cr": 3,
-                                    "capital": 2, "event_tsstk_aq": 32, "event_cvbd_is": 1,
+                                    "capital": 2, "event_tsstk_aq": 41, "event_cvbd_is": 1,
                                     "krx_listing": 2}
     assert x["n_raw_rows_by_source"]["event_fric"] == 6 and x["n_dedup"] == 1
     assert _gate(r, "EG7").metrics["reject_by_reason"] == {
@@ -648,10 +672,10 @@ def test_종류_별칭은_대응표로_매핑되고_모호하면_unknown(tmp_pat
     fx.write_text(json.dumps(HAND_KIND_FIXTURES, ensure_ascii=False), encoding="utf-8")
     r = _build_chain(stage_root, tmp_path / "equity", _seed(), fixtures_path=fx)
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
-    assert r.n_rows == 42 and r.n_reject == 0      # 손픽스처 9 + 절단본 자사주·CB 33
+    assert r.n_rows == 51 and r.n_reject == 0      # 손픽스처 9 + 절단본 자사주·CB 42
     x = _gate(r, "EG3_corp_event").metrics
-    assert x["n_pool_by_scope"] == {"in_scope": 42, "unlisted_class": 1, "class_unknown": 1,
-                                    "out_of_calendar": 1}
+    assert x["n_pool_by_scope"] == {"in_scope": 51, "unlisted_class": 1, "class_unknown": 1,
+                                    "out_of_calendar": 1, "class_ambiguous": 4}
     assert x["n_pool_by_scope_source"]["unlisted_class"] == {"capital": 1}
     assert x["n_pool_by_scope_source"]["class_unknown"] == {"capital": 1}
     assert x["class_unknown_kinds"] == ["〃"] and x["n_class_unknown_mvp"] == 1
@@ -671,6 +695,7 @@ def test_종류_별칭은_대응표로_매핑되고_모호하면_unknown(tmp_pat
 
 _DART_EMPTY: dict[str, str] = {
     "stg_event_tsstk_aq": ("rcept_no VARCHAR, corp_code VARCHAR, aq_dd DATE, "
+                           "aqpln_stk_ostk DECIMAL(10,0), aqpln_stk_estk DECIMAL(10,0), "
                            "aqpln_prc_ostk DECIMAL(18,0), aqpln_prc_estk DECIMAL(18,0), "
                            "available_date DATE, available_basis VARCHAR"),
     "stg_event_cvbd_is": ("rcept_no VARCHAR, corp_code VARCHAR, bddd DATE, "
@@ -714,7 +739,8 @@ def _krx_harness(tol: float) -> duckdb.DuckDBPyConnection:
                 "AS prev_td FROM (VALUES (DATE '2013-05-22'), (DATE '2013-05-23'), "
                 "(DATE '2013-05-24'), (DATE '2013-05-27')) t(date)")
     tickers = ", ".join(f"('{t}')" for t, *_ in KRX_HAND)
-    con.execute(f"CREATE TABLE security_span AS SELECT ticker, DATE '2013-05-22' AS first_date "
+    con.execute(f"CREATE TABLE security_span AS SELECT ticker, DATE '2013-05-22' AS first_date, "
+                f"DATE '2013-05-27' AS last_date, 'coverage_gap' AS end_reason "
                 f"FROM (VALUES {tickers}) t(ticker)")
     con.execute(f"CREATE TABLE corp_ticker AS SELECT ticker, 'KR7' || substr(ticker, 1, 5) AS "
                 f"isin8, '0' || ticker || '0' AS corp_code, TRUE AS is_common "
@@ -939,8 +965,11 @@ def test_자사주_취득과_CB_발행은_금액을_싣고_비율은_없다() ->
 
     t = out[f"A00001:treasury_buy:{cal[20]}"]
     assert t["ratio"] is None and t["ratio_basis"] == "none"
-    assert t["amount_krw"] == 6_000_000_000        # 보통주 + 기타주 합
+    # 보통주 티커에는 보통주식분만 실린다(#589). 이 법인은 상장 우선주가 없어 기타주식분은
+    # unlisted_class 로 범위 밖이다.
+    assert t["amount_krw"] == 5_000_000_000
     assert t["source"] == "event_tsstk_aq" and t["effective_date"] == cal[20]
+    assert [e for e in out if ":treasury_buy:" in e] == [f"A00001:treasury_buy:{cal[20]}"]
 
     c = out[f"A00001:cb_issue:{cal[30]}"]
     assert c["ratio"] is None and c["amount_krw"] == 30_000_000_000
@@ -968,6 +997,241 @@ def test_금액이_없는_행은_격리하지_않고_금액만_결측이다() ->
     r = run_event_sql(cal, flat_listing("A00001", cal, 1_000_000), tsstk=tsstk)[
         f"A00001:treasury_buy:{cal[20]}"]
     assert r["amount_krw"] is None and r["reject_reason"] is None
+
+
+def _run_two_class_corp(cal: list[date], preferred: tuple[str, ...],
+                        tsstk: list[dict[str, object]],
+                        delisted: tuple[str, ...] = (),
+                        listed_days: dict[str, list[date]] | None = None,
+                        spans: list[dict[str, object]] | None = None,
+                        repeat_legs: tuple[str, ...] = ()) -> dict[str, dict[str, object]]:
+    """보통주 A00001 과 상장 우선주 `preferred` 를 가진 법인 CX 위에서 자사주 공시만 돌린다.
+
+    `delisted` 의 우선주는 앞 10세션만 상장했다가 폐지된다(security_span 끝 = cal[9]).
+    `listed_days` 는 티커별 상장 세션을 직접 정하고, `spans` 는 security_span 을 직접 준다.
+    `repeat_legs` 의 티커는 corp_ticker 에 같은 행이 두 번 실린다(원천 중복).
+    """
+    tickers = ("A00001", *preferred)
+    days = {t: (listed_days or {}).get(t, cal[:10] if t in delisted else cal) for t in tickers}
+    listing = [row for t in tickers for row in flat_listing(t, days[t], 1_000_000)]
+    corp_ticker: list[dict[str, object]] = [
+        {"ticker": t, "isin8": f"KR7{t}", "corp_code": "CX", "is_common": t == "A00001"}
+        for t in (*tickers, *repeat_legs)]
+    return run_event_sql(cal, listing, tsstk=tsstk, corp_ticker=corp_ticker, spans=spans)
+
+
+def test_자사주_취득_금액은_주식_종류별로_그_종류의_티커에_붙는다() -> None:
+    """DART 자기주식취득결정(tsstkAqDecsn)은 보통주식(`_ostk`)·기타주식(`_estk`)을 따로 적는다.
+
+    #589.
+
+    보통주 티커에는 보통주식 금액만, 결정일에 상장된 우선주가 하나인 법인의 그 티커에는 기타주식
+    금액만 붙는다. 둘을 합쳐 보통주에 붙이면 보통주 시가총액으로 나눈 규모가 우선주 매입분만큼
+    부푼다. 기타주식만 사는 공시는 보통주 사건이 아니다. 종류별 금액이 하나도 없으면 보통주 행의
+    금액만 결측이다(「결측은 결측」).
+    """
+    cal = sessions(60)
+    tsstk = [
+        {"rcept_no": "20210301000001", "corp_code": "CX", "aq_dd": cal[20],
+         "aqpln_stk_ostk": 100_000.0, "aqpln_stk_estk": 30_000.0,
+         "aqpln_prc_ostk": 5_000_000_000.0, "aqpln_prc_estk": 1_000_000_000.0,
+         "available_date": cal[20]},
+        {"rcept_no": "20210401000001", "corp_code": "CX", "aq_dd": cal[30],
+         "aqpln_stk_estk": 6_000.0, "aqpln_prc_estk": 200_000_000.0, "available_date": cal[30]},
+        {"rcept_no": "20210501000001", "corp_code": "CX", "aq_dd": cal[40],
+         "aqpln_stk_ostk": 10_000.0, "available_date": cal[40]},
+    ]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk)
+    got = {e: (r["amount_krw"], r["rcept_no"]) for e, r in out.items()
+           if r["event_type"] == "treasury_buy"}
+    assert got == {
+        f"A00001:treasury_buy:{cal[20]}": (5_000_000_000, "20210301000001"),
+        f"A00005:treasury_buy:{cal[20]}": (1_000_000_000, "20210301000001"),
+        f"A00005:treasury_buy:{cal[30]}": (200_000_000, "20210401000001"),
+        f"A00001:treasury_buy:{cal[40]}": (None, "20210501000001"),
+    }
+    assert all(out[e]["corp_code"] == "CX" and out[e]["reject_reason"] is None for e in got)
+
+
+def test_상장_우선주가_둘_이상이면_기타주식_금액은_어느_티커에도_싣지_않는다() -> None:
+    """공시는 기타주식이 어느 우선주인지 말하지 않는다. 금액은 1주당 배수와 달리 나눠 붙일 수 없어
+    두 우선주에 같은 금액을 복제하면 합이 두 배가 된다 — class_ambiguous 로 범위 밖에 둔다.
+    보통주식분은 그대로 보통주 티커에 실린다."""
+    cal = sessions(60)
+    tsstk = [{"rcept_no": "20210301000001", "corp_code": "CX", "aq_dd": cal[20],
+              "aqpln_stk_ostk": 100_000.0, "aqpln_stk_estk": 30_000.0,
+              "aqpln_prc_ostk": 5_000_000_000.0, "aqpln_prc_estk": 1_000_000_000.0,
+              "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005", "A00007"), tsstk)
+    got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+    assert got == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000}
+
+
+_BOTH_CLASSES = {"rcept_no": "20210301000001", "corp_code": "CX",
+                 "aqpln_stk_ostk": 100_000.0, "aqpln_stk_estk": 30_000.0,
+                 "aqpln_prc_ostk": 5_000_000_000.0, "aqpln_prc_estk": 1_000_000_000.0}
+
+
+def test_결정일_전에_폐지된_우선주에는_기타주식_금액을_싣지_않는다() -> None:
+    """#590 리뷰 P3-1: 우선주 수는 결정일에 security_span 구간 안인 것만 센다.
+
+    유일한 우선주 A00005 가 cal[9] 에 폐지됐으면 cal[20] 결정의 기타주식분은 그날 상장 우선주가
+    없어 unlisted_class(범위 밖)다 — 폐지된 티커에 붙이지 않는다. 보통주식분은 그대로다.
+    """
+    cal = sessions(60)
+    tsstk = [{**_BOTH_CLASSES, "aq_dd": cal[20], "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk, delisted=("A00005",))
+    got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+    assert got == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000}
+
+
+def test_우선주_둘_중_결정일에_살아_있는_하나에만_기타주식_금액이_붙는다() -> None:
+    """A00007 은 cal[9] 에 폐지돼 cal[20] 결정일에 상장 우선주는 A00005 하나뿐이다 — ambiguous 가
+    아니라 A00005 에 귀속한다."""
+    cal = sessions(60)
+    tsstk = [{**_BOTH_CLASSES, "aq_dd": cal[20], "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005", "A00007"), tsstk, delisted=("A00007",))
+    got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+    assert got == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000,
+                   f"A00005:treasury_buy:{cal[20]}": 1_000_000_000}
+    # 정해진 티커(leg_ticker)는 legs 로 다시 펴지 않는다 — 펴면 우선주 leg 수만큼 같은 후보가
+    # pool 에 들어가 dedup 이 접고(n_src_rows 2), EG1 모집단이 부푼다.
+    assert out[f"A00005:treasury_buy:{cal[20]}"]["n_src_rows"] == 1
+
+
+def _treasury_rows(out: dict[str, dict[str, object]]) -> dict[str, object]:
+    return {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+
+
+def test_결정일이_우선주_구간의_첫날이나_끝날이면_그날_상장이다() -> None:
+    """구간 양끝은 포함이다(first_date ≤ 결정일 ≤ last_date) — universe_daily 와 같은 규칙.
+
+    A00005 는 cal[20] 에 처음 상장하고, A00007 은 cal[30] 에 폐지된다(끝 = delisted). 각 구간의
+    첫날·끝날 결정은 그 우선주에 붙는다. 같은 날 살아 있는 다른 우선주가 없게 법인을 따로 둔다.
+    """
+    cal = sessions(60)
+    first = _run_two_class_corp(
+        cal, ("A00005",), [{**_BOTH_CLASSES, "aq_dd": cal[20], "available_date": cal[20]}],
+        listed_days={"A00005": cal[20:]})
+    assert _treasury_rows(first) == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000,
+                                     f"A00005:treasury_buy:{cal[20]}": 1_000_000_000}
+    last = _run_two_class_corp(
+        cal, ("A00007",), [{**_BOTH_CLASSES, "aq_dd": cal[30], "available_date": cal[30]}],
+        listed_days={"A00007": cal[:31]})
+    assert _treasury_rows(last) == {f"A00001:treasury_buy:{cal[30]}": 5_000_000_000,
+                                    f"A00007:treasury_buy:{cal[30]}": 1_000_000_000}
+
+
+def test_재상장_우선주는_구간_사이_결정일에는_없고_두_번째_구간_안에서는_있다() -> None:
+    """security_span 은 재상장마다 구간이 따로다. cal[10]~cal[29] 사이는 상장돼 있지 않았다."""
+    cal = sessions(60)
+    spans: list[dict[str, object]] = [
+        {"ticker": "A00001", "first_date": cal[0], "last_date": cal[-1],
+         "end_reason": "coverage_gap"},
+        {"ticker": "A00005", "first_date": cal[0], "last_date": cal[9], "end_reason": "delisted"},
+        {"ticker": "A00005", "first_date": cal[30], "last_date": cal[-1],
+         "end_reason": "coverage_gap"}]
+    tsstk = [{**_BOTH_CLASSES, "rcept_no": f"2021030100000{i}", "aq_dd": cal[d],
+              "available_date": cal[d]} for i, d in ((1, 20), (2, 40))]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk, spans=spans)
+    assert _treasury_rows(out) == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000,
+                                   f"A00001:treasury_buy:{cal[40]}": 5_000_000_000,
+                                   f"A00005:treasury_buy:{cal[40]}": 1_000_000_000}
+
+
+def test_구간_끝이_coverage_gap_이면_끝날_뒤도_상장으로_본다() -> None:
+    """원천 끝까지 상장한 구간(coverage_gap)은 열린 끝이다. 정상 빌드에서는 그 뒤 결정일이 캘린더
+    밖이라 out_of_calendar 가 먼저 걸러 보이지 않고, 입력 판본이 어긋날 때(security_span 이
+    캘린더보다 먼저 끝난 판)만 의미가 있는 방어다 — 그 판을 직접 주입해 본다."""
+    cal = sessions(60)
+    spans: list[dict[str, object]] = [
+        {"ticker": t, "first_date": cal[0], "last_date": cal[30], "end_reason": "coverage_gap"}
+        for t in ("A00001", "A00005")]
+    tsstk = [{**_BOTH_CLASSES, "aq_dd": cal[40], "available_date": cal[40]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk, spans=spans)
+    assert _treasury_rows(out) == {f"A00001:treasury_buy:{cal[40]}": 5_000_000_000,
+                                   f"A00005:treasury_buy:{cal[40]}": 1_000_000_000}
+
+
+def test_corp_ticker_에_같은_우선주가_두_번_있어도_우선주는_하나다() -> None:
+    """우선주 수는 서로 다른 티커 수다(count DISTINCT) — 원천 중복 행이 모호함을 만들지 않는다."""
+    cal = sessions(60)
+    tsstk = [{**_BOTH_CLASSES, "aq_dd": cal[20], "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk, repeat_legs=("A00005",))
+    assert _treasury_rows(out) == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000,
+                                   f"A00005:treasury_buy:{cal[20]}": 1_000_000_000}
+
+
+def test_결정일이_없으면_우선주_하나로_귀속하고_effective_unresolved_로_격리한다() -> None:
+    """결정일이 없으면 시점을 못 정해 전 기간 우선주로 센다. 하나면 그 티커의 후보가 되고, 날짜가
+    없어 effective_unresolved 로 격리된다 — 범위 밖으로 조용히 빠지지 않는다."""
+    cal = sessions(60)
+    tsstk = [{**_BOTH_CLASSES, "aq_dd": None, "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk)
+    rejects = {e: r["reject_reason"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+    assert rejects == {"A00001:treasury_buy:-": "effective_unresolved",
+                       "A00005:treasury_buy:-": "effective_unresolved"}
+
+
+def test_보통주_수량만_있고_금액이_없으면_보통주_금액은_0이_아니라_결측이다() -> None:
+    """#590 리뷰 nit-1(a): 보통주 수량은 있는데 보통주 금액이 비고 기타주식 금액만 있는 공시.
+
+    보통주 행은 사건이 있으니 내되 금액은 결측이다 — 0 으로 채우면 「매입 0원」이라는 거짓 사실이
+    된다. 기타주식분은 우선주 티커에 그대로 실린다."""
+    cal = sessions(60)
+    tsstk = [{"rcept_no": "20210301000001", "corp_code": "CX", "aq_dd": cal[20],
+              "aqpln_stk_ostk": 10_000.0, "aqpln_stk_estk": 3_000.0,
+              "aqpln_prc_estk": 200_000_000.0, "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk)
+    got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+    assert got == {f"A00001:treasury_buy:{cal[20]}": None,
+                   f"A00005:treasury_buy:{cal[20]}": 200_000_000}
+
+
+def test_기타주식_수량만_있는_공시는_우선주_행으로_남고_금액만_결측이다() -> None:
+    """#590 리뷰 nit-1(b): 기타주식 수량만 있고 금액이 없는 공시도 우선주 사건이다. 보통주 사건이
+    아니므로 보통주 행은 없고, 우선주 행은 금액만 결측이다(어디에도 안 실리면 사건이 사라진다)."""
+    cal = sessions(60)
+    tsstk = [{"rcept_no": "20210301000001", "corp_code": "CX", "aq_dd": cal[20],
+              "aqpln_stk_estk": 5_000.0, "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk)
+    got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+    assert got == {f"A00005:treasury_buy:{cal[20]}": None}
+
+
+def test_절단본_자사주_취득은_종류별_금액이_각_티커에_붙는다(
+        built: build.BuildResult, events: dict[str, dict[str, object]]) -> None:
+    """손검산 근거는 절단본 `stg_event_tsstk_aq` 의 `aqpln_prc_ostk`·`aqpln_prc_estk` 원값이다.
+
+    삼성전자(00126380)는 상장 우선주가 005935 하나라 기타주식분이 005935 에 실린다 —
+    2024-11-15 결정(접수 20241118000328)은 보통주 2,682,737,598,000 · 기타주식 317,262,452,400,
+    2025-07-08 결정(20250708000011)은 3,509,995,276,400 · 401,912,568,900 이다. 대신증권
+    (00110893)은 상장 우선주가 003545·003547 둘이라 기타주식분 4건이 class_ambiguous 로 빠지고,
+    기타주식만 산 2025-08-28·2026-03-09 결정은 보통주 003540 에도 행이 없다.
+    """
+    for eid, amount, rcept in (
+            ("005930:treasury_buy:2024-11-15", 2_682_737_598_000, "20241118000328"),
+            ("005935:treasury_buy:2024-11-15", 317_262_452_400, "20241118000328"),
+            ("005930:treasury_buy:2025-07-08", 3_509_995_276_400, "20250708000011"),
+            ("005935:treasury_buy:2025-07-08", 401_912_568_900, "20250708000011")):
+        r = events[eid]
+        assert (r["amount_krw"], r["rcept_no"], r["corp_code"]) == (amount, rcept, "00126380")
+    assert events["005935:treasury_buy:2024-11-15"]["announce_date"] == date(2024, 11, 18)
+    pref_dates = {e.rsplit(":", 1)[1] for e in events if e.startswith("005935:treasury_buy:")}
+    assert pref_dates == {"2015-10-29", "2016-01-28", "2016-04-28", "2016-07-28", "2017-01-24",
+                          "2017-04-27", "2017-07-27", "2017-10-31", "2024-11-15", "2025-02-18",
+                          "2025-07-08"}
+    # 대신증권 — 보통주식분만 남는다. 2015-01-23 은 합 20,672,400,000 이 아니라
+    # 보통주식분 15,750,000,000 이다
+    assert events["003540:treasury_buy:2015-01-23"]["amount_krw"] == 15_750_000_000
+    assert {e for e in events if e.startswith("003540:treasury_buy:")} == {
+        "003540:treasury_buy:2015-01-23", "003540:treasury_buy:2019-04-26",
+        "003540:treasury_buy:2019-09-09", "003540:treasury_buy:2020-09-22",
+        "003540:treasury_buy:2022-02-28"}
+    assert not [e for e in events if e.startswith(("003545:", "003547:"))
+                and ":treasury_buy:" in e]
+    x = _gate(built, "EG3_corp_event").metrics
+    assert x["n_pool_by_scope_source"]["class_ambiguous"] == {"event_tsstk_aq": 4}
 
 
 def test_사건일이_없으면_격리된다() -> None:

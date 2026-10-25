@@ -34,6 +34,7 @@ from strategy_workbench.domain.assistant.facade.tools import (
 )
 
 from ..backtest_run_wait import wait_for_terminal_state
+from .test_trial_ledger_http_api import _saved_run
 
 _ASSISTANT = "/api/v1/assistant"
 _STRATEGY_CONTEXT = {"source_text": "schema_version: '1.2'\n", "source_format": "yaml"}
@@ -156,6 +157,33 @@ def test_a_completed_run_is_explained_from_the_server_summary(
         "이 결과 좋은 거야?",
         "좋은 편입니다.",
     ]
+
+
+def test_the_summary_carries_the_same_validation_evidence_as_the_card(
+    client: TestClient, provider: _ResultReadingProvider
+) -> None:
+    """US-DM-12: 모델이 읽는 검증 근거는 결과 검증 카드의 조회와 같은 원장 값이다."""
+    accepted = client.post("/api/v1/backtests", json=_saved_run(client))
+    assert accepted.status_code == 202, accepted.text
+    run_id = accepted.json()["run"]["run_id"]
+    assert wait_for_terminal_state(client, run_id, timeout_s=60.0)["status"] == "completed"
+    session_id = client.post(
+        f"{_ASSISTANT}/sessions", json={"document_ref": {"run_id": run_id}}
+    ).json()["session_id"]
+
+    client.post(f"{_ASSISTANT}/sessions/{session_id}/turns", json={"text": "믿어도 돼?"})
+    _settled_history(client, session_id)
+    card = client.get(f"/api/v1/backtests/{run_id}/validation-report").json()
+
+    validation = json.loads(provider.tool_results[0].content)["validation"]
+    assert validation["psr"]["value"] == card["psr"]["value"]
+    ledger = validation["current_ledger"]
+    assert ledger["trial_count"] == card["dsr"]["trial_count"] == 1
+    assert ledger["deflated_sharpe"] == card["dsr"]["value"]
+    assert ledger["unavailable_reason"] is None
+    assert ledger["lineage_id"] == card["dsr"]["lineage_id"]
+    # 실험으로 고른 적이 없는 단일 실행이다.
+    assert validation["selection_snapshots"] == []
 
 
 def test_a_session_for_an_unknown_run_is_refused(client: TestClient) -> None:

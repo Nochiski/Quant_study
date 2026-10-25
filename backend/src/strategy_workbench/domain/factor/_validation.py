@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
+from ._history import node_read_window
 from ._nodes import (
     BinaryNode,
     BinaryOperator,
@@ -16,6 +17,7 @@ from ._nodes import (
     FactorGraph,
     FieldMetadata,
     FieldNode,
+    FillNode,
     GroupNode,
     GroupOperator,
     NodeValueType,
@@ -119,8 +121,30 @@ def unavailable_field_message(field_id: str, reason: str) -> str:
     return f"연결된 데이터가 이 필드를 주지 않습니다 — {reason}: field_id={field_id!r}"
 
 
+UNSELECTED_FIELD_MESSAGE = "아직 필드를 고르지 않았습니다. 목록에서 필드를 고르세요."
+"""아직 고르지 않은 빈 필드 칸(`field_id: ""`)의 진단 문장.
+
+그래프 안(`factor.graph.field_missing`)과 밖(`strategy.field.missing`)이 같은 문장을 쓴다.
+재현할 값이 없으므로 `field_id`·`path` 원문 없이 할 일만 알린다(위치는 진단 pointer 가 소유한다).
+"""
+
+
+def missing_field_message(field_id: str, reason: str | None, unknown: str) -> str:
+    """찾지 못한 필드 참조의 진단 문장 — 필드 id 를 받는 모든 검사가 이 하나로 빈 값 분기를 맞춘다.
+
+    빈 칸(`field_id: ""`)은 `UNSELECTED_FIELD_MESSAGE`, 어댑터가 뺀 필드는 그 사유
+    (`unavailable_field_message`), 그 밖에는 자리마다의 `unknown` 문장 뒤에 `field_id` 원문을
+    붙인다.
+    """
+    if not field_id.strip():
+        return UNSELECTED_FIELD_MESSAGE
+    if reason is None:
+        return f"{unknown}: field_id={field_id!r}"
+    return unavailable_field_message(field_id, reason)
+
+
 def node_dependencies(node: ExpressionNode) -> tuple[str, ...]:
-    if isinstance(node, (UnaryNode, TimeSeriesNode, CrossSectionalNode, GroupNode)):
+    if isinstance(node, (UnaryNode, TimeSeriesNode, CrossSectionalNode, GroupNode, FillNode)):
         return (node.input_node_id,)
     if isinstance(node, (BinaryNode, ComparisonNode)):
         return (node.left_node_id, node.right_node_id)
@@ -203,17 +227,12 @@ def validate_factor_graph(
             and (fields or require_field_metadata)
             and node.field_id not in field_by_id
         ):
-            reason = (unavailable_fields or {}).get(node.field_id)
-            issues.append(
-                _issue(
-                    "factor.graph.field_missing",
-                    node.node_id,
-                    path,
-                    f"필드 계약을 찾을 수 없습니다: field_id={node.field_id!r}"
-                    if reason is None
-                    else unavailable_field_message(node.field_id, reason),
-                )
+            message = missing_field_message(
+                node.field_id,
+                (unavailable_fields or {}).get(node.field_id),
+                "필드 계약을 찾을 수 없습니다",
             )
+            issues.append(_issue("factor.graph.field_missing", node.node_id, path, message))
         elif isinstance(node, ParameterNode) and node.parameter_id not in known_parameters:
             issues.append(
                 _issue(
@@ -296,6 +315,7 @@ def validate_factor_graph(
                 contracts,
                 field_by_id,
                 require_field_metadata=require_field_metadata,
+                unavailable_fields=unavailable_fields,
             )
             contracts[node.node_id] = contract
             issues.extend(contract_issues)
@@ -423,6 +443,7 @@ def _infer_contract(
     fields: dict[str, FieldMetadata],
     *,
     require_field_metadata: bool,
+    unavailable_fields: Mapping[str, str] | None = None,
 ) -> tuple[NodeContract, tuple[FactorValidationIssue, ...]]:
     dependencies = [contracts[dependency] for dependency in node_dependencies(node)]
     issues: list[FactorValidationIssue] = []
@@ -551,10 +572,7 @@ def _infer_contract(
                     f"변환 입력은 숫자여야 합니다: actual={source.value_type.value}",
                 )
             )
-        if isinstance(node, TimeSeriesNode):
-            history += node.window - 1 + node.lag
-        elif isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
-            history += node.periods or 0
+        history += node_read_window(node).far
         if isinstance(node, (TimeSeriesNode, CrossSectionalNode, GroupNode)) or (
             isinstance(node, UnaryNode) and node.operator is not UnaryOperator.NEGATE
         ):
@@ -574,7 +592,12 @@ def _infer_contract(
                         "factor.graph.group_field_missing",
                         node.node_id,
                         node.node_id,
-                        f"그룹 필드 계약을 찾을 수 없습니다: field_id={node.group_field_id!r}",
+                        # 필드 노드와 같이 어댑터가 뺀 그룹 필드는 그 사유를 싣는다(5차 리뷰 3).
+                        missing_field_message(
+                            node.group_field_id,
+                            (unavailable_fields or {}).get(node.group_field_id),
+                            "그룹 필드 계약을 찾을 수 없습니다",
+                        ),
                     )
                 )
             elif group_metadata and group_metadata.value_type is not NodeValueType.GROUP_SERIES:

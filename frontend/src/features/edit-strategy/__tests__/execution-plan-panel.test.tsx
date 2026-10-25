@@ -59,6 +59,7 @@ const explanation = (
   },
   plan: {
     missing_policy: "drop",
+    evaluation_version: "factor-evaluation-v1",
     graph_hash: suffix.repeat(64),
     plan_hash: suffix.toUpperCase().repeat(64),
     registry_version: "factor-registry-v1",
@@ -180,6 +181,34 @@ describe("ExecutionPlanPanel", () => {
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith("/factors/1/graph");
     expect(screen.getByTitle("b".repeat(64))).toBeInTheDocument();
+  });
+
+  it("팩터 변경은 선택을 유지하고 명시적인 노드·입력 원문 열기만 검사 이벤트를 보낸다", async () => {
+    const user = userEvent.setup();
+    const onSelectPointer = vi.fn();
+    const onInspectPointer = vi.fn();
+    render(
+      <ExecutionPlanPanel
+        state={readyState()}
+        onSelectPointer={onSelectPointer}
+        onInspectPointer={onInspectPointer}
+      />,
+    );
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "팩터 그래프" }),
+      "1",
+    );
+    expect(onSelectPointer).toHaveBeenLastCalledWith("/factors/1/graph");
+    expect(onInspectPointer).not.toHaveBeenCalled();
+    expect(screen.getByTitle("b".repeat(64))).toBeInTheDocument();
+    onSelectPointer.mockClear();
+
+    await user.click(screen.getByRole("button", { name: /momentum 소스 열기/ }));
+    expect(onInspectPointer).toHaveBeenLastCalledWith("/factors/1/graph/nodes/1");
+    await user.click(screen.getByRole("button", { name: /close.*numeric_series.*KRW/ }));
+    expect(onInspectPointer).toHaveBeenLastCalledWith("/factors/1/graph/nodes/0");
+    expect(onSelectPointer).not.toHaveBeenCalled();
   });
 
   it("uses a routed factor pointer as the factor selection owner", () => {

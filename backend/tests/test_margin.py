@@ -62,7 +62,9 @@ def market_buy(quantity: int) -> OpenOrder:
 class TestBrokerBuyingPower:
     def test_buying_power_caps_fill_and_names_leverage(self) -> None:
         # 여력 20,000 → 200주까지
-        outcome = BrokerSim(fee_bps=0.0).execute(market_buy(250), BAR, 20_000.0, "F-1")
+        outcome = BrokerSim(fee_bps=0.0).execute(
+            market_buy(250), BAR, 20_000.0, "F-1", sell_tax_rate=0.0
+        )
         assert outcome.status is ExecutionStatus.CASH_LIMITED
         assert outcome.fill is not None
         assert outcome.fill.quantity == Decimal(200)
@@ -140,10 +142,13 @@ class TestMarginGolden:
         assert d3.cash == pytest.approx(10_749.5)
 
     def test_buying_power_shrinks_with_existing_exposure(self) -> None:
-        # 150주 @110 평가 16,500, equity 11,499.5 → 여력 2×11,499.5 − 16,500 = 6,499 → @105 61주
+        # 110→105 재평가로 equity=10,749.5, gross=15,750, 여력=5,749: 54주.
+        # 옛 61주는 체결 직후 gross=22,155 > 2×10,749.5로 한도를 넘겼다.
         engine, result = run_margin((target(150), target(400)))
         fills = result.fills
-        assert [(f.ts, int(f.quantity)) for f in fills] == [(day(2), 150), (day(3), 61)]
+        assert [(f.ts, int(f.quantity)) for f in fills] == [(day(2), 150), (day(3), 54)]
+        assert (150 + 54) * 105 <= 2 * 10_749.5
+        assert (150 + 55) * 105 > 2 * 10_749.5
 
     def test_leverage_above_one_requires_margin_declaration(self) -> None:
         engine = BacktestEngine(config())

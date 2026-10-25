@@ -46,13 +46,22 @@ from strategy_workbench.adapters.outbound.assistant_sqlite.facade.repository imp
     SQLiteProviderProfileRepository,
 )
 from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import ScriptedLlmProvider
+from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import (
+    CredentialsEnvFile,
+    EnvFileProviderStore,
+)
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
     LocalFileProviderSecretStore,
-    default_secrets_path,
 )
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
 from strategy_workbench.application.assistant_chat.facade.context import AssistantContextBuilder
-from strategy_workbench.application.assistant_chat.facade.ports import LlmProviderPort
+from strategy_workbench.application.assistant_chat.facade.ports import (
+    LlmProviderPort,
+    ProviderProfileRepository,
+    ProviderSecretStore,
+    ResultSelectionSnapshot,
+    ResultValidationFacts,
+)
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
@@ -61,13 +70,17 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunNotFoundError,
     BacktestRunResult,
     BacktestRunService,
+    InvalidBacktestRunError,
+    StrategyReferenceNotFoundError,
 )
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
+from strategy_workbench.application.experiment_run.facade.experiments import ExperimentRunService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompileRequest,
     StrategyAuthoringService,
 )
 from strategy_workbench.application.strategy_authoring.facade.ports import SourceFormat
+from strategy_workbench.application.strategy_design.facade.ports import StrategyNotFoundError
 from strategy_workbench.domain.assistant.facade.models import (
     ProposalCompileResult,
     ProposalDiagnostic,
@@ -76,6 +89,12 @@ from strategy_workbench.domain.assistant.facade.models import (
 from strategy_workbench.domain.factor.facade.registry import FactorRegistry
 
 from ._file_guard import restrict_to_current_user
+from ._secrets import (
+    credentials_env_file,
+    local_secret_store,
+    migrate_provider_profiles,
+    repository_root,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -218,10 +237,17 @@ class AssistantSettings:
 
     `db_path=None`은 프로세스 안에서만 사는 in-memory DB다(전략 revision 저장소와 같은 관례).
     `secrets_path=None`이면 OS 규칙이 정하는 사용자 설정 디렉터리를 쓴다.
+
+    `credentials_env_path`는 내 문서 `auto_trading/.env`(2026-10-24 사용자 결정). 서버 실행 설정
+    (`runtime_assistant_settings`)은 늘 채운다. `None`이면 예전 저장(프로파일은 이 DB, 키는
+    `secrets_path`)을 그대로 쓴다 — 테스트가 직접 세우는 그래프가 사용자의 실제 문서 폴더에
+    쓰지 않게
+    하는 기본값이다.
     """
 
     db_path: str | Path | None = None
     secrets_path: str | Path | None = None
+    credentials_env_path: str | Path | None = None
     allow_insecure_base_url: bool = False
     # `MappingProxyType`은 불변이지만 dataclass가 mutable default로 보므로 factory로 준다.
     provider_factories: Mapping[ProviderKind, ProviderAdapterFactory] = field(
@@ -242,17 +268,12 @@ class AssistantServices:
     chat: AssistantChatService
     turns: AssistantTurnRunner
     database: AssistantDatabase
-
-
-def repository_root() -> Path:
-    """**소스 체크아웃 기준** 저장소 루트. 비밀 파일이 들어가면 안 되는 트리다.
-
-    `backend/src/strategy_workbench/bootstrap/`에서 네 단계 위다. 같은 파일의 `.local` 경로
-    계산(`_http.py`의 `parents[3]`)과 같은 관례이고, 이 앱은 editable 설치(`uv sync`)로만
-    돌기 때문에 성립한다. 비 editable 설치에서는 관련 없는 디렉터리를 가리키므로, 그런 배포가
-    생기면 저장소 루트를 설정으로 받아야 한다.
-    """
-    return Path(__file__).resolve().parents[4]
+    # 키움 모의 연결 설정(S06 ②-2)이 같은 secrets.json을 쓴다. 인스턴스를 하나로 둬야 그 잠금이
+    # 두 쓰기를 막는다.
+    secrets: LocalFileProviderSecretStore
+    # 내 문서 `auto_trading/.env`. 키움 모의 연결도 같은 인스턴스를 써야 잠금이 맞는다. 예전 저장을
+    # 쓰는 그래프(`credentials_env_path=None`)에서는 None이다.
+    credentials_file: CredentialsEnvFile | None = None
 
 
 class _LazyProviderRegistry(Mapping[ProviderKind, LlmProviderPort]):
@@ -325,6 +346,7 @@ def build_assistant_services(
     factor_registry: FactorRegistry,
     strategy_authoring: StrategyAuthoringService,
     backtest_runs: BacktestRunService,
+    experiments: ExperimentRunService,
     today: Callable[[], date] = date.today,
 ) -> AssistantServices:
     """프로파일·세션 저장소부터 턴 러너까지 한 그래프로 묶는다.
@@ -337,17 +359,23 @@ def build_assistant_services(
         # in-memory DB는 파일이 없어 잠글 것도 없다. 실패는 삼키지 않는다 — 조용히 넘어가면
         # 이력이 느슨한 권한으로 남고 아무도 그 사실을 모른다.
         restrict_to_current_user(database.database_path)
-    profile_repository = SQLiteProviderProfileRepository(database)
+    legacy_profiles = SQLiteProviderProfileRepository(database)
     session_repository = SQLiteChatSessionRepository(database)
-    secrets = LocalFileProviderSecretStore(
-        settings.secrets_path if settings.secrets_path is not None else default_secrets_path(),
-        forbidden_roots=(repository_root(),),
-    )
+    secrets = local_secret_store(settings.secrets_path)
+    credentials_file: CredentialsEnvFile | None = None
+    profile_repository: ProviderProfileRepository = legacy_profiles
+    provider_secrets: ProviderSecretStore = secrets
+    if settings.credentials_env_path is not None:
+        credentials_file = credentials_env_file(settings.credentials_env_path)
+        env_store = EnvFileProviderStore(credentials_file)
+        migrate_provider_profiles(legacy_profiles, secrets, env_store)
+        profile_repository = env_store
+        provider_secrets = env_store.secrets()
     providers = _LazyProviderRegistry(settings.provider_factories)
     compiler = _AuthoringStrategyCompiler(strategy_authoring)
     profiles = ProviderProfileService(
         profile_repository,
-        secrets,
+        provider_secrets,
         providers,
         now=_now,
         new_id=_new_id,
@@ -357,13 +385,13 @@ def build_assistant_services(
         equity_data=equity_data,
         factor_registry=factor_registry,
         compiler=compiler,
-        backtest_results=_RunServiceBacktestResults(backtest_runs),
+        backtest_results=_RunServiceBacktestResults(backtest_runs, experiments),
         today=today,
     )
     chat = AssistantChatService(
         session_repository,
         profiles,
-        secrets,
+        provider_secrets,
         providers,
         compiler,
         context_builder,
@@ -375,6 +403,8 @@ def build_assistant_services(
         chat=chat,
         turns=AssistantTurnRunner(chat, session_repository, now=_now, new_id=_new_id),
         database=database,
+        secrets=secrets,
+        credentials_file=credentials_file,
     )
 
 
@@ -412,20 +442,62 @@ class _RunServiceBacktestResults:
     `_AuthoringStrategyCompiler`와 같은 모양이다. 어시스턴트가 `backtest_run` 유스케이스를
     import하지 않도록 bootstrap이 감싼다. "없음"·"아직 안 끝남"·"결과 파일을 못 읽음"을 None 하나로
     접는 것만 한다 — 어시스턴트 쪽 대응이 같다(설명할 결과가 없다).
+
+    검증 근거(US-DM-12)는 결과 검증 카드와 같은 `validation_report` 와, 실행을 소유한 실험의 선택
+    기록(`run_selections`)을 옮긴다.
     """
 
-    def __init__(self, runs: BacktestRunService) -> None:
+    def __init__(self, runs: BacktestRunService, experiments: ExperimentRunService) -> None:
         self._runs = runs
+        self._experiments = experiments
 
     def completed_result(self, run_id: str) -> BacktestRunResult | None:
         try:
             return self._runs.result(run_id)
-        except (
-            BacktestRunNotFoundError,
-            BacktestResultNotReadyError,
-            BacktestArtifactUnreadableError,
-        ):
+        except _RESULT_UNAVAILABLE:
             return None
+
+    def validation_facts(self, run_id: str) -> ResultValidationFacts | None:
+        try:
+            report = self._runs.validation_report(run_id)
+            experiment_id = self._runs.summary(run_id).experiment_id
+        except _RESULT_UNAVAILABLE:
+            return None
+        except _LEDGER_UNAVAILABLE as error:
+            # 계열 출처를 해소하지 못했다 — 근거 없이도 결과는 설명한다(요약 `validation` 이 null).
+            logger.warning("result validation evidence unavailable — run_id=%s: %s", run_id, error)
+            return None
+        selections = (
+            () if experiment_id is None else self._experiments.run_selections(experiment_id, run_id)
+        )
+        return ResultValidationFacts(
+            observed_at=report.observed_at,
+            psr=report.psr,
+            deflated_sharpe=report.dsr,
+            selections=tuple(
+                ResultSelectionSnapshot(
+                    experiment_id=item.experiment_id,
+                    selected_at=item.selected_at,
+                    trial_count=item.trial_count,
+                    deflated_sharpe=item.deflated_sharpe,
+                    ledger_representative_sharpe=item.ledger_representative_sharpe,
+                )
+                for item in selections
+            ),
+        )
+
+
+_RESULT_UNAVAILABLE = (
+    BacktestRunNotFoundError,
+    BacktestResultNotReadyError,
+    BacktestArtifactUnreadableError,
+)
+# 결과는 읽었지만 그 계열 원장을 해소하지 못한 경우(출처 계열이 없거나 저장 전략이 사라졌다).
+_LEDGER_UNAVAILABLE = (
+    InvalidBacktestRunError,
+    StrategyReferenceNotFoundError,
+    StrategyNotFoundError,
+)
 
 
 def _now() -> datetime:

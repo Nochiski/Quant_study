@@ -73,6 +73,7 @@ __all__ = [
     "AssistantProbeFailedDetail",
     "AssistantProviderNotInstalledDetail",
     "AssistantSecretMissingDetail",
+    "AssistantStorageUnavailableDetail",
     "AssistantTurnInProgressDetail",
     "ChatMessageView",
     "CreateProviderProfileRequest",
@@ -234,7 +235,7 @@ class TurnAcceptedView:
 
 @dataclass(frozen=True)
 class TurnContextPayload:
-    """한 턴이 보는 문서 상태. 서버가 문서를 들지 않으므로 요청마다 실려 온다(spec D7)."""
+    """한 턴이 보는 편집기 상태. 저장 문서와 별개로 아직 저장하지 않은 원문·진단을 요청에 싣는다."""
 
     source_text: str
     source_format: str = "yaml"
@@ -496,6 +497,17 @@ class AssistantSecretMissingDetail:
 
 
 @dataclass(frozen=True)
+class AssistantStorageUnavailableDetail:
+    """공급자 저장 파일(내 문서 `auto_trading/.env`) 자체를 읽거나 쓸 수 없다(3차 리뷰 4).
+
+    연결 테스트 전에 거절한다. 사용자가 파일을 고치거나 지워야 풀린다. 경로·값은 싣지 않는다.
+    """
+
+    code: Literal["assistant.storage_unavailable"]
+    message: str
+
+
+@dataclass(frozen=True)
 class AssistantDocumentRefInvalidDetail:
     """`document_ref`가 "저장된 전략과 초안 중 정확히 하나" 규칙을 어겼다.
 
@@ -537,6 +549,7 @@ AssistantUnprocessableDetail: TypeAlias = Annotated[
     | AssistantProbeFailedDetail
     | AssistantBaseUrlRejectedDetail
     | AssistantSecretMissingDetail
+    | AssistantStorageUnavailableDetail
     | AssistantDocumentRefInvalidDetail
     | AssistantResultUnavailableDetail
     | AssistantTurnContextMismatchDetail,

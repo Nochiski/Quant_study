@@ -2,14 +2,14 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-3);
+  width: 100%;
 }
 
 .doc-toolbar__identity {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  margin: 0;
+  order: 2;
+  margin: 0 0 0 auto;
   color: var(--text-muted);
   font-size: var(--text-size-small);
 }
@@ -20,41 +20,46 @@
   align-items: center;
 }
 
-.doc-toolbar__identity dt::after {
-  content: ":";
-}
+.doc-toolbar__identity dt::after { content: ":"; }
+.doc-toolbar__identity dd { margin: 0; }
 
-.doc-toolbar__identity dd {
-  margin: 0;
-  color: var(--text);
-}
-
-.doc-toolbar__identity code {
-  font-size: 11px;
-}
-
-/*
- * 한글은 음절마다 줄을 바꿀 수 있어, 좁아지면 버튼 글자가 "검/증"처럼 한 음절씩 선다(이슈 #260). 버튼
- * 글자는 낱말 안에서 꺾지 않는다(`keep-all`). 편집기 칸이 버튼 줄보다 좁으면(1280px 등) 버튼을 다음 줄로
- * 내린다 — 한 줄을 고집하면 버튼 줄이 칸을 넘어 옆 계약 칸 밑으로 들어가고, 가려진 버튼은 눌리지 않는다(#269).
- */
 .doc-toolbar__actions {
+  --control-size: var(--control-height-compact);
+  --control-font-size: var(--text-size-label);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }
 
-.doc-toolbar__actions .ui-button {
+.doc-toolbar__actions > .ui-button,
+.doc-toolbar__actions > .ui-tooltip > .ui-button {
+  min-height: var(--control-height-compact);
+  font-size: var(--text-size-label);
   word-break: keep-all;
 }
 
-/* 오류 문장은 버튼 줄 아래 한 줄을 통째로 쓴다. 글자색·줄바꿈은 `FailureNotice` 가 정한다. */
 .doc-toolbar__error {
+  order: 3;
   flex-basis: 100%;
 }
 
 .doc-toolbar__run-status {
   color: var(--status-info);
   font-size: var(--text-size-small);
+}
+
+@media (max-width: 719px) {
+  .doc-toolbar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-1); }
+  .doc-toolbar__actions { display: contents; }
+  .doc-toolbar__actions > .ui-button,
+  .doc-toolbar__actions > .ui-tooltip { min-width: 0; width: 100%; }
+  .doc-toolbar__actions > .ui-button,
+  .doc-toolbar__actions > .ui-tooltip > .ui-button { width: 100%; padding-inline: var(--space-1); }
+  .doc-toolbar__settings { grid-column: 1 / span 2; min-width: 0; padding-top: var(--space-1); }
+  .doc-toolbar__identity { grid-column: 3; grid-row: 2; align-self: center; margin: 0; justify-self: end; }
+  .doc-toolbar__settings summary { flex-wrap: wrap; }
+  .doc-toolbar__identity dt { display: none; }
+  .doc-toolbar__run-status,
+  .doc-toolbar__error { grid-column: 1 / -1; overflow-wrap: anywhere; }
 }

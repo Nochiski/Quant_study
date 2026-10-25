@@ -24,6 +24,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import Moc
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
 )
+from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -125,6 +126,7 @@ def _runs(tmp_path: Path, *run_ids: str) -> BacktestRunService:
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path),
         new_id=iter(run_ids).__next__,
+        run_execution=ThreadRunExecution,
         run_repository=SQLiteBacktestRunRepository(),
     )
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import functools
 import importlib
-import importlib.util
 from datetime import datetime
 from decimal import ROUND_DOWN, Decimal
 from typing import Any, Protocol, cast
@@ -21,8 +20,14 @@ from backtest_engine.engine.broker import (
     QuoteCore,
     QuoteNumbers,
 )
+from backtest_engine.engine.core_source import (
+    BUILD_COMMAND,
+    USABLE_STATUSES,
+    process_core_status,
+)
 from backtest_engine.engine.portfolio import Portfolio as PythonPortfolio
 from backtest_engine.engine.portfolio import scale_quantity
+from backtest_engine.engine.power_projection import ExecutionState, project_execution
 from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.engine.slippage import (
     FixedBpsSlippage,
@@ -77,19 +82,35 @@ def core_available(core: str) -> bool:
     if core == "python":
         return True
     if core in RUST_CORES:
-        return importlib.util.find_spec("backtest_core") is not None
+        # 현재 소스보다 오래된 확장은 없는 것과 같이 다룬다. 낡은 코어의 결과가 섞이면 안 된다.
+        return process_core_status() in USABLE_STATUSES
     return False
 
 
 def _require_core(core: str) -> None:
     if core not in CORES:
         raise CoreUnavailable(f"unknown core — core={core!r} available={CORES}")
-    if not core_available(core):
-        raise CoreUnavailable(
-            f"core extension not installed — core={core!r}; build with "
-            f"`uv run maturin develop --manifest-path "
-            f"rust/backtest_core/Cargo.toml --release` from the backend directory"
-        )
+    if core in RUST_CORES:
+        status = process_core_status()
+        if status == "missing":
+            raise CoreUnavailable(
+                f"core extension not installed — core={core!r}; build with "
+                f"`{BUILD_COMMAND}` from the backend directory"
+            )
+        # 백테스트 run은 run마다 새 worker 프로세스라 다시 빌드만 하면 다음 run에 반영된다. 서버
+        # 프로세스 자체가 확장을 이미 올렸다면(벤치마크 곡선 등) 그 프로세스는 재시작해야 한다.
+        if status == "broken":
+            raise CoreUnavailable(
+                f"core extension failed to load — core={core!r}; rebuild with "
+                f"`{BUILD_COMMAND}` from the backend directory and run again"
+            )
+        if status == "stale":
+            raise CoreUnavailable(
+                f"core extension is older than the current Rust source — core={core!r}; "
+                f"rebuild with `{BUILD_COMMAND}` from the backend directory and run again "
+                "(new runs pick up the rebuilt core; restart the server only if this process "
+                "already loaded the old one)"
+            )
 
 
 class PythonPricing:
@@ -270,7 +291,14 @@ def make_persistent_runtime(
     return core.PersistentEngine(initial_cash, allow_short, allow_margin, leverage)
 
 
-PowerState = tuple[float, float, dict[InstrumentId, Decimal], dict[InstrumentId, float]]
+PowerState = tuple[
+    float,
+    float,
+    dict[InstrumentId, Decimal],
+    dict[InstrumentId, float],
+    float,
+    dict[InstrumentId, float],
+]
 
 
 class BuyingPowerTracker(Protocol):
@@ -279,10 +307,26 @@ class BuyingPowerTracker(Protocol):
     @property
     def available(self) -> float: ...
 
+    @property
+    def leverage(self) -> float: ...
+
+    @property
+    def valuation(self) -> tuple[float, float]: ...
+
+    def execution_state(self, instrument: InstrumentId) -> ExecutionState: ...
+
+    def mark_of(self, instrument: InstrumentId) -> float | None: ...
+
     def quantity_of(self, instrument: InstrumentId) -> Decimal: ...
 
     def consume_quantity(
-        self, instrument: InstrumentId, side: Side, quantity: Decimal, price: float, fee: float
+        self,
+        instrument: InstrumentId,
+        side: Side,
+        quantity: Decimal,
+        price: float,
+        fee: float,
+        tax: float = 0.0,
     ) -> None: ...
 
     def checkpoint(self) -> object: ...
@@ -294,8 +338,13 @@ class PythonBuyingPower:
     """MARGIN 없음(leverage 1.0, 롱 전용)이면 정확히 현금과 같다. 체결마다 수량 변화로
     총노출을, 수수료·재평가로 equity를 갱신한다. 가격은 세션 시작 평가가 아니라 체결가를 쓴다."""
 
-    def __init__(self, snapshot: PortfolioSnapshot, leverage: float) -> None:
+    def __init__(
+        self, snapshot: PortfolioSnapshot, leverage: float, allow_margin: bool = False
+    ) -> None:
         self._leverage = leverage
+        self._cash = snapshot.cash
+        self._allow_margin = allow_margin
+        self._values = {p.instrument: p.market_value for p in snapshot.positions}
         self._equity = snapshot.equity
         self._gross = sum(abs(p.market_value) for p in snapshot.positions)
         self._quantities = {p.instrument: p.quantity for p in snapshot.positions}
@@ -305,35 +354,72 @@ class PythonBuyingPower:
     def available(self) -> float:
         return self._leverage * self._equity - self._gross
 
+    @property
+    def leverage(self) -> float:
+        return self._leverage
+
+    @property
+    def valuation(self) -> tuple[float, float]:
+        return self._equity, self._gross
+
+    def execution_state(self, instrument: InstrumentId) -> ExecutionState:
+        keys = tuple(self._values)
+        index = keys.index(instrument) if instrument in self._values else len(keys)
+        return self._cash, tuple(self._values.values()), index, self._allow_margin
+
+    def mark_of(self, instrument: InstrumentId) -> float | None:
+        return self._marks.get(instrument)
+
     def quantity_of(self, instrument: InstrumentId) -> Decimal:
         return self._quantities.get(instrument, Decimal(0))
 
     def consume_quantity(
-        self, instrument: InstrumentId, side: Side, quantity: Decimal, price: float, fee: float
+        self,
+        instrument: InstrumentId,
+        side: Side,
+        quantity: Decimal,
+        price: float,
+        fee: float,
+        tax: float = 0.0,
     ) -> None:
         old = self._quantities.get(instrument, Decimal(0))
         signed = quantity if side is Side.BUY else -quantity
         new = old + signed
         # 기존 노출은 세션 시작 평가가, 변화분은 체결가가 기준이다. 체결가로 재평가되면
         # 기존 보유분의 평가 손익만큼 equity도 움직인다 (equity = cash + Σ qty × mark).
-        old_mark = self._marks.get(instrument, price)
-        self._gross += float(abs(new)) * price - float(abs(old)) * old_mark
-        self._equity += float(old) * (price - old_mark) - fee
+        self._cash, self._equity, self._gross = project_execution(
+            self.execution_state(instrument), side is Side.BUY, quantity, new, price, fee, tax
+        )
         self._marks[instrument] = price
         self._quantities[instrument] = new
+        if new == 0:
+            self._values.pop(instrument, None)
+        else:
+            self._values[instrument] = float(new) * price
 
     def checkpoint(self) -> object:
-        return self._equity, self._gross, dict(self._quantities), dict(self._marks)
+        return (
+            self._equity,
+            self._gross,
+            dict(self._quantities),
+            dict(self._marks),
+            self._cash,
+            dict(self._values),
+        )
 
     def restore(self, state: object) -> None:
-        equity, gross, quantities, marks = cast(PowerState, state)
+        equity, gross, quantities, marks, cash, values = cast(PowerState, state)
         self._equity, self._gross = equity, gross
         self._quantities = dict(quantities)
         self._marks = dict(marks)
+        self._cash = cash
+        self._values = dict(values)
 
 
 class RustBuyingPower:
-    def __init__(self, snapshot: PortfolioSnapshot, leverage: float) -> None:
+    def __init__(
+        self, snapshot: PortfolioSnapshot, leverage: float, allow_margin: bool = False
+    ) -> None:
         core = importlib.import_module("backtest_core")
         self._instruments = {instrument_key(p.instrument): p.instrument for p in snapshot.positions}
         self._inner = core.BuyingPower(
@@ -343,20 +429,43 @@ class RustBuyingPower:
                 (instrument_key(p.instrument), int(p.quantity), p.market_price, p.market_value)
                 for p in snapshot.positions
             ],
+            snapshot.cash,
+            allow_margin,
         )
 
     @property
     def available(self) -> float:
         return self._inner.available
 
+    @property
+    def leverage(self) -> float:
+        return self._inner.leverage
+
+    @property
+    def valuation(self) -> tuple[float, float]:
+        return self._inner.valuation
+
+    def execution_state(self, instrument: InstrumentId) -> ExecutionState:
+        cash, values, index, allow_margin = self._inner.execution_state(instrument_key(instrument))
+        return cash, tuple(values), index, allow_margin
+
+    def mark_of(self, instrument: InstrumentId) -> float | None:
+        return self._inner.mark_of(instrument_key(instrument))
+
     def quantity_of(self, instrument: InstrumentId) -> Decimal:
         return Decimal(self._inner.quantity_of(instrument_key(instrument)))
 
     def consume_quantity(
-        self, instrument: InstrumentId, side: Side, quantity: Decimal, price: float, fee: float
+        self,
+        instrument: InstrumentId,
+        side: Side,
+        quantity: Decimal,
+        price: float,
+        fee: float,
+        tax: float = 0.0,
     ) -> None:
         self._instruments.setdefault(instrument_key(instrument), instrument)
-        self._inner.consume(instrument_key(instrument), side.value, int(quantity), price, fee)
+        self._inner.consume(instrument_key(instrument), side.value, int(quantity), price, fee, tax)
 
     def checkpoint(self) -> object:
         return self._inner.checkpoint()
@@ -387,6 +496,11 @@ class RustQuoteCore:
         held: Decimal,
         fee_rate: float,
         fok: bool,
+        sell_tax_rate: float = 0.0,
+        leverage: float = 1.0,
+        held_mark: float | None = None,
+        valuation: tuple[float, float] | None = None,
+        execution_state: ExecutionState | None = None,
     ) -> QuoteNumbers:
         price, quantity, applied, status = self._core.quote_numbers(
             side.value,
@@ -400,6 +514,11 @@ class RustQuoteCore:
             int(held),
             fee_rate,
             fok,
+            sell_tax_rate,
+            leverage,
+            held_mark,
+            valuation,
+            execution_state,
         )
         return QuoteNumbers(price, Decimal(quantity), applied, ExecutionStatus(status))
 
@@ -427,12 +546,12 @@ def make_quote_core(core: str) -> QuoteCore:
 
 
 def make_buying_power(
-    core: str, snapshot: PortfolioSnapshot, leverage: float
+    core: str, snapshot: PortfolioSnapshot, leverage: float, allow_margin: bool = False
 ) -> BuyingPowerTracker:
     _require_core(core)
     if core in RUST_CORES:
-        return RustBuyingPower(snapshot, leverage)
-    return PythonBuyingPower(snapshot, leverage)
+        return RustBuyingPower(snapshot, leverage, allow_margin)
+    return PythonBuyingPower(snapshot, leverage, allow_margin)
 
 
 def make_pricing(core: str) -> ExecutionPricing:

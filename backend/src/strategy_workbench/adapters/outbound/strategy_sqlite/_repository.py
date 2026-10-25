@@ -143,7 +143,8 @@ class SQLiteStrategyRepository:
                     "strategy revision not found -- "
                     f"strategy_id={strategy_id} revision={requested_revision}"
                 )
-            return self._decode(row)
+        # 행 스냅샷을 확보한 뒤 원문을 검증한다. 재컴파일 동안 DB·저장소 잠금을 잡지 않는다.
+        return self._decode(row)
 
     def list_strategies(self, page: PageRequest) -> Page[StrategySummary]:
         with self._database.transaction(write=False) as connection:
@@ -151,7 +152,7 @@ class SQLiteStrategyRepository:
             total_row = connection.execute("SELECT COUNT(*) FROM strategy_heads").fetchone()
             total = self._count_from_row(total_row)
             rows = connection.execute(_LATEST_ROWS_SQL, (page.limit, page.offset)).fetchall()
-            records = tuple(self._decode(row) for row in rows)
+        records = tuple(self._decode(row) for row in rows)
         return Page(
             items=tuple(
                 StrategySummary(
@@ -183,7 +184,7 @@ class SQLiteStrategyRepository:
                 """,
                 (strategy_id, page.limit, page.offset),
             ).fetchall()
-            records = tuple(self._decode(row) for row in rows)
+        records = tuple(self._decode(row) for row in rows)
         return Page(
             items=tuple(
                 RevisionSummary(

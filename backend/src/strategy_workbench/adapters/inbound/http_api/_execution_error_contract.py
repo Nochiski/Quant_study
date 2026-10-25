@@ -60,6 +60,19 @@ class BacktestRunFieldInvalidDetail:
 
 
 @dataclass(frozen=True)
+class BacktestParameterInvalidDetail:
+    """요청의 파라미터 값이 문서에 없는 파라미터이거나 허용 밖이다(spec D4).
+
+    허용 판정 owner 는 `domain/strategy/_models.py` 의 `normalized_parameter_value` 다. 화면 문장은
+    frontend 가 `code` 로 번역하고 `parameter_id` 를 자리표시자로 채운다.
+    """
+
+    code: Literal["backtest.run.parameter_invalid"]
+    message: str
+    parameter_id: str
+
+
+@dataclass(frozen=True)
 class BacktestEnvironmentRequiredDetail:
     """실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다."""
 
@@ -101,6 +114,7 @@ PortfolioUnprocessableDetail: TypeAlias = Annotated[
     | PortfolioDataUnavailableDetail
     | PortfolioRawObservationInvalidDetail
     | BacktestRunFieldInvalidDetail
+    | BacktestParameterInvalidDetail
     | BacktestEnvironmentRequiredDetail
     | BacktestResearchWindowViolationDetail,
     Field(discriminator="code"),

@@ -9,7 +9,7 @@ import {
   type StrategyDraft,
 } from "../../../shared/api";
 import { useCommittedRef } from "../../../shared/lib/react";
-import type { DocumentAction, DocumentState } from "./document-state";
+import type { DocumentState } from "./document-state";
 import { matchesServerDraftBase, type ServerDraftBase } from "./server-draft";
 
 const SERVER_AUTOSAVE_DELAY_MS = 800;
@@ -110,7 +110,7 @@ const requestOf = (
  */
 export const useServerDraft = (
   state: DocumentState,
-  dispatch: (action: DocumentAction) => void,
+  replaceSource: (source: string) => boolean,
   options: ServerDraftOptions,
 ): ServerDraftSync => {
   const { draftId, schemaVersion } = options;
@@ -461,7 +461,7 @@ export const useServerDraft = (
   const applyRemote = useCallback(() => {
     const current = sessionRef.current;
     if (current.remote === null || current.incompatible) return;
-    dispatch({ type: "edit", source: current.remote.source });
+    if (!replaceSource(current.remote.source)) return;
     const next = {
       ...current,
       phase: "synced",
@@ -472,7 +472,7 @@ export const useServerDraft = (
     } satisfies Session;
     sessionRef.current = next;
     setSession(next);
-  }, [dispatch, sessionRef]);
+  }, [replaceSource, sessionRef]);
 
   const keepLocal = useCallback(() => {
     const current = sessionRef.current;

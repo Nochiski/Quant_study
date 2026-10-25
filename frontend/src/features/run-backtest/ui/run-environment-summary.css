@@ -1,12 +1,15 @@
 .run-environment-summary {
+  position: relative;
+  z-index: var(--layer-sticky);
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-3);
+  gap: var(--space-1) var(--space-3);
   padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
-  background: var(--surface);
+  background: var(--surface-panel);
   font-size: var(--text-size-small);
 }
 
@@ -31,23 +34,65 @@
 .run-environment-summary dd {
   margin: 0;
   color: var(--text);
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
-.run-environment-summary__incomplete {
-  color: var(--status-warn);
-}
-
-.run-environment-summary > small {
-  margin-left: auto;
-}
+.run-environment-summary__incomplete { color: var(--status-warn); }
 
 .run-environment-summary__fill {
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border);
+  min-height: var(--control-height-dense);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
   color: var(--text);
   background: var(--surface-raised);
   font: inherit;
   cursor: pointer;
 }
+
+.run-environment-summary__details {
+  margin-left: auto;
+}
+
+.run-environment-summary__details > summary {
+  min-height: var(--control-height-dense);
+  white-space: nowrap;
+}
+
+.run-environment-summary__all {
+  position: absolute;
+  top: 100%;
+  right: var(--space-4);
+  left: var(--space-4);
+  max-width: var(--content-width-form);
+  max-height: 60dvh;
+  margin-left: auto;
+  padding: var(--panel-padding);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-popover);
+}
+
+.run-environment-summary__all p { margin: 0 0 var(--space-3); }
+
+@media (max-width: 767px) {
+  .run-environment-summary { padding: var(--space-2); }
+  .run-environment-summary > dl { flex-basis: 100%; }
+}
+
+@media (max-width: 719px) {
+  .run-environment-summary { gap: var(--space-1); padding-block: var(--space-1); }
+  .run-environment-summary > strong,
+  .run-environment-summary > dl,
+  .run-environment-summary__incomplete {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  .run-environment-summary__fill { margin-right: auto; }
+}
+
+.run-environment-summary__mobile-state { display: none; }
+@media (max-width: 719px) { .run-environment-summary__mobile-state { display: inline; } }

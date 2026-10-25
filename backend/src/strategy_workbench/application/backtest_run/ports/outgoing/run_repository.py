@@ -19,7 +19,23 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategyProvenance,
 )
 
-from .trial_ledger import TrialLedgerPort
+from .trial_ledger import RunHeadline, TrialLedgerPort
+
+
+class RetiredRunRequestError(RuntimeError):
+    """저장한 요청의 전략 schema 판을 이 서버가 더 읽지 않는다(#313).
+
+    옛 요청을 현재 판으로 올려 읽지 않는다 — 기록과 다른 전략이 다시 실행되지 않게 한다. 손상된
+    저장(무결성 실패)과 구별되는 영구 상태다.
+    """
+
+    def __init__(self, run_id: str, schema_version: object) -> None:
+        self.run_id = run_id
+        self.schema_version = schema_version
+        super().__init__(
+            "stored backtest request names a strategy schema this server no longer reads — "
+            f"run_id={run_id} schema_version={schema_version!r}"
+        )
 
 
 class BacktestRunNotFoundError(KeyError):
@@ -50,6 +66,8 @@ class BacktestRunSummary:
     kind: RunKind
     experiment_id: str | None
     experiment_paused: bool
+    headline: RunHeadline | None = None
+    """완료 run 의 머리 지표. 끝나지 않았거나 판본 10 이전에 끝난 run 은 None 이다."""
 
 
 class BacktestRunRepositoryPort(TrialLedgerPort, Protocol):
@@ -70,7 +88,11 @@ class BacktestRunRepositoryPort(TrialLedgerPort, Protocol):
         ...
 
     def update(self, state: BacktestRunState) -> None:
-        """이미 있는 run 의 상태를 바꾼다. 없으면 `BacktestRunNotFoundError`."""
+        """이미 있는 run 의 상태를 바꾼다. 없으면 `BacktestRunNotFoundError`.
+
+        `started_at` 은 처음 실린 값만 남는다 — 처음 `running` 이 된 시각을 정하는 쪽은 실행
+        서비스이고(`_emit`), 저장 실패로 놓친 시각은 뒤 전이가 같은 값을 다시 실어 채운다.
+        """
         ...
 
     def get(self, run_id: str) -> BacktestRunSummary: ...

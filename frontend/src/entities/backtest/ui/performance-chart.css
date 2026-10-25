@@ -1,0 +1,134 @@
+/* 자산 곡선과 낙폭은 같은 가로축을 쓴다. 눈금 열 폭을 두 그래프와 연도 줄이 함께 써서 x 위치가 맞는다. */
+.performance-chart {
+  --performance-chart-ticks: calc(var(--space-6) * 2);
+
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-raised);
+}
+
+.performance-chart > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.performance-chart h4 {
+  margin: 0;
+  font-size: var(--text-size-body);
+}
+
+.performance-chart h5 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-size-small);
+  color: var(--text-muted);
+}
+
+.performance-chart h5 small {
+  font-weight: normal;
+}
+
+.performance-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-size-small);
+}
+
+.performance-chart__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.performance-chart__legend svg {
+  width: var(--space-5);
+  height: var(--space-2);
+}
+
+.performance-chart__plot {
+  display: grid;
+  grid-template-columns: var(--performance-chart-ticks) minmax(0, 1fr);
+}
+
+.performance-chart__ticks {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  margin: 0;
+  padding: 0 var(--space-2) 0 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.performance-chart__plot svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+
+.performance-chart__equity {
+  height: calc(var(--space-6) * 6);
+}
+
+.performance-chart__drawdown {
+  height: calc(var(--space-6) * 3);
+}
+
+.performance-chart svg line {
+  stroke: var(--border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.performance-chart path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.performance-chart .performance-chart__strategy {
+  stroke: var(--chart-series-1);
+  stroke-width: 2;
+}
+
+.performance-chart .performance-chart__benchmark {
+  stroke: var(--text-subtle);
+  stroke-dasharray: 6 4;
+  stroke-width: 1.5;
+}
+
+.performance-chart .performance-chart__loss {
+  stroke: var(--return-down);
+}
+
+.performance-chart__years {
+  position: relative;
+  height: var(--space-4);
+  margin: 0 0 0 var(--performance-chart-ticks);
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+.performance-chart__years li {
+  position: absolute;
+  top: 0;
+}

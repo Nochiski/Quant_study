@@ -1,5 +1,5 @@
 import type { InlineDraft, SavedRevisionReference } from "../../../shared/api";
-import { currentCompile, type DocumentState } from "./document-state";
+import { currentCompile, currentCompileOutcome, type DocumentState } from "./document-state";
 import type { ExecutionPlansState } from "./use-execution-plans";
 
 /**
@@ -28,9 +28,7 @@ export const decideBacktestSource = (
   if (state.composing) return { kind: "blocked", reason: "composing" };
   if (state.source.trim().length === 0)
     return { kind: "blocked", reason: "empty" };
-  const compiledIsCurrent =
-    state.compiled !== null && state.compiledVersion === state.sourceVersion;
-  if (!compiledIsCurrent) return { kind: "blocked", reason: "stale" };
+  if (currentCompileOutcome(state) === null) return { kind: "blocked", reason: "stale" };
   const compiled = currentCompile(state);
   if (compiled === null) {
     return { kind: "blocked", reason: "invalid" };

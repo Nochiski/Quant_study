@@ -1,10 +1,17 @@
-import { useId, useMemo, useRef, useState } from "react";
+import { RUN_STATUS, runStageLabel, runStatusLabel } from "../../../entities/backtest";
+
+import { useId, useRef, useState } from "react";
 
 import {
+  BacktestAccountReport,
+  BacktestFactorRegression,
+  BacktestHoldings,
+  BacktestValidationReport,
+  useBacktestAccountReport,
+  useBacktestValidationReport,
   BacktestResultFailure,
   BacktestRunDetail,
   BacktestRunFailure,
-  runEnvironmentFields,
   useBacktestRequest,
   useBacktestSummary,
   useBacktestResult,
@@ -12,20 +19,15 @@ import {
   useRunEnvironmentSchema,
 } from "../../../entities/backtest";
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
+import { CheckCapacity } from "../../../features/check-capacity";
+import { RobustnessCheck } from "../../../features/check-robustness";
 import { BacktestRunActions } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
 import { Link, useNavigate, useParams } from "../../../shared/lib/router";
 import { Badge, Button } from "../../../shared/ui";
 import "./backtest-run-page.css";
 
-const TONE = {
-  queued: "info",
-  running: "info",
-  cancel_requested: "warn",
-  cancelled: "warn",
-  failed: "error",
-  completed: "ok",
-} as const;
+
 
 /**
  * 결과 화면 우측 AI 패널의 열림 상태(결과 설명 spec R1). 페이지의 local UI state다.
@@ -36,7 +38,7 @@ const TONE = {
  */
 type AssistantPanel = { runId: string; open: boolean; mounted: boolean };
 
-/** Backtest run entry: live status while running, the full result once completed. */
+/** 실행 중에는 진행 상태를, 완료되면 계좌 요약과 원본 결과를 보인다. */
 export const BacktestRunPage = () => {
   const { runId } = useParams({ from: "/research/backtests/$runId" });
   const navigate = useNavigate();
@@ -45,15 +47,11 @@ export const BacktestRunPage = () => {
   const summary = useBacktestSummary(runId);
   const completed = status.data?.status === "completed";
   const result = useBacktestResult(runId, completed);
+  const validationReport = useBacktestValidationReport(runId, completed && result.data !== undefined);
+  const accountReport = useBacktestAccountReport(runId, completed);
   // run 상세의 실행 설정 칸 이름·단위·값 이름은 실행 설정 스키마에서 읽는다(DEFECT-242-04).
   const runEnvironmentSchema = useRunEnvironmentSchema();
-  const environmentFields = useMemo(
-    () =>
-      runEnvironmentSchema.data === undefined
-        ? null
-        : runEnvironmentFields(runEnvironmentSchema.data.schema),
-    [runEnvironmentSchema.data],
-  );
+  const environmentFields = runEnvironmentSchema.data === undefined ? null : runEnvironmentSchema.environmentFields;
   const assistantId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
   const [panel, setPanel] = useState<AssistantPanel>({
@@ -87,9 +85,7 @@ export const BacktestRunPage = () => {
   if (status.isError || !status.data) {
     return (
       <div className="page">
-        <p className="page-state page-state--error" role="alert">
-          {t("page.backtest.loadError")}
-        </p>
+        <BacktestResultFailure error={status.error} className="page-state page-state--error" />
       </div>
     );
   }
@@ -97,6 +93,7 @@ export const BacktestRunPage = () => {
   // 설명할 결과는 완료된 실행에만 있다. 진행 중·실패한 실행에는 진입점을 두지 않는다(spec R6).
   const assistantAvailable = completed && result.data !== undefined;
   const assistantOpen = assistantAvailable && panel.open;
+  const provenance = result.data?.manifest.strategy_provenance;
   return (
     <div
       className={
@@ -110,7 +107,7 @@ export const BacktestRunPage = () => {
           <h1>{t("page.backtest.title")}</h1>
           <code>{state.run_id}</code>
           <span role="status" aria-label={t("page.backtest.status")}>
-            <Badge tone={TONE[state.status]}>{state.status}</Badge>
+            <Badge tone={RUN_STATUS[state.status].tone}>{runStatusLabel(state.status)}</Badge>
           </span>
           <BacktestRunActions
             runId={runId}
@@ -136,6 +133,21 @@ export const BacktestRunPage = () => {
               {t("backtest.actions.experiment")}
             </Link>
           ) : null}
+          {/* 저장 리비전으로 돈 실행만 그 리비전 편집기로 보낸다. 인라인 초안은 돌아갈 문서가 없다. */}
+          {provenance?.kind === "saved_revision" &&
+          provenance.strategy_id != null &&
+          provenance.revision != null ? (
+            <Link
+              className="ui-button ui-button--secondary ui-button--small"
+              to="/research/strategies/$strategyId/revisions/$revision"
+              params={{
+                strategyId: provenance.strategy_id,
+                revision: String(provenance.revision),
+              }}
+            >
+              {t("backtest.result.rules")}
+            </Link>
+          ) : null}
           {assistantAvailable ? (
             <Button
               ref={toggleRef}
@@ -153,8 +165,9 @@ export const BacktestRunPage = () => {
           role="status"
           aria-label={t("page.backtest.progress")}
         >
-          {state.stage} · {Math.round(state.progress * 100)}% · {state.message}
+          {runStageLabel(state.stage)} · {Math.round(state.progress * 100)}%
         </p>
+        {state.message ? <details className="ui-disclosure"><summary>{t("ui.failure.serverReason")}</summary><p>{state.message}</p></details> : null}
         <BacktestRunFailure
           run={state}
           className="page-state page-state--error"
@@ -171,6 +184,36 @@ export const BacktestRunPage = () => {
         {result.data ? (
           <BacktestRunDetail
             result={result.data}
+            validationReport={
+              <BacktestValidationReport
+                report={validationReport.data}
+                error={validationReport.error}
+                loading={validationReport.isPending}
+                fetching={validationReport.isFetching}
+                refresh={() => { void validationReport.refresh(); }}
+              >
+                {/* 실행 종류(서버 판정)를 읽은 뒤에 붙인다 — 단일 실행에서만 확인 실험을 만든다. */}
+                {summary.data ? (
+                  <RobustnessCheck runId={runId} single={summary.data.kind === "single"} />
+                ) : null}
+              </BacktestValidationReport>
+            }
+            account={accountReport.data?.summary}
+            holdings={<BacktestHoldings runId={runId} enabled={completed} />}
+            regression={
+              <BacktestFactorRegression runId={runId} fingerprint={result.data.manifest.run_fingerprint} />
+            }
+            capacityCheck={
+              <CheckCapacity runId={runId} request={request.isError ? undefined : request.data} requestError={request.error} reloadRequest={() => { void request.refetch(); }} single={summary.data?.kind === "single"} />
+            }
+            accountReport={
+              <BacktestAccountReport
+                report={accountReport.data}
+                error={accountReport.error}
+                loading={accountReport.isPending}
+                retry={() => { void accountReport.refetch(); }}
+              />
+            }
             environmentFields={environmentFields}
           />
         ) : null}

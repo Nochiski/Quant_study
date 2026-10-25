@@ -376,7 +376,7 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 
 ## 6. `RULES_VERSION` 상향 규칙
 
-`database/src/equity/model.py` 의 `RULES_VERSION`(Q-4 main 병합 현재 e1.27.0 — 브랜치 e1.17~e1.26 · main e1.17~e1.19 두 계보의 합)은 `BuildRecord.rules_version` 에 실린다.
+`database/src/equity/model.py` 의 `RULES_VERSION`(2026-10-24 갈래 병합 현재 e1.31.0 — 브랜치 e1.17~e1.30 · main e1.17~e1.21 두 계보의 합)은 `BuildRecord.rules_version` 에 실린다.
 
 - **산출을 바꾸는 규칙 변경이면 반드시 올린다.** `sql/*.sql`·`rules_*.py` 의 산출식·
   선언 컬럼·`field_profiles`·게이트 술어가 대상이다.
@@ -462,8 +462,8 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 
 ## 8-2. 서버 반영 이력 — 2026-09-07 (e1.6.0 → e1.13.0)
 
-> **현행 안내(2026-10-10, Q-4 병합)**: 8-2~8-5 의 서버 반영 이력은 2026-09-09(e1.14.0, P0 정렬)에서 멈췄다. 그 뒤
-> 판본 e1.15.0~e1.27.0(브랜치·main 두 계보)의 변경 내용은 `database/src/equity/model.py` 의 `RULES_VERSION` 위 판본별 주석에,
+> **현행 안내(2026-10-24, 갈래 병합)**: 8-2~8-5 의 서버 반영 이력은 2026-09-09(e1.14.0, P0 정렬)에서 멈췄다. 그 뒤
+> 판본 e1.15.0~e1.31.0(브랜치·main 두 계보)의 변경 내용은 `database/src/equity/model.py` 의 `RULES_VERSION` 위 판본별 주석에,
 > 운영 상태는 `database/README.md` 상태 표에 있다.
 
 이 날 서버 `data/equity/` 가 크게 움직였다. 배포 전 코드 백업

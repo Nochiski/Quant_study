@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import asdict
 from datetime import datetime
@@ -11,7 +12,9 @@ from pydantic import TypeAdapter
 
 from strategy_workbench.adapters.outbound.sqlite_store.facade.database import SqliteDatabase
 from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import datetime_text
+from strategy_workbench.application.backtest_run.facade.ports import RetiredRunRequestError
 from strategy_workbench.application.experiment_run.facade.ports import (
+    ControlChange,
     ExperimentRecord,
     ExperimentSelection,
     TrialAttempt,
@@ -24,13 +27,19 @@ from strategy_workbench.domain.experiment.facade.trial import (
 )
 
 from ._errors import ResearchStorageError
+from ._request_codec import decode_request, encode_request
 from ._schema import migrate_schema
+
+logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 # 설계 JSON 은 기록에서 바뀌는 칸(취소 시각·대기열 조작)과 식별·만든 시각을 뺀 것이다.
-_COLUMNS = {"experiment_id", "created_at", "cancelled_at"}
-_SELECT = "experiment_id, created_at, cancelled_at, design_json, paused, priority"
-_FROM = "experiments LEFT JOIN experiment_controls USING (experiment_order)"
+_COLUMNS = {"experiment_id", "created_at", "cancelled_at", "source_run_id"}
+_SELECT = "experiment_id, created_at, cancelled_at, source_run_id, design_json, paused, priority"
+_FROM = (
+    "experiments LEFT JOIN experiment_controls USING (experiment_order) "
+    "LEFT JOIN experiment_sources USING (experiment_order)"
+)
 _RECORD = TypeAdapter(ExperimentRecord)
 _ATTEMPT = TypeAdapter(TrialAttempt)
 _PICK = TypeAdapter(WindowPick)
@@ -54,14 +63,20 @@ class SQLiteExperimentRepository:
 
     def add(self, record: ExperimentRecord) -> None:
         with self._database.transaction(write=True) as connection:
-            connection.execute(
+            inserted = connection.execute(
                 "INSERT INTO experiments (experiment_id, created_at, design_json) VALUES (?, ?, ?)",
                 (
                     record.experiment_id,
                     _time_text(record.created_at, "created_at", record.experiment_id),
-                    _RECORD.dump_json(record, exclude=_COLUMNS | {"controls"}).decode(),
+                    _encode_record(record),
                 ),
             )
+            if record.source_run_id is not None:
+                connection.execute(
+                    "INSERT INTO experiment_sources (experiment_order, source_run_id) "
+                    "VALUES (?, ?)",
+                    (inserted.lastrowid, record.source_run_id),
+                )
 
     def get(self, experiment_id: str) -> ExperimentRecord:
         with self._database.transaction(write=False) as connection:
@@ -72,6 +87,16 @@ class SQLiteExperimentRepository:
             raise _not_found(experiment_id)
         return _record(row)
 
+    def controls(self, experiment_id: str) -> ExperimentControls:
+        # 실험 설계를 디코드하지 않고 조작 행만 읽는다(접수가 trial마다 최신 설정을 본다).
+        with self._database.transaction(write=False) as connection:
+            row = connection.execute(
+                f"SELECT paused, priority FROM {_FROM} WHERE experiment_id = ?", (experiment_id,)
+            ).fetchone()
+        if row is None:
+            raise _not_found(experiment_id)
+        return ExperimentControls(**_controls(row))
+
     def open_ids(self) -> tuple[str, ...]:
         with self._database.transaction(write=False) as connection:
             rows = connection.execute(
@@ -81,18 +106,50 @@ class SQLiteExperimentRepository:
         return tuple(row["experiment_id"] for row in rows)
 
     def list(self, *, after: str | None, limit: int) -> tuple[ExperimentRecord, ...]:
+        records: list[ExperimentRecord] = []
+        cursor = after
+        while len(records) < limit:
+            remaining = limit - len(records)
+            with self._database.transaction(write=False) as connection:
+                rows = connection.execute(
+                    f"""
+                    SELECT {_SELECT} FROM {_FROM}
+                    WHERE ? IS NULL OR experiment_order < (
+                        SELECT experiment_order FROM experiments WHERE experiment_id = ?
+                    )
+                    ORDER BY experiment_order DESC LIMIT ?
+                    """,
+                    (cursor, cursor, remaining),
+                ).fetchall()
+            # 디코드는 DB 락 밖에서 한다. 손상 행만 건너뛰고 다음 정상 행으로 페이지를 채운다.
+            for row in rows:
+                cursor = row["experiment_id"]
+                try:
+                    records.append(_record(row))
+                except ResearchStorageError:
+                    logger.exception("experiment skipped on listing — experiment_id=%s", cursor)
+            if len(rows) < remaining:
+                break
+        return tuple(records)
+
+    def by_source_run(self, run_id: str) -> tuple[ExperimentRecord, ...]:
         with self._database.transaction(write=False) as connection:
             rows = connection.execute(
-                f"""
-                SELECT {_SELECT} FROM {_FROM}
-                WHERE ? IS NULL OR experiment_order < (
-                    SELECT experiment_order FROM experiments WHERE experiment_id = ?
-                )
-                ORDER BY experiment_order DESC LIMIT ?
-                """,
-                (after, after, limit),
+                f"SELECT {_SELECT} FROM {_FROM} WHERE source_run_id = ? "
+                "ORDER BY experiment_order DESC",
+                (run_id,),
             ).fetchall()
-        return tuple(_record(row) for row in rows)
+        records: list[ExperimentRecord] = []
+        for row in rows:
+            try:
+                records.append(_record(row))
+            except ResearchStorageError:
+                logger.exception(
+                    "experiment skipped on source lookup — experiment_id=%s source_run_id=%s",
+                    row["experiment_id"],
+                    run_id,
+                )
+        return tuple(records)
 
     def cancel(self, experiment_id: str, *, cancelled_at: datetime) -> None:
         with self._database.transaction(write=True) as connection:
@@ -103,7 +160,9 @@ class SQLiteExperimentRepository:
             if updated.rowcount != 1:
                 raise _not_found(experiment_id)
 
-    def set_controls(self, experiment_id: str, controls: ExperimentControls) -> None:
+    def set_controls(
+        self, experiment_id: str, controls: ExperimentControls, *, changed_at: datetime
+    ) -> None:
         with self._database.transaction(write=True) as connection:
             written = connection.execute(
                 """
@@ -116,6 +175,45 @@ class SQLiteExperimentRepository:
             )
             if written.rowcount != 1:
                 raise _not_found(experiment_id)
+            connection.execute(
+                """
+                INSERT INTO experiment_control_changes
+                    (experiment_order, changed_at, paused, priority)
+                SELECT experiment_order, ?, ?, ? FROM experiments WHERE experiment_id = ?
+                """,
+                (
+                    _time_text(changed_at, "control changed_at", experiment_id),
+                    int(controls.paused),
+                    controls.priority,
+                    experiment_id,
+                ),
+            )
+
+    def control_changes(self, experiment_id: str) -> tuple[ControlChange, ...]:
+        with self._database.transaction(write=False) as connection:
+            rows = connection.execute(
+                """
+                SELECT changed_at, paused, priority FROM experiment_control_changes
+                JOIN experiments USING (experiment_order)
+                WHERE experiment_id = ? ORDER BY change_order
+                """,
+                (experiment_id,),
+            ).fetchall()
+        try:
+            return tuple(
+                ControlChange(
+                    changed_at=datetime.fromisoformat(row["changed_at"]),
+                    controls=ExperimentControls(
+                        paused=bool(row["paused"]), priority=row["priority"]
+                    ),
+                )
+                for row in rows
+            )
+        except (TypeError, ValueError) as error:
+            raise ResearchStorageError(
+                f"stored experiment control change failed integrity validation — "
+                f"experiment_id={experiment_id}: {error}"
+            ) from error
 
     def add_attempt(self, attempt: TrialAttempt) -> None:
         with self._database.transaction(write=True) as connection:
@@ -222,22 +320,42 @@ class SQLiteExperimentRepository:
         )
 
 
-def _record(row: sqlite3.Row) -> ExperimentRecord:
+def _encode_record(record: ExperimentRecord) -> str:
+    value = _RECORD.dump_python(record, mode="json", exclude=_COLUMNS | {"controls", "run"})
+    value["run"] = json.loads(encode_request(record.run))
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True)
+
+
+def _controls(row: sqlite3.Row) -> dict[str, Any]:
     # 조작 행이 없는 실험(판본 4 이전 파일 포함)은 처음 값으로 읽는다.
-    controls = (
+    return (
         asdict(DEFAULT_EXPERIMENT_CONTROLS)
         if row["paused"] is None
-        else {"paused": row["paused"], "priority": row["priority"]}
+        else {"paused": bool(row["paused"]), "priority": row["priority"]}
     )
-    return _decode(
-        _RECORD,
-        row["experiment_id"],
-        {
-            **json.loads(row["design_json"]),
+
+
+def _record(row: sqlite3.Row) -> ExperimentRecord:
+    controls = _controls(row)
+    try:
+        design = json.loads(row["design_json"])
+        request = design["run"]
+        design["run"] = decode_request(
+            json.dumps(request),
+            run_id=f"experiment:{row['experiment_id']}",
+            legacy_spec="run_spec" not in request,
+        )
+        value = {
+            **design,
             **{key: row[key] for key in _COLUMNS},
             "controls": controls,
-        },
-    )
+        }
+    except (KeyError, TypeError, ValueError, RetiredRunRequestError) as error:
+        raise ResearchStorageError(
+            f"stored experiment design is unreadable — experiment_id={row['experiment_id']}: "
+            f"{error}"
+        ) from error
+    return _decode(_RECORD, row["experiment_id"], value)
 
 
 def _decode(adapter: TypeAdapter[_T], experiment_id: str, value: dict[str, Any]) -> _T:

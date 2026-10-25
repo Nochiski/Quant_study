@@ -31,11 +31,13 @@ from strategy_workbench.adapters.outbound.research_sqlite.facade.repository impo
     ResearchStorageError,
     SQLiteBacktestRunRepository,
 )
+from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestRunRepositoryPort,
+    RunHeadline,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestResultNotReadyError,
@@ -109,6 +111,7 @@ def _service(
         LocalArtifactStore(tmp_path / "artifacts"),
         run_repository=repository,
         new_id=iter(run_ids).__next__,
+        run_execution=ThreadRunExecution,
         run_slots=1,
     )
 
@@ -186,8 +189,20 @@ def test_a_failed_accept_write_rejects_the_run(
 
 
 class _RefusingUpdate(SQLiteBacktestRunRepository):
+    """디스크가 찬 저장소: 접수 뒤의 상태 전이를 하나도 적지 못한다(완료 전이 포함)."""
+
     def update(self, state: BacktestRunState) -> None:
         raise ResearchStorageError(f"disk full — run_id={state.run_id}")
+
+    def record_trial_result(
+        self,
+        completed: BacktestRunState,
+        *,
+        session_sharpe: float | None,
+        metric_registry_version: str,
+        headline: RunHeadline | None = None,
+    ) -> None:
+        raise ResearchStorageError(f"disk full — run_id={completed.run_id}")
 
 
 def test_a_completion_that_cannot_be_saved_is_not_shown(
@@ -213,6 +228,40 @@ def test_a_completion_that_cannot_be_saved_is_not_shown(
     # 파일에는 접수 상태만 남았다. 재시작하면 `interrupted` 로 닫힌다.
     assert repository.get("run-1").run.status is RunStatus.QUEUED
     assert "backtest run state could not be persisted — run_id=run-1" in caplog.text
+
+
+class _RefusingTrialResult(SQLiteBacktestRunRepository):
+    def record_trial_result(
+        self,
+        completed: BacktestRunState,
+        *,
+        session_sharpe: float | None,
+        metric_registry_version: str,
+        headline: RunHeadline | None = None,
+    ) -> None:
+        raise ResearchStorageError(f"disk full — run_id={completed.run_id}")
+
+
+def test_a_completion_whose_trial_result_cannot_be_saved_is_not_shown(
+    tmp_path: Path, barriers: list[RawLoadBarrier], caplog: pytest.LogCaptureFixture
+) -> None:
+    """#381: 대표 샤프 기록이 실패한 완료도 보이지 않는다 — 보이면 원장은 그 시도를 샤프 없는
+    시도로 세고 사용자는 결과를 본다."""
+    free = _open_barrier(barriers)
+    free.release.set()
+    repository = _RefusingTrialResult()
+    runs = _service(tmp_path, repository, free, "run-1")
+
+    runs.start(_request())
+
+    ended = wait_for_terminal_run(runs, "run-1")
+    assert (ended.status, ended.artifact_sha256) == (RunStatus.FAILED, None)
+    with pytest.raises(BacktestResultNotReadyError):
+        runs.result("run-1")
+    assert "run completion and trial result could not be recorded — run_id=run-1" in caplog.text
+    # 완료 전이·대표 샤프·머리 지표는 한 트랜잭션이라 함께 적히지 않았다.
+    assert repository.get("run-1").run.status is not RunStatus.COMPLETED
+    assert repository.get("run-1").headline is None
 
 
 def test_only_recent_finished_runs_keep_an_in_memory_copy(
@@ -281,3 +330,23 @@ def test_a_finished_run_whose_final_state_was_not_saved_keeps_its_copy(
 
     assert runs.state("run-1").status is RunStatus.FAILED
     assert runs.events("run-1")[-1].status is RunStatus.FAILED
+
+
+def test_the_start_time_is_set_once_and_kept_in_memory_and_storage(
+    tmp_path: Path, barriers: list[RawLoadBarrier]
+) -> None:
+    """로드맵 M6 시간 어림(#519 리뷰 N3): 처음 `running` 이 된 시각을 뒤 전이가 바꾸지 않는다."""
+    path = tmp_path / "research.sqlite3"
+    held = _open_barrier(barriers)
+    runs = _service(tmp_path, SQLiteBacktestRunRepository(path), held, "run-1")
+    runs.start(_request())
+    assert held.entered.wait(timeout=10)
+    started = runs.state("run-1").started_at
+
+    held.release.set()
+    finished = wait_for_terminal_run(runs, "run-1")
+
+    assert started is not None
+    assert finished.status is RunStatus.COMPLETED
+    assert finished.started_at == started < finished.updated_at
+    assert _stored(path, "run-1").started_at == started

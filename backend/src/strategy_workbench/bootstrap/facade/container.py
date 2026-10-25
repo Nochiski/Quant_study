@@ -8,7 +8,13 @@ from strategy_workbench.bootstrap._assistant import (
     is_missing_provider_sdk,
     scripted_provider_factories,
 )
-from strategy_workbench.bootstrap._container import BackendContainer, build_container
+from strategy_workbench.bootstrap._container import (
+    BackendContainer,
+    build_container,
+    build_equity_data,
+    build_portfolio_design,
+    build_run_versions,
+)
 from strategy_workbench.bootstrap._file_guard import (
     SIDECAR_SUFFIXES,
     FilePermissionError,
@@ -26,6 +32,9 @@ __all__ = [
     "ProviderAdapterFactory",
     "build_assistant_services",
     "build_container",
+    "build_equity_data",
+    "build_portfolio_design",
+    "build_run_versions",
     "is_missing_provider_sdk",
     "restrict_to_current_user",
     "scripted_provider_factories",

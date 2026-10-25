@@ -1,0 +1,67 @@
+/* 연구 홈: 할 일·계좌·진행 중 카드를 위에, 최근 결과와 작업 기록을 넓게 아래에 둔다(RD-01). */
+.research-home__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.research-home__card {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.research-home__card h2 {
+  margin: 0;
+  font-size: var(--text-size-section-title);
+}
+
+.research-home__card p {
+  margin: 0;
+}
+
+.research-home__wide {
+  grid-column: 1 / -1;
+}
+
+.research-home__list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.research-home__list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.research-home__failure {
+  display: grid;
+  flex: 1 1 14rem;
+  gap: var(--space-1);
+}
+
+.research-home__progress .experiment-progress,
+.research-home__bar {
+  flex: 1 1 100%;
+}
+
+.research-home__bar {
+  width: 100%;
+  height: var(--space-2);
+  accent-color: var(--status-info);
+}
+
+.research-home__muted {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}

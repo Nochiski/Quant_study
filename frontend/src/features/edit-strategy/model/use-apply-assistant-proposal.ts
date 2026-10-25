@@ -1,6 +1,8 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
+import type { EditorHandleOwner } from "./use-editor-handle";
+import { sameReplacementDocument, useGuardedDocumentReplacement } from "./replace-whole-document";
+import { useCallback, useMemo, useState } from "react";
+
 import type { DocumentState } from "./document-state";
 
 /**
@@ -57,7 +59,6 @@ export type ProposalApplyStatus =
 
 export type AssistantProposalApply = {
   status: ProposalApplyStatus;
-  onEditorReady: (editor: CodeEditorHandle | null) => void;
   /**
    * 편집기의 지금 텍스트(없으면 null). 턴을 시작하는 쪽이 reducer 상태 대신 이 값을 싣는다 —
    * 세션 생성 왕복 뒤에 불려도 그 순간 사용자가 보는 텍스트여야 하기 때문이다.
@@ -91,27 +92,25 @@ const IDLE: ProposalApplyStatus = { kind: "idle" };
  * 흘러 기존 parse·compile 디바운스를 그대로 타고 배지·Problems가 갱신된다.
  */
 export const useApplyAssistantProposal = (
+  owner: EditorHandleOwner,
   state: DocumentState,
 ): AssistantProposalApply => {
-  const editor = useRef<CodeEditorHandle | null>(null);
+  const readEditor = owner.read;
+  const replace = useGuardedDocumentReplacement(owner, state);
   const [scoped, setScoped] = useState<{
-    epoch: number;
+    document: DocumentState;
     /** 이 상태가 묶인 텍스트 버전. null이면 버전과 무관하다(확인 창). */
     version: number | null;
     value: ProposalApplyStatus;
   } | null>(null);
-  const documentEpoch = state.documentEpoch;
   const composing = state.composing;
   const format = state.format;
   const sourceVersion = state.sourceVersion;
 
-  const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
-    editor.current = next;
-  }, []);
 
   const readSource = useCallback(
-    (): string | null => editor.current?.getText() ?? null,
-    [],
+    (): string | null => readEditor()?.getText() ?? null,
+    [readEditor],
   );
 
   /**
@@ -123,24 +122,33 @@ export const useApplyAssistantProposal = (
     (
       value: ProposalApplyStatus,
       version: number | null = sourceVersion,
-    ): void => setScoped({ epoch: documentEpoch, version, value }),
-    [documentEpoch, sourceVersion],
+    ): void => setScoped({ document: state, version, value }),
+    [state, sourceVersion],
   );
 
-  /** 전체 범위 교체 한 번. 호출 전에 조합·편집기·기준 검사를 마친 상태여야 한다. */
+  /**
+   * 전체 범위 교체 한 번. `expectedSource`는 적용을 결정한 근거 원문(즉시 적용은 방금 읽은 원문,
+   * 확인 창은 사용자가 본 원문)이다. 그 사이 문서 신원이나 원문이 바뀌었으면 덮어쓰지 않고 `stale`로
+   * 알린다 — 조용히 무시하면 사용자는 적용된 줄 안다.
+   */
   const overwrite = useCallback(
-    (handle: CodeEditorHandle, source: string): void => {
-      const before = handle.getText();
-      handle.replaceRange(0, before.length, source);
+    (handle: CodeEditorHandle, expectedSource: string, source: string): void => {
+      if (!replace(state, handle, expectedSource, source)) {
+        setStatus({ kind: "failed", reason: "stale" });
+        return;
+      }
       handle.scrollTo(0);
       handle.focus();
       // replaceRange가 낸 change가 reducer `edit`로 이미 흘렀으므로 다음 버전이 소유자다. 단 제안이
       // 지금 문서와 똑같으면 reducer가 상태를 그대로 돌려줘 버전이 오르지 않는다 — 그때 +1을 쓰면
       // 결과가 영원히 어긋난 소유자에 묶여 알림도, 이어지는 백테스트도 사라진다(3차 리뷰 P2-1).
-      const changed = source !== before;
-      setStatus({ kind: "applied", changed }, sourceVersion + (changed ? 1 : 0));
+      const changed = source !== expectedSource;
+      setStatus(
+        { kind: "applied", changed },
+        sourceVersion + (changed ? 1 : 0),
+      );
     },
-    [setStatus, sourceVersion],
+    [setStatus, sourceVersion, replace, state],
   );
 
   /** 적용·미리보기가 함께 지키는 전제. 통과하면 지금 편집기 텍스트를 돌려준다. */
@@ -153,13 +161,13 @@ export const useApplyAssistantProposal = (
       setStatus({ kind: "failed", reason: "composing" });
       return null;
     }
-    const handle = editor.current;
+    const handle = readEditor();
     if (handle === null) {
       setStatus({ kind: "failed", reason: "editor-unavailable" });
       return null;
     }
     return handle.getText();
-  }, [composing, format, setStatus]);
+  }, [composing, readEditor, format, setStatus]);
 
   const preview = useCallback(
     (proposal: AssistantProposal): void => {
@@ -177,10 +185,10 @@ export const useApplyAssistantProposal = (
     (proposal: AssistantProposal): void => {
       const currentSource = readCurrent();
       if (currentSource === null) return;
-      const handle = editor.current;
+      const handle = readEditor();
       if (handle === null) return;
       if (proposal.baseSource === currentSource) {
-        overwrite(handle, proposal.source);
+        overwrite(handle, currentSource, proposal.source);
         return;
       }
       setStatus(
@@ -193,38 +201,37 @@ export const useApplyAssistantProposal = (
         null,
       );
     },
-    [overwrite, readCurrent, setStatus],
+    [readEditor, overwrite, readCurrent, setStatus],
   );
 
   const status = useMemo<ProposalApplyStatus>(
     () =>
       scoped !== null &&
-      scoped.epoch === documentEpoch &&
+      sameReplacementDocument(scoped.document, state) &&
       (scoped.version === null || scoped.version === sourceVersion)
         ? scoped.value
         : IDLE,
-    [documentEpoch, scoped, sourceVersion],
+    [state, scoped, sourceVersion],
   );
 
   const confirm = useCallback((): void => {
     if (status.kind !== "confirming") return;
     const currentSource = readCurrent();
     if (currentSource === null) return;
-    const handle = editor.current;
+    const handle = readEditor();
     if (handle === null) return;
     // 사용자가 확인 화면에서 본 텍스트가 아직 그대로일 때만 덮어쓴다.
     if (currentSource !== status.currentSource) {
       setStatus({ kind: "failed", reason: "stale" });
       return;
     }
-    overwrite(handle, status.proposal.source);
-  }, [overwrite, readCurrent, setStatus, status]);
+    overwrite(handle, status.currentSource, status.proposal.source);
+  }, [readEditor, overwrite, readCurrent, setStatus, status]);
 
   const cancel = useCallback((): void => setStatus(IDLE), [setStatus]);
 
   return {
     status,
-    onEditorReady,
     readSource,
     apply,
     preview,

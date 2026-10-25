@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import replace
 from datetime import date, timedelta
 
@@ -14,8 +14,6 @@ from strategy_workbench.application.backtest_run.facade.ports import (
 )
 from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataSnapshot,
-    FactorObservationQuery,
-    FactorObservationSet,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
     RawFieldValue,
@@ -29,23 +27,20 @@ from strategy_workbench.domain.equity.facade.research_data import (
     DataLoadStatus,
     DatasetFieldProfile,
     DataSnapshot,
-    FieldValueType,
     ResearchPanelCell,
     ResearchPanelQuery,
     ResearchPanelResult,
     SecurityRef,
+    UniverseDefinition,
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+    describe_universe,
     field_contract_snapshot_id,
-)
-from strategy_workbench.domain.factor.facade.evaluation import (
-    FactorFieldValue,
-    FactorObservation,
 )
 from strategy_workbench.domain.factor.facade.expression import (
     FieldMetadata,
-    NodeValueType,
+    field_metadata,
 )
 
 from ._fixture import (
@@ -66,6 +61,9 @@ _MOCK_SECTORS = ("technology", "industrial", "consumer")
 _CAPITAL_IMPAIRED_INDEX = 2
 # (market, universe_id) -> venue the fixture memberships are keyed by.
 _MOCK_UNIVERSES: dict[tuple[str, str], str] = {("KRX", "krx.common-stock"): "XKRX"}
+_MOCK_UNIVERSE_DESCRIPTION = (
+    "연습용 모의 데이터의 고정 종목 묶음입니다. 실데이터의 같은 유니버스와 종목 구성이 다릅니다."
+)
 
 
 class MockEquityDataAdapter:
@@ -112,16 +110,7 @@ class MockEquityDataAdapter:
             profile = profile_by_id.get(field_id)
             if profile is not None:
                 fields.append(
-                    FieldMetadata(
-                        field_id=field_id,
-                        unit=profile.unit,
-                        value_type=(
-                            NodeValueType.GROUP_SERIES
-                            if profile.value_type is FieldValueType.CATEGORY
-                            else NodeValueType.NUMERIC_SERIES
-                        ),
-                        adjusted_field_id=ADJUSTED_FIELD_BY_RAW.get(field_id),
-                    )
+                    field_metadata(profile, ADJUSTED_FIELD_BY_RAW.get(field_id))
                 )
         return FactorMetadataSnapshot(
             data_snapshot_id=self._snapshot.snapshot_id,
@@ -161,6 +150,20 @@ class MockEquityDataAdapter:
             detail=None if points else f"no mock universe sessions — query={query}",
         )
 
+    def list_universes(self) -> tuple[UniverseDefinition, ...]:
+        """fixture 가 구성 종목을 가진 유니버스 전부(id 오름차순).
+
+        표시명은 실데이터와 같은 이름을 쓰되, 설명은 mock 의 실제 구성(고정 합성 종목)을
+        말한다 — 원장 술어를 요약한 실데이터 설명을 그대로 쓰면 날짜마다 상장 종목을 다시
+        고른다고 잘못 말한다.
+        """
+        return tuple(
+            replace(
+                describe_universe(universe_id, market), description=_MOCK_UNIVERSE_DESCRIPTION
+            )
+            for market, universe_id in sorted(_MOCK_UNIVERSES, key=lambda key: key[1])
+        )
+
     def universe_securities(
         self, market: str, universe_id: str, as_of: date
     ) -> tuple[SecurityRef, ...]:
@@ -170,6 +173,16 @@ class MockEquityDataAdapter:
         """
         venue = _MOCK_UNIVERSES.get((market, universe_id))
         return tuple(item.security for item in self._memberships if item.security.venue == venue)
+
+    def describe_securities(self, security_ids: Collection[str]) -> tuple[SecurityRef, ...]:
+        """fixture 구성 종목의 이름·티커. 모르는 id 는 빠지고 이름을 합성하지 않는다."""
+        wanted = set(security_ids)
+        found = {
+            item.security.security_id: item.security
+            for item in self._memberships
+            if item.security.security_id in wanted
+        }
+        return tuple(found[security_id] for security_id in sorted(found))
 
     def load_panel(self, query: ResearchPanelQuery) -> ResearchPanelResult:
         profile_by_id = {profile.field_id: profile for profile in self._profiles}
@@ -233,34 +246,6 @@ class MockEquityDataAdapter:
             detail=None if cells else f"no mock panel cells — query={query}",
         )
 
-    def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
-        """Generate a deterministic PIT-shaped factor panel behind the replaceable port."""
-        sessions = _factor_sessions(query)
-        security_ids = tuple(membership.security.security_id for membership in self._memberships)
-        observations = tuple(
-            FactorObservation(
-                as_of=session,
-                security_id=security_id,
-                fields=tuple(
-                    FactorFieldValue(
-                        field_id=field_id,
-                        value=_factor_field_value(
-                            field_id,
-                            security_index=security_index,
-                            session_index=session_index,
-                            session=session,
-                        ),
-                    )
-                    for field_id in query.required_field_ids
-                ),
-                forward_return=(security_index - 1) * 0.003 + ((session_index % 5) - 2) * 0.0002,
-            )
-            for session_index, session in enumerate(sessions)
-            for security_index, security_id in enumerate(security_ids)
-        )
-        return FactorObservationSet(
-            data_snapshot_id=self._snapshot.snapshot_id, observations=observations
-        )
 
     def load_raw_observations(
         self,
@@ -455,6 +440,7 @@ class MockEquityDataAdapter:
                     previous_close = close_price
         return BacktestDataset(
             data_snapshot_id=self._snapshot.snapshot_id,
+            sessions=tuple(sessions),
             bars=tuple(bars),
             history_bars=tuple(history_bars),
             memberships=tuple(
@@ -470,7 +456,7 @@ class MockEquityDataAdapter:
             benchmark_security_id=query.benchmark_security_id,
             warnings=(
                 DataWarning(
-                    code="mock_equity_data",
+                    code="equity.mock_data",
                     message=(
                         "결정적으로 생성한 mock OHLCV로 실행했다. 실제 연구에는 실데이터 "
                         "어댑터로 바꿔야 한다."
@@ -478,7 +464,7 @@ class MockEquityDataAdapter:
                     severity=WarningSeverity.INFO,
                 ),
                 DataWarning(
-                    code="corporate_action_feed_empty",
+                    code="equity.corporate_action_feed_empty",
                     message="mock 실행은 기업 행동 피드를 비워 둔다(분할·병합 없음).",
                 ),
             ),
@@ -515,15 +501,6 @@ class MockEquityDataAdapter:
         )
 
 
-def _factor_sessions(query: FactorObservationQuery) -> tuple[date, ...]:
-    requested = list(_business_sessions(query.start, query.end))
-    history: list[date] = []
-    cursor = query.start - timedelta(days=1)
-    while len(history) < max(query.minimum_history_sessions - 1, 0):
-        if cursor.weekday() < 5:
-            history.append(cursor)
-        cursor -= timedelta(days=1)
-    return tuple((*reversed(history), *requested))
 
 
 def _sessions_with_history(
@@ -597,7 +574,12 @@ def _factor_field_value(
         return -income if impaired else income
     if field_id == "consensus.forward_eps":
         return 2_000.0 + security_index * 350.0 + trend * 0.2
-    if field_id == "flow.foreign_net_buy":
+    if field_id in ("flow.foreign_ownership", "flow.foreign_limit_exhaustion"):
+        # 원장과 같은 퍼센트 척도다. 날짜에 대한 결정론을 유지하며 0~100 안에 둔다.
+        return 52.79 + (security_index % 3) + (session_index % 7) * 0.1
+    if field_id == "short.short_sale_volume":
+        return float(1_000 + abs(trend))
+    if field_id in ("flow.foreign_net_buy", "flow.pension_net_buy"):
         return (security_index - 1) * 100_000_000.0 + trend * 10_000
     if field_id == "short.short_balance_ratio":
         return 0.01 + security_index * 0.015 + (session_index % 7) * 0.0001

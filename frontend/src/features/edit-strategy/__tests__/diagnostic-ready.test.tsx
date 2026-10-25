@@ -7,7 +7,7 @@ import {
   type DocumentDiagnostic,
 } from "../model/document-state";
 import { migrateStrategyView } from "../model/strategy-views";
-import { useDiagnosticNavigation } from "../model/use-diagnostic-navigation";
+import { useDiagnosticNavigation } from "./editor-harness";
 
 afterEach(cleanup);
 const diagnostic: DocumentDiagnostic = {
@@ -33,6 +33,7 @@ const handle = (): CodeEditorHandle => ({
   focus: vi.fn(),
   undo: () => false,
   redo: () => false,
+  subscribeHistory: () => () => {},
   historyDepth: () => ({ undo: 0, redo: 0 }),
   getHistoryState: () => null,
   restoreHistoryState: vi.fn(),

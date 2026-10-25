@@ -6,6 +6,11 @@ export type TabItem<Id extends string = string> = {
   id: Id;
   label: string;
   disabled?: boolean;
+  /**
+   * 탭 이름 뒤에 붙는 짧은 표식(예: "4줄 바뀜"). 접근 이름에는 넣지 않고 설명(`aria-describedby`)으로 읽는다 —
+   * 표식이 바뀔 때마다 탭 이름이 바뀌면 보조 기술이 다른 탭으로 읽는다.
+   */
+  badge?: string;
 };
 
 type TabsProps<Id extends string> = {
@@ -73,6 +78,9 @@ export function Tabs<Id extends string>({
             aria-selected={selected}
             aria-disabled={item.disabled || undefined}
             aria-controls={panelId(baseId, item.id)}
+            aria-describedby={
+              item.badge === undefined ? undefined : `${tabId(baseId, item.id)}-badge`
+            }
             tabIndex={selected ? 0 : -1}
             onClick={() => {
               if (!item.disabled) onChange(item.id);
@@ -80,6 +88,18 @@ export function Tabs<Id extends string>({
             onKeyDown={(event) => move(event, item.id)}
           >
             {item.label}
+            {item.badge === undefined ? null : (
+              <>
+                {" "}
+                <span
+                  id={`${tabId(baseId, item.id)}-badge`}
+                  className="ui-tab__badge"
+                  aria-hidden="true"
+                >
+                  {item.badge}
+                </span>
+              </>
+            )}
           </button>
         );
       })}

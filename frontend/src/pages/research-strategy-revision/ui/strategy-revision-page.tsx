@@ -1,7 +1,9 @@
+import { ApiRequestError } from "../../../shared/api";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { strategyDocumentQuery } from "../../../entities/strategy";
+import { RunParameterSelection, useRunParameters } from "../../../entities/backtest";
 import {
   ContractInspector,
   ProposalApplyDialog,
@@ -12,7 +14,9 @@ import {
   DocumentHistoryActions,
   DocumentStatus,
   DocumentToolbar,
+  DocumentResearchActions,
   FactorGraphPanel,
+  LibraryUpdateNotice,
   RecipePanel,
   factorIndexAtPointer,
   PipelinePanel,
@@ -23,15 +27,19 @@ import {
   StrategyDiffPanel,
   StrategyOutline,
   UpgradeBanner,
-  PROJECTION_VIEWS,
+  STRATEGY_VIEWS,
   canValidateDocument,
+  currentCompileOutcome,
   currentDiagnostics,
   revisionDraftId,
   saveStatusText,
+  saveStatusSummary,
   saveStatusTone,
   useApplyAssistantProposal,
   useStrategyAssistant,
   useAutosave,
+  useWholeDocumentReplacement,
+  useEditorHandle,
   useCompileDocument,
   useDiagnosticNavigation,
   useDocumentHistory,
@@ -49,7 +57,10 @@ import {
   type DocumentSource,
   type StrategyView,
 } from "../../../features/edit-strategy";
-import { AssistStrategySidebar } from "../../../features/assist-strategy";
+import {
+  AssistStrategySidebar,
+  useAssistSidebarState,
+} from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
   RunEnvironmentSummary,
@@ -57,7 +68,7 @@ import {
 } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
 import { useNavigate, useParams, useSearch } from "../../../shared/lib/router";
-import { Badge, type CodeEditorHandle } from "../../../shared/ui";
+import { Badge, Button } from "../../../shared/ui";
 import {
   StrategyDebuggerPanel,
   StrategyPreviewPanel,
@@ -108,19 +119,28 @@ export const StrategyRevisionPage = () => {
           document.baseSpecHash,
         )
       : null;
-  const serverDraft = useServerDraft(document, dispatch, {
+  const editorOwner = useEditorHandle();
+  const replacement = useWholeDocumentReplacement(editorOwner);
+  const serverDraft = useServerDraft(document, replacement.replace, {
     draftId: serverDraftId,
     schemaVersion: assist.schemaVersion ?? stored.schema_version,
     schemaPending: assist.loading,
   });
   const { validateNow, validating } = useCompileDocument(document, dispatch);
   const canValidate = !validating && canValidateDocument(document);
-  const autosave = useAutosave(document, dispatch, {
+  const autosave = useAutosave(document, replacement.replace, {
     schemaVersion: assist.schemaVersion,
   });
   // 실행 설정(시장·기간·유니버스·체결·비용·결측)은 전략 문서 밖에 있고 패널이 owner 다(schema 1.2,
   // P3-02). 마지막 사용값은 이 전략의 local UI state 다.
   const runSettings = useBacktestRunSettings(strategyId);
+  const runParameters = useRunParameters(search.run, { strategyId, revision: Number(revision), specHash: stored.spec_hash });
+  const runOptions = useMemo(() => {
+    if (!runParameters.ready || runSettings.requestOptions === null) return null;
+    return runParameters.state === "selected"
+      ? { ...runSettings.requestOptions, parameter_values: runParameters.values }
+      : runSettings.requestOptions;
+  }, [runParameters.ready, runParameters.state, runParameters.values, runSettings.requestOptions]);
   // 실행 계획 sandbox 도 실행과 같은 결측 정책을 싣는다(Phase 2 감사 #3). 기간·유니버스가 비어도
   // 결측 정책 칸 값은 따로 싣는다(#357 C-P3-16).
   const executionPlans = useExecutionPlans(
@@ -131,13 +151,15 @@ export const StrategyRevisionPage = () => {
   const backtest = useRunBacktest(
     document,
     executionPlans,
-    runSettings.requestOptions,
+    runOptions,
+    search.run,
   );
   const startBacktest = backtest.run;
   // 저장된 1.0 revision 참조로 보낸 실행을 backend가 거부한 경우: 같은 배너로 안내하고 실행을 막는다.
   const backtestRejectedForUpgrade =
     backtest.status.kind === "failed" &&
-    backtest.status.code === "backtest.strategy.requires_upgrade";
+    backtest.status.error instanceof ApiRequestError &&
+    backtest.status.error.code === "backtest.strategy.requires_upgrade";
   const canRun = backtest.canRun && !backtestRejectedForUpgrade;
   const storedMeta = useMemo(
     () => ({
@@ -147,15 +169,11 @@ export const StrategyRevisionPage = () => {
     }),
     [stored.generated, stored.requires_upgrade, stored.revision],
   );
-  const documentUpgrade = useUpgradeDocument(document, storedMeta);
+  const documentUpgrade = useUpgradeDocument(editorOwner, document, storedMeta);
   // AI 제안은 업그레이드 적용과 같은 전체 범위 교체 경로를 쓴다(SoT 규칙의 두 번째 예외).
-  const proposalApply = useApplyAssistantProposal(document);
-  const current =
-    document.compiled !== null &&
-    document.compiledVersion === document.sourceVersion
-      ? document.compiled
-      : null;
-  const availableViews: readonly StrategyView[] = PROJECTION_VIEWS;
+  const proposalApply = useApplyAssistantProposal(editorOwner, document);
+  const current = currentCompileOutcome(document);
+  const availableViews: readonly StrategyView[] = STRATEGY_VIEWS;
   const view: StrategyView = search.view === "yaml" ? "yaml" : "graph";
   // Include route params as well as the validated search generation; the debug feature only
   // compares this opaque lease and never interprets router state.
@@ -173,19 +191,22 @@ export const StrategyRevisionPage = () => {
       void navigate({
         to: ROUTE,
         params: { strategyId, revision },
-        search: {
-          ...search,
+        // 커서 게시는 parse가 끝난 뒤 effect에서 늦게 올 수 있다. 렌더 시점 `search`를 펼치면 그사이 탭 전환이
+        // 바꾼 `view`를 옛 값으로 되돌린다 — 라우터의 최신 위치(`prev`)에 `path`만 얹는다.
+        search: (prev) => ({
+          ...prev,
           path,
-          view: origin === "outline" ? "yaml" : search.view,
-        },
+          recipe: path?.includes("/graph") ? prev.recipe : undefined,
+          view: origin === "outline" ? "yaml" : prev.view,
+        }),
         replace: true,
         // 문서 안 선택은 reveal 경로가 스크롤을 소유한다. URL 갱신이 페이지를 맨 위로 돌리면 안 된다.
         resetScroll: false,
       });
     },
-    [navigate, revision, search, strategyId],
+    [navigate, revision, strategyId],
   );
-  const outline = useOutlineNavigation({
+  const outline = useOutlineNavigation(editorOwner, {
     state: document,
     schema: assist.schema,
     revealSelectedPointer: view === "yaml",
@@ -194,17 +215,14 @@ export const StrategyRevisionPage = () => {
   });
   // source 트랜잭션 인스턴스는 page가 하나 만들어 Form·스니펫이 공유한다(WORKFLOW P4-04). hidden 편집기가
   // 살아 있으므로 editorActive는 참이고, 스니펫만 source view 게이트를 따로 지킨다.
-  const transactions = useSourceTransactions(document, true);
+  const transactions = useSourceTransactions(editorOwner, document, true);
   const snippets = useSnippetInsertion(
-    document,
     assist.snippetSource,
     view === "yaml",
     transactions,
   );
   const form = useFormProjection(document, assist.schema);
-  const catalogs = {
-    equityFields: assist.inspectorSource.equityCatalog?.fields ?? null,
-  };
+  const catalogs = assist.fieldPickerCatalogs;
   const openGraph = useCallback(
     (pointer: string): void => {
       void navigate({
@@ -225,7 +243,7 @@ export const StrategyRevisionPage = () => {
   );
   // outline 다음에 부른다 — 탭 전환 뒤 진단 범위로 가는 effect가 outline의 pointer reveal 뒤에 서야
   // 더 정확한 범위가 남는다(WORKFLOW P1-01).
-  const problems = useDiagnosticNavigation({
+  const problems = useDiagnosticNavigation(editorOwner, {
     state: document,
     view,
     sourceView: "yaml",
@@ -237,34 +255,7 @@ export const StrategyRevisionPage = () => {
   });
   // 되돌리기·다시 실행은 편집기 이력 하나가 owner다(WORKFLOW P1-02). 탭 목록 줄의 버튼(탭 패널 밖)과
   // IDE 전역 단축키가 같은 명령을 부른다.
-  const history = useDocumentHistory(document);
-  const onOutlineEditorReady = outline.onEditorReady;
-  const onSnippetEditorReady = snippets.onEditorReady;
-  const onTransactionsEditorReady = transactions.onEditorReady;
-  const onUpgradeEditorReady = documentUpgrade.onEditorReady;
-  const onProblemsEditorReady = problems.onEditorReady;
-  const onHistoryEditorReady = history.onEditorReady;
-  const onProposalEditorReady = proposalApply.onEditorReady;
-  const onEditorReady = useCallback(
-    (editor: CodeEditorHandle | null): void => {
-      onOutlineEditorReady(editor);
-      onSnippetEditorReady(editor);
-      onTransactionsEditorReady(editor);
-      onUpgradeEditorReady(editor);
-      onProblemsEditorReady(editor);
-      onHistoryEditorReady(editor);
-      onProposalEditorReady(editor);
-    },
-    [
-      onOutlineEditorReady,
-      onProposalEditorReady,
-      onSnippetEditorReady,
-      onTransactionsEditorReady,
-      onUpgradeEditorReady,
-      onProblemsEditorReady,
-      onHistoryEditorReady,
-    ],
-  );
+  const history = useDocumentHistory(editorOwner);
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
   // 어시스턴트 사이드바 배선(문서 참조·턴 컨텍스트·"적용 후 백테스트"·제안 카드 동작). 두 전략 화면이
   // 같은 훅을 써서 한쪽만 콜백을 잃지 않는다(Phase B 감사 NB-8).
@@ -272,6 +263,12 @@ export const StrategyRevisionPage = () => {
     draftId: serverDraftId,
     environment: runSettings.environment,
     backtest: { canRun, settling: backtest.settling, run: runBacktest },
+  });
+  // AI 대화·입력칸 상태는 새 전략 화면과 같이 화면이 든다. 편집기 AI 열이 접힌 동안(widget 이 넘기는 `open`)
+  // 대화 조회를 멈추되 입력 초안은 남긴다(SoT 3차 경미 1·2, 5차 리뷰 9).
+  const assistantState = useAssistSidebarState({
+    documentRef: strategyAssistant.documentRef,
+    readContext: strategyAssistant.readContext,
   });
   const selectSymbol = useCallback(
     (pointer: string): void => {
@@ -323,6 +320,15 @@ export const StrategyRevisionPage = () => {
       <StrategyIde
         title={title}
         versionLabel={`v${stored.revision}`}
+        research={({ openEditor }) => <DocumentResearchActions
+          state={document} request={backtest.request}
+          requiresUpgrade={documentUpgrade.availability.kind !== "none"}
+          parametersReady={runParameters.ready}
+          selectedParameters={runParameters.state === "selected"}
+          recipeOpen={view === "graph" && search.recipe === true}
+          onToggleRecipe={() => { const closing = view === "graph" && search.recipe === true; openEditor(); void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, view: "graph", recipe: closing ? undefined : true, path: closing ? undefined : `/factors/${factorIndexAtPointer(search.path) ?? 0}/graph` }, replace: true, resetScroll: false }); }}
+          onSend={(request) => void navigate({ to: "/research/experiments/new", search: {}, state: { experimentSeed: request } })}
+        />}
         badges={
           <>
             <Badge tone="accent">
@@ -340,6 +346,7 @@ export const StrategyRevisionPage = () => {
           specHash: current?.specHash ?? null,
         }}
         saveStatus={saveStatusText(document, status)}
+        saveStatusSummary={saveStatusSummary(document, status)}
         onRunBacktest={runBacktest}
         runDisabled={!canRun}
         onValidate={validateNow}
@@ -421,62 +428,175 @@ export const StrategyRevisionPage = () => {
           />
         )}
         projections={{
-          graph: (
-            <>
-              {/* 그래프 1수준(파이프라인) 캔버스 위, 고급 수준(노드 편집·실행 계획) 아래(P4-02). */}
-              <PipelinePanel
-                form={form}
+          graph:
+            !search.recipe &&
+            !(
+              factorIndexAtPointer(search.path) !== null &&
+              search.path?.includes("/graph")
+            ) ? (
+              <section
+                className="pipeline-comparison"
+                aria-label={t("graph.pipeline.comparison")}
+              >
+                <nav
+                  className="pipeline-comparison__navigation"
+                  aria-label={t("graph.pipeline.comparison")}
+                >
+                  <a className="ui-button" href="#strategy-rules">
+                    {t("graph.pipeline.rulesSection")}
+                  </a>
+                  <a className="ui-button" href="#selection-results">
+                    {t("graph.pipeline.resultsSection")}
+                  </a>
+                </nav>
+                <div className="pipeline-comparison__body">
+                  <div id="strategy-rules" tabIndex={-1}>
+                    <PipelinePanel
+                      librarySave
+                      form={form}
+                      schema={assist.schema}
+                      transactions={transactions}
+                      catalogs={catalogs}
+                      onOpenGraph={openGraph}
+                      onOpenAdvanced={(pointer) =>
+                        void navigate({
+                          to: ROUTE,
+                          params: { strategyId, revision },
+                          search: {
+                            ...search,
+                            path: pointer,
+                            view: "graph",
+                            recipe: undefined,
+                          },
+                          resetScroll: false,
+                        })
+                      }
+                      selectedPointer={search.path}
+                      revealSignal={problems.revealSignal}
+                    />
+                  </div>
+                  <aside
+                    id="selection-results"
+                    tabIndex={-1}
+                    className="pipeline-comparison__result"
+                    aria-label={t("graph.pipeline.selectionResult")}
+                  >
+                    <StrategyPreviewPanel
+                      document={document}
+                      executionPlans={executionPlans}
+                      environment={runSettings.environment}
+                      parameters={runParameters}
+                      onTraceSelection={(selection) =>
+                        void navigate({
+                          to: ROUTE,
+                          params: { strategyId, revision },
+                          search: { ...search, ...selection },
+                          replace: true,
+                          resetScroll: false,
+                        })
+                      }
+                    />
+                  </aside>
+                </div>
+              </section>
+            ) : search.recipe &&
+              !form.firstParsePending &&
+              assist.schema !== null ? (
+              <RecipePanel
+                tree={form.tree}
                 schema={assist.schema}
+                factorIndex={factorIndexAtPointer(search.path) ?? 0}
                 transactions={transactions}
                 catalogs={catalogs}
-                onOpenGraph={openGraph}
-                selectedPointer={search.path}
-                revealSignal={problems.revealSignal}
-              />
-              <StrategyPreviewPanel document={document} executionPlans={executionPlans} environment={runSettings.environment} />
-              {search.recipe && !form.firstParsePending && assist.schema !== null ? (
-                <RecipePanel
-                  tree={form.tree} schema={assist.schema}
-                  factorIndex={factorIndexAtPointer(search.path) ?? 0}
-                  transactions={transactions} catalogs={catalogs} operators={assist.operators}
-                  diagnostics={currentDiagnostics(document)} plans={executionPlans}
-                  selectedPointer={search.path} revealSignal={problems.revealSignal}
-                  onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
-                  onAdvanced={() => void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, recipe: undefined }, resetScroll: false })}
-                  onBack={() => void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, recipe: undefined, path: undefined }, resetScroll: false })}
-                />
-              ) : (
-              <FactorGraphPanel
-                state={executionPlans}
-                schema={assist.schema}
+                operators={assist.operators}
                 diagnostics={currentDiagnostics(document)}
+                plans={executionPlans}
                 selectedPointer={search.path}
                 revealSignal={problems.revealSignal}
-                // 첫 parse 전 tree 는 비어 있어 편집기가 "팩터가 없습니다"를 그린다. 캔버스처럼 기다린다(#413).
-                editing={
-                  form.firstParsePending
-                    ? undefined
-                    : {
-                        tree: form.tree,
-                        transactions,
-                        catalogs,
-                        operators: assist.operators,
-                        onOpenSource: openSourceAt,
-                        documentKey: document.documentEpoch,
-                      }
-                }
                 onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
-                onOpenSource={(pointer) => {
-                  outline.requestSourceReveal(pointer);
-                  selectPointer(pointer, "outline");
-                }}
+                onAdvanced={() =>
+                  void navigate({
+                    to: ROUTE,
+                    params: { strategyId, revision },
+                    search: {
+                      ...search,
+                      path: search.path?.includes("/graph")
+                        ? search.path
+                        : `/factors/${factorIndexAtPointer(search.path) ?? 0}/graph`,
+                      recipe: undefined,
+                    },
+                    resetScroll: false,
+                  })
+                }
+                onBack={() =>
+                  void navigate({
+                    to: ROUTE,
+                    params: { strategyId, revision },
+                    search: { ...search, recipe: undefined, path: undefined },
+                    resetScroll: false,
+                  })
+                }
               />
-              )}
-            </>
-          ),
+            ) : (
+              <section className="graph-authoring">
+                <header className="graph-authoring__navigation">
+                  <Button
+                    tone="ghost"
+                    onClick={() =>
+                      void navigate({
+                        to: ROUTE,
+                        params: { strategyId, revision },
+                        search: {
+                          ...search,
+                          recipe: undefined,
+                          path: undefined,
+                        },
+                        resetScroll: false,
+                      })
+                    }
+                  >
+                    {t("graph.backToStrategy")}
+                  </Button>
+                </header>
+                <FactorGraphPanel
+                  state={executionPlans}
+                  schema={assist.schema}
+                  diagnostics={currentDiagnostics(document)}
+                  selectedPointer={search.path}
+                  revealSignal={problems.revealSignal}
+                  // 첫 parse 전 tree 는 비어 있어 편집기가 "팩터가 없습니다"를 그린다. 캔버스처럼 기다린다(#413).
+                  editing={
+                    form.firstParsePending
+                      ? undefined
+                      : {
+                          tree: form.tree,
+                          transactions,
+                          catalogs,
+                          operators: assist.operators,
+                          onOpenSource: openSourceAt,
+                          documentKey: document.documentEpoch,
+                          sourceVersion: document.sourceVersion,
+                          active: view === "graph" && !search.recipe,
+                        }
+                  }
+                  onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
+                  onOpenSource={(pointer) => {
+                    outline.requestSourceReveal(pointer);
+                    selectPointer(pointer, "outline");
+                  }}
+                />
+              </section>
+            ),
         }}
         notice={
           <>
+            <RunParameterSelection selection={runParameters} clear={() => {
+              void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, run: undefined }, replace: true, resetScroll: false });
+            }} />
+            {autosave.recovery ? (
+              <RecoveryBanner recovery={autosave.recovery} />
+            ) : null}
+            <ServerDraftBanner sync={serverDraft} />
             {/* 제안 적용 결과는 문서 알림 줄에 둔다 — 사이드바 레일에는 사이드바가 소유한
                 라이브 영역 하나만 있어야 한다(B-03 리뷰). 알림 줄은 배너들의 원래 자리라 저장 충돌
                 배너와 동시에 뜨면 라이브 영역이 둘이 될 수 있으나, 동시 노출이 드물고 두 문장 모두
@@ -485,6 +605,11 @@ export const StrategyRevisionPage = () => {
               apply={proposalApply}
               chain={strategyAssistant.chain}
               blockedReason={runSettings.blockedReason}
+            />
+            <LibraryUpdateNotice
+              document={document}
+              form={form}
+              transactions={transactions}
             />
             <UpgradeBanner
               upgrade={documentUpgrade}
@@ -506,14 +631,17 @@ export const StrategyRevisionPage = () => {
             ) : null}
           </>
         }
-        outline={
+        outline={({ inspect }) => (
           <StrategyOutline
             snapshot={outline.snapshot}
             selectedPointer={search.path}
-            onSelect={outline.onSelectOutlineNode}
+            onSelect={(node) => {
+              outline.onSelectOutlineNode(node);
+              inspect();
+            }}
             onCollapse={outline.onCollapseOutlineNode}
           />
-        }
+        )}
         snippets={
           <SnippetCatalog
             snippets={snippets.snippets}
@@ -530,14 +658,17 @@ export const StrategyRevisionPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
-        assistant={({ close }) => (
+        assistant={({ open }) => (
           <AssistStrategySidebar
             documentRef={strategyAssistant.documentRef}
             readContext={strategyAssistant.readContext}
             {...strategyAssistant.proposalHandlers}
-            // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
-            // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
-            onClose={close}
+            // 창을 접는 손잡이는 창의 최소화 하나다 — 최소화는 턴을 끊지 않는다(진행 중 답변은 끝까지 받는다).
+            // 답을 멈추려면 입력칸 옆 "중지"를 쓴다. 사이드바 자신의 닫기(취소 확인)는 두지 않는다.
+            visible={open}
+            state={assistantState}
+            // 떠 있는 창 안이라 대화가 비어 있어도 입력칸을 창 바닥에 붙인다.
+            layout="docked"
           />
         )}
         debugger={
@@ -545,6 +676,7 @@ export const StrategyRevisionPage = () => {
             document={document}
             executionPlans={executionPlans}
             environment={runSettings.environment}
+            parameters={runParameters}
             publicationOwnerKey={debuggerPublicationOwner}
             asOf={search.asOf}
             security={search.security}
@@ -562,22 +694,18 @@ export const StrategyRevisionPage = () => {
         }
         editor={
           <>
-            {autosave.recovery ? (
-              <RecoveryBanner recovery={autosave.recovery} />
-            ) : null}
-            <ServerDraftBanner sync={serverDraft} />
             <SourceEditor
               state={document}
               dispatch={dispatch}
               assist={assist}
-              onEditorReady={onEditorReady}
+              onEditorReady={editorOwner.onEditorReady}
               onSelectionChange={outline.onEditorSelectionChange}
             />
           </>
         }
       />
       <ProposalApplyDialog apply={proposalApply} />
-      <DirtyLeaveGuard dirty={document.dirty} />
+      <DirtyLeaveGuard dirty={document.dirty} acceptedRunId={backtest.status.kind === "accepted" ? backtest.status.runId : null} />
     </>
   );
 };

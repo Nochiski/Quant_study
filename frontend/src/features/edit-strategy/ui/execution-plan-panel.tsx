@@ -17,6 +17,8 @@ type ExecutionPlanPanelProps = {
   state: ExecutionPlansState;
   selectedPointer?: string;
   onSelectPointer: (pointer: string) => void;
+  /** 명시적인 원문 열기만 작업 공간을 바꿀 수 있다. 생략한 호출자는 기존 선택 경로를 유지한다. */
+  onInspectPointer?: (pointer: string) => void;
 };
 
 const blockedMessage = (
@@ -70,6 +72,7 @@ export const ExecutionPlanPanel = ({
   state,
   selectedPointer,
   onSelectPointer,
+  onInspectPointer = onSelectPointer,
 }: ExecutionPlanPanelProps) => {
   const [chosenFactor, setChosenFactor] = useState(0);
   if (state.status !== "ready") return <PlanState state={state} />;
@@ -100,7 +103,7 @@ export const ExecutionPlanPanel = ({
       <div className="execution-plan__toolbar">
         <label>
           <span>{t("plan.factor")}</span>
-          <select
+          <select className="ui-select"
             value={activeIndex}
             onChange={(event) => {
               const next = Number(event.target.value);
@@ -207,7 +210,7 @@ export const ExecutionPlanPanel = ({
                             .replace("{node}", name)
                             .replace("{pointer}", pointer ?? "—")}
                           onClick={() =>
-                            pointer !== null && onSelectPointer(pointer)
+                            pointer !== null && onInspectPointer(pointer)
                           }
                         >
                           {booleanScore ? (
@@ -243,7 +246,7 @@ export const ExecutionPlanPanel = ({
                                     disabled={inputPointer === null}
                                     onClick={() =>
                                       inputPointer !== null &&
-                                      onSelectPointer(inputPointer)
+                                      onInspectPointer(inputPointer)
                                     }
                                   >
                                     <code>{nodeId}</code>

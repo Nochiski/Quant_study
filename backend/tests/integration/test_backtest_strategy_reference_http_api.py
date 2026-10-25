@@ -123,7 +123,7 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
     assert manifest["strategy_hash"] == manifest["strategy_provenance"]["spec_hash"]
     assert manifest["run_spec"]["strategy"]["identity"]["strategy_id"] == document["strategy_id"]
     assert manifest["run_spec"]["strategy_source"] == reference
-    assert manifest["schema_version"] == "backtest-run-v2"
+    assert manifest["schema_version"] == "backtest-run-v3"
 
 
 def test_stale_or_missing_reference_fails_before_a_run_exists() -> None:

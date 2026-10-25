@@ -2,12 +2,13 @@
 
 > 작성: 2026-09-03
 >
-> 상태(2026-09-28): M0~M5 완료, M6·M7·M10 미착수, M8·M9는 일부 항목만 완료. 이 로드맵의
-> 하위 initiative 다섯 개 중 셋이 끝났고 schema 1.2·그래프 표현(P3-03 차례)과 검증 랩이 진행 중이다.
+> 상태(2026-10-16 보완): M0~M5의 기존 구현 이력은 유지하며 M3 신호 분석 1항목은 부분 구현으로 정정한다.
+> M6·M7은 검증 랩(28 PR 중 21 머지)이 진행 중, M8·M9는 일부 항목만 완료,
+> M10 미착수. 이 로드맵의 하위 initiative 다섯 개 중 넷이 끝났고 검증 랩이 진행 중이다.
 >
-> 체크리스트: 150개 중 83개 완료, 67개 남음
+> 체크리스트: 151개 중 95개 완료, 56개 남음(실제 체크행과 M3 분석 1건 정정 반영)
 >
-> 다음 체크: M6-1 `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가
+> 다음 체크: 검증 랩 V4-05(팩터 회귀)·V5-02(결과 검증 카드)·V6-01(개봉 backend) — 착수 가능
 >
 > initiative — PR 단위 상태는 각 PLAN.md만 추적한다(16절 참고).
 >
@@ -17,12 +18,66 @@
 >   [strategy-gui-editing/PLAN.md](../../planning/strategy-gui-editing/PLAN.md)
 > - AI 어시스턴트(완료 2026-09-27, 19 PR):
 >   [ai-assistant/PLAN.md](../../planning/ai-assistant/PLAN.md)
-> - schema 1.2·그래프 표현(진행 중, 30 PR 중 19 머지):
+> - schema 1.2·그래프 표현(완료 2026-10-13, 30 PR, 마감 수용 검증은 CLOSEOUT):
 >   [strategy-language-2-0/PLAN.md](../../planning/strategy-language-2-0/PLAN.md)
-> - 검증 랩(M6·M7 구체화, 시작 2026-09-29, 28 PR):
+> - 검증 랩(M6·M7 구체화, 시작 2026-09-29, 28 PR 중 21 머지):
 >   [validation-lab/PLAN.md](../../planning/validation-lab/PLAN.md) · [설계 spec](./2026-09-29-validation-lab-design.md)
 >
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
+
+## 2026-10-16 작업 트리 보완: 연구 재현과 실행 경계
+
+기준 HEAD `1e780ce7` 이후 추가한 구현과 검증 범위를 연결한다. 아래는 신규 제품 완료율이나
+Validation Lab의 MERGED/PR 집계를 만드는 기록이 아니다.
+[구현 증거 인계](../../planning/research-to-trading/README.md)는 각 단계의 의도·구현·한계·다음
+결정을 연결한다. [HTML 작업 패킷](../../auto-trading-roadmap.html)은 향후 작업 지시 원문이고,
+공식 기능 상태와 initiative 의존성은 이 로드맵과 각 PLAN이 계속 소유한다.
+전체 backend 4,583 passed·database 1,437 passed는 **1차 기반 `8c3c1803` 검증**이며,
+S03 runner·S04를 포함한 후속 전체 회귀는 **backend 4,610 passed, 1 skipped, 34 warnings**
+(169.50초)·**database 1,437 passed**(162.26초)이고 backend 전체 ruff·pyright 오류 0이다.
+frontend 105파일·1,346테스트·타입/린트/빌드·mock e2e 증거는 앞선 S04 검증 시점의 결과다.
+[PR #522](https://github.com/Nochiski/Quant_study/pull/522)·
+[PR #523](https://github.com/Nochiski/Quant_study/pull/523)·
+[PR #524](https://github.com/Nochiski/Quant_study/pull/524)는 검토 근거 링크로만 연결한다.
+로컬 전체 회귀와 GitHub CI 상태는 구분하며 이 문서에 PR 상태 원장을 만들지 않는다.
+
+- **S01 / M9·재현성 보완:** current 빌드 입력 복사·출처·무결성 검증·pending 공개 gate와 실제
+  DuckDB adapter 재접속을 합성 원장으로 검증했다. 실제 원장의 품질·용량·연구 재현은 미검증이다.
+  [S01 스펙·CLI](../../planning/research-to-trading/S01-snapshot.md).
+- **S02 / M5·M9 검산:** 실제 선정 compiler와 Python/Rust 실행 adapter를 연결한 합성 손계산으로
+  현금·수량·분할·비용을 확인했다. 배당 총수익이나 상폐 회수금 정산을 해결하지 않았다.
+  [S02 독립 기대값·사용 제한](../../planning/research-to-trading/S02-accounting.md).
+- **S03 / M3 분석 문구 보완:** 별도 미래 가격 라벨·날짜별 Rank IC·커버리지 core를 기존 raw
+  observation/factor pipeline에 합성 연결했다. M3의 관련 체크 한 줄만 부분 구현으로 정정한다.
+  `FactorResearchService`의 catalog/validate/explain과 비용 후 `portfolioAnalytics`는 이 신호
+  평가의 완료 증거가 아니다. 후속 runner는 S01 검증→실제 DuckDB→기존 raw/factor pipeline→별도
+  label→원시 근거·일별 IC/coverage JSON 내보내기를 합성 원장으로 연결했다. 새 25건과 기존 S03·
+  architecture를 합친 64건, 관련 회귀 195건이 통과했다. 실제 원장·실성과·비용 후 비교·API/UI는
+  미완료이며 M3 체크행을 추가로 바꾸지 않는다.
+  [S03 core·분리 계약](../../planning/research-to-trading/S03-signal-evaluation.md) ·
+  [보존 입력 runner·실행/실패 계약](../../planning/research-to-trading/S03-runner.md).
+- **S04 / M7·평가 의미 보완:** 기존 워크포워드 API와 실험 화면에 기간별 초기자본 재시작,
+  첫 기록 이전 진입비용·손익 제외, 현금·보유 수량 미이월을 명시했다. 독립 합성 장부로 현 연결과
+  연속 계좌 손익이 다를 수 있음을 확인했으며 기존 곡선·지표·trial key·판본·선택 규칙은 유지했다.
+  실제 연속 계좌 실행기·스트레스·일반 평가 열람 이력은 남아 있다.
+  [S04 안내·독립 장부·후속 계약](../../planning/research-to-trading/S04-walk-forward.md).
+- **S05 / 별도 운영 확장:** 주문 전 영속 의도·단일 전송·오프라인 fake broker·재시작 대사 기반을
+  새 실행 노드로 추가했다. 기존 M10의 연구 실행 복구와 책임을 구분한다. 목표 비중 sizing이나
+  외부 모의/실계좌 준비 완료를 뜻하지 않으며 S06 이후는 미착수다.
+  [S05 오프라인 스펙·장애 증거](../../planning/research-to-trading/S05-offline-execution.md).
+
+PLAN 집계는 [공용 Python 도구](../../../tools/PLAN_PROGRESS.md)로 macOS에서도 실행한다.
+후속 PS1 다섯 개는 workflow 변경 없이 PATH Python 3.11+를 사전 검사하고 `python -X utf8`로
+절대경로 script를 직접 호출한다. site/editable 설치 없는 `-I -S` 직접 script의 다섯 PLAN 검증,
+부모의 root 전체 unittest 52건·tools ruff/pyright 오류 0을 확인했다. 기존 tracker·체크행·PR 집계나
+의존성은 바꾸지 않았다. 원격 HEAD `79b9c86d`의
+[generated-progress 단일 job 성공](https://github.com/Nochiski/Quant_study/actions/runs/38862921708)은
+추가 근거이며 전체 CI 통과나 머지를 뜻하지 않는다. 동적 상태는 PR 링크에서 확인하고, 실제 Windows
+PowerShell 현지 실측은 남아 있다.
+
+다음 결정은 같은 코드·환경의 실제 보존 입력과 연구 사양을 준비한 뒤 S02 한계 안에서 무튜닝 S03
+첫 사례를 진행할지 판단하는 것이다. 합성 검증을 비용 후 수익성으로 해석하지 않으며, 실데이터 결과와 반증 기준이 준비된 뒤
+후속 연구·운영 범위를 정한다. Validation Lab PLAN의 PR 상태·개수·선행 의존성은 변경하지 않는다.
 
 ## 1. 결론
 
@@ -440,7 +495,11 @@ frontend 타입이 backend schema에서 생성된다.
 - [x] parameter reference와 saved subgraph/factor reference 구현.
 - [x] DAG→PIT execution plan compiler와 deterministic plan hash 추가.
 - [x] factor matrix cache key에 data/factor/params/as-of fingerprint 포함.
-- [x] IC/rank IC/quantile spread/coverage/turnover/decay 분석 구현.
+- [ ] IC/rank IC/quantile spread/coverage/turnover/decay 분석 — **부분 구현으로 정정(2026-10-16)**.
+  현재 작업 트리의 `domain/signal_evaluation`은 미래 가격 라벨·날짜별 Rank IC·커버리지를
+  합성 입력으로 검증했다. 첫 실데이터 연구와 나머지 완전 분석, 제품 API·화면 노출은 미완료다.
+  [S03 구현 범위·검증](../../planning/research-to-trading/S03-signal-evaluation.md)을 근거로 하며,
+  기존 2026-09-03 완료 기록을 현재 제품의 전체 분석 완료 증거로 사용하지 않는다.
 - [x] factor catalog API와 validate/explain/preview API 추가.
 - [x] `factor` entity와 factor browser/card UI 추가.
 - [x] Quick transform chain/weight editor 추가.
@@ -491,37 +550,37 @@ Python/Rust 결과가 같다.
 
 ### M6 — Parameter Search + 실험 진행 UX
 
-- [ ] `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가.
-- [ ] path 기반 parameter binding과 ResolvedStrategySpec 생성 구현.
-- [ ] invalid combination을 실행 전 제거하는 constraint evaluator 구현.
-- [ ] trial count/time/memory estimate 구현.
-- [ ] deterministic grid sampler 구현.
-- [ ] seeded random과 Latin hypercube sampler 구현.
-- [ ] sampler plugin port를 두고 TPE/CMA-ES는 후속 adapter로 격리.
-- [ ] fingerprint duplicate/cache-hit 판정 구현.
-- [ ] SQLite experiment repository와 migration 추가.
-- [ ] experiment/trial/attempt 상태 전이·audit event 구현.
-- [ ] bounded process worker, parallelism, cancellation, crash recovery 구현.
-- [ ] failed/pruned/cancelled trial과 error reason 보존.
-- [ ] experiment create/status/trials/results/cancel/retry API 추가.
-- [ ] Builder 파라미터 범위/constraint/budget 화면 추가.
-- [ ] Experiment Monitor 진행률·ETA·상태별 count·실패 상세 추가.
-- [ ] cancel/restart/idempotency 통합 테스트 추가.
+- [ ] `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가(SearchSpec·파라미터 축은 검증 랩 V3-01 #306, 탐색 파라미터끼리·상수와 비교하는 조합 Constraint는 #517, 다른 파라미터 값에 따라 켜지는 조건부 파라미터는 미착수).
+- [ ] path 기반 parameter binding과 ResolvedStrategySpec 생성 구현(의도적 보류: 검증 랩 spec D4·§4).
+- [x] invalid combination을 실행 전 제거하는 constraint evaluator 구현(#517 — 격자 좌표계는 두고 어긴 칸만 실행·N 에서 뺀다).
+- [ ] trial count/time/memory estimate 구현(조합 수 미리 계산은 V3-03, 시간 어림은 #519 — 계열 최근 완료 실행 시간을 구간 길이로 늘려 차례로 더한다. 메모리는 의도적 보류: run 이 한 프로세스의 스레드로 돌아 run 하나의 메모리를 잴 수 없다, process worker 보류와 함께 다시 본다).
+- [x] deterministic grid sampler 구현(검증 랩 V3-01·V3-03).
+- [ ] seeded random과 Latin hypercube sampler 구현(의도적 보류: 검증 랩 spec §4, 이 문서 13절).
+- [ ] sampler plugin port를 두고 TPE/CMA-ES는 후속 adapter로 격리(의도적 보류: 검증 랩 spec §4).
+- [ ] fingerprint duplicate/cache-hit 판정 구현(의도적 보류: 끝난 결과 재사용 안 함, 2026-09-30 리드 결정·검증 랩 spec D6 — 진행 중 같은 입력 잇기만 V3-04).
+- [x] SQLite experiment repository와 migration 추가(검증 랩 V3-03 #334).
+- [x] experiment/trial/attempt 상태 전이·audit event 구현(상태 전이는 검증 랩 V3-03, 감사 기록은 #521 — 조작 이력만 새로 적고 나머지는 쌓인 기록·실행 상태에서 읽는다).
+- [ ] bounded process worker, parallelism, cancellation, crash recovery 구현(취소·재시작 복구·슬롯 병렬은 V3-04 #346·#348, process worker는 의도적 보류: 검증 랩 spec §4·D6).
+- [ ] failed/pruned/cancelled trial과 error reason 보존(failed·cancelled는 검증 랩 V3-03·V3-04, pruned 개념 없음).
+- [x] experiment create/status/trials/results/cancel/retry API 추가(검증 랩 V3-03·V3-04).
+- [ ] Builder 파라미터 범위/constraint/budget 화면 추가(값 직접 입력·조합 제약 편집은 #518, budget 미착수).
+- [x] Experiment Monitor 진행률·ETA·상태별 count·실패 상세 추가(V5-01 #402·#407, ETA 는 #520 — 미리 계산과 같은 `estimate_time` 으로 남은 실행만 어림).
+- [x] cancel/restart/idempotency 통합 테스트 추가(검증 랩 V3-04).
 
 완료 게이트: 사용자는 실행 전 비용을 알고 탐색을 시작·중단·재개할 수 있고, 모든 trial이
 감사 가능한 denominator에 남는다.
 
 ### M7 — 강건성·OOS·과적합 방지
 
-- [ ] train/validation/locked-OOS SplitSpec 추가.
-- [ ] rolling/anchored walk-forward와 window metrics 구현.
-- [ ] label horizon 기반 purge/embargo 구현.
+- [x] train/validation/locked-OOS SplitSpec 추가(검증 랩 V1-01 봉인·V3-05 SplitSpec).
+- [x] rolling/anchored walk-forward와 window metrics 구현(검증 랩 V3-05 #364·#365).
+- [ ] label horizon 기반 purge/embargo 구현(embargo만 V3-05, label horizon purge 미착수).
 - [ ] OOS 열람 ledger와 재사용 상태 표시 구현.
-- [ ] parameter sensitivity와 plateau/stability score 구현.
+- [x] parameter sensitivity와 plateau/stability score 구현(검증 랩 V4-03 #403, 화면은 V5-04).
 - [ ] fee/slippage/borrow/execution-delay stress grid 구현.
 - [ ] return/trade bootstrap 또는 Monte Carlo adapter 구현.
-- [ ] probabilistic Sharpe와 deflated Sharpe 구현.
-- [ ] trial count와 selection bias metadata를 결과에 포함.
+- [x] probabilistic Sharpe와 deflated Sharpe 구현(검증 랩 V4-01 #363·V4-02 #385).
+- [x] trial count와 selection bias metadata를 결과에 포함(검증 랩 V1-05 시도 원장·V4-02 DSR·선택 기록, 단일 실행 결과 화면은 V5-02).
 - [ ] single-objective ranking과 Pareto frontier view 구현.
 - [ ] robustness report API 추가.
 - [ ] Candidate Explorer heatmap/scatter/parallel coordinate 추가.
@@ -532,6 +591,8 @@ Python/Rust 결과가 같다.
 선택할 수 있다.
 
 ### M8 — 전문가용 표현력과 작업 흐름
+
+- [x] LANG2 파이프라인·팩터 레시피·고급 노드 캔버스의 같은 원문 편집, ELK 배치·배선·undo·진단 이동 구현(P5/P6, #429~#436 머지). 실제 스크린리더 음성 출력 감사와 아래 전문가 기능 전체 완료를 뜻하지 않는다.
 
 - [ ] long/short leg별 서로 다른 factor graph와 universe 지원.
 - [ ] regime switch와 conditional portfolio branch 지원.
@@ -717,6 +778,13 @@ Contract:
   [PLAN](../../planning/strategy-language-2-0/PLAN.md)): 실행 설정이 문서 밖 `RunEnvironment`로
   갔고(7.1), 결합 전 정규화·횡단면 eligibility·`risk_factor_id`·compile 단일 게이트·1.1 → 1.2
   업그레이더와 frontend 실행 설정 패널이 들어갔다. 그래프 표현(P4~P6)과 P3-03이 남았다.
+- 2026-10-13 — schema 1.2·그래프 표현 initiative 완료(30 PR, 마감 #439~#443): 파이프라인(P4)·팩터
+  레시피(P5)·노드 캔버스(P6)가 같은 원문을 편집한다. M8의 LANG2 항목을 체크했다. 실제 스크린리더 음성
+  검증 등 수용 검증은 [CLOSEOUT](../../planning/strategy-language-2-0/CLOSEOUT.md)에 남았다.
+- 2026-10-14 — 검증 랩 진척 반영(21/28, [PLAN](../../planning/validation-lab/PLAN.md)): 탐색 공간·격자,
+  실험 저장·상태·API·취소/재시작(V3-01~V3-05), PSR·DSR·선택 기록·고원/민감도·용량 스윕(V4-01~V4-04),
+  실험 화면(V5-01)이 들어가 M6·M7에서 해당 항목을 체크했다. 의도적 보류(path binding·무작위/베이지안
+  샘플러·결과 재사용·process worker)는 항목 옆에 근거를 적어 미체크로 둔다.
 
 체크 수는 이 문서의 완료/미완료 체크박스 기준으로 갱신한다. 설명 안의 예시 checkbox는 두지
 않아 수치가 실제 구현 단위와 일치하게 유지한다.

@@ -173,10 +173,7 @@ const CatalogDetails = ({
             t("dataset.field.recommendedLag"),
             `${field.recommended_lag_sessions} ${t("contract.sessions")}`,
           ],
-          [
-            t("contract.coverage"),
-            `${field.coverage.estimated_coverage_pct}%`,
-          ],
+          [t("contract.coverage"), `${field.coverage.estimated_coverage_pct}%`],
           [
             t("contract.window"),
             `${field.coverage.starts_on} → ${field.coverage.ends_on}`,
@@ -345,7 +342,7 @@ export const ContractInspector = ({
   // 본문으로 찍지 않고 "설명 없음"을 보인다 — 키는 아래 보조 `<code>`에만 남는다.
   const name = tName(field.descriptionKey);
   const description = tDescription(field.descriptionKey);
-  const rows: [string, ReactNode][] = [
+  const technicalRows: [string, ReactNode][] = [
     [
       t("ide.inspector.path"),
       <code key="path">{field.pointer || t("contract.root")}</code>,
@@ -355,8 +352,9 @@ export const ContractInspector = ({
       <code key="template">{field.templatePointer || "/"}</code>,
     ],
   ];
+  const rows: [string, ReactNode][] = [];
   if (field.unresolvedBranches !== null) {
-    rows.push([
+    technicalRows.push([
       t("contract.variants"),
       <span key="unresolved" className="contract-inspector__inline-values">
         {field.unresolvedBranches.map((branch) => (
@@ -365,7 +363,7 @@ export const ContractInspector = ({
       </span>,
     ]);
   } else {
-    rows.push([
+    technicalRows.push([
       t("assist.type"),
       <span key="type" className="contract-inspector__inline-values">
         <code>{field.type ?? EMPTY}</code>
@@ -379,15 +377,15 @@ export const ContractInspector = ({
     ]);
   }
   if (field.shape === "scalar") {
-    rows.push([
-      t("ide.inspector.storedValue"),
-      field.value.present ? codeValue(field.value.raw) : t("contract.noValue"),
-    ]);
     if (field.value.display !== null)
       rows.push([
         t("ide.inspector.displayValue"),
         <strong key="display">{field.value.display}</strong>,
       ]);
+    rows.push([
+      t("ide.inspector.storedValue"),
+      field.value.present ? codeValue(field.value.raw) : t("contract.noValue"),
+    ]);
   }
   if (field.enumValues.length)
     rows.push([
@@ -408,7 +406,10 @@ export const ContractInspector = ({
       <code key="range">{boundText(field.minimum, field.maximum)}</code>,
     ]);
   if (field.format)
-    rows.push([t("contract.format"), <code key="format">{field.format}</code>]);
+    technicalRows.push([
+      t("contract.format"),
+      <code key="format">{field.format}</code>,
+    ]);
   if (field.unit)
     rows.push([
       t("ide.inspector.unit"),
@@ -420,14 +421,17 @@ export const ContractInspector = ({
   if (field.hasExample)
     rows.push([t("assist.example"), codeValue(field.example)]);
   if (field.appliedStage)
-    rows.push([
+    technicalRows.push([
       t("ide.inspector.stage"),
       <code key="stage">{field.appliedStage}</code>,
     ]);
   if (field.catalog)
-    rows.push([t("assist.source"), <code key="catalog">{field.catalog}</code>]);
+    technicalRows.push([
+      t("assist.source"),
+      <code key="catalog">{field.catalog}</code>,
+    ]);
   if (field.reference)
-    rows.push([
+    technicalRows.push([
       t("assist.source"),
       <code key="reference">{field.reference}</code>,
     ]);
@@ -448,6 +452,13 @@ export const ContractInspector = ({
             <code>{field.templatePointer}</code>
           )}
         </h3>
+        {field.descriptionKey ? (
+          <div className="contract-inspector__description">
+            <strong>{t("contract.description")}</strong>
+            <p>{description ?? t("contract.noDescription")}</p>
+          </div>
+        ) : null}
+
         <Rows rows={rows} />
         {field.unresolvedBranches !== null ? (
           <p
@@ -460,81 +471,87 @@ export const ContractInspector = ({
         {field.shape !== "scalar" ? (
           <p className="contract-inspector__notice">{t("contract.noScalar")}</p>
         ) : null}
-        {field.descriptionKey ? (
-          <div className="contract-inspector__description">
-            <strong>{t("contract.description")}</strong>
-            <p>{description ?? t("contract.noDescription")}</p>
-            <code title={t("contract.descriptionKey")}>
-              {field.descriptionKey}
-            </code>
-          </div>
-        ) : null}
       </section>
 
       {field.applicability ? (
         <ApplicabilitySection applicability={field.applicability} />
       ) : null}
 
-      {field.discriminator ? (
-        <section className="contract-inspector__section">
-          <h3>{t("contract.discriminator")}</h3>
-          <Rows
-            rows={[
-              [
-                t("ide.inspector.path"),
-                <code key="owner">{field.discriminator.ownerPointer}</code>,
-              ],
-              [
-                t("contract.discriminator"),
-                <code key="property">{field.discriminator.propertyName}</code>,
-              ],
-              [
-                t("contract.variants"),
-                <span
-                  key="variants"
-                  className="contract-inspector__inline-values"
-                >
-                  {field.discriminator.variants.map((variant) => (
-                    <code key={variant}>{variant}</code>
-                  ))}
-                </span>,
-              ],
-              [
-                t("contract.selectedBranch"),
-                field.discriminator.selected ? (
-                  <code key="selected">{field.discriminator.selected}</code>
-                ) : (
-                  EMPTY
-                ),
-              ],
-            ]}
-          />
-        </section>
-      ) : null}
-
       {projection.catalog ? (
         <CatalogDetails catalog={projection.catalog} />
       ) : null}
 
-      <section className="contract-inspector__section">
-        <h3>{t("contract.provenance")}</h3>
-        <Rows
-          rows={[
-            [
-              t("contract.schemaVersion"),
-              <code key="version">{projection.provenance.schemaVersion}</code>,
-            ],
-            [
-              t("contract.schemaHash"),
-              shortHash(projection.provenance.schemaHash),
-            ],
-            [
-              t("contract.contractHash"),
-              shortHash(projection.provenance.contractHash),
-            ],
-          ]}
-        />
-      </section>
+      <details className="contract-inspector__technical ui-disclosure">
+        <summary>{t("inspector.technicalDetails")}</summary>
+        <Rows rows={technicalRows} />
+        {field.descriptionKey ? (
+          <p className="contract-inspector__notice">
+            <code title={t("contract.descriptionKey")}>
+              {field.descriptionKey}
+            </code>
+          </p>
+        ) : null}
+        {field.discriminator ? (
+          <section className="contract-inspector__section">
+            <h3>{t("contract.discriminator")}</h3>
+            <Rows
+              rows={[
+                [
+                  t("ide.inspector.path"),
+                  <code key="owner">{field.discriminator.ownerPointer}</code>,
+                ],
+                [
+                  t("contract.discriminator"),
+                  <code key="property">
+                    {field.discriminator.propertyName}
+                  </code>,
+                ],
+                [
+                  t("contract.variants"),
+                  <span
+                    key="variants"
+                    className="contract-inspector__inline-values"
+                  >
+                    {field.discriminator.variants.map((variant) => (
+                      <code key={variant}>{variant}</code>
+                    ))}
+                  </span>,
+                ],
+                [
+                  t("contract.selectedBranch"),
+                  field.discriminator.selected ? (
+                    <code key="selected">{field.discriminator.selected}</code>
+                  ) : (
+                    EMPTY
+                  ),
+                ],
+              ]}
+            />
+          </section>
+        ) : null}
+
+        <section className="contract-inspector__section">
+          <h3>{t("contract.provenance")}</h3>
+          <Rows
+            rows={[
+              [
+                t("contract.schemaVersion"),
+                <code key="version">
+                  {projection.provenance.schemaVersion}
+                </code>,
+              ],
+              [
+                t("contract.schemaHash"),
+                shortHash(projection.provenance.schemaHash),
+              ],
+              [
+                t("contract.contractHash"),
+                shortHash(projection.provenance.contractHash),
+              ],
+            ]}
+          />
+        </section>
+      </details>
     </div>
   );
 };

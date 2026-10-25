@@ -9,7 +9,7 @@
 .strategy-outline__filter-input {
   width: 100%;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-medium);
   background: var(--surface-panel);
   color: var(--text);

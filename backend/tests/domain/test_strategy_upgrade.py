@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from ruamel.yaml import YAML
 
 from strategy_workbench.domain.strategy import _upgrade as _upgrade_module
@@ -37,6 +36,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     SignalNormalization,
     StrategyIdentity,
 )
+from tests.authoring_yaml import load_authoring_yaml
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 DRAFT = StrategyIdentity("draft", 0)
@@ -44,14 +44,20 @@ V1_0, V1_1 = UPGRADE_CHAIN[0], UPGRADE_CHAIN[1]
 
 
 def _yaml(name: str) -> dict[str, Any]:
-    loaded = yaml.safe_load((FIXTURES / name).read_text(encoding="utf-8"))
+    loaded = load_authoring_yaml((FIXTURES / name).read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
     return loaded
 
 
 def _tree(document: dict[str, Any], *, until: str | None = None) -> dict[str, Any]:
     """테스트 편의: 변환 결과 tree 를 dict[str, Any] 로 다룬다(프로덕션 시그니처는 object 값)."""
-    tree = upgrade_document(document, until=until).tree
+    if until == V1_1:
+        tree = copy.deepcopy(document)
+        for _name, step in UPGRADE_STEPS[V1_0]:
+            step(tree)
+        tree["schema_version"] = V1_1
+    else:
+        tree = upgrade_document(document).tree
     assert isinstance(tree, dict)
     return tree
 
@@ -138,10 +144,6 @@ def test_the_1_1_stage_moves_execution_settings_to_the_outcome() -> None:
     assert outcome.environment.missing_policy == "drop"
     assert outcome.environment.missing_policy_pointer == "/factors/0/graph/missing_policy"
     assert outcome.warnings == ()
-
-
-def test_a_stop_before_the_1_1_stage_moves_nothing() -> None:
-    assert upgrade_document(_yaml("quality_momentum.v1_0.yaml"), until=V1_1).environment is None
 
 
 def test_differing_missing_policies_use_the_first_and_warn() -> None:
@@ -296,8 +298,8 @@ def test_saved_reference_nodes_refuse_the_upgrade(kind: str) -> None:
 def test_a_1_0_document_names_the_retired_node_where_its_author_wrote_it() -> None:
     """1.0 의 두 겹 factors 문서도 거절 자리가 원문 pointer 다(#418 리뷰 P3-4).
 
-    평탄화 뒤 자리(`/factors/0/…`)를 말하면 1.0 작성자는 문서에 없는 자리를 찾게 된다. 1.0 → 1.1 만
-    올리는 호출은 `saved_*` 를 받아 주던 버전에서 멈추므로 거절하지 않는다.
+    평탄화 뒤 자리(`/factors/0/…`)를 말하면 1.0 작성자는 문서에 없는 자리를 찾게 된다.
+    현재 판까지 가는 호출은 원문 자리에서 거절한다.
     """
     document = _yaml("quality_momentum.v1_0.yaml")
     nodes = document["factors"]["factors"][0]["graph"]["nodes"]
@@ -307,7 +309,6 @@ def test_a_1_0_document_names_the_retired_node_where_its_author_wrote_it() -> No
 
     assert isinstance(refusal, UpgradeUnsupportedNodeError)
     assert refusal.pointer == f"/factors/factors/0/graph/nodes/{len(nodes) - 1}/kind"
-    assert upgrade_document(document, until=V1_1).source_version == V1_0
 
 
 def test_upgrade_does_not_mutate_its_input() -> None:
@@ -606,7 +607,7 @@ def test_steps_apply_identically_to_ruamel_round_trip_containers() -> None:
     buffer = StringIO()
     loader.dump(document, buffer)
     dumped = buffer.getvalue()
-    assert json.loads(json.dumps(yaml.safe_load(dumped))) == _tree(yaml.safe_load(text))
+    assert json.loads(json.dumps(load_authoring_yaml(dumped))) == _tree(load_authoring_yaml(text))
     assert dumped.startswith("# P0-01 golden authoring fixture")  # 선두 주석 보존
     # 따옴표 보존은 loader 설정(`preserve_quotes`) 몫이라 여기서는 어느 쪽이든 현재 버전이면 된다.
     assert (

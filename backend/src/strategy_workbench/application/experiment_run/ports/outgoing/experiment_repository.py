@@ -30,6 +30,9 @@ class ExperimentRecord:
     design: ExperimentDesign
     controls: ExperimentControls
     cancelled_at: datetime | None = None
+    # "튼튼한지 확인하기"로 만든 실험이면 그 버튼이 있던 결과의 실행(US-DM-11). 결과 화면이 이
+    # 실행의 실험을 찾는다. 직접 만든 실험은 None 이다.
+    source_run_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -47,14 +50,13 @@ class TrialAttempt:
     error: str | None = None
 
     def __post_init__(self) -> None:
-        if (self.run_id is None) == (self.error_code is None) or (self.error_code is None) != (
-            self.error is None
-        ):
-            raise ValueError(
-                "attempt carries a run_id or a rejection (code and message), not both — "
-                f"experiment_id={self.experiment_id} trial_index={self.trial_index} "
-                f"attempt={self.attempt} run_id={self.run_id!r} error_code={self.error_code!r}"
-            )
+        _validate_submission(
+            self.run_id,
+            self.error_code,
+            self.error,
+            context=f"experiment_id={self.experiment_id} trial_index={self.trial_index} "
+            f"attempt={self.attempt}",
+        )
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,39 @@ class WindowPick:
     run_id: str | None = None
     error_code: AdmissionRejectionCode | None = None
     error: str | None = None
+
+    def __post_init__(self) -> None:
+        context = f"experiment_id={self.experiment_id} window_index={self.window_index}"
+        if (self.trial_index is None) != (self.train_sharpe is None):
+            raise ValueError(f"window pick carries a trial and training score together — {context}")
+        if self.trial_index is None:
+            if any(value is not None for value in (self.run_id, self.error_code, self.error)):
+                raise ValueError(f"a window without a chosen trial has no submission — {context}")
+        else:
+            _validate_submission(self.run_id, self.error_code, self.error, context=context)
+
+
+def _validate_submission(
+    run_id: str | None,
+    error_code: AdmissionRejectionCode | None,
+    error: str | None,
+    *,
+    context: str,
+) -> None:
+    """학습·검증 제출은 실행 ID 또는 거절 코드와 문장 가운데 하나를 기록한다."""
+    if (run_id is None) == (error_code is None) or (error_code is None) != (error is None):
+        raise ValueError(
+            "submission carries a run_id or a rejection (code and message), not both — "
+            f"{context} run_id={run_id!r} error_code={error_code!r}"
+        )
+
+
+@dataclass(frozen=True)
+class ControlChange:
+    """실험 조작을 바꾼 기록 한 줄(로드맵 M6 감사 기록). 바꾼 뒤의 값을 싣는다."""
+
+    changed_at: datetime
+    controls: ExperimentControls
 
 
 @dataclass(frozen=True)
@@ -118,17 +153,40 @@ class ExperimentRepositoryPort(Protocol):
         """없으면 `ExperimentNotFoundError`(`experiment.not_found`)."""
         ...
 
+    def controls(self, experiment_id: str) -> ExperimentControls:
+        """저장된 레인 조작만 읽는다(설계 디코드 없음). 없으면 `ExperimentNotFoundError`."""
+        ...
+
     def open_ids(self) -> tuple[str, ...]:
         """취소하지 않은 실험 id(만든 순). 기록을 디코드하지 않는다(재시작 복구가 하나씩 읽는다)."""
         ...
 
     def list(self, *, after: str | None, limit: int) -> tuple[ExperimentRecord, ...]:
-        """최근에 만든 순으로 `after` 실험 다음부터 `limit` 개. 모르는 `after` 면 빈 목록이다."""
+        """최근에 만든 순으로 `after` 다음의 읽을 수 있는 기록을 `limit` 개까지 돌려준다.
+
+        디코드 실패 행은 adapter가 식별자를 로그에 남기고 건너뛴다. 원장은 변경하지 않는다.
+        모르는 `after` 면 빈 목록이고, 저장소 전체 읽기 실패는 전파한다.
+        """
+        ...
+
+    def by_source_run(self, run_id: str) -> tuple[ExperimentRecord, ...]:
+        """`source_run_id` 가 `run_id` 인 기록, 최근에 만든 순.
+
+        읽지 못하는 행은 `list` 처럼 건너뛴다.
+        """
         ...
 
     def cancel(self, experiment_id: str, *, cancelled_at: datetime) -> None: ...
 
-    def set_controls(self, experiment_id: str, controls: ExperimentControls) -> None: ...
+    def set_controls(
+        self, experiment_id: str, controls: ExperimentControls, *, changed_at: datetime
+    ) -> None:
+        """현재 조작을 바꾸고 같은 트랜잭션에서 이력(`control_changes`)에 한 줄을 더한다."""
+        ...
+
+    def control_changes(self, experiment_id: str) -> tuple[ControlChange, ...]:
+        """조작을 바꾼 순."""
+        ...
 
     def add_attempt(self, attempt: TrialAttempt) -> None: ...
 

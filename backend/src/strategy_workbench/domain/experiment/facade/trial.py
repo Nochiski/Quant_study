@@ -5,8 +5,11 @@ from strategy_workbench.domain.experiment._trial import (
     ExperimentStatus,
     TrialStatus,
     awaiting_recovery,
+    experiment_settled,
     experiment_status,
+    settled,
     trial_status,
+    validate_selection_reason,
 )
 
 __all__ = [
@@ -16,6 +19,9 @@ __all__ = [
     "ExperimentStatus",
     "TrialStatus",
     "awaiting_recovery",
+    "settled",
     "experiment_status",
+    "experiment_settled",
+    "validate_selection_reason",
     "trial_status",
 ]

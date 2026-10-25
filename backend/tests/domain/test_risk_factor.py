@@ -22,6 +22,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
+from strategy_workbench.domain.factor.facade.expression import FactorGraph, FieldNode
 from strategy_workbench.domain.portfolio.facade.construction import (
     ExclusionReason,
     PortfolioFactorValue,
@@ -33,9 +34,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
 from strategy_workbench.domain.strategy.facade.explanation import explain_strategy
 from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
-    FactorGraph,
     FactorSignal,
-    FieldNode,
     RebalanceFrequency,
     SignalNormalization,
     StrategySpec,
@@ -335,6 +334,7 @@ def test_excluding_the_risk_factor_is_reported_as_a_warning() -> None:
         ("risk.risk_factor_id", ValidationSeverity.WARNING)
     ]
     assert "'vol'" in excluded[0].message
+    assert "factor_id" not in excluded[0].message
 
 
 def test_risk_field_and_risk_factor_together_are_a_conflict_error() -> None:

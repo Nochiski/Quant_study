@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import math
 import shutil
@@ -10,31 +9,67 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BeforeValidator, TypeAdapter, ValidationError
 
 from strategy_workbench.application.backtest_run.facade.ports import (
     ArtifactCommit,
     BacktestArtifactUnreadableError,
 )
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
+from strategy_workbench.domain.canonical.facade.encoding import canonical_payload_json
 
 logger = logging.getLogger(__name__)
 
 # `_json_value` 가 쓴 `result.json` 을 되읽는 디코더. HTTP 가 요청 본문을 읽을 때와 같은 dataclass
 # 검증(pydantic)이라 `__post_init__` 불변식을 다시 탄다.
-_RESULT = TypeAdapter(BacktestRunResult)
+# v2에만 있던 비용 사본은 읽기 경계에서 기존 불일치 검사를 유지한다. 새 모델·저장본·소비자는
+# 이 목록을 사용하지 않는다. 체크섬은 이 검증에 앞서 원래 파일 바이트 그대로 확인한다.
+_LEGACY_FLAT_COST_FIELDS = ("fee_bps", "slippage_bps", "participation_rate")
+
+
+def _validate_legacy_manifest_costs(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    manifest = value.get("manifest")
+    if not isinstance(manifest, dict):
+        return value
+    environment = manifest.get("environment")
+    if not isinstance(environment, dict):
+        return value
+    divergent = {
+        name: (manifest[name], environment[name])
+        for name in _LEGACY_FLAT_COST_FIELDS
+        if name in manifest and name in environment and manifest[name] != environment[name]
+    }
+    if divergent:
+        raise ValueError(
+            "manifest records two execution cost models for one run — "
+            f"run_id={manifest.get('run_id')} divergent={divergent}"
+        )
+    return value
+
+
+_RESULT = TypeAdapter(
+    Annotated[BacktestRunResult, BeforeValidator(_validate_legacy_manifest_costs)]
+)
 
 
 class LocalArtifactStore:
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
         self._root.mkdir(parents=True, exist_ok=True)
-        # 커밋 도중 프로세스가 죽으면 staging 이 남는다. 부팅 때 여기서 한 번 치운다 — 루트 하나를
-        # 서버 프로세스 하나가 쓴다는 전제다(연구 기록 DB 와 같다). 못 지워도(Windows 잠금 등)
-        # 부팅은 막지 않는다 — 남은 staging 은 run 이 읽지 않는다.
+
+    def remove_orphan_staging(self) -> None:
+        """커밋 도중 프로세스가 죽어 남은 staging(`.*.tmp`)을 모두 지운다.
+
+        루트 하나를 서버 프로세스 하나가 쓴다는 전제라, 그 서버의 composition root 가 부팅 때 한 번
+        부른다(연구 기록 DB 와 같다). 생성자에서 지우지 않는다 — 같은 루트를 여는 다른 프로세스가
+        도는 run 의 staging 을 지우게 된다(run-worker spec D4). 못 지워도(Windows 잠금 등) 부팅은
+        막지 않는다 — 남은 staging 은 run 이 읽지 않는다.
+        """
         for staging in self._root.glob(".*.tmp"):
             try:
                 shutil.rmtree(staging)
@@ -52,13 +87,7 @@ class LocalArtifactStore:
             raise ValueError("staging path escapes artifact root")
         staging.mkdir()
         try:
-            payload = json.dumps(
-                _json_value(result),
-                ensure_ascii=False,
-                allow_nan=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
+            payload = canonical_payload_json(_json_value(result)).encode("utf-8")
             result_path = staging / "result.json"
             with result_path.open("xb") as stream:
                 stream.write(payload)
@@ -98,6 +127,20 @@ class LocalArtifactStore:
         target = self._run_dir(run_id)
         if target.exists():
             shutil.rmtree(target)
+
+    def discard_unfinished(self, run_id: str) -> None:
+        """끝나지 못한 run 하나의 staging(`.{run_id}.*.tmp`)과 결과 디렉터리를 지운다(멱등).
+
+        다른 프로세스(run worker)가 쓰던 run 을, 그 프로세스가 끝난 뒤 부모가 치울 때 쓴다
+        (run-worker spec D5). 프로세스가 살아 있는 동안 부르지 않는다 — rename·열린 파일과 경합한다.
+        """
+        target = self._run_dir(run_id)
+        for staging in self._root.glob(f".{run_id}.*.tmp"):
+            shutil.rmtree(staging)
+            logger.warning("unfinished run artifact staging removed — run_id=%s", run_id)
+        if target.exists():
+            shutil.rmtree(target)
+            logger.warning("unfinished run artifact removed — run_id=%s", run_id)
 
     def _run_dir(self, run_id: str) -> Path:
         target = (self._root / run_id).resolve()

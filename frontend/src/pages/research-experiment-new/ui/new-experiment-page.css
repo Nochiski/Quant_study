@@ -1,0 +1,229 @@
+.experiment-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  padding: var(--panel-padding);
+}
+
+.experiment-form > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.experiment-form .data-list-page__scroll {
+  min-width: 0;
+}
+
+.experiment-form caption {
+  padding-block-end: var(--space-2);
+  text-align: start;
+  font-size: var(--text-size-subsection);
+  font-weight: var(--font-weight-heading);
+}
+
+.experiment-form fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+}
+
+.experiment-form legend {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding-inline: var(--space-2);
+  font-size: var(--text-size-subsection);
+  font-weight: var(--font-weight-heading);
+}
+
+.experiment-form .experiment-form__split {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--space-3);
+}
+
+.experiment-form__field {
+  display: grid;
+  grid-row: span 2;
+  grid-template-rows: subgrid;
+  gap: var(--field-gap);
+  min-width: 0;
+  font-size: var(--text-size-label);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.experiment-form__field--rule {
+  grid-column: span 2;
+}
+
+.experiment-form .ui-input,
+.experiment-form .ui-select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.experiment-form__field > .ui-input,
+.experiment-form__field > .ui-select {
+  width: 100%;
+}
+
+.experiment-form .experiment-form__constraints {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.experiment-form__constraint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.experiment-form__constraint > .ui-input,
+.experiment-form__constraint > .ui-select {
+  flex: 1 1 calc(var(--space-7) * 3);
+}
+
+.experiment-form__constraints > .ui-button {
+  justify-self: start;
+}
+
+@media (max-width: 767px) {
+  .experiment-form {
+    padding: var(--space-4);
+  }
+
+  .experiment-form .experiment-form__split {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-3);
+  }
+
+  .experiment-form__field--rule {
+    grid-column: auto;
+  }
+
+  .experiment-form__constraint > .ui-input,
+  .experiment-form__constraint > .ui-select,
+  .experiment-form__constraint > .ui-button {
+    flex-basis: 100%;
+    width: 100%;
+  }
+}
+
+/* 표 전체의 최소 폭은 내부 스크롤에만 적용하고 페이지 폭은 늘리지 않는다. */
+.experiment-form .data-list-page__table {
+  min-width: calc(var(--space-7) * 12);
+}
+
+.experiment-form .data-list-page__table th {
+  white-space: nowrap;
+}
+
+.experiment-form .data-list-page__scroll:focus-visible {
+  outline-offset: calc(-1 * var(--focus-ring-offset));
+}
+
+.experiment-form__scroll-hint {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+/* 탐색 값은 칩으로 보인다(RD-09-A). */
+.experiment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.experiment-chips li {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+.experiment-form__rule-note {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+/* 시작 전 확인: 넓은 화면에서는 오른쪽 열에 고정해 값을 바꾸며 바로 본다(RD-09-A). */
+.experiment-form__summary {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.experiment-form__summary h2 {
+  margin: 0;
+  font-size: var(--text-size-subsection);
+}
+
+.experiment-form__summary > p {
+  margin: 0;
+}
+
+@media (min-width: 1200px) {
+  .experiment-form {
+    grid-template-columns: minmax(0, 1fr) minmax(0, calc(var(--space-6) * 14));
+    grid-auto-flow: row dense;
+  }
+
+  .experiment-form > * {
+    grid-column: 1;
+  }
+
+  .experiment-form > .experiment-form__summary {
+    position: sticky;
+    top: var(--space-4);
+    grid-row: 1 / span 6;
+    grid-column: 2;
+    align-self: start;
+  }
+}
+
+.experiment-window {
+  display: grid;
+  gap: var(--space-1);
+  min-width: calc(var(--space-6) * 5);
+}
+
+.experiment-window__bar {
+  position: relative;
+  height: var(--space-3);
+  border-radius: var(--radius-small);
+  background: var(--surface-subtle);
+}
+
+.experiment-window__train,
+.experiment-window__test {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.experiment-window__train {
+  background: var(--accent-soft);
+}
+
+.experiment-window__test {
+  background: var(--accent);
+}
+
+.experiment-window small {
+  color: var(--text-muted);
+}

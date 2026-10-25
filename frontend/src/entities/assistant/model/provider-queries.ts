@@ -8,6 +8,7 @@ import {
 import {
   AssistantRequestError,
   assistantProviderApi,
+  type ProvidersView,
 } from "../../../shared/api";
 
 export const assistantProvidersKey = () => ["assistant", "providers"] as const;
@@ -27,6 +28,11 @@ export const assistantProvidersQuery = () =>
     queryKey: assistantProvidersKey(),
     queryFn: () => assistantProviderApi.listProviders(),
   });
+
+/** 쓸 수 있는(활성) 공급자가 하나라도 있는가. 사이드바 빈 상태와 화면의 기본 패널 선택이 같은 술어를 쓴다. */
+export const hasActiveAssistantProvider = (
+  providers: Pick<ProvidersView, "profiles">,
+): boolean => providers.profiles.some((profile) => profile.active);
 
 /**
  * 404는 이 화면이 모르는 사이에 프로파일이 사라졌다는 뜻이다 — 다른 탭·다른 기기에서 지웠을 때.
@@ -51,23 +57,38 @@ export const refreshIfProviderGone = (
  * `Mutation.state.variables`에 보관하고 그 mutation은 `MutationCache`에 남는다(관찰자가 살아 있는 동안
  * gc도 일어나지 않는다). 키를 싣는 호출은 `features/configure-ai-providers`의 plain async 명령이
  * `assistantProviderApi`를 직접 부르고, 키는 호출 인자로만 흐른다(B-01 리뷰 P1-1).
+ *
+ * `afterSuccess`는 성공 뒤 함께 새로 읽을 다른 조회다. entity끼리는 서로 import하지 않으므로 그 조회를
+ * 아는 feature가 넘긴다(저장 파일 문제 목록, 3차 SoT 리뷰 경미 3).
  */
-export const useActivateAssistantProvider = () => {
+export const useActivateAssistantProvider = (
+  afterSuccess?: (queryClient: QueryClient) => Promise<unknown>,
+) => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (profileId: string) =>
       assistantProviderApi.activateProvider(profileId),
-    onSuccess: () => refreshAssistantProviders(queryClient),
+    onSuccess: () =>
+      Promise.all([
+        refreshAssistantProviders(queryClient),
+        afterSuccess?.(queryClient),
+      ]),
     onError: (error) => refreshIfProviderGone(queryClient, error),
   });
 };
 
-export const useDeleteAssistantProvider = () => {
+export const useDeleteAssistantProvider = (
+  afterSuccess?: (queryClient: QueryClient) => Promise<unknown>,
+) => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (profileId: string) =>
       assistantProviderApi.deleteProvider(profileId),
-    onSuccess: () => refreshAssistantProviders(queryClient),
+    onSuccess: () =>
+      Promise.all([
+        refreshAssistantProviders(queryClient),
+        afterSuccess?.(queryClient),
+      ]),
     onError: (error) => refreshIfProviderGone(queryClient, error),
   });
 };

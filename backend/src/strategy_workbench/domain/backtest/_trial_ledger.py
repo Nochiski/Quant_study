@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
@@ -45,6 +45,11 @@ class TrialLedgerEntry:
     metric_registry_version: str | None = None
     # 실패한 실행의 분류. 파산이면 결과가 나온 실행으로 센다.
     error_code: RunFailureCode | None = None
+    # 처음 `running` 이 된 시각(`BacktestRunState.started_at`).
+    started_at: datetime | None = None
+    # 실행 구간(요청의 실행 설정 시작·끝, 양끝 포함). 실행 설정이 없는 옛 요청이면 없다.
+    start: date | None = None
+    end: date | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +71,10 @@ class TrialRun:
     role: TrialRunRole
     # 완료된 실행의 전체 구간 세션 샤프(연율화 전). 워크포워드 창 고르기의 학습 점수다.
     session_sharpe: float | None = None
+    # 완료된 실행의 계산 시간(초) — 접수 대기를 뺀 시작~완료. 시작 시각이 없으면 없다.
+    seconds: float | None = None
+    # 실행 구간의 달력 일수(양끝 포함). 시간 어림이 구간 길이로 늘려 쓴다.
+    span_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -162,12 +171,29 @@ def representative_sharpe(result: BacktestRunResult) -> float | None:
         ),
         None,
     )
-    return None if sharpe is None else session_sharpe(sharpe, result.manifest.annualization_days)
+    return (
+        None
+        if sharpe is None
+        else session_sharpe(sharpe, result.manifest.run_spec.annualization_days)
+    )
 
 
 def bankrupt(status: RunStatus, error_code: str | None) -> bool:
     """파산(전략이 자본을 다 잃어 엔진이 멈춤)으로 끝난 실행 — 실패지만 전략의 결과다(#383)."""
     return status is RunStatus.FAILED and error_code == "backtest.run.equity_wiped_out"
+
+
+def span_days(start: date, end: date) -> int:
+    """구간의 달력 일수(양끝 포함)."""
+    return (end - start).days + 1
+
+
+def _seconds(entry: TrialLedgerEntry) -> float | None:
+    """완료된 실행의 계산 시간. 완료 저장이 마지막 상태 전이라 `updated_at` 이 끝난 시각이다.
+    벽시계가 뒤로 돌아 음수가 되면 0 으로 둔다."""
+    if entry.status is not RunStatus.COMPLETED or entry.started_at is None:
+        return None
+    return max(0.0, (entry.updated_at - entry.started_at).total_seconds())
 
 
 def _has_result(entry: TrialLedgerEntry) -> bool:
@@ -197,6 +223,10 @@ def _group(trial_key: str, entries: list[TrialLedgerEntry]) -> TrialGroup:
                 entry.created_at,
                 _role(entry, first),
                 _score(entry),
+                _seconds(entry),
+                None
+                if entry.start is None or entry.end is None
+                else span_days(entry.start, entry.end),
             )
             for entry in entries
         ),
@@ -214,3 +244,30 @@ def _role(entry: TrialLedgerEntry, first: TrialLedgerEntry | None) -> TrialRunRo
     if entry.status in (RunStatus.CANCELLED, RunStatus.FAILED):
         return TrialRunRole.NO_RESULT
     return TrialRunRole.PENDING
+
+
+@dataclass(frozen=True)
+class ResolvedLineage:
+    """합치기 간선에서 해소한 생존 계열과 합쳐진 구성원."""
+
+    root: str
+    merged: tuple[str, ...]
+
+
+def lineage_root(merges: Mapping[str, str], lineage_id: str) -> str:
+    """합치기 사슬의 생존 계열. 순환 데이터는 무한 대기 대신 거절한다."""
+    visited: set[str] = set()
+    while lineage_id in merges:
+        if lineage_id in visited:
+            raise ValueError(f"lineage merge cycle — lineage_id={lineage_id}")
+        visited.add(lineage_id)
+        lineage_id = merges[lineage_id]
+    return lineage_id
+
+
+def resolve_lineage(merges: Mapping[str, str], lineage_id: str) -> ResolvedLineage:
+    """조회·다시 합치기는 같은 생존 계열을 따른다. 저장소는 간선만 제공한다(#332)."""
+    root = lineage_root(merges, lineage_id)
+    return ResolvedLineage(
+        root, tuple(source for source in merges if lineage_root(merges, source) == root)
+    )

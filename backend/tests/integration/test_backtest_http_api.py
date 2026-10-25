@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from threading import Event
 from typing import Any, NoReturn, cast
@@ -27,6 +29,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
 )
+from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
 from strategy_workbench.application.backtest_run.facade.ports import (
     ArtifactCommit,
     BacktestDataNotReadyError,
@@ -108,6 +111,7 @@ def _backtests_with_raw_load_barrier(
         LocalArtifactStore(tmp_path / "artifacts"),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
+        run_execution=ThreadRunExecution,
     )
     return backtests, barrier
 
@@ -224,14 +228,14 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
     assert state["status"] == "completed", state
     assert len(state["artifact_sha256"]) == 64
     result = client.get(f"/api/v1/backtests/{run_id}/result").json()
-    assert result["manifest"]["engine_core"] == "rust"
+    assert result["manifest"]["run_spec"]["core"] == "rust"
     assert len(result["manifest"]["run_fingerprint"]) == 64
     assert result["manifest"]["run_spec"]["strategy"] == _run_body(client)["strategy"]
     assert result["manifest"]["run_spec"]["benchmark_security_id"] == "sec-005930-1"
-    assert result["manifest"]["metric_registry_version"] == "metric-registry-v5"
+    assert result["manifest"]["metric_registry_version"] == "metric-registry-v6"
     assert {item["code"] for item in result["manifest"]["warnings"]} == {
-        "corporate_action_feed_empty",
-        "mock_equity_data",
+        "equity.corporate_action_feed_empty",
+        "equity.mock_data",
     }
     # 경고 문장은 backend가 한글로 완성한다(SoT 경고 문장 행, 이슈 #229).
     assert all(re.search("[가-힣]", item["message"]) for item in result["manifest"]["warnings"])
@@ -277,14 +281,16 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
     container = build_container(artifact_root=tmp_path / "unused")
     artifact_root = tmp_path / "artifacts"
     barrier = _CommitBarrierStore(LocalArtifactStore(artifact_root), first_run_id)
+    research_db = tmp_path / "research.sqlite3"
     backtests = BacktestRunService(
         container.portfolio_design,
         container.strategy_repository,
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         barrier,
-        run_repository=SQLiteBacktestRunRepository(),
+        run_repository=SQLiteBacktestRunRepository(research_db),
         new_id=lambda: next(run_ids),
+        run_execution=ThreadRunExecution,
     )
     client = TestClient(_app_with_backtests(container, backtests))
     submitted = _run_body(client, "python")
@@ -314,6 +320,15 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
     assert '"status":"cancel_requested"' in events
     assert '"status":"cancelled"' in events
     assert '"status":"completed"' not in events
+    # 취소가 이긴 run 에는 원장 대표 샤프도 목록 머리 지표도 남지 않는다(#581 리뷰). 계열 없는
+    # 초안이라 원장 조회로는 못 봐 저장소 파일을 읽는다.
+    assert client.get(f"/api/v1/backtests/{first_run_id}/summary").json()["headline"] is None
+    with closing(sqlite3.connect(research_db)) as connection:
+        assert connection.execute(
+            "SELECT session_sharpe FROM trial_ledger JOIN backtest_runs USING (accepted_order) "
+            "WHERE run_id = ?",
+            (first_run_id,),
+        ).fetchone() == (None,)
 
     # Reuse the server-serialized accepted request bytes, not the original client draft.
     replay = client.post(
@@ -464,6 +479,7 @@ def test_cancel_first_observed_by_a_progress_callback_ends_cancelled(tmp_path: P
         LocalArtifactStore(tmp_path / "artifacts"),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
+        run_execution=ThreadRunExecution,
     )
     client = TestClient(_app_with_backtests(container, backtests))
 
@@ -590,6 +606,7 @@ def test_engine_incompatible_strategy_is_rejected_at_start_with_the_issue_list(
         LocalArtifactStore(tmp_path / "artifacts"),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "must-not-be-accepted",
+        run_execution=ThreadRunExecution,
     )
     client = TestClient(_app_with_backtests(container, backtests))
 
@@ -759,7 +776,7 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
             raise failure
 
     monkeypatch.setattr(
-        "strategy_workbench.application.backtest_run._service.Thread", _UnstartableThread
+        "strategy_workbench.adapters.outbound.run_thread._execution.Thread", _UnstartableThread
     )
     run_id = "run-thread-unstartable"
     container = build_container(artifact_root=tmp_path / "unused")
@@ -833,7 +850,7 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
     ],
 )
 def test_run_error_masks_server_paths_but_keeps_urls_and_units(raw: str, masked: str) -> None:
-    from strategy_workbench.application.backtest_run._service import _mask_paths
+    from strategy_workbench.application.backtest_run._computation import _mask_paths
 
     assert _mask_paths(raw) == masked
 
@@ -853,7 +870,7 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         PortfolioRawObservationInvalidDetail,
         PortfolioStrategyInvalidDetail,
     )
-    from strategy_workbench.application.backtest_run._service import (
+    from strategy_workbench.application.backtest_run._computation import (
         InvalidBacktestRunError,
         NoPositionsError,
         _failure_code,
@@ -881,8 +898,10 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         _failure_code(BacktestDataUnavailableError("x")),
         _failure_code(RuntimeError("x")),
     }
-    # `interrupted` 는 예외가 아니라 재시작 때 서비스가 닫으며 붙인다(검증 랩 spec D3).
-    assert produced == RUN_FAILURE_CODES - {"backtest.run.interrupted"}
+    # `interrupted` 는 예외가 아니라 재시작 때 서비스가 닫으며 붙인다(검증 랩 spec D3). worker 두
+    # 코드는 계산이 아니라 프로세스 전송의 감독이 붙인다(run-worker spec D5·D6).
+    transport = {"backtest.run.worker_exited", "backtest.run.worker_mismatch"}
+    assert produced == RUN_FAILURE_CODES - {"backtest.run.interrupted"} - transport
 
     def contract_code(detail_type: type) -> str:
         # future annotations 라 필드 타입이 문자열이다 — 평가해서 Literal 인자를 꺼낸다.
@@ -901,6 +920,7 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         "backtest.run.no_positions",
         "backtest.run.benchmark_unknown",
         "backtest.run.interrupted",
+        *transport,
     }
 
 
@@ -913,8 +933,8 @@ def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -
     assert rust["metrics"] == python["metrics"]
     assert rust["series"] == python["series"]
     assert rust["artifacts"] == python["artifacts"]
-    assert rust["manifest"]["engine_core"] == "rust"
-    assert python["manifest"]["engine_core"] == "python"
+    assert rust["manifest"]["run_spec"]["core"] == "rust"
+    assert python["manifest"]["run_spec"]["core"] == "python"
 
 
 def test_adjacent_metric_windows_chain_to_the_full_run_total_return() -> None:

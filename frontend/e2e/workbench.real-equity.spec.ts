@@ -27,6 +27,7 @@ import {
   GOLDEN,
   mustReplace,
   openEditor,
+  openRunSettingsGroup,
   replaceSource,
   requireData,
   runSettingsInputs,
@@ -147,6 +148,7 @@ test.describe("real equity data", () => {
     await fillRunEnvironment(page, {}, REAL_RUN_ENVIRONMENT);
     const settingsToggle = runSettingsInputs(page).toggle;
     await settingsToggle.click();
+    await openRunSettingsGroup(page, "고급 실행");
     await expect(page.getByRole("combobox", { name: "실행 core" })).toHaveValue("rust");
     await page
       .getByRole("textbox", { name: "벤치마크 종목 ID" })
@@ -187,10 +189,10 @@ test.describe("real equity data", () => {
     const runId = new URL(page.url()).pathname.split("/").at(-1)!;
     // tape 단계는 실데이터에서 수십 초 이상 이어지므로 run 페이지가 그 단계를 실제로 보여 주는지 본다.
     await expect(page.getByRole("status", { name: "실행 진행" })).toContainText(
-      "tape",
+      "전략 목표 계산",
       { timeout: 30_000 },
     );
-    // 실패하면 화면의 "오류 failed" 만으로는 원인을 알 수 없다 — 서버 run 상태의 error 를 단언 메시지에 싣는다.
+    // 실패하면 화면의 "오류 실패" 만으로는 원인을 알 수 없다 — 서버 run 상태의 error 를 단언 메시지에 싣는다.
     let finalState: BacktestRunState | undefined;
     await expect
       .poll(
@@ -207,7 +209,7 @@ test.describe("real equity data", () => {
     const terminal = requireData(finalState, "terminal backtest run state");
     expect(terminal.status, JSON.stringify(terminal.error)).toBe("completed");
     await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
-      "completed",
+      "완료",
       { timeout: 60_000 },
     );
     await expect(

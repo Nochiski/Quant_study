@@ -12,16 +12,26 @@ import {
   useExperimentPreview,
   type ExperimentRequest,
 } from "../../../entities/experiment";
-import { strategyDocumentQuery } from "../../../entities/strategy";
+import {
+  strategyDocumentQuery,
+  type StrategyDocument,
+} from "../../../entities/strategy";
 import { failureReason } from "../../../shared/api";
-import { t, tFill, type MessageKey } from "../../../shared/config";
-import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
-import { Button, FailureNotice } from "../../../shared/ui";
+import { t, tDuration, tFill, type MessageKey } from "../../../shared/config";
+import { Link, useNavigate, useRouterState, useSearch } from "../../../shared/lib/router";
+import { Badge, Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
+import { ConstraintEditor, type Constraint } from "./constraint-editor";
+import "./new-experiment-page.css";
 
 // 화면의 분할은 고르는 기준까지 늘 값이 있다. 기준이 빠진 기록은 처음 값(`INITIAL_SPLIT`)의 기준으로 채운다.
 type Split = Required<ExperimentRequest["split"]>;
 type Search = ExperimentRequest["search"];
+type SearchValue = NonNullable<Search[string]>[number];
+type Parameter = NonNullable<StrategyDocument["spec"]["parameters"]>[number];
+// 탐색하는 파라미터의 값 입력. 숫자 파라미터를 고쳐 적는 중이면 입력 원문, 선택지에서 고른 값·원 실험에서 받은
+// 값은 값 배열이다 — 받은 값을 글자로 왕복하지 않아 쉼표가 든 선택지도 그대로 다시 실린다(#518 리뷰 N1).
+type Entry = string | SearchValue[];
 type Rule = Split["selection_rule"];
 
 const RULES: Record<Rule, MessageKey> = {
@@ -42,6 +52,86 @@ const INITIAL_SPLIT: Split = {
   selection_rule: "neighbor_mean_sharpe_max",
 };
 
+/**
+ * 값 입력 글자 하나를 요청 값으로 옮긴다. 숫자 파라미터는 숫자로, 선택지는 같은 글자의 선택지 값으로 읽고,
+ * 읽지 못한 글자는 그대로 보내 허용 판정(`experiment.search.invalid_values`·`invalid_constraint`)을
+ * backend 에 맡긴다. 탐색 값과 제약 상수가 같은 규칙으로 읽힌다.
+ */
+const parseValue = (
+  token: string,
+  parameter: Parameter | undefined,
+): SearchValue => {
+  if (parameter?.kind === "choice")
+    return (
+      parameter.choices?.find((choice) => String(choice) === token) ?? token
+    );
+  const number = Number(token);
+  return token !== "" && Number.isFinite(number) ? number : token;
+};
+
+/**
+ * 값 입력을 요청 값으로 옮긴다. 원문은 쉼표로 나눠 숫자로 읽는다. 비면 null — backend 가 정의의 격자 값
+ * 전체를 편다.
+ */
+const searchValues = (entry: Entry): SearchValue[] | null => {
+  const values =
+    typeof entry === "string"
+      ? entry
+          .split(",")
+          .map((token) => token.trim())
+          .filter((token) => token !== "")
+          .map((token) => parseValue(token, undefined))
+      : entry;
+  return values.length === 0 ? null : values;
+};
+
+/** 탐색 값 입력 칸. 선택지는 목록에서 고르고(글자로 적지 않는다), 숫자는 쉼표로 적는다. */
+const ValuesInput = ({
+  parameter,
+  entry,
+  onChange,
+}: {
+  parameter: Parameter;
+  entry: Entry;
+  onChange: (entry: Entry) => void;
+}) => {
+  const label = `${t("experiments.new.valuesInput")}: ${parameter.parameter_id}`;
+  if (parameter.kind === "choice") {
+    const picked = typeof entry === "string" ? [] : entry;
+    return (
+      <select className="ui-select"
+        multiple
+        aria-label={label}
+        value={parameter.choices.flatMap((choice, index) =>
+          picked.includes(choice) ? [String(index)] : [],
+        )}
+        onChange={(event) =>
+          onChange(
+            Array.from(
+              event.target.selectedOptions,
+              (option) => parameter.choices[Number(option.value)]!,
+            ),
+          )
+        }
+      >
+        {parameter.choices.map((choice, index) => (
+          <option key={index} value={index}>
+            {String(choice)}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <input className="ui-input"
+      aria-label={label}
+      placeholder={t("experiments.new.valuesPlaceholder")}
+      value={typeof entry === "string" ? entry : entry.join(", ")}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+};
+
 /** 미리 계산·만들기 거절 문장. 코드 번역은 백테스트 거절과 같은 `backtest.error.<code>` 체계다. */
 const rejection = (error: unknown): string =>
   requestRejectionMessage(error, "experiments.new.failed");
@@ -57,9 +147,9 @@ const NumberField = ({
 }) => {
   const id = useId();
   return (
-    <span>
+    <span className="experiment-form__field">
       <label htmlFor={id}>{t(label)}</label>{" "}
-      <input
+      <input className="ui-input"
         id={id}
         type="number"
         value={value}
@@ -73,13 +163,24 @@ const Form = ({
   base,
   initialSearch,
   initialSplit,
+  initialConstraints = [],
 }: {
   base: BacktestRunSpec;
   initialSearch: Search;
   initialSplit: Split;
+  initialConstraints?: Constraint[];
 }) => {
   const navigate = useNavigate();
-  const [search, setSearch] = useState(initialSearch);
+  const scrollHintId = useId();
+  const summaryTitleId = useId();
+  // 탐색하는 파라미터 → 값 입력. 원 실험의 값은 받은 그대로 둔다.
+  const [entries, setEntries] = useState<Record<string, Entry>>(() =>
+    Object.fromEntries(
+      Object.entries(initialSearch).map(([id, values]) => [id, values ?? []]),
+    ),
+  );
+  const [constraints, setConstraints] =
+    useState<Constraint[]>(initialConstraints);
   const [split, setSplit] = useState(initialSplit);
   const source = base.strategy_source;
   const document = useQuery({
@@ -89,11 +190,50 @@ const Form = ({
     ),
     enabled: source?.kind === "saved_revision",
   });
+  const parameters = document.data?.spec.parameters ?? [];
+  const definitions = new Map<string, Parameter>(
+    parameters.map((parameter) => [parameter.parameter_id, parameter]),
+  );
+  const search: Search = Object.fromEntries(
+    Object.entries(entries).map(([id, entry]) => [id, searchValues(entry)]),
+  );
+  const explore = (id: string, on: boolean) => {
+    const next = { ...entries };
+    if (on) next[id] = [];
+    else {
+      delete next[id];
+      // 탐색을 끈 파라미터를 가리키는 제약은 함께 뺀다(남기면 backend 가 거절한다).
+      setConstraints(
+        constraints.filter(
+          (constraint) =>
+            constraint.left !== id && constraint.right_parameter !== id,
+        ),
+      );
+    }
+    setEntries(next);
+  };
   // 실험의 측정 창은 분할이 정하므로 기반 요청의 지표 창은 싣지 않는다(backend `experiment.base.invalid`).
+  // 제약은 있을 때만 싣는다 — 비어 있으면 곱집합 전체라 요청 모양을 바꾸지 않는다.
   const request: ExperimentRequest = {
     run: { ...base, metric_windows: [] },
     search,
     split,
+    ...(constraints.length > 0
+      ? {
+          // 상수는 입력 원문으로 들고 있다가(소수점 입력 중 "1." 이 1 로 접히지 않게) 왼쪽 파라미터 규칙으로 읽는다.
+          constraints: constraints.map((constraint) =>
+            constraint.right_parameter == null
+              ? {
+                  ...constraint,
+                  right_value: parseValue(
+                    String(constraint.right_value ?? "").trim(),
+                    definitions.get(constraint.left),
+                  ),
+                }
+              : constraint,
+          ),
+        }
+      : {}),
   };
   const preview = useExperimentPreview(request);
   const create = useCreateExperiment();
@@ -103,9 +243,8 @@ const Form = ({
       axis.values,
     ]),
   );
-  const parameters = document.data?.spec.parameters ?? [];
   return (
-    <div className="data-list-page__panel">
+    <div className="data-list-page__panel experiment-form">
       {/* 기반이 무엇인지 한 줄로 보인다 — 어떤 전략·리비전·연구 기간을 나눠 도는지(#402 리뷰 P2-2). */}
       {source?.kind === "saved_revision" && base.environment ? (
         <p>
@@ -117,7 +256,13 @@ const Form = ({
           })}
         </p>
       ) : null}
-      <div className="data-list-page__scroll">
+      <p className="experiment-form__scroll-hint" id={scrollHintId}>
+        {t("debugger.scroll.help")}
+      </p>
+      <div className="data-list-page__scroll"
+        role="region" tabIndex={0}
+        aria-label={t("experiments.new.space")} aria-describedby={scrollHintId}
+      >
         <table className="data-list-page__table">
           <caption>{t("experiments.new.space")}</caption>
           <thead>
@@ -125,35 +270,51 @@ const Form = ({
               <th scope="col">{t("experiments.new.explore")}</th>
               <th scope="col">{t("experiments.new.parameter")}</th>
               <th scope="col">{t("experiments.new.values")}</th>
+              <th scope="col">{t("experiments.new.valuesInput")}</th>
             </tr>
           </thead>
           <tbody>
             {parameters.map((parameter) => {
               const id = parameter.parameter_id;
               const values = axes.get(id);
+              const entry = id in entries ? entries[id] : undefined;
               return (
                 <tr key={id}>
                   <td>
                     <input
                       type="checkbox"
                       aria-label={`${t("experiments.new.explore")}: ${id}`}
-                      checked={id in search}
-                      onChange={(event) => {
-                        const next = { ...search };
-                        // 값을 정하지 않으면(null) backend 가 정의의 격자 값 전체를 편다.
-                        if (event.target.checked) next[id] = null;
-                        else delete next[id];
-                        setSearch(next);
-                      }}
+                      checked={id in entries}
+                      onChange={(event) => explore(id, event.target.checked)}
                     />
                   </td>
                   <td>
                     <code>{id}</code>
                   </td>
                   <td>
-                    {values === undefined
-                      ? "—"
-                      : `${values.join(", ")} (${values.length})`}
+                    {values === undefined ? (
+                      "—"
+                    ) : (
+                      <ul
+                        className="experiment-chips"
+                        aria-label={tFill("experiments.new.valueCount", { count: values.length })}
+                      >
+                        {values.map((value) => (
+                          <li key={String(value)}>{String(value)}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
+                  <td>
+                    {entry === undefined ? null : (
+                      <ValuesInput
+                        parameter={parameter}
+                        entry={entry}
+                        onChange={(next) =>
+                          setEntries({ ...entries, [id]: next })
+                        }
+                      />
+                    )}
                   </td>
                 </tr>
               );
@@ -161,21 +322,29 @@ const Form = ({
           </tbody>
         </table>
       </div>
-      <fieldset className="data-list-page__filter">
+      <ConstraintEditor
+        explored={Object.keys(entries)}
+        constraints={constraints}
+        onChange={setConstraints}
+      />
+      <fieldset className="data-list-page__filter experiment-form__split">
         <legend>{t("experiments.new.split")}</legend>
-        <select
-          aria-label={t("experiments.new.mode")}
-          value={split.mode}
-          onChange={(event) =>
-            setSplit({ ...split, mode: event.target.value as Split["mode"] })
-          }
-        >
-          {Object.entries(MODES).map(([value, label]) => (
-            <option key={value} value={value}>
-              {t(label)}
-            </option>
-          ))}
-        </select>
+        <label className="experiment-form__field">
+          <span>{t("experiments.new.mode")}</span>
+          <select className="ui-select"
+            aria-label={t("experiments.new.mode")}
+            value={split.mode}
+            onChange={(event) =>
+              setSplit({ ...split, mode: event.target.value as Split["mode"] })
+            }
+          >
+            {Object.entries(MODES).map(([value, label]) => (
+              <option key={value} value={value}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+        </label>
         <NumberField
           label="experiments.new.trainYears"
           value={split.train_years}
@@ -191,19 +360,28 @@ const Form = ({
           value={split.embargo_sessions}
           onChange={(value) => setSplit({ ...split, embargo_sessions: value })}
         />
-        <select
-          aria-label={t("experiments.new.rule")}
-          value={split.selection_rule}
-          onChange={(event) =>
-            setSplit({ ...split, selection_rule: event.target.value as Rule })
-          }
-        >
-          {Object.entries(RULES).map(([value, label]) => (
-            <option key={value} value={value}>
-              {t(label)}
-            </option>
-          ))}
-        </select>
+        <label className="experiment-form__field experiment-form__field--rule">
+          <span>{t("experiments.new.rule")}</span>
+          <select className="ui-select"
+            aria-label={t("experiments.new.rule")}
+            value={split.selection_rule}
+            onChange={(event) =>
+              setSplit({ ...split, selection_rule: event.target.value as Rule })
+            }
+          >
+            {Object.entries(RULES).map(([value, label]) => (
+              <option key={value} value={value}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+          {split.selection_rule === INITIAL_SPLIT.selection_rule ? (
+            <small className="experiment-form__rule-note">
+              <Badge tone="neutral">{t("experiments.new.default")}</Badge>{" "}
+              {t("experiments.new.rule.neighbor_mean_sharpe_max.why")}
+            </small>
+          ) : null}
+        </label>
       </fieldset>
       {preview.isError ? (
         <FailureNotice
@@ -214,7 +392,8 @@ const Form = ({
       ) : preview.data === undefined ? (
         <p role="status">{t("page.loading")}</p>
       ) : (
-        <>
+        <section className="experiment-form__summary" aria-labelledby={summaryTitleId}>
+          <h2 id={summaryTitleId}>{t("experiments.new.summary")}</h2>
           <p role="status" aria-label={t("experiments.new.summary")}>
             {tFill("experiments.new.counts", {
               combinations: preview.data.combination_count,
@@ -224,7 +403,19 @@ const Form = ({
               after: preview.data.trial_count_after,
             })}
           </p>
-          <div className="data-list-page__scroll">
+          {/* 어림은 backend 가 계열의 최근 완료 실행으로 낸다(로드맵 M6). 화면은 근거와 함께 그대로 보인다. */}
+          <p>
+            {preview.data.time_estimate
+              ? tFill("experiments.new.estimate", {
+                  total: tDuration(preview.data.time_estimate.total_seconds),
+                  samples: preview.data.time_estimate.sample_count,
+                })
+              : t("experiments.new.estimateUnknown")}
+          </p>
+          <div className="data-list-page__scroll"
+            role="region" tabIndex={0}
+            aria-label={t("experiments.new.windows")} aria-describedby={scrollHintId}
+          >
             <table className="data-list-page__table">
               <caption>{t("experiments.new.windows")}</caption>
               <thead>
@@ -232,10 +423,11 @@ const Form = ({
                   <th scope="col">{t("experiments.new.window")}</th>
                   <th scope="col">{t("experiments.new.train")}</th>
                   <th scope="col">{t("experiments.new.test")}</th>
+                  <th scope="col">{t("experiments.new.span")}</th>
                 </tr>
               </thead>
               <tbody>
-                {preview.data.design.windows.map((window, index) => (
+                {preview.data.design.windows.map((window, index, windows) => (
                   <tr key={index}>
                     <td>{index + 1}</td>
                     <td>
@@ -244,12 +436,15 @@ const Form = ({
                     <td>
                       {window.test_start} ~ {window.test_end}
                     </td>
+                    <td>
+                      <WindowBar window={window} windows={windows} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </>
+        </section>
       )}
       {create.isError ? (
         <FailureNotice
@@ -282,14 +477,62 @@ const Form = ({
  * 새 실험(검증 랩 V5-01, US-SM-14). 기반은 백테스트 실행(`run`) 하나의 요청이거나, 끝난 실험(`from`)의 기반·
  * 탐색 공간·분할이다. 조합·창·실행 수와 시도 수 변화는 backend 미리 계산이 정한다.
  */
+type DesignWindow = { train_start: string; train_end: string; test_start: string; test_end: string };
+
+const dayOf = (date: string) => Date.parse(`${date}T00:00:00Z`) / 86_400_000;
+
+/**
+ * 창 하나를 전체 기간 위의 막대로 보인다: 학습은 연한 칸, 검증은 진한 칸(RD-09-A). 날짜는 서버 설계 그대로이고
+ * 막대 위치만 화면이 정한다. 연도 문장을 함께 둬 막대를 읽지 못해도 같은 정보를 얻는다.
+ */
+const WindowBar = ({
+  window,
+  windows,
+}: {
+  window: DesignWindow;
+  windows: readonly DesignWindow[];
+}) => {
+  const start = Math.min(...windows.map((item) => dayOf(item.train_start)));
+  const end = Math.max(...windows.map((item) => dayOf(item.test_end)));
+  const span = Math.max(end - start, 1);
+  const at = (date: string) => ((dayOf(date) - start) / span) * 100;
+  return (
+    <span className="experiment-window">
+      <span className="experiment-window__bar" aria-hidden="true">
+        <span
+          className="experiment-window__train"
+          style={{ left: `${at(window.train_start)}%`, width: `${at(window.train_end) - at(window.train_start)}%` }}
+        />
+        <span
+          className="experiment-window__test"
+          style={{ left: `${at(window.test_start)}%`, width: `${at(window.test_end) - at(window.test_start)}%` }}
+        />
+      </span>
+      <small>
+        {tFill("experiments.new.spanText", {
+          train: `${window.train_start.slice(0, 4)}–${window.train_end.slice(0, 4)}`,
+          test: `${window.test_start.slice(0, 4)}–${window.test_end.slice(0, 4)}`,
+        })}
+      </small>
+    </span>
+  );
+};
+
 export const NewExperimentPage = () => {
   const { run, from } = useSearch({ from: "/research/experiments/new" });
+  const location = useRouterState({ select: state => state.location });
+  const historySeed = location.state.experimentSeed;
+  const entryKey = location.state.__TSR_key;
+  // URL로 지정한 기반을 우선하며 IDE 입력은 run/from이 없는 명시적 이동에서만 쓴다.
+  const seed = run === undefined && from === undefined ? historySeed : undefined;
   const request = useBacktestRequest(run ?? null);
   const origin = useQuery({
     ...experimentQuery(from ?? ""),
     enabled: from !== undefined,
   });
   const source = from !== undefined ? origin : request;
+  // 떠나는 화면이 목적지 entry key로 새 Form을 열어 불필요한 미리 계산을 보내지 않는다.
+  if (location.pathname !== "/research/experiments/new") return null;
   return (
     <section
       className="page data-list-page"
@@ -301,7 +544,13 @@ export const NewExperimentPage = () => {
           <p>{t("experiments.new.description")}</p>
         </div>
       </header>
-      {run === undefined && from === undefined ? (
+      {seed !== undefined ? (
+        <>
+          <p>{t("research.ide.received")}</p>
+          {/* Form 입력은 기반/방문 단위다. router가 부여한 entry key로만 새 입력 세션을 구분한다. */}
+          <Form key={`seed:${entryKey}`} base={seed} initialSearch={{}} initialSplit={INITIAL_SPLIT} />
+        </>
+      ) : run === undefined && from === undefined ? (
         <p className="page-state">
           {t("experiments.new.noBase")}{" "}
           <Link to="/research/backtests" search={{}}>
@@ -319,6 +568,7 @@ export const NewExperimentPage = () => {
         />
       ) : origin.data !== undefined ? (
         <Form
+          key={`from:${from}:${entryKey}`}
           base={origin.data.record.run}
           initialSearch={Object.fromEntries(
             origin.data.record.design.search.axes.map((axis) => [
@@ -327,9 +577,13 @@ export const NewExperimentPage = () => {
             ]),
           )}
           initialSplit={{ ...INITIAL_SPLIT, ...origin.data.record.split }}
+          initialConstraints={
+            origin.data.record.design.search.constraints ?? []
+          }
         />
       ) : request.data !== undefined ? (
         <Form
+          key={`run:${run}:${entryKey}`}
           base={request.data}
           initialSearch={{}}
           initialSplit={INITIAL_SPLIT}

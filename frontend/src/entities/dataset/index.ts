@@ -1,4 +1,4 @@
-export { datasetKeys, useDatasetCatalog } from "./model/dataset-queries";
+export { datasetKeys, useDatasetCatalog, useEquityUniverses } from "./model/dataset-queries";
 export {
   cellKindCopy,
   fieldFrequencyCopy,
@@ -7,4 +7,4 @@ export {
   type FieldFrequency,
   type FieldValueType,
 } from "./model/field-copy";
-export type { DatasetFieldProfile, ResearchCatalog } from "../../shared/api";
+export type { DatasetFieldProfile, ResearchCatalog, UniverseDefinition } from "../../shared/api";

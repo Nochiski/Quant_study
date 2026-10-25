@@ -17,14 +17,19 @@ EXPERIMENT_SPEC_CODES: frozenset[str] = frozenset(
         "experiment.search.unknown_parameter",
         "experiment.search.invalid_values",
         "experiment.search.too_many_points",
+        "experiment.search.invalid_constraint",
+        "experiment.search.no_feasible_point",
         "experiment.split.invalid",
         "experiment.split.no_window",
         "experiment.capacity.invalid_amounts",
         "experiment.capacity.base_not_run",
+        "experiment.robustness.period_too_short",
+        "experiment.robustness.too_many_parameters",
+        "experiment.robustness.not_single",
     }
 )
 EXPERIMENT_NOT_FOUND_CODES: frozenset[str] = frozenset(
-    {"experiment.not_found", "experiment.trial.not_found"}
+    {"experiment.not_found", "experiment.trial.not_found", "experiment.robustness.run_not_found"}
 )
 # 실험·trial 의 지금 상태로는 받을 수 없는 요청이다.
 EXPERIMENT_STATE_CODES: frozenset[str] = frozenset(
@@ -34,6 +39,7 @@ EXPERIMENT_STATE_CODES: frozenset[str] = frozenset(
         "experiment.selection.not_finished",
         "experiment.kind.mismatch",
         "experiment.cancel.completed",
+        "experiment.robustness.running",
     }
 )
 EXPERIMENT_CODES = EXPERIMENT_SPEC_CODES | EXPERIMENT_NOT_FOUND_CODES | EXPERIMENT_STATE_CODES

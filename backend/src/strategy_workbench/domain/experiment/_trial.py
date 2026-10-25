@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -99,6 +100,11 @@ def trial_status(
     return _RUN_TRIAL_STATUSES[latest_run]
 
 
+def settled(status: TrialStatus | RunStatus, *, recovering: bool) -> bool:
+    """끝났고 재시작 복구를 기다리지 않는다. trial과 검증 실행의 종결 판정이 같은 규칙을 쓴다."""
+    return status.is_terminal and not recovering
+
+
 def awaiting_recovery(latest_run: BacktestRunState | None) -> bool:
     """최신 실행이 재시작으로 중단됐다 — 복구가 새 attempt 를 넘길 때까지 실험은 끝나지
     않는다(spec D6).
@@ -131,3 +137,26 @@ def experiment_status(
     if all(status is TrialStatus.QUEUED for status in trials):
         return ExperimentStatus.QUEUED
     return ExperimentStatus.RUNNING
+
+
+# HTTP도 이 검증 함수를 호출한다. 정규식 엔진마다 다른 공백 의미를 복제하지 않는다.
+_SELECTION_REASON_PATTERN = r"\S"
+
+
+def validate_selection_reason(reason: str) -> str:
+    if re.search(_SELECTION_REASON_PATTERN, reason) is None:
+        raise ValueError("selection reason must contain a non-whitespace character")
+    return reason
+
+
+def experiment_settled(
+    status: ExperimentStatus,
+    trials: Sequence[TrialStatus],
+    validation_runs: Sequence[RunStatus],
+) -> bool:
+    """진행을 더 볼 실행이 없다. 취소한 실험도 도는 학습·검증 실행을 기다린다."""
+    return (
+        status.is_terminal
+        and all(trial.is_terminal for trial in trials)
+        and all(run.is_terminal for run in validation_runs)
+    )

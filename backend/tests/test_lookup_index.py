@@ -13,6 +13,7 @@ from backtest_engine.types.instruments import AssetClass, InstrumentId
 from backtest_engine.types.market import Bar, MarketSnapshot, PriceField
 from backtest_engine.types.portfolio import PortfolioSnapshot, Position
 from backtest_engine.types.requirements import HistoryRequest
+from tests.rust_core_guard import RUST_CORE
 
 TS = datetime(2024, 1, 2, tzinfo=UTC)
 
@@ -88,14 +89,12 @@ def test_history_store_keeps_session_alignment_per_instrument() -> None:
     assert window.values[0, 1] != window.values[0, 1]  # B는 첫 세션 결측 → NaN
 
 
-@pytest.mark.parametrize("core_name", ["python", "rust_legacy"])
+@pytest.mark.parametrize("core_name", ["python", pytest.param("rust_legacy", marks=RUST_CORE)])
 def test_portfolio_snapshot_is_reused_until_state_changes(core_name: str) -> None:
-    from backtest_engine.engine.core import core_available, make_portfolio
+    from backtest_engine.engine.core import make_portfolio
     from backtest_engine.types.events import FillEvent
     from backtest_engine.types.orders import Side
 
-    if core_name == "rust_legacy" and not core_available("rust_legacy"):
-        pytest.skip("rust core not built")
     portfolio = make_portfolio(core_name, 1_000.0, allow_short=False, allow_margin=False)
     bars = MarketSnapshot(ts=TS, bars=(_bar("A", 10.0),))
     portfolio.mark(bars)
@@ -171,14 +170,12 @@ def test_portfolio_snapshot_rejects_duplicate_instruments() -> None:
         )
 
 
-@pytest.mark.parametrize("core_name", ["python", "rust_legacy"])
+@pytest.mark.parametrize("core_name", ["python", pytest.param("rust_legacy", marks=RUST_CORE)])
 def test_portfolio_snapshot_memo_is_cleared_by_every_mutator(core_name: str) -> None:
-    from backtest_engine.engine.core import core_available, make_portfolio
+    from backtest_engine.engine.core import make_portfolio
     from backtest_engine.types.events import CostAccrued, CostKind, FillEvent
     from backtest_engine.types.orders import Side
 
-    if core_name == "rust_legacy" and not core_available("rust_legacy"):
-        pytest.skip("rust core not built")
     portfolio = make_portfolio(core_name, 1_000.0, allow_short=False, allow_margin=False)
     portfolio.mark(MarketSnapshot(ts=TS, bars=(_bar("A", 10.0),)))
     portfolio.apply(

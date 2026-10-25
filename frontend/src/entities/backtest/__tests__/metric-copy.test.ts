@@ -4,7 +4,7 @@ import type { MetricValue } from "../../../shared/api";
 import { messages, type MessageKey } from "../../../shared/config";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
-  HIGHLIGHTED_METRIC_IDS,
+  RESULT_LAYOUT_METRIC_IDS,
   metricPlainCopy,
   metricUnavailableCopy,
 } from "../model/metric-copy";
@@ -25,9 +25,9 @@ describe("지표 쉬운 이름·뜻", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
-  it("결과 화면 강조 지표는 모두 registry id 다", () => {
-    // 없는 id 는 강조 칸에서 조용히 빠진다 — registry id 가 바뀌면 여기서 깨진다(#362 DR-B-09)
-    expect(HIGHLIGHTED_METRIC_IDS.filter((id) => !ids.includes(id))).toEqual(
+  it("결과 화면 요약·두 축 카드 지표는 모두 registry id 다", () => {
+    // 없는 id 는 카드에서 조용히 빠진다 — registry id 가 바뀌면 여기서 깨진다(#362 DR-B-09)
+    expect(RESULT_LAYOUT_METRIC_IDS.filter((id) => !ids.includes(id))).toEqual(
       [],
     );
   });

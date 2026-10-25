@@ -28,7 +28,7 @@
   overflow: auto;
   border-radius: var(--radius-medium);
   background: var(--surface-panel);
-  font-size: 12px;
+  font-size: var(--text-size-small);
 }
 
 .recovery__actions {

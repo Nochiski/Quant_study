@@ -1,3 +1,4 @@
+import { runEnvironmentFields, runEnvironmentApplies } from "../../../entities/backtest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -24,17 +25,16 @@ import {
   vi,
 } from "vitest";
 
-import type { BacktestRunSpec, RunEnvironment } from "../../../shared/api";
+import { ApiRequestError, type BacktestRunSpec, type RunEnvironment } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
   initialRunEnvironmentValues,
-  runEnvironmentFields,
   validateRunEnvironment,
   type RunEnvironmentValidation,
 } from "../model/run-environment";
 import {
   buildBacktestRunOptions,
-  DEFAULT_BACKTEST_RUN_SETTINGS,
+  initialBacktestRunSettings,
 } from "../model/run-settings";
 import { runFieldLabel } from "../model/run-settings-problems";
 import {
@@ -69,7 +69,18 @@ const acceptedRequest: BacktestRunSpec = {
 
 let cancelledRun: string | null = null;
 let replayedRequest: BacktestRunSpec | null = null;
+/** 연결된 시장 데이터가 답하는 유니버스 목록(기본 핸들러). 패널의 유니버스 칸은 이 목록의 드롭다운이다. */
+const UNIVERSE_LIST = [
+  {
+    universe_id: "krx.common-stock",
+    market: "KRX",
+    label: "KRX 보통주",
+    description: "KRX 상장 보통주입니다. 기준일마다 그날 상장돼 있던 종목으로 후보를 다시 고릅니다.",
+  },
+];
+
 const server = setupServer(
+  http.get(`${API}/api/v1/equity/universes`, () => HttpResponse.json(UNIVERSE_LIST)),
   http.post(`${API}/api/v1/backtests/:runId/cancel`, ({ params }) => {
     cancelledRun = String(params.runId);
     return HttpResponse.json({
@@ -122,29 +133,28 @@ const renderWithQuery = (ui: ReactElement) => {
 };
 
 /** backend 가 만든 실행 설정 스키마 사본(`tools/export_runtime_schema.py`). */
+const RUN_OPTIONS_SCHEMA = JSON.parse(readBackendFixture("strategy_documents/run-options-schema.json")) as Record<string, unknown>;
 const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/run-environment-schema.json"),
 ) as Record<string, unknown>;
+
+const DEFAULT_BACKTEST_RUN_SETTINGS = initialBacktestRunSettings(RUN_OPTIONS_SCHEMA);
 
 /**
  * 기본값에 기간·유니버스를 채운 패널이 싣는 실행 설정. 가격 충격 계수·직접 입력 세율은 고정 bp·법정 세율에서
  * 읽히지 않아(스키마 `x-applicable-when`, #352) 싣지 않는다.
  */
-const ENVIRONMENT: RunEnvironment = {
-  market: "KRX",
-  frequency: "daily",
+const defaultFields = runEnvironmentFields(RUN_ENVIRONMENT_SCHEMA);
+const environmentProperties = RUN_ENVIRONMENT_SCHEMA.properties as Record<string, { default?: unknown }>;
+const defaultEnvironment = Object.fromEntries(Object.entries(environmentProperties).map(([name, node]) => [name, node.default]));
+const ENVIRONMENT = {
+  ...Object.fromEntries(defaultFields
+    .filter((field) => defaultEnvironment[field.name] != null && runEnvironmentApplies(field, defaultEnvironment))
+    .map((field) => [field.name, defaultEnvironment[field.name]])),
   start: "2021-01-01",
   end: "2026-08-31",
   universe_id: "krx.common-stock",
-  timing: "next_open",
-  participation_rate: 0.1,
-  participation_basis: "adv20",
-  fee_bps: 15,
-  slippage_bps: 10,
-  impact_model: "fixed_bps",
-  sell_tax: "krx_statutory",
-  missing: "drop",
-};
+} as RunEnvironment;
 
 const VALID: RunEnvironmentValidation = {
   valid: true,
@@ -161,7 +171,7 @@ const INCOMPLETE: RunEnvironmentValidation = {
 
 let servedSchema: Record<string, unknown> = RUN_ENVIRONMENT_SCHEMA;
 const schemaHandler = http.get(`${API}/api/v1/run-environments/schema`, () =>
-  HttpResponse.json({ schema_hash: "h", schema: servedSchema }),
+  HttpResponse.json({ schema_hash: "h", schema: servedSchema, options_schema: RUN_OPTIONS_SCHEMA }),
 );
 
 const Harness = ({
@@ -192,10 +202,18 @@ const Harness = ({
   );
 };
 
-const openSettings = async () => {
+const openSettings = async (expandGroups = true) => {
   const user = userEvent.setup();
   await user.click(screen.getByLabelText("실행 설정 열기"));
-  await screen.findByRole("textbox", { name: "유니버스" });
+  // 유니버스 드롭다운이 목록을 받을 때까지 기다린다(불러오는 동안은 aria-busy).
+  const universe = await screen.findByRole("combobox", { name: "유니버스" });
+  await waitFor(() => expect(universe).not.toHaveAttribute("aria-busy"));
+  if (expandGroups) {
+    for (const label of ["비용", "고급 실행"]) {
+      const summary = screen.getByLabelText(label, { selector: "summary" });
+      if (!summary.closest("details")?.open) await user.click(summary);
+    }
+  }
   return user;
 };
 
@@ -210,8 +228,8 @@ const fillPeriodAndUniverse = async (
 ) => {
   await user.type(screen.getByLabelText(/^시작일/), "2021-01-01");
   await user.type(screen.getByLabelText(/^종료일/), "2026-08-31");
-  await user.type(
-    screen.getByRole("textbox", { name: "유니버스" }),
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "유니버스" }),
     "krx.common-stock",
   );
 };
@@ -463,9 +481,11 @@ describe("run environment panel", () => {
       "drop",
     );
     expect(screen.getByLabelText(/^시작일/)).toHaveValue("");
-    expect(screen.getByRole("textbox", { name: "유니버스" })).toHaveValue("");
+    expect(screen.getByRole("combobox", { name: "유니버스" })).toHaveValue("");
     expect(screen.getAllByText("값을 정하세요.")).toHaveLength(3);
-    expect(screen.getByText("입력 확인")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("실행 설정 열기")).getByText("입력 확인")).toBeInTheDocument();
+    // 상태 배지는 지금 상태 문장 하나만 텍스트로 갖는다(반대 문장은 폭 자리표시로만 있다).
+    expect(within(screen.getByLabelText("실행 설정 열기")).queryByText("준비됨")).toBeNull();
     expect(requestBody()).toBeNull();
     // 차단 안내와 요약 띠가 "어느 칸을 채우라"를 칸 이름으로 말한다(P3-02 결정 1 보충).
     expect(
@@ -474,6 +494,46 @@ describe("run environment panel", () => {
     expect(screen.getByTestId("blocked")).toHaveTextContent(
       "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
     );
+  });
+
+  it("처음에는 기간·종목 범위만 펼치고 비용·고급의 현재 값을 요약한다", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings(false);
+    expect(screen.getByLabelText(/^시작일/)).toBeVisible();
+    expect(screen.getByLabelText(/^종료일/)).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "유니버스" })).toBeVisible();
+    expect(screen.getByRole("spinbutton", { name: /수수료/ })).not.toBeVisible();
+    expect(screen.getByRole("combobox", { name: "실행 core" })).not.toBeVisible();
+    const costs = screen.getByLabelText("비용", { selector: "summary" });
+    expect(costs).toHaveAccessibleDescription(/수수료: 15bp/);
+
+    await fillPeriodAndUniverse(user);
+    const request = requestBody();
+    await user.click(costs);
+    expect(screen.getByRole("spinbutton", { name: /수수료/ })).toHaveValue(15);
+    await user.click(costs);
+    const advanced = screen.getByLabelText("고급 실행", { selector: "summary" });
+    await user.click(advanced);
+    expect(screen.getByRole("combobox", { name: "실행 core" })).toBeVisible();
+    await user.click(advanced);
+    expect(requestBody()).toEqual(request);
+  });
+
+  it("기본값 그대로인 묶음에 기본값 배지를 달고, 값을 바꾸면 배지를 뗀다(RD-05-A)", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings(false);
+    const costs = screen.getByLabelText("비용", { selector: "summary" });
+    const advanced = screen.getByLabelText("고급 실행", { selector: "summary" });
+    expect(within(costs).getByText("기본값")).toBeInTheDocument();
+    expect(within(advanced).getByText("기본값")).toBeInTheDocument();
+
+    await user.click(costs);
+    const fee = screen.getByRole("spinbutton", { name: /수수료/ });
+    await user.clear(fee);
+    await user.type(fee, "20");
+    expect(within(costs).queryByText("기본값")).toBeNull();
+    expect(costs).toHaveAccessibleDescription(/수수료: 20bp/);
+    expect(within(advanced).getByText("기본값")).toBeInTheDocument();
   });
 
   // #357 C-P3-16: 실행 계획 설명은 결측 정책 칸만 따로 싣는다. 기간·유니버스가 비었다고 기본 정책의
@@ -492,6 +552,42 @@ describe("run environment panel", () => {
 
     expect(result.current.missing).toBe("zero");
     expect(result.current.environment).toBeNull();
+  });
+
+  it("설정 밖으로 이동하면 패널을 닫고 외부 초점을 유지한다", async () => {
+    renderWithQuery(<Harness />);
+    await openSettings();
+    const field = screen.getByRole("combobox", { name: "유니버스" });
+    const outside = screen.getByRole("button", { name: "apply upgraded environment" });
+    act(() => field.focus());
+    act(() => outside.focus());
+    expect(field).not.toBeVisible();
+    expect(outside).toHaveFocus();
+    expect(screen.getByLabelText("실행 설정 열기").closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("설정 내부와 summary로 초점을 옮길 때는 열린 상태를 유지한다", async () => {
+    renderWithQuery(<Harness />);
+    await openSettings();
+    const field = screen.getByRole("combobox", { name: "유니버스" });
+    const close = screen.getByRole("button", { name: "실행 설정 닫기" });
+    const summary = screen.getByLabelText("실행 설정 열기");
+    act(() => field.focus());
+    act(() => close.focus());
+    expect(field).toBeVisible();
+    act(() => summary.focus());
+    expect(field).toBeVisible();
+    expect(summary).toHaveFocus();
+  });
+
+  it("다음 초점이 없는 네이티브 선택창·창 이탈은 패널을 닫지 않는다", async () => {
+    renderWithQuery(<Harness />);
+    await openSettings();
+    const field = screen.getByRole("combobox", { name: "유니버스" });
+    act(() => field.focus());
+    fireEvent.blur(field, { relatedTarget: null });
+    expect(field).toBeVisible();
+    expect(screen.getByLabelText("실행 설정 열기").closest("details")).toHaveAttribute("open");
   });
 
   it("opens the panel at the first empty field from the summary band", async () => {
@@ -517,14 +613,16 @@ describe("run environment panel", () => {
     );
 
     await user.type(screen.getByLabelText(/^종료일/), "2026-08-31");
-    await user.type(
-      screen.getByRole("textbox", { name: "유니버스" }),
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "유니버스" }),
       "krx.common-stock",
     );
     expect(
       screen.queryByRole("button", { name: "실행 설정 채우기" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("blocked")).toBeEmptyDOMElement();
+    expect(band).toHaveTextContent("15bp");
+    expect(band).toHaveTextContent("10%");
   });
 
   // DEFECT-242-01: 기간·유니버스를 정한 뒤 다른 칸의 값이 틀리면, 차단 문장이 그 칸 이름과 이유를 말하고
@@ -536,6 +634,10 @@ describe("run environment panel", () => {
     const fee = screen.getByRole("spinbutton", { name: /수수료/ });
     await user.clear(fee);
     await user.type(fee, "-1");
+    const costs = screen.getByLabelText("비용", { selector: "summary" });
+    await user.click(costs);
+    expect(costs).toHaveAccessibleDescription(/입력 확인/);
+    expect(screen.getByRole("spinbutton", { name: /수수료/ })).not.toBeVisible();
     await user.click(screen.getByLabelText("실행 설정 열기"));
 
     const reason = "실행 설정의 수수료 칸을 고치세요: 0bp 이상이어야 합니다.";
@@ -580,6 +682,9 @@ describe("run environment panel", () => {
     const user = await openSettings();
     await fillPeriodAndUniverse(user);
     await user.type(screen.getByLabelText(/^OOS 시작일/), "2020-12-31");
+    const advanced = screen.getByLabelText("고급 실행", { selector: "summary" });
+    await user.click(advanced);
+    expect(advanced).toHaveAccessibleDescription(/입력 확인/);
     await user.click(screen.getByLabelText("실행 설정 열기"));
 
     const band = screen.getByRole("region", { name: "실행 설정 요약" });
@@ -627,7 +732,9 @@ describe("run environment panel", () => {
 
     await user.selectOptions(method, "custom");
     expect(rate).toBeEnabled();
-    expect(screen.getByText("입력 확인")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("실행 설정 열기")).getByText("입력 확인")).toBeInTheDocument();
+    // 상태 배지는 지금 상태 문장 하나만 텍스트로 갖는다(반대 문장은 폭 자리표시로만 있다).
+    expect(within(screen.getByLabelText("실행 설정 열기")).queryByText("준비됨")).toBeNull();
     expect(screen.getByTestId("blocked")).toHaveTextContent(
       "실행 설정에서 매도 거래세율 칸을 채우세요.",
     );
@@ -644,6 +751,7 @@ describe("run environment panel", () => {
     expect(rate).toBeDisabled();
     expect(rate).toHaveValue(12);
     expect(screen.getByText("준비됨")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("실행 설정 열기")).queryByText("입력 확인")).toBeNull();
     expect(requestBody()?.environment).toEqual(ENVIRONMENT);
   });
 
@@ -687,7 +795,7 @@ describe("run environment panel", () => {
         await gate;
         return HttpResponse.json({
           schema_hash: "h",
-          schema: RUN_ENVIRONMENT_SCHEMA,
+          options_schema: RUN_OPTIONS_SCHEMA, schema: RUN_ENVIRONMENT_SCHEMA,
         });
       }),
     );
@@ -819,9 +927,10 @@ describe("run environment panel", () => {
     await fillPeriodAndUniverse(user);
 
     expect(requestBody()?.environment).toEqual(ENVIRONMENT);
+    // 요약 띠는 유니버스를 연결된 시장 데이터가 답한 표시명과 실제 id 로 함께 읽는다.
     expect(
       screen.getByRole("region", { name: "실행 설정 요약" }),
-    ).toHaveTextContent("krx.common-stock");
+    ).toHaveTextContent("유니버스KRX 보통주 (krx.common-stock)");
 
     const participation = screen.getByRole("spinbutton", { name: /참여율/ });
     await user.clear(participation);
@@ -967,7 +1076,7 @@ describe("run environment panel", () => {
 
     renderWithQuery(<Harness storageKey="strategy-1" />);
     await openSettings();
-    expect(screen.getByRole("textbox", { name: "유니버스" })).toHaveValue(
+    expect(screen.getByRole("combobox", { name: "유니버스" })).toHaveValue(
       "krx.common-stock",
     );
     cleanup();
@@ -1099,6 +1208,8 @@ describe("run environment panel", () => {
     );
 
     expect(requestBody()?.environment).toEqual({ ...ENVIRONMENT, fee_bps: 5 });
+    // 외부 문서 행동으로 초점이 이동하면 설정이 닫히므로 다시 열어 적용된 값을 확인한다.
+    await openSettings();
     expect(screen.getByRole("spinbutton", { name: /수수료/ })).toHaveValue(5);
   });
 
@@ -1174,28 +1285,18 @@ describe("run environment panel", () => {
         </QueryClientProvider>
       ),
     });
+    const rejection = (code: string, values: Record<string, string>) =>
+      new ApiRequestError("startBacktest", 422, code, "rejected", null, null, undefined, undefined, values);
     const researchStart = { research_start: "2020-01-02" };
-
-    expect(
-      result.current.rejectionFix(
-        "backtest.run.research_window_violation",
-        researchStart,
-      )?.label,
-    ).toBe("시작일을 2020-01-02로");
-    expect(
-      result.current.rejectionFix(
-        "backtest.strategy.requires_upgrade",
-        researchStart,
-      ),
-    ).toBeNull();
-    expect(
-      result.current.rejectionFix("backtest.run.research_window_violation", {}),
-    ).toBeNull();
-    expect(result.current.rejectionFix(null, researchStart)).toBeNull();
+    expect(result.current.rejectionFix(rejection("backtest.run.research_window_violation", researchStart))?.label)
+      .toBe("시작일을 2020-01-02로");
+    expect(result.current.rejectionFix(rejection("backtest.strategy.requires_upgrade", researchStart))).toBeNull();
+    expect(result.current.rejectionFix(rejection("backtest.run.research_window_violation", {}))).toBeNull();
+    expect(result.current.rejectionFix(new Error("network"))).toBeNull();
   });
 
   // 봉인 겹침처럼 미리 계산이 거절되면 줄을 그리지 않는다 — 같은 거절은 실행 버튼이 이유·교정과 함께 보인다.
-  it("draws no trial line when the preview is rejected", async () => {
+  it("leaves the reserved trial line empty when the preview is rejected", async () => {
     let asked = 0;
     server.use(
       http.post(`${API}/api/v1/backtests/trial-preview`, () => {
@@ -1218,7 +1319,130 @@ describe("run environment panel", () => {
     await openSettings();
 
     await waitFor(() => expect(asked).toBe(1));
-    expect(screen.queryByRole("status", { name: "시도 영향" })).toBeNull();
+    // 자리는 늘 두되(높이 예약) 거절된 요청의 문장은 쓰지 않는다 — 실행 버튼이 같은 거절을 이유와 함께 보인다.
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "시도 영향" }).textContent).toBe(""),
+    );
+  });
+
+  // 칸을 한 글자 고칠 때마다 요청이 바뀐다. 새 답을 기다리는 동안 문단이 사라지면 패널이 출렁이므로 직전 답을
+  // 흐리게 남겨 둔다(레이아웃 흔들림 수정).
+  it("keeps the previous trial verdict while the next request is still being asked", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(`${API}/api/v1/backtests/trial-preview`, async ({ request }) => {
+        const body = (await request.json()) as BacktestRunSpec;
+        if (body.initial_cash !== acceptedRequest.initial_cash) await gate;
+        return HttpResponse.json({
+          lineage_id: "strategy-1",
+          trial_key: "k",
+          trial_count: body.initial_cash === acceptedRequest.initial_cash ? 2 : 5,
+          new_trial: false,
+          trial_count_after: body.initial_cash === acceptedRequest.initial_cash ? 2 : 5,
+          reason: "recheck",
+        });
+      }),
+    );
+    const view = renderWithQuery(<Harness request={acceptedRequest} />);
+    await openSettings();
+    const line = await screen.findByRole("status", { name: "시도 영향" });
+    await waitFor(() => expect(line).toHaveTextContent("2회 그대로"));
+
+    view.rerender(<Harness request={{ ...acceptedRequest, initial_cash: 1 }} />);
+
+    // 새 답이 오기 전: 문장은 그대로, 옛 답임을 표시한다.
+    // 새 답이 오기 전: 직전 답을 남기되 "갱신 중"을 앞에 붙여 옛 답임을 보이고 읽힌다.
+    expect(screen.getByRole("status", { name: "시도 영향" })).toHaveTextContent(
+      /^갱신 중 · 직전 답: .*2회 그대로/u,
+    );
+    expect(screen.getByRole("status", { name: "시도 영향" })).toHaveAttribute("aria-busy", "true");
+    release();
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "시도 영향" })).toHaveTextContent("5회 그대로"),
+    );
+    expect(screen.getByRole("status", { name: "시도 영향" })).not.toHaveAttribute("aria-busy");
+    expect(screen.getByRole("status", { name: "시도 영향" })).not.toHaveTextContent("갱신 중");
+
+    // 설정이 다시 덜 채워져 물을 요청이 없어지면 남은 직전 답의 "갱신 중"도 쓰지 않는다.
+    view.rerender(<Harness request={null} />);
+    const pending = screen.getByRole("status", { name: "시도 영향" });
+    expect(pending).toHaveTextContent(
+      "실행 설정을 다 채우면 이 실행이 시도 수에 어떻게 들어가는지 여기 보입니다.",
+    );
+    expect(pending).not.toHaveAttribute("aria-busy");
+    expect(pending).not.toHaveAttribute("data-stale");
+  });
+
+  it("says what the reserved trial line will show while there is no run request yet", async () => {
+    renderWithQuery(<Harness request={null} />);
+    await openSettings();
+
+    expect(screen.getByRole("status", { name: "시도 영향" })).toHaveTextContent(
+      "실행 설정을 다 채우면 이 실행이 시도 수에 어떻게 들어가는지 여기 보입니다.",
+    );
+  });
+
+  it("reserves an empty error line under each run field so typing never pushes the fields below", async () => {
+    renderWithQuery(<Harness />);
+    await openSettings();
+
+    await screen.findByLabelText("시작일");
+    const fields = Array.from(document.querySelectorAll(".backtest-settings__field"));
+    expect(fields.length).toBeGreaterThan(0);
+    for (const field of fields) {
+      const input = field.querySelector("input, select");
+      const errorLine = field.querySelector(".backtest-settings__field-error");
+      // 오류가 있든 없든 줄은 늘 있다. 오류가 없으면 비어 있고 보조 기술에는 읽히지 않는다.
+      expect(errorLine).not.toBeNull();
+      if (input?.getAttribute("aria-invalid") !== "true") {
+        expect(errorLine?.textContent).toBe("");
+        expect(errorLine).toHaveAttribute("aria-hidden", "true");
+      }
+    }
+  });
+
+  it("실행 옵션 기본값과 코어 목록은 서버 스키마 변경을 그대로 따른다", async () => {
+    const options = structuredClone(RUN_OPTIONS_SCHEMA);
+    const properties = options.properties as Record<string, Record<string, unknown>>;
+    properties.core.default = "python";
+    properties.core.enum = ["python"];
+    properties.initial_cash.default = 7654321;
+    properties.annualization_days.default = 260;
+    server.use(http.get(`${API}/api/v1/run-environments/schema`, () => HttpResponse.json({ schema_hash: "changed-options", schema: RUN_ENVIRONMENT_SCHEMA, options_schema: options })));
+    renderWithQuery(<Harness />);
+    await openSettings();
+    expect(screen.getByRole("combobox", { name: "실행 core" })).toHaveValue("python");
+    expect(within(screen.getByRole("combobox", { name: "실행 core" })).getAllByRole("option")).toHaveLength(1);
+    expect(screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" })).toHaveValue(7654321);
+    expect(screen.getByRole("spinbutton", { name: "연환산 거래일" })).toHaveValue(260);
+  });
+
+  it("전략 전환 시 실행 옵션과 열린 패널을 새 전략 기본값으로 초기화한다", async () => {
+    const view = renderWithQuery(<Harness storageKey="strategy-a" />);
+    const user = await openSettings();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "실행 core" }),
+      "python",
+    );
+    await user.clear(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+    );
+    await user.type(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+      "1234",
+    );
+    view.rerender(<Harness storageKey="strategy-b" />);
+    expect(screen.queryByRole("combobox", { name: "실행 core" })).not.toBeInTheDocument();
+    await openSettings();
+    expect(screen.getByRole("combobox", { name: "실행 core" })).toHaveValue(
+      DEFAULT_BACKTEST_RUN_SETTINGS.core,
+    );
+    expect(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+    ).toHaveValue(Number(DEFAULT_BACKTEST_RUN_SETTINGS.initialCashKrw));
   });
 
   it("exposes every run option through accessible controls and reports invalid input", async () => {
@@ -1236,7 +1460,9 @@ describe("run environment panel", () => {
       "초기 자본: 0보다 큰 숫자를 입력하세요.",
     );
     expect(cash).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByText("입력 확인")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("실행 설정 열기")).getByText("입력 확인")).toBeInTheDocument();
+    // 상태 배지는 지금 상태 문장 하나만 텍스트로 갖는다(반대 문장은 폭 자리표시로만 있다).
+    expect(within(screen.getByLabelText("실행 설정 열기")).queryByText("준비됨")).toBeNull();
   });
 });
 
@@ -1318,6 +1544,16 @@ describe("backtest run actions", () => {
     expect(
       screen.getByRole("button", { name: "실행 취소" }),
     ).toBeInTheDocument();
+  });
+
+  it.each(["cancel", "replay"])("%s 실패는 다른 실행 화면에 남지 않는다", async (action) => {
+    server.use(http.post(action === "cancel" ? `${API}/api/v1/backtests/:runId/cancel` : `${API}/api/v1/backtests`, () => HttpResponse.json({ detail: { code: "backtest.run.not_found", message: "missing run" } }, { status: 404 })));
+    const props = { status: action === "cancel" ? "running" as const : "completed" as const, request: acceptedRequest, onReplayed: vi.fn() };
+    const view = renderWithQuery(<BacktestRunActions {...props} runId="old" />);
+    await userEvent.setup().click(screen.getByRole("button", { name: action === "cancel" ? "실행 취소" : "동일 설정 재실행" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    view.rerender(<BacktestRunActions {...props} runId="new" />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders a typed cancel 404 without leaking an unhandled rejection", async () => {
@@ -1419,7 +1655,8 @@ describe("backtest run actions", () => {
           {
             detail: {
               code: "backtest.run.research_window_violation",
-              message: "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
+              message:
+                "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
               sealed_start: "2016-01-01",
               sealed_end: "2019-12-31",
               research_start: "2020-01-02",
@@ -1528,5 +1765,136 @@ describe("backtest run actions", () => {
     } finally {
       window.removeEventListener("unhandledrejection", unhandled);
     }
+  });
+});
+
+// 유니버스는 자유 텍스트가 아니라 연결된 시장 데이터가 답한 목록에서 고른다(선택지 owner 는 backend 어댑터).
+describe("run settings universe choice", () => {
+  const UNIVERSES = [
+    {
+      universe_id: "krx.common-stock",
+      market: "KRX",
+      label: "KRX 보통주",
+      description: "KRX 상장 보통주입니다. 기준일마다 그날 상장돼 있던 종목으로 후보를 다시 고릅니다.",
+    },
+    {
+      universe_id: "krx.all",
+      market: "KRX",
+      label: "krx.all",
+      description: "설명이 등록되지 않은 유니버스입니다.",
+    },
+  ];
+  const serveUniverses = (body: typeof UNIVERSES = UNIVERSES) =>
+    server.use(http.get(`${API}/api/v1/equity/universes`, () => HttpResponse.json(body)));
+  beforeEach(() => {
+    servedSchema = RUN_ENVIRONMENT_SCHEMA;
+    server.use(schemaHandler);
+    localStorage.clear();
+  });
+  const open = async () => {
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    return user;
+  };
+
+  it("lists the universes the backend answers and shows the chosen one's description", async () => {
+    serveUniverses();
+    renderWithQuery(<Harness storageKey="universe-pick" />);
+    const user = await open();
+
+    const select = await screen.findByRole("combobox", { name: "유니버스" });
+    await waitFor(() => expect(select).toBeEnabled());
+    expect(
+      within(select).getAllByRole("option").map((option) => option.textContent),
+    ).toEqual(["유니버스를 고르세요", "KRX 보통주 (krx.common-stock)", "krx.all"]);
+    expect(select).toHaveValue("");
+
+    await user.selectOptions(select, "krx.common-stock");
+
+    expect(select).toHaveValue("krx.common-stock");
+    expect(select).toHaveAccessibleDescription(UNIVERSES[0].description);
+  });
+
+  it("keeps a stored universe the list no longer has and names it as unknown", async () => {
+    serveUniverses([UNIVERSES[1]]);
+    renderWithQuery(<Harness storageKey="universe-unknown" />);
+    // 패널 밖 단추를 누르면 패널이 닫히므로, 저장값을 먼저 넣고 연다.
+    await userEvent.setup().click(screen.getByRole("button", { name: "apply upgraded environment" }));
+    await open();
+
+    const select = await screen.findByRole("combobox", { name: "유니버스" });
+    await waitFor(() => expect(select).toHaveValue("krx.common-stock"));
+    expect(
+      within(select).getByRole("option", { selected: true }),
+    ).toHaveTextContent("알 수 없는 유니버스 (krx.common-stock)");
+  });
+
+  it("falls back to typing the id with the reason when no universe is listed for the market", async () => {
+    serveUniverses([{ ...UNIVERSES[0], market: "NYSE" }]);
+    renderWithQuery(<Harness storageKey="universe-empty" />);
+    await open();
+
+    const field = await screen.findByRole("textbox", { name: "유니버스" });
+    expect(field).toHaveAccessibleDescription(
+      /^연결된 시장 데이터가 이 시장에서 고를 유니버스를 알려 주지 않아 ID를 직접 적습니다\./u,
+    );
+  });
+
+  it("lists only the run market's universes and names a stored universe of another market", async () => {
+    // 저장값 krx.common-stock 이 다른 시장(NYSE) 유니버스로 답해진 목록. 실행 시장은 KRX 다.
+    serveUniverses([{ ...UNIVERSES[0], market: "NYSE" }, UNIVERSES[1]]);
+    renderWithQuery(<Harness storageKey="universe-market" />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "apply upgraded environment" }));
+    await open();
+
+    const select = await screen.findByRole("combobox", { name: "유니버스" });
+    await waitFor(() => expect(select).not.toHaveAttribute("aria-busy"));
+    expect(within(select).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "krx.all",
+      "다른 시장 유니버스 (krx.common-stock)",
+    ]);
+    expect(select).toHaveValue("krx.common-stock");
+  });
+
+  it("keeps the same dropdown while the list loads and hands its focus to the typed field when the list fails", async () => {
+    let fail: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      fail = resolve;
+    });
+    server.use(
+      http.get(`${API}/api/v1/equity/universes`, async () => {
+        await gate;
+        return HttpResponse.json({ detail: "down" }, { status: 500 });
+      }),
+    );
+    renderWithQuery(<Harness storageKey="universe-loading" />);
+    await open();
+
+    const select = await screen.findByRole("combobox", { name: "유니버스" });
+    // 불러오는 동안에도 끄지 않은 같은 드롭다운이고, 불러오는 중임을 알린다.
+    expect(select).toBeEnabled();
+    expect(select).toHaveAttribute("aria-busy", "true");
+    act(() => select.focus());
+    fail();
+
+    const field = await screen.findByRole("textbox", { name: "유니버스" });
+    await waitFor(() => expect(field).toHaveFocus());
+  });
+
+  it("falls back to typing the id when the universe list cannot be read", async () => {
+    server.use(
+      http.get(`${API}/api/v1/equity/universes`, () =>
+        HttpResponse.json({ detail: "down" }, { status: 500 }),
+      ),
+    );
+    renderWithQuery(<Harness storageKey="universe-fallback" />);
+    await open();
+
+    const field = await screen.findByRole("textbox", { name: "유니버스" });
+    // 빈 필수 칸이라 오류 문장도 함께 읽힌다. 예시 id 는 적지 않는다(목록 owner 는 backend).
+    expect(field).toHaveAccessibleDescription(
+      /^유니버스 목록을 불러오지 못해 ID를 직접 적습니다\./,
+    );
+    expect(field).not.toHaveAccessibleDescription(/krx\.common-stock/);
   });
 });

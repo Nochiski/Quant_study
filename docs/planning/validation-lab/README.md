@@ -11,9 +11,21 @@
   이 initiative의 계약 SoT
 - [WORKFLOW.md](./WORKFLOW.md): Phase별 PR scope packet과 공통 gate
 - [PLAN.md](./PLAN.md): PR 상태, 리뷰·검증 결과를 계속 갱신하는 단일 진행 추적 파일
-- [tools/update-plan-progress.ps1](./tools/update-plan-progress.ps1): PLAN.md 집계 갱신
+- [REAL-DATA-CHECKS.md](./REAL-DATA-CHECKS.md): 기능마다 우선하는 실데이터 확인 절차와 열람 기록
+- [V5-04-candidate-map.md](./V5-04-candidate-map.md): 파라미터 칸 비교·이유 기록·선택 당시 통계와 결과 카드의 책임 경계
+- [KIWOOM-INDEPENDENT.md](./KIWOOM-INDEPENDENT.md): 키움 없이 진행하는 패킷·부분 구현·전체 자동매매 후속 경계
+- [공용 Python progress 도구](../../../tools/quant_study_dev/plan_progress.py): PLAN 집계 갱신(`uv run --no-sync python -m quant_study_dev.plan_progress --profile validation-lab`, 검사는 `--check`). 기존 PowerShell wrapper는 호환용
 - 디자인보드: [전략 검증 랩 UI/UX 기획](https://claude.ai/artifact/5jYGBTPKcWFHhjB4fvEtup)
 - 수학 노트: [검증 랩 수학 노트](https://claude.ai/artifact/CieccrnXuEpin4DWmvuXvu)
+
+## 현재 인계
+
+회귀 접수 상한 #546·V6 모의 core #547·선택 파라미터 배선 #548은 머지됐다. V5-02는 완료됐고
+후보 지도 #549(V5-04)도 main `45328d0b`로 머지됐고 12개 검사가 통과했다. 비용/회귀 보고서 #550(V5-06, main `366dc241`)·
+IDE 진입점 #551(V5-07, main `c2f46dfb`)도 각 12개 검사 통과 뒤 머지됐다. 검증 랩은 **26/28(93%)**로 V5를 완료했지만
+전체 자동매매의 완료율은 아니다. V6는 사전등록·합성 모의 core 부분 구현으로 실제 개봉·UI가 남는다.
+상태·완료 수는 PLAN과 실제 머지 기록으로 확인한다. 기능별 실자료 기술 QA와 2026-10-19 주간 예정인
+S03 신호/S04 비용 후 수익성 연구를 구분하며, 어느 테스트 통과도 실거래 준비 완료로 해석하지 않는다.
 
 ## 기준
 

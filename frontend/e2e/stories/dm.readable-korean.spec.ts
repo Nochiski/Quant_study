@@ -20,6 +20,7 @@ import {
   GOLDEN,
   mustReplace,
   openEditor,
+  openRunSettingsGroup,
   replaceSource,
   RUN_ENVIRONMENT,
   runSettingsInputs,
@@ -38,30 +39,27 @@ test(
     );
     await expectPhase(page, "검증 통과");
     await page.getByRole("tab", { name: "그래프", exact: true }).click();
+    await page.getByRole("button", { name: /· 노드 편집$/ }).first().click();
     const editor = page.getByRole("region", { name: "그래프 편집" });
 
-    // 실행 계획 노드 카드: 입력 칸·설정 칸 이름과 출력 표시가 한글이다. 칸은 스키마에서 읽고 영어 칸 키를
-    // 보이지 않는다(#354).
-    const momentumCard = page
-      .getByRole("list", { name: "백엔드 계획 순서의 팩터 노드와 입력 연결" })
-      .getByRole("listitem")
-      .filter({
-        has: page.getByRole("button", { name: "그래프 노드 선택: mom_252" }),
-      });
+    // 같은 편집 노드에 backend 출력 표식과 스키마 입력 포트가 붙는다.
+    const momentumCard = editor.locator(".node-canvas__node").filter({
+      has: page.getByRole("button", { name: /^노드 편집: 2\./ }),
+    });
     await expect(momentumCard).toContainText("그래프 출력");
     await expect(momentumCard).toContainText("입력 노드");
-    await expect(momentumCard).toContainText("집계 기간");
     await expect(momentumCard).not.toContainText("OUTPUT");
     await expect(momentumCard).not.toContainText("window");
 
-    // 노드 종류: 카드에 한글 이름이 먼저 보이고, 영어 kind는 보조 코드 표기로만 남는다.
+    // 노드에는 한글 연산 이름을 표시하고 영어 kind는 인스펙터의 접힌 식별자 영역에 둔다.
     const momentumNode = editor.getByRole("button", {
-      name: "노드 편집: mom_252",
+      name: /^노드 편집: 2\./,
     });
-    await expect(momentumNode).toContainText("기간 집계");
-    await expect(momentumNode.getByRole("code")).toHaveText("time_series");
+    await expect(momentumNode).toContainText("기간 수익률");
+    await expect(momentumNode).not.toContainText("time_series");
 
     // 연산자: 팔레트가 한글 이름과 한 줄 설명·계산식을 보인다.
+    await editor.getByText("노드 추가 · 연산자 찾기", { exact: true }).click();
     const palette = editor.getByRole("group", { name: "연산자 팔레트" });
     const movingAverage = palette.getByRole("listitem").filter({
       has: page.getByRole("button", {
@@ -71,14 +69,15 @@ test(
     });
     await expect(movingAverage).toContainText("이동평균이 이것입니다");
 
-    // 필드: 노드를 고르면 설정 칸이 한글 라벨(보조로 키)과 한 줄 설명을 보인다.
+    // 필드: 노드를 고르면 설정 칸이 한글 라벨과 한 줄 설명을 보인다.
     await momentumNode.click();
     const selected = editor.getByRole("group", { name: /선택한 노드/u });
     await expect(
-      selected.getByRole("spinbutton", { name: "집계 기간 window" }),
+      selected.getByRole("spinbutton", { name: "집계 기간", exact: true }),
     ).toHaveValue("252");
     await expect(selected).toContainText("집계에 쓸 세션 수입니다");
     // 노드 종류의 한 줄 설명은 계약 패널이 한글로 보인다.
+    await page.getByRole("button", { name: "계약", exact: true }).click();
     const contract = page.getByRole("complementary", { name: "계약" });
     await expect(
       contract.getByRole("heading", { name: "기간 집계" }),
@@ -86,12 +85,13 @@ test(
     await expect(contract).toContainText(
       "같은 종목의 과거 구간을 값 하나로 집계합니다.",
     );
+    await contract.getByRole("button", { name: "계약 접기", exact: true }).click();
 
     // 삭제 거부: 참조하는 노드를 JSON Pointer가 아니라 노드 이름으로 말한다.
-    await editor.getByRole("button", { name: "close · 삭제" }).click();
+    await editor.getByRole("button", { name: /^1\..* · 삭제$/ }).click();
     const refusal = editor.getByRole("alert");
     await expect(refusal).toHaveText(
-      "close을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: mom_252",
+      /1\..*을\(를\) 다른 곳이 참조하고 있어 삭제하지 않았습니다: 2\. 기간 수익률/,
     );
     await expect(refusal).not.toContainText("/factors/");
     // 거부된 삭제는 문서를 건드리지 않는다.
@@ -233,7 +233,10 @@ test(
     expect(response?.ok()).toBe(true);
     const row = page.getByRole("row").filter({ hasText: WIPED_OUT.run_id });
     await expect(row.getByText(`실행 오류: ${sentence}`)).toBeVisible();
-    await expect(row.getByRole("group")).toContainText("EquityWipedOutError");
+    // 줄에는 접힌 묶음이 둘(서버 사유·재현 정보)이라 서버 사유 묶음을 내용으로 고른다.
+    await expect(
+      row.getByRole("group").filter({ hasText: "서버 사유" }),
+    ).toContainText("EquityWipedOutError");
     await expect(row).not.toContainText("EquityWipedOutError", {
       useInnerText: true,
     });
@@ -301,6 +304,7 @@ test(
     await toggle.click();
     await start.fill(RUN_ENVIRONMENT.start);
     await end.fill(RUN_ENVIRONMENT.end);
+    await openRunSettingsGroup(page, "고급 실행");
     await page
       .getByRole("textbox", { name: /^벤치마크 종목 ID/ })
       .fill("KOSPI");
@@ -318,7 +322,7 @@ test(
 test(
   "US-DM-06 결과 파일을 읽을 수 없는 완료 실행은 결과 화면이 다시 실행하라고 말하고 결과를 다시 묻지 않는다",
   { tag: ["@story", "@US-DM-06"] },
-  async ({ page }) => {
+  async ({ page }, testInfo) => {
     const unreadable: BacktestRunState = {
       run_id: "run-dm06-unreadable",
       status: "completed",
@@ -329,13 +333,59 @@ test(
       created_at: "2026-09-02T00:00:00Z",
       updated_at: "2026-09-02T00:00:07Z",
     };
-    let resultReads = 0;
-    await page.route(`**/api/v1/backtests/${unreadable.run_id}`, (route) =>
-      route.fulfill({ json: unreadable }),
+    // 이 case의 초기 부팅 실패만 진단한다. 이벤트 수·문자열 길이를 제한하고 헤더·본문은 수집하지 않는다.
+    const pageErrors: string[] = [];
+    const requestFailures: Array<{
+      url: string;
+      resource: string;
+      error: string;
+    }> = [];
+    const consoleErrors: string[] = [];
+    const bounded = <T>(items: T[], value: T) => {
+      if (items.length < 20) items.push(value);
+    };
+    const localUrl = (value: string): string => {
+      const url = new URL(value);
+      return `${url.origin}${url.pathname}`.slice(0, 1000);
+    };
+    page.on("pageerror", (error) =>
+      bounded(pageErrors, (error.stack ?? error.message).slice(0, 2000)),
     );
+    page.on("requestfailed", (request) =>
+      bounded(requestFailures, {
+        url: localUrl(request.url()),
+        resource: request.resourceType(),
+        error: (request.failure()?.errorText ?? "").slice(0, 1000),
+      }),
+    );
+    page.on("console", (message) => {
+      if (message.type() === "error")
+        bounded(consoleErrors, message.text().slice(0, 2000));
+    });
+    const documentSnapshot = () =>
+      page.evaluate(() => {
+        const root = document.getElementById("root");
+        return {
+          url: `${location.origin}${location.pathname}`,
+          readyState: document.readyState,
+          rootExists: root !== null,
+          rootChildCount: root?.childElementCount ?? null,
+          rootText: root?.textContent?.slice(0, 2000) ?? null,
+        };
+      });
+    let statusReads = 0;
+    let requestReads = 0;
+    let resultReads = 0;
+    await page.route(`**/api/v1/backtests/${unreadable.run_id}`, (route) => {
+      statusReads++;
+      return route.fulfill({ json: unreadable });
+    });
     await page.route(
       `**/api/v1/backtests/${unreadable.run_id}/request`,
-      (route) => route.fulfill({ json: OLD_RUN_REQUEST }),
+      (route) => {
+        requestReads++;
+        return route.fulfill({ json: OLD_RUN_REQUEST });
+      },
     );
     await page.route(
       `**/api/v1/backtests/${unreadable.run_id}/result`,
@@ -357,13 +407,38 @@ test(
       `/research/backtests/${unreadable.run_id}`,
     );
     expect(response?.ok()).toBe(true);
+    const initialDocument = await documentSnapshot();
     // 일반 문구 대신 다시 불러와도 소용없고 같은 설정으로 다시 실행하라고 말한다. 서버 사유는 접힌 상세에만 있다.
     const failure = page
       .getByRole("alert")
       .filter({ hasText: "이 실행의 결과 파일을 읽을 수 없습니다." });
-    await expect(failure).toContainText(
-      "다시 불러와도 같으니 같은 설정으로 다시 실행하세요.",
-    );
+    try {
+      await expect(failure).toContainText(
+        "다시 불러와도 같으니 같은 설정으로 다시 실행하세요.",
+      );
+    } catch (error) {
+      const failedDocument = await documentSnapshot().catch((captureError) => ({
+        captureError: String(captureError).slice(0, 1000),
+      }));
+      await testInfo
+        .attach("unreadable-run-boot-diagnostics.json", {
+          contentType: "application/json",
+          body: JSON.stringify(
+            {
+              initialDocument,
+              failedDocument,
+              routeReads: { statusReads, requestReads, resultReads },
+              pageErrors,
+              requestFailures,
+              consoleErrors,
+            },
+            null,
+            2,
+          ),
+        })
+        .catch(() => undefined);
+      throw error;
+    }
     await expect(failure.getByRole("group")).toContainText(
       "run result file is missing",
     );

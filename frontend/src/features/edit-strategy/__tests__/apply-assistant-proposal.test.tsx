@@ -21,7 +21,7 @@ import {
   initialDocumentState,
   type DocumentState,
 } from "../model/document-state";
-import { useApplyAssistantProposal } from "../model/use-apply-assistant-proposal";
+import { useApplyAssistantProposal } from "./editor-harness";
 import { ProposalApplyDialog, ProposalApplyFeedback } from "..";
 
 afterEach(cleanup);
@@ -51,7 +51,8 @@ const editorOf = (initial: string) => {
     focus: vi.fn(),
     undo: vi.fn(() => false),
     redo: vi.fn(() => false),
-    historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
+    subscribeHistory: () => () => {},
+  historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
     getHistoryState: vi.fn(() => null),
     restoreHistoryState: vi.fn(),
   };

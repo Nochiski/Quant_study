@@ -35,7 +35,7 @@
 
 .problems__filter,
 .problems__copy {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
   background: transparent;
   color: var(--text-muted);
@@ -47,8 +47,9 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 3px var(--space-2);
-  font-size: 11px;
+  min-height: var(--control-height-dense);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-size-small);
 }
 
 .problems__filter[aria-pressed="true"] {
@@ -79,8 +80,7 @@
 }
 
 .problems__body {
-  max-height: 220px;
-  overflow: auto;
+  overflow: visible;
 }
 
 .problems__section + .problems__section {
@@ -98,7 +98,7 @@
   padding: var(--space-1) var(--space-3);
   background: var(--surface-subtle);
   color: var(--text-subtle);
-  font-size: 11px;
+  font-size: var(--text-size-small);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -162,14 +162,14 @@
 }
 
 .problems__message {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .problems__where {
   color: var(--text-subtle);
-  font-size: 11px;
+  font-size: var(--text-size-small);
 }
 
 .problems__actions {
@@ -182,7 +182,7 @@
 .problems__copy {
   padding: 2px var(--space-1);
   white-space: nowrap;
-  font-size: 10px;
+  font-size: var(--text-size-small);
 }
 
 .problems__empty {
@@ -203,6 +203,49 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
   border: 0;
+}
+
+@media (max-width: 760px) {
+  /* 좁은 화면에서는 본문과 긴 원문 경로가 상태·복사 열에 눌리지 않게 각 행을 준다. */
+  .problems__item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .problems__navigate {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .problems__severity {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .problems__kind {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .problems__message,
+  .problems__where {
+    grid-column: 1 / -1;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .problems__actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    padding: 0 var(--space-3) var(--space-2);
+  }
+
+  .problems__summary,
+  .problems__filters {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
 }
 
 @media (max-width: 840px) {

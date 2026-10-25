@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal, get_args
@@ -42,6 +42,11 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
+
+    @property
+    def is_terminal(self) -> bool:
+        """종결 여부의 정본. 취소 요청은 실행이 멈춘 상태가 아니다."""
+        return self in (RunStatus.CANCELLED, RunStatus.COMPLETED, RunStatus.FAILED)
 
 
 class WarningSeverity(StrEnum):
@@ -106,7 +111,8 @@ class ImpactModel(StrEnum):
     """체결가에 얹는 시장충격 모델(spec D7).
 
     `fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×
-    √(체결 수량 / ADV)(`_impact.py`)를 뜻한다. `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
+    √(Q / ADV)(`_impact.py`, Q = 참여 한도 적용 후·여력 제한 전 주문 수량)를 뜻한다.
+    `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
     """
 
     FIXED_BPS = "fixed_bps"
@@ -126,6 +132,10 @@ RUN_ENVIRONMENT_KEY_NAMESPACE = "run_environment.field"
 #
 # 범위 위반은 `__post_init__` 이 칸 이름을 실은 `InvalidRunFieldError` 로 거절한다(요청 검증 422
 # `backtest.run.field_invalid`). 진단 코드(`code`)는 전략 문서 validator 의 것이라 행에 없다.
+# bp 비용 칸 하나가 대금 전체(100%)를 넘으면 경제적으로 성립하지 않는다 — 참여율 상한 1.0과 같은
+# 자연 단위 경계다. 더 좁은 임의 상한은 두지 않는다(#342 V2-04).
+BPS_OF_NOTIONAL = 10_000.0
+
 RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
     "participation_rate": ScalarConstraint(
         pointer="/participation_rate",
@@ -144,8 +154,9 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
+        maximum=BPS_OF_NOTIONAL,
         example=15.0,
-        message="수수료는 0 이상의 숫자여야 합니다.",
+        message="수수료는 0 이상 10000 이하(대금의 100% 이하)여야 합니다.",
     ),
     "slippage_bps": ScalarConstraint(
         pointer="/slippage_bps",
@@ -153,11 +164,12 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
+        maximum=BPS_OF_NOTIONAL,
         example=10.0,
-        message="슬리피지는 0 이상의 숫자여야 합니다.",
+        message="슬리피지는 0 이상 10000 이하(대금의 100% 이하)여야 합니다.",
     ),
-    # √ 충격의 계수 k(무차원). 기본 1.0 은 문헌의 "1 안팎"(`_impact.py` 머리말)이다. 상한 10 은 그
-    # 범위를 넉넉히 덮고 오타 입력(100·1000)을 막는다.
+    # √ 충격의 계수 k(무차원). 기본값은 아래 필드 선언이 소유한다(`_impact.py` 머리말).
+    # 상한은 문헌의 "1 안팎"을 넉넉히 덮고 오타 입력(100·1000)을 막는다.
     "impact_coefficient": ScalarConstraint(
         pointer="/impact_coefficient",
         stage=AppliedStage.EXECUTION,
@@ -174,8 +186,9 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
+        maximum=BPS_OF_NOTIONAL,
         example=20.0,
-        message="매도 거래세는 0 이상의 숫자여야 합니다.",
+        message="매도 거래세는 0 이상 10000 이하(대금의 100% 이하)여야 합니다.",
     ),
 }
 
@@ -200,14 +213,6 @@ RUN_ENVIRONMENT_APPLICABILITY: dict[str, FieldApplicability] = {
 # canonical JSON 이 `15` 와 `15.0` 으로 갈리지 않게 float 으로 정규화할 필드. 제약 행과 같은
 # 집합이므로 이름을 다시 적지 않는다.
 NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = tuple(RUN_ENVIRONMENT_CONSTRAINTS)
-
-# `RunManifest` 가 평면 필드로도 싣는 비용·참여율. 제약 행이 늘어도 매니페스트 평면 필드는 늘지
-# 않으므로 제약 행과 따로 고정한다 — 제약 행을 그대로 읽으면 새 행마다 `AttributeError` 가 난다.
-MANIFEST_FLAT_ENVIRONMENT_FIELDS: tuple[str, ...] = (
-    "participation_rate",
-    "fee_bps",
-    "slippage_bps",
-)
 
 
 class InvalidRunFieldError(ValueError):
@@ -316,37 +321,14 @@ class MetricWindow:
             raise ValueError("metric window start must be before or equal to end")
 
 
-@dataclass(frozen=True)
-class BacktestRunSpec:
-    """A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
+@dataclass(frozen=True, kw_only=True)
+class BacktestRunOptions:
+    """실행 옵션의 기본값·타입·검증. 요청과 편집기 계약이 같은 정의를 읽는다."""
 
-    `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
-    so a run can name a saved revision (P1-09). The run service rejects a request carrying both
-    or neither (one coded 422, `backtest.run.invalid`).
-    After resolution the run spec stored in the manifest carries both: `strategy` is the exact
-    spec that was executed and `strategy_source` says where it came from.
-    """
-
-    strategy: StrategySpec | None = None
-    strategy_source: StrategySource | None = None
-    # 실행 설정(1.2 부터 필수). 타입은 optional 로 남긴다 — 요청 본문에서 빠졌을 때
-    # pydantic 의 타입 오류가 아니라 코드화된 진단(`backtest.run.environment_required`)으로
-    # 거절해야 프론트가 번역할 코드를 얻는다. 해소는 `require_environment` 하나가 한다.
-    environment: RunEnvironment | None = None
     core: ExecutionCore = ExecutionCore.RUST
     initial_cash: float = 100_000_000.0
     benchmark_security_id: str | None = None
     annualization_days: int = 252
-    metric_windows: tuple[MetricWindow, ...] = ()
-    # 전략 파라미터 값(parameter_id → 값, 검증 랩 spec D4). 빠진 파라미터는 문서 기본값이다.
-    # 접수가 `resolve_parameter_values` 로 선언된 파라미터 전부를 선언 타입 값으로 채워 실행 spec 에
-    # 박으므로 실행 지문과 매니페스트는 해소된 값을 싣는다. 저장 리비전의 provenance·`spec_hash` 는
-    # 그대로다.
-    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
-    # 인라인 초안이 속한 계열(편집 중인 전략의 `strategy_id`, 검증 랩 spec D2). 저장 리비전
-    # 실행은 리비전의 전략이 계열이라 비워 둔다. 출처 정보라 `strategy_source` 처럼 실행 지문에
-    # 넣지 않는다.
-    lineage_strategy_id: str | None = None
 
     def __post_init__(self) -> None:
         # NaN 은 `<= 0` 비교를 빠져나가고 inf 는 양수라, 유한성을 따로 보지 않으면 접수된 뒤
@@ -363,6 +345,72 @@ class BacktestRunSpec:
                 "annualization_days must be positive — "
                 f"annualization_days={self.annualization_days!r}",
             )
+
+
+@dataclass(frozen=True)
+class BacktestRunSpec(BacktestRunOptions):
+    """A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
+
+    `strategy` stays for existing HTTP and CLI callers; new callers use `strategy_source`
+    so a run can name a saved revision (P1-09). The run service rejects a request carrying both
+    or neither (one coded 422, `backtest.run.invalid`).
+    After resolution the run spec stored in the manifest carries both: `strategy` is the exact
+    spec that was executed and `strategy_source` says where it came from.
+    """
+
+    strategy: StrategySpec | None = None
+    strategy_source: StrategySource | None = None
+    # 실행 설정(1.2 부터 필수). 타입은 optional 로 남긴다 — 요청 본문에서 빠졌을 때
+    # pydantic 의 타입 오류가 아니라 코드화된 진단(`backtest.run.environment_required`)으로
+    # 거절해야 프론트가 번역할 코드를 얻는다. 해소는 `require_environment` 하나가 한다.
+    environment: RunEnvironment | None = None
+    metric_windows: tuple[MetricWindow, ...] = ()
+    # 전략 파라미터 값(parameter_id → 값, 검증 랩 spec D4). 빠진 파라미터는 문서 기본값이다.
+    # 접수가 `resolve_parameter_values` 로 선언된 파라미터 전부를 선언 타입 값으로 채워 실행 spec 에
+    # 박으므로 실행 지문과 매니페스트는 해소된 값을 싣는다. 저장 리비전의 provenance·`spec_hash` 는
+    # 그대로다.
+    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
+    # 인라인 초안이 속한 계열(편집 중인 전략의 `strategy_id`, 검증 랩 spec D2). 저장 리비전
+    # 실행은 리비전의 전략이 계열이라 비워 둔다. 출처 정보라 `strategy_source` 처럼 실행 지문에
+    # 넣지 않는다.
+    lineage_strategy_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedBacktestRunSpec(BacktestRunOptions):
+    """접수 후 실행 입력. 전략·환경은 필수이며 요청 출처는 실행 값과 분리한다."""
+
+    strategy: StrategySpec
+    environment: RunEnvironment
+    metric_windows: tuple[MetricWindow, ...] = ()
+    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
+
+    @classmethod
+    def from_request(
+        cls,
+        request: BacktestRunSpec,
+        *,
+        strategy: StrategySpec,
+        environment: RunEnvironment,
+        parameter_values: dict[str, ParameterValue],
+    ) -> ResolvedBacktestRunSpec:
+        # 실행 칸의 owner는 이 타입이다. 새 요청 전용 칸이 실행에 자동 유입되지 않는다.
+        values = {item.name: getattr(request, item.name) for item in fields(cls)}
+        values.update(strategy=strategy, environment=environment, parameter_values=parameter_values)
+        return cls(**values)
+
+    def to_wire(
+        self,
+        *,
+        strategy_source: StrategySource | None = None,
+        lineage_strategy_id: str | None = None,
+    ) -> BacktestRunSpec:
+        """기존 manifest·연구 저장 계약 투영. 실행 중에는 이 요청 타입을 사용하지 않는다."""
+        return BacktestRunSpec(
+            **{item.name: getattr(self, item.name) for item in fields(self)},
+            strategy_source=strategy_source,
+            lineage_strategy_id=lineage_strategy_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -383,7 +431,6 @@ class RunManifest:
     run_id: str
     created_at: datetime
     completed_at: datetime
-    engine_core: ExecutionCore
     engine_version: str
     run_fingerprint: str
     run_spec: BacktestRunSpec
@@ -391,18 +438,16 @@ class RunManifest:
     data_snapshot_id: str
     target_tape_hash: str
     metric_registry_version: str
-    initial_cash: float
-    annualization_days: int
-    fee_bps: float
-    slippage_bps: float
-    participation_rate: float
     # 이 run 이 실제로 쓴 실행 설정과 그 hash. `strategy_hash` 와 별개 축이라, 같은 전략을
     # 다른 기간·비용으로 돌린 두 run 을 매니페스트만 보고 구분할 수 있다.
     environment: RunEnvironment
     environment_hash: str
     strategy_provenance: StrategyProvenance
     warnings: tuple[DataWarning, ...] = ()
-    schema_version: str = "backtest-run-v2"
+    # v3는 평면 실행 값 사본 6개를 제거한 표현 판본이다. 실행 지문에는 넣지 않는다.
+    schema_version: str = "backtest-run-v3"
+    # 기록되지 않은 과거 실행은 미상(None)이다. 현재 판본을 소급 채우지 않는다.
+    factor_evaluation_version: str | None = None
 
     def __post_init__(self) -> None:
         # The two fields have different producers — `strategy_hash` is the compiler's, carried on
@@ -417,23 +462,6 @@ class RunManifest:
                 f"provenance.kind={self.strategy_provenance.kind.value} "
                 f"strategy_id={self.strategy_provenance.strategy_id} "
                 f"revision={self.strategy_provenance.revision}"
-            )
-        # 비용·참여율은 `environment` 가 owner 다. 평면 필드는 매니페스트 소비자 호환으로
-        # 남아 있을 뿐이라 두 축이 갈리면 리포트가 읽는 축에 따라 같은 run 의 수수료가
-        # 달라진다. 평면 필드 제거는 소비자(프론트 실행 결과 화면) 정리와 같이 간다.
-        divergent = {
-            name: (getattr(self, name), getattr(self.environment, name))
-            for name in MANIFEST_FLAT_ENVIRONMENT_FIELDS
-            if getattr(self, name) != getattr(self.environment, name)
-        }
-        if divergent:
-            raise ValueError(
-                "manifest records two execution cost models for one run — "
-                f"run_id={self.run_id} environment_hash={self.environment_hash} "
-                + " ".join(
-                    f"{name}: manifest={flat!r} environment={owned!r}"
-                    for name, (flat, owned) in sorted(divergent.items())
-                )
             )
 
 
@@ -470,6 +498,18 @@ class RawOrder:
 
 
 @dataclass(frozen=True)
+class RawOrderUpdate:
+    """엔진 주문 상태 기록을 그대로 투영한다. 사유 코드는 견적 owner만 판정한다."""
+
+    session: date
+    order_id: str
+    status: str
+    detail: str | None = None
+    reason_code: str | None = None
+    cap_volume: int | None = None
+
+
+@dataclass(frozen=True)
 class RawFill:
     fill_id: str
     order_id: str
@@ -483,11 +523,28 @@ class RawFill:
     # 체결 세션의 유동성 캡 기준 거래량 — 엔진이 참여 한도를 곱한 값이다(V4-04 2/2). 그 전에 쓴
     # `result.json`(`backtest-artifacts-v1`)에는 없어 None 으로 읽힌다.
     cap_volume: int | None = None
+    # 구판 산출물은 체결별 세금을 싣지 않았으므로 None으로 구별한다.
+    sell_tax: float | None = None
+
+
+class RunCostKind(StrEnum):
+    """실행 결과 비용 기록의 어휘. 실행 어댑터가 엔진 비용 종류를 이 어휘로 옮기고 모르는 종류는
+    실패시켜, 새 비용이 거래 분석 합계에서 조용히 0으로 사라지지 않게 한다."""
+
+    SHORT_BORROW = "short_borrow"
+    MARGIN_INTEREST = "margin_interest"
+    SELL_TAX = "sell_tax"
+
+
+# 포지션을 들고 있는 동안 쌓이는 비용(거래 분석의 `total_carry_cost`).
+CARRY_COST_KINDS = frozenset({RunCostKind.SHORT_BORROW, RunCostKind.MARGIN_INTEREST})
 
 
 @dataclass(frozen=True)
 class RawCost:
     session: date
+    # 저장 결과 읽기 계약은 문자열 그대로다(옛 결과 호환).
+    # 새 결과는 어댑터가 `RunCostKind`로 만든다.
     kind: str
     security_id: str | None
     amount: float
@@ -520,6 +577,26 @@ class RawRounding:
 
 
 @dataclass(frozen=True)
+class RawCorporateAction:
+    """엔진이 보유에 실제로 적용한 분할·병합(`CORPORATE_ACTION_APPLIED`)을 그대로 옮긴 기록.
+
+    엔진은 같은 세션의 어떤 체결보다 먼저 적용한다. 수량은 정수 문자열이고 `ratio` 는 구주 1주당
+    신주 수(Decimal 문자열)다. 엔진은 `old × ratio` 를 1e-9 에서 반올림한 이론 수량을 0 쪽으로 내려
+    `new_quantity` 로 두고, 버린 단주 `settled_quantity`(이론 수량 − 새 수량, 숏이면 음수)를 정산
+    세션 시가로 `cash_paid` 만큼 현금 정산한다. 단주는 엔진 규칙(`scale_quantity`)으로 정한 값이라
+    소비자가 비율로 다시 곱하지 않는다.
+    """
+
+    session: date
+    security_id: str
+    ratio: str
+    old_quantity: str
+    new_quantity: str
+    settled_quantity: str
+    cash_paid: float
+
+
+@dataclass(frozen=True)
 class RawArtifactBundle:
     snapshots: tuple[RawSnapshot, ...]
     positions: tuple[RawPosition, ...]
@@ -532,6 +609,10 @@ class RawArtifactBundle:
     # v2: 체결에 `cap_volume` 을, 번들에 `roundings` 를 싣는다. v1 파일도 같은 모델로 읽는다(빈 칸은
     # None·빈 튜플).
     schema_version: str = "backtest-artifacts-v2"
+    # None은 과거 결과에 상태 기록 자체가 없음을 뜻한다. 새 결과의 빈 기록은 ()다.
+    order_updates: tuple[RawOrderUpdate, ...] | None = None
+    # 보유에 적용된 분할·병합. None은 과거 결과에 기록 자체가 없음을, 새 결과의 빈 기록은 ()다.
+    corporate_actions: tuple[RawCorporateAction, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -589,9 +670,11 @@ class RunProgressEvent:
 # `data_not_ready` 는 데이터 원천이 백테스트 데이터를 낼 준비가 안 된 실행이다(원장 표·카탈로그 뷰가
 # 없거나 낡음, 조치는 서버 사유 문장, #369). `no_positions` 는 tape 가 한 번도 종목을 고르지 않은
 # 실행(기간 안 리밸런싱일이 없거나 선정이 빔, #360), `benchmark_unknown` 은 데이터 원천이 모르는
-# 벤치마크 id 다(#361). 프론트는 이 어휘를 `backtest.run.error.<code>` 로 번역한다. 시작 422 의
-# `backtest.error.*` 와 키를 나누는 까닭은 같은 코드라도 시작 거절은 실행 전에 고칠 것을, run 실패는
-# 실행 중에 난 일을 말하기 때문이다(`frontend-api-state.md`).
+# 벤치마크 id 다(#361). `worker_exited` 는 run 을 돌리던 worker 프로세스가 결과 없이 끝난
+# 실행(부팅 실패·비정상 종료), `worker_mismatch` 는 worker 가 서버와 다른 데이터·규칙·코드 판본을
+# 읽은 실행이다(run-worker spec D5·D6). 프론트는 이 어휘를 `backtest.run.error.<code>` 로 번역한다.
+# 시작 422 의 `backtest.error.*` 와 키를 나누는 까닭은 같은 코드라도 시작 거절은 실행 전에 고칠
+# 것을, run 실패는 실행 중에 난 일을 말하기 때문이다(`frontend-api-state.md`).
 RunFailureCode = Literal[
     "portfolio.strategy.invalid",
     "portfolio.data.unavailable",
@@ -603,6 +686,8 @@ RunFailureCode = Literal[
     "backtest.run.benchmark_unknown",
     "backtest.run.internal",
     "backtest.run.interrupted",
+    "backtest.run.worker_exited",
+    "backtest.run.worker_mismatch",
 ]
 RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
 
@@ -638,6 +723,9 @@ class BacktestRunState:
     # 산출물의 위치(서버 경로)는 싣지 않는다 — run 상태는 그대로 API 응답이고, 산출물은 저장소가
     # run_id 로 찾는다(#277).
     artifact_sha256: str | None = None
+    # 처음 `running` 이 된 시각. 접수 대기를 뺀 계산 시간(끝난 시각 − 시작)의 기준이다(로드맵
+    # M6 시간 추정). 시작 전에 끝났거나 이 칸이 생기기 전(연구 DB v6 이전)에 돈 run 은 없다.
+    started_at: datetime | None = None
 
 
 @dataclass(frozen=True)

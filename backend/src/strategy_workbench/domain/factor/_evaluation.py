@@ -4,9 +4,11 @@ import math
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
+from itertools import accumulate
 from statistics import mean, median, pstdev
-from typing import TypeAlias, TypeGuard, TypeVar
+from typing import TypeAlias, TypeGuard, TypeVar, cast
 
+from ._history import SessionReadWindow, node_read_window
 from ._nodes import (
     FILLING_MISSING_POLICIES,
     BinaryNode,
@@ -20,6 +22,7 @@ from ._nodes import (
     FactorComparisonOperator,
     FactorGraph,
     FieldNode,
+    FillNode,
     GroupNode,
     GroupOperator,
     MissingPolicy,
@@ -96,7 +99,6 @@ class FactorObservation:
     as_of: date
     security_id: str
     fields: tuple[FactorFieldValue, ...]
-    forward_return: float | None = None
     universe_member: bool = True
 
 
@@ -214,8 +216,8 @@ def _compute_nodes(
 ) -> _NodeEvaluator:
     """출력에서 닿는 노드를 한 번씩 평가한 평가기. 그 노드 캐시가 값의 유일한 출처다.
 
-    `evaluate_factor_graph` 는 출력 노드만, `_trace` 는 캐시 전체(`computed`)와 원장이 가린
-    칸 때문에 결측으로 둔 칸(`masked`)을 읽는다. 같은 목록을 읽으므로 추적 값과 평가 값은 만들
+    `evaluate_factor_graph` 는 출력 노드만, `_trace` 는 캐시 뷰(`cache`)로 모든 노드의 칸 값과
+    원장이 가린 칸 때문에 결측으로 둔 칸을 읽는다. 같은 목록을 읽으므로 추적 값과 평가 값은 만들
     때부터 같다.
 
     진행은 도달 가능한 노드마다 종류별 가중치(`_node_progress_weight`)로 몫을 나눠 노드 완료 때
@@ -285,6 +287,11 @@ class _NodeEvaluator:
         """노드마다 원장이 가린 칸 때문에 결측이 된 출력 칸. 판정은 값 구간 규칙(`_value_spans`)
         이다."""
         return self._masked
+
+    @property
+    def cache(self) -> _ObjectNodeCache:
+        """trace 가 읽는 노드 캐시 뷰. 열 평가기 `FactorNodeCache` 와 같은 읽기를 낸다(T3-06)."""
+        return _ObjectNodeCache(self._computed, self._masked)
 
     def _securities(self) -> dict[str, list[int]]:
         """종목별 관측 index(날짜 순). 관측에만 달려 있어 시간 연산 노드들이 나눠 쓴다."""
@@ -413,9 +420,11 @@ class _NodeEvaluator:
                     zip(*inputs, strict=True), self._checkpoint
                 )
             ]
+        elif isinstance(node, FillNode):
+            values = _fill(node, inputs[0], checkpoint=self._checkpoint)
         elif isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
             values = _lag(
-                inputs[0], self._securities(), node.periods or 0, checkpoint=self._checkpoint
+                inputs[0], self._securities(), node_read_window(node), checkpoint=self._checkpoint
             )
         elif isinstance(node, UnaryNode):
             values = _unary(node, inputs[0], checkpoint=self._checkpoint)
@@ -461,18 +470,49 @@ class _NodeEvaluator:
         return values
 
 
+class _ObjectNodeCache:
+    """객체 평가기 캐시의 trace 뷰(`_trace.TraceNodeCache`). 평가기 목록을 복사하지 않고 읽는다.
+
+    열 평가기 `FactorNodeCache` 가 같은 두 읽기를 낸다. 그래서 trace 는 어느 평가기의 캐시로
+    만들어도 같다.
+    """
+
+    __slots__ = ("_computed", "_masked")
+
+    def __init__(
+        self,
+        computed: dict[str, list[FactorComputedValue]],
+        masked: dict[str, frozenset[int]],
+    ) -> None:
+        self._computed = computed
+        self._masked = masked
+
+    def value(self, node_id: str, row: int) -> FactorComputedValue:
+        return self._computed[node_id][row]
+
+    def is_masked(self, node_id: str, row: int) -> bool:
+        """원장이 가린 칸 때문에 결측이 된 칸인가(`_NodeEvaluator.masked`)."""
+        return row in self._masked[node_id]
+
+
 # 노드 계산이 평가 진행에서 차지하는 몫. 나머지는 출력 값 조립이다(4년 구간 실측 약 4%).
 _NODES_PROGRESS_SHARE = 0.96
 
-# 노드 종류별 진행 가중치. 실데이터 실측(이슈 #162, 모멘텀 252)에서 시계열 노드가 필드 노드의
-# 약 30배 시간을 썼다(창 길이만큼 값을 복사한다). 횡단면·그룹 노드는 날짜별 정렬이라 그 사이다.
+# 노드 종류별 진행 가중치. 창 전체를 읽는 시계열 연산(평균·표준편차·최소·최대)은 창 길이만큼 돌아
+# 필드 노드보다 훨씬 오래 걸린다(800종목 × 1200세션 합성, 창 252: 표준편차 약 70배). 창 양끝만 읽는
+# 모멘텀·차이는 창을 자르지 않아(`_time_series`) 필드 노드와 비슷하다(같은 측정 약 0.7배 —
+# 실데이터 확인 2026-10-17 후속 1 전에는 이것도 창을 복사해 약 30배였다, 이슈 #162). 횡단면·그룹
+# 노드는 날짜별 정렬이라 그 사이다.
 _TIME_SERIES_PROGRESS_WEIGHT = 20
 _SECTION_PROGRESS_WEIGHT = 3
+_ENDPOINT_TIME_SERIES_OPERATORS = frozenset({TimeSeriesOperator.MOMENTUM, TimeSeriesOperator.DELTA})
 
 
 def _node_progress_weight(node: ExpressionNode) -> int:
     if isinstance(node, TimeSeriesNode):
-        return _TIME_SERIES_PROGRESS_WEIGHT
+        return (
+            1 if node.operator in _ENDPOINT_TIME_SERIES_OPERATORS else _TIME_SERIES_PROGRESS_WEIGHT
+        )
     if isinstance(node, (CrossSectionalNode, GroupNode)):
         return _SECTION_PROGRESS_WEIGHT
     return 1
@@ -575,6 +615,25 @@ def _compare(
     return left == right
 
 
+def _fill(
+    node: FillNode,
+    values: list[FactorComputedValue],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> list[FactorComputedValue]:
+    """빈 칸을 `fill_value` 로 채운다(#608). 숫자가 아닌 값(검증이 막는 bool 입력)은 `_unary` 처럼
+    결측이다.
+
+    원장이 가린 칸과 값의 구간에 가린 칸이 드는 칸은 평가기가 이 뒤에 다시 비운다(#298) — 여기서는
+    가림을 보지 않는다.
+    """
+    fill = float(node.fill_value)
+    return [
+        fill if value is None else value if _is_number(value) else None
+        for value in _checkpointed(values, checkpoint)
+    ]
+
+
 def _unary(
     node: UnaryNode,
     values: list[FactorComputedValue],
@@ -606,24 +665,35 @@ def _time_series(
     # 처리한 관측 수로 센다.
     observation_count = max(len(values), 1)
     finished = 0
+    read_window = node_read_window(node)
     for indices in _checkpointed(by_security.values(), checkpoint):
+        # 종목마다 숫자 변환과 "앞까지 숫자 개수"를 한 번만 만든다. 창마다 원소를 다시 걸러 만들면
+        # 관측 수 × 창 길이만큼 돈다(실데이터 확인 2026-10-17 후속 1: 252일 모멘텀 하나에 6억 번).
+        numbers = [_as_number(values[index]) for index in indices]
+        numeric_before = [0, *accumulate(number is not None for number in numbers)]
         for position, result_index in _checkpointed(enumerate(indices), checkpoint):
-            end = position - node.lag + 1
-            start = end - node.window
+            bounds = read_window.bounds(position)
+            start, end = bounds.start, bounds.stop
             # 구간에 가린 칸이 드는 칸은 어차피 결측이라 창을 읽지 않는다
             if start < 0 or end <= 0 or result_index in masked:
                 continue
-            window = values_from_indices(values, indices[start:end], checkpoint=checkpoint)
-            if len(window) != node.window:
+            # 창은 정확히 `node.window` 칸이다(`node_read_window`). 그 칸이 모두 숫자일 때만 값을
+            # 낸다 — 숫자만 걸러 센 길이가 창 길이와 같은지 보던 규칙과 같다.
+            if numeric_before[end] - numeric_before[start] != node.window:
                 continue
+            # 창 양끝만 읽는 연산은 창을 자르지 않는다(`_ENDPOINT_TIME_SERIES_OPERATORS`).
+            first, last = cast(float, numbers[start]), cast(float, numbers[end - 1])
+            if node.operator is TimeSeriesOperator.MOMENTUM:
+                result[result_index] = None if first == 0 else last / first - 1
+                continue
+            if node.operator is TimeSeriesOperator.DELTA:
+                result[result_index] = last - first
+                continue
+            window = cast(list[float], numbers[start:end])
             if node.operator is TimeSeriesOperator.MEAN:
                 result[result_index] = mean(window)
             elif node.operator is TimeSeriesOperator.STANDARD_DEVIATION:
                 result[result_index] = pstdev(window)
-            elif node.operator is TimeSeriesOperator.MOMENTUM:
-                result[result_index] = None if window[0] == 0 else window[-1] / window[0] - 1
-            elif node.operator is TimeSeriesOperator.DELTA:
-                result[result_index] = window[-1] - window[0]
             elif node.operator is TimeSeriesOperator.MINIMUM:
                 result[result_index] = min(window)
             else:
@@ -700,15 +770,17 @@ def _group_transform(
 def _lag(
     values: list[FactorComputedValue],
     by_security: dict[str, list[int]],
-    periods: int,
+    window: SessionReadWindow,
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
+    """세션 창 정본(`node_read_window`)이 정한 한 칸을 옮긴다. 음수 시작은 이력 부족이다."""
     result: list[FactorComputedValue] = [None] * len(values)
     for indices in _checkpointed(by_security.values(), checkpoint):
         for position, index in _checkpointed(enumerate(indices), checkpoint):
-            if position >= periods:
-                result[index] = values[indices[position - periods]]
+            start = window.bounds(position).start
+            if start >= 0:
+                result[index] = values[indices[start]]
     return result
 
 
@@ -720,18 +792,14 @@ def _value_spans(node: ExpressionNode, inputs: list[_Spans]) -> _Spans:
     자체다. 창 연산은 창만큼 넓힌다 — 건너뛰는 세션은 창 밖이라, 창 안 값끼리 견주는 12-1 모멘텀은
     그 세션의 가린 칸과 무관하다. 두 값 이상을 섞는 연산(이항·비교·조건)은 필드마다 두 구간을 덮는
     구간이라, 오늘 값을 k세션 전 값이나 건너뛴 창과 견주면 그 사이의 가린 칸에서 결측이다. 같은 자리
-    연산(부정·횡단면·그룹)은 입력 구간 그대로이고, 상수·파라미터는 구간이 없다.
+    연산(부정·채움·횡단면·그룹)은 입력 구간 그대로이고, 상수·파라미터는 구간이 없다.
     """
     if isinstance(node, FieldNode):
         return {node.field_id: (0, 0)}
-    if isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
-        shift = node.periods or 0
+    if isinstance(node, (UnaryNode, TimeSeriesNode)):
+        window = node_read_window(node)
         return {
-            field_id: (near + shift, far + shift) for field_id, (near, far) in inputs[0].items()
-        }
-    if isinstance(node, TimeSeriesNode):
-        return {
-            field_id: (near + node.lag, far + node.lag + node.window - 1)
+            field_id: (near + window.near, far + window.far)
             for field_id, (near, far) in inputs[0].items()
         }
     hull: _Spans = {}
@@ -781,19 +849,6 @@ def _indices_by_security(
     for indices in _checkpointed(grouped.values(), checkpoint):
         indices.sort(key=lambda index: observations[index].as_of)
     return grouped
-
-
-def values_from_indices(
-    values: list[FactorComputedValue],
-    indices: list[int],
-    *,
-    checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> list[float]:
-    return [
-        number
-        for index in _checkpointed(indices, checkpoint)
-        if (number := _as_number(values[index])) is not None
-    ]
 
 
 def _is_number(value: FactorComputedValue) -> TypeGuard[int | float]:

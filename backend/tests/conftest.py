@@ -4,15 +4,23 @@ import sys
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from backtest_engine.types.instruments import AssetClass, InstrumentId
 from backtest_engine.types.market import Bar, MarketSnapshot
+from strategy_workbench.adapters.outbound.run_worker_process.facade.execution import (
+    ProcessRunExecution,
+)
+from strategy_workbench.adapters.outbound.secrets_local.facade.env_store import (
+    default_auto_trading_env_path,
+)
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import default_secrets_path
-from strategy_workbench.bootstrap import _assistant, _container, _http
+from strategy_workbench.bootstrap import _container, _http, _secrets
 
 from .runtime_path_guard import RuntimePathGuard
+from .rust_core_guard import require_rust_core
 
 # 테스트가 열면 안 되는 개발자 로컬 런타임 상태의 위치(#211). 아래 격리 fixture가 기본값을
 # tmp로 바꾸기 전에, 실제 기본값에서 계산한다.
@@ -21,8 +29,11 @@ RUNTIME_PATH_GUARD = RuntimePathGuard(
         _http.DEFAULT_STRATEGY_REPOSITORY_PATH.parent,
         _http.DEFAULT_ASSISTANT_DB_PATH.parent,
         _http.DEFAULT_RESEARCH_DB_PATH.parent,
+        _http.DEFAULT_CONTINUOUS_DB_PATH.parent,
         _container.DEFAULT_RUN_ARTIFACT_ROOT,
         default_secrets_path().parent,
+        # 내 문서 `auto_trading/.env`(AI 공급자·키움 모의 연결). 실제 사용자 키가 있는 파일이다.
+        default_auto_trading_env_path().parent,
     )
 )
 sys.addaudithook(RUNTIME_PATH_GUARD)
@@ -53,8 +64,12 @@ def _redirect_runtime_defaults(monkeypatch: pytest.MonkeyPatch, root: Path) -> N
     )
     monkeypatch.setattr(_http, "DEFAULT_ASSISTANT_DB_PATH", root / "assistant.sqlite3")
     monkeypatch.setattr(_http, "DEFAULT_RESEARCH_DB_PATH", root / "research.sqlite3")
+    monkeypatch.setattr(_http, "DEFAULT_CONTINUOUS_DB_PATH", root / "continuous-accounts.sqlite3")
     monkeypatch.setattr(_container, "DEFAULT_RUN_ARTIFACT_ROOT", root / "backtest-runs")
-    monkeypatch.setattr(_assistant, "default_secrets_path", lambda: root / "secrets.json")
+    monkeypatch.setattr(_secrets, "default_secrets_path", lambda: root / "secrets.json")
+    monkeypatch.setattr(
+        _secrets, "default_credentials_env_path", lambda: root / "auto_trading" / ".env"
+    )
 
 
 def _fail_if_touched(when: str) -> None:
@@ -101,6 +116,28 @@ def isolate_runtime_state_paths(
     root = tmp_path_factory.mktemp("runtime-state")
     _redirect_runtime_defaults(monkeypatch, root)
     return root
+
+
+@pytest.fixture(autouse=True)
+def _close_process_run_executions(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """테스트가 만든 프로세스 전송을 끝에 모두 닫는다(run-worker spec D5·D7).
+
+    프로세스 전송은 만들 때 예비 worker 를 띄운다. 서버 종료(lifespan)를 거치지 않는 앱·전송이
+    예비를 남기면 테스트마다 유휴 worker 가 쌓인다. `build_http_app` 이 만든 것도 같은 클래스라 함께
+    닫힌다. 이미 닫힌 전송을 다시 닫아도 된다.
+    """
+    opened: list[ProcessRunExecution] = []
+    initialize = ProcessRunExecution.__init__
+
+    # reason: 감싼 생성자의 인자를 그대로 넘기는 패스스루라 `Any` 다(code-style.md `Any` 표).
+    def tracked(self: ProcessRunExecution, *args: Any, **kwargs: Any) -> None:
+        initialize(self, *args, **kwargs)
+        opened.append(self)
+
+    monkeypatch.setattr(ProcessRunExecution, "__init__", tracked)
+    yield
+    for execution in opened:
+        execution.shutdown()
 
 
 @pytest.fixture(autouse=True)
@@ -163,3 +200,14 @@ def make_snapshot(ts: datetime, *bars: Bar) -> MarketSnapshot:
 
 def day(day_of_month: int) -> datetime:
     return datetime(2026, 8, day_of_month)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", "rust_core: Rust 코어 확장이 필요하다(없으면 건너뛰고 낡았으면 실패)"
+    )
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    if item.get_closest_marker("rust_core") is not None:
+        require_rust_core()

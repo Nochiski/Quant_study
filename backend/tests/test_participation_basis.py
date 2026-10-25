@@ -99,8 +99,8 @@ def test_workbench_feed_places_each_liquidity_volume_on_its_own_bar() -> None:
         (sessions[1], "B"): 4,
     }
 
-    feed = _columnar_feed(rows, liquidity)
-    plain = _columnar_feed(rows)
+    feed = _columnar_feed(rows, liquidity, session_calendar=sessions)
+    plain = _columnar_feed(rows, session_calendar=sessions)
 
     assert [
         [(bar.instrument.symbol, bar.liquidity_volume) for bar in snapshot.bars]

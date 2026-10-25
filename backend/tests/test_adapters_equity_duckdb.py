@@ -39,6 +39,7 @@ from strategy_workbench.adapters.outbound.equity_duckdb._source import (
 )
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_NOT_IN_LEDGER,
+    FIELD_NOT_PROVIDED,
     FIELD_SPECS,
     SOURCE_SPECS,
     UNSUPPORTED_FIELDS,
@@ -58,10 +59,9 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataUnavailableError,
     CorporateActionRecord,
 )
-from strategy_workbench.application.factor_research.facade.ports import FactorObservationQuery
 from strategy_workbench.application.factor_research.facade.research import (
     FactorCatalogQuery,
-    FactorPreviewRequest,
+    FactorGraphRequest,
     FactorResearchService,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
@@ -86,20 +86,22 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelResult,
     UniverseHistoryQuery,
 )
+from strategy_workbench.domain.factor.facade.expression import (
+    FactorGraph,
+    FieldNode,
+    NodeValueType,
+    TimeSeriesNode,
+    TimeSeriesOperator,
+)
 from strategy_workbench.domain.factor.facade.registry import (
     FactorAvailability,
     build_default_factor_registry,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
-    FactorGraph,
     FactorSignal,
-    FieldNode,
-    NodeValueType,
     RebalanceFrequency,
     StrategySpec,
-    TimeSeriesNode,
-    TimeSeriesOperator,
 )
 from tests.equity_fixture import (
     WB_BONUS_EX,
@@ -113,6 +115,7 @@ from tests.equity_fixture import (
     WB_PROFILE_ROWS,
     WB_SESSIONS,
     WB_SPLIT_DATE,
+    WB_WISE_FIELDS,
     build_workbench_root,
     fin_std_table,
     snapshot_id,
@@ -126,8 +129,8 @@ pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync -
 
 START, END = date(2024, 1, 8), date(2024, 1, 12)
 PRICE_FIELDS = ("price.close", "price.adj_close", "price.market_cap")
-# 손 픽스처가 원천을 다 갖췄을 때 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 29 +
-# equity 내부 스코프 `price.adj_close`. 나머지 13 의 사유는 `_specs.UNSUPPORTED_FIELDS` 다.
+# 손 픽스처가 원천을 다 갖췄을 때 어댑터가 내는 field_id.
+# 원장 선언과 지원·미지원의 전체 대조는 필드 계약 테스트가 소유한다.
 ALL_FIELDS = (
     "price.close",
     "price.open",
@@ -151,14 +154,20 @@ ALL_FIELDS = (
     "consensus.recommendation",
     "consensus.analyst_count",
     "flow.foreign_net_buy",
+    "flow.foreign_ownership",
+    "flow.foreign_limit_exhaustion",
+    "flow.pension_net_buy",
     "flow.institution_net_buy",
     "flow.retail_net_buy",
+    "flow.private_fund_net_buy",
+    "short.short_sale_volume",
     "short.short_sale_value",
     "short.borrowed_quantity",
     "credit.margin_balance",
     "event.dividend_per_share",
     "event.buyback_amount",
     "event.insider_net_buy",
+    *WB_WISE_FIELDS,
 )
 
 # 경고 문장이 한글로 완성됐는지 보는 표지(SoT 경고 문장 행, 이슈 #229).
@@ -237,21 +246,21 @@ def test_field_contract_splits_the_snapshot_but_not_the_ledger_or_the_root_path(
     assert older.snapshot().snapshot_id.startswith(ledger)
     assert older.snapshot().snapshot_id != current.snapshot().snapshot_id
 
-    request = FactorPreviewRequest(
-        FactorGraph(nodes=(FieldNode("close", "price.close", "field"),), output_node_id="close"),
-        START,
-        END,
-    )
     registry = build_default_factor_registry()
-    keys = [
-        FactorResearchService(registry, adapter, adapter).preview(request).cache_key
+    plans = [
+        FactorResearchService(registry, adapter).explain(
+            FactorGraphRequest(
+                FactorGraph(
+                    nodes=(FieldNode("close", "price.close", "field"),), output_node_id="close"
+                )
+            )
+        )
         for adapter in (current, older)
     ]
-    assert [key.data_snapshot_id for key in keys] == [
+    assert [plan.data_snapshot_id for plan in plans] == [
         current.snapshot().snapshot_id,
         older.snapshot().snapshot_id,
     ]
-    assert keys[0].fingerprint != keys[1].fingerprint
 
 
 _ADAPTER = "strategy_workbench.adapters.outbound.equity_duckdb._adapter"
@@ -324,7 +333,6 @@ def _reverse_declarations(monkeypatch: pytest.MonkeyPatch) -> None:
                 label="종가 ",
                 description="문장만",
                 evidence="-",
-                verdict="-",
                 disclosure_basis="-",
                 lag_basis="-",
             ),
@@ -354,6 +362,27 @@ def test_the_field_contract_follows_meaning_not_prose_or_order(
     ledger = before.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0]
     assert after.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0] == ledger
     assert (after != before) is moves
+
+
+def test_relisting_lag_fix_invalidates_the_previous_field_contract(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = EquityDuckdbAdapter(root).snapshot().snapshot_id
+    contract = EquityDuckdbAdapter._field_contract
+
+    def previous_contract(adapter: EquityDuckdbAdapter) -> dict[str, object]:
+        previous = contract(adapter)
+        previous.pop("grid_lag_scope")
+        return previous
+
+    monkeypatch.setattr(EquityDuckdbAdapter, "_field_contract", previous_contract)
+    previous = EquityDuckdbAdapter(root).snapshot().snapshot_id
+    # 원장 빌드는 같아도 잘못 연결했던 관측·팩터 캐시를 재사용하면 안 된다.
+    assert current != previous
+    assert (
+        current.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0]
+        == previous.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0]
+    )
 
 
 _HIVE_OFF = "(hive_partitioning = CAST('f' AS BOOLEAN))"
@@ -426,18 +455,13 @@ def test_list_fields_serves_every_declared_field_whose_source_is_built(
     # LATEST 원천의 커버 시작은 첫 공개일이고, 그 전 세션에는 셀이 없다
     assert profiles["financial.book_equity"].coverage.starts_on == WB_SESSIONS[0]
     assert profiles["event.buyback_amount"].coverage.starts_on == date(2023, 12, 27)
-    # 판정(지원/부분)은 프로필 설명 앞에 붙어 소비자에게 그대로 보인다
-    assert profiles["financial.revenue"].description.startswith("[부분]")
-    assert profiles["financial.net_income"].description.startswith("[지원]")
-
-
-def test_field_specs_cover_every_field_map_id_exactly_once() -> None:
-    """FIELD_MAP §2 의 42 = 어댑터가 내는 29 + 사유가 적힌 13. 겹치거나 빠지면 안 된다."""
-    declared = {spec.field_id for spec in FIELD_SPECS} - {"price.adj_close"}
-    assert declared & set(UNSUPPORTED_FIELDS) == set()
-    assert len(declared) == 29 and len(UNSUPPORTED_FIELDS) == 13
-    assert len(declared | set(UNSUPPORTED_FIELDS)) == 42
-    assert all(reason.strip() for reason in UNSUPPORTED_FIELDS.values())
+    # 수집일 격자(WISE, #608)는 캘린더 시작이 아니라 첫 수집일부터다
+    assert profiles["wise.consensus_op"].coverage.starts_on == date(2023, 12, 28)
+    assert profiles["price.close"].coverage.starts_on == WB_SESSIONS[0]
+    # 설명은 선언표 문장 그대로 소비자에게 간다 — 판정 접두를 붙이지 않는다(#373).
+    assert {f: p.description for f, p in profiles.items()} == {
+        spec.field_id: spec.description for spec in FIELD_SPECS
+    }
 
 
 def test_declarations_their_query_does_not_read_are_rejected() -> None:
@@ -464,6 +488,23 @@ def test_declarations_their_query_does_not_read_are_rejected() -> None:
         _reject_unread_declarations(
             (*SOURCE_SPECS, replace(plain, omitted_is_zero=True)), FIELD_SPECS
         )
+    # 날짜 식은 비매크로 격자 원천의 관계식만 감싼다(#608)
+    macro = next(spec for spec in SOURCE_SPECS if spec.is_macro and spec.mode is SourceMode.GRID)
+    for bad in (replace(latest, date_expr="fetched_date"), replace(macro, date_expr="date")):
+        with pytest.raises(ValueError, match=re.escape(f"sources=['{bad.name}']")):
+            _reject_unread_declarations((*SOURCE_SPECS, bad), FIELD_SPECS)
+
+
+@pytest.mark.parametrize("source_name", ["adj", "credit"])
+@pytest.mark.parametrize("field_count", [0, 2])
+def test_가림_표시_원천은_필드_하나만_선언한다(source_name: str, field_count: int) -> None:
+    original = next(spec for spec in FIELD_SPECS if spec.source == source_name)
+    fields = tuple(spec for spec in FIELD_SPECS if spec.source != source_name)
+    fields += tuple(
+        replace(original, field_id=f"test.masked_{index}") for index in range(field_count)
+    )
+    with pytest.raises(ValueError, match=re.escape(f"sources=['{source_name}']")):
+        _reject_unread_declarations(SOURCE_SPECS, fields)
 
 
 # ── RawObservationPort ────────────────────────────────────────────────────────
@@ -565,6 +606,29 @@ def test_unavailable_field_is_a_failure_value_naming_the_supported_set(
     # 읽는다(#316 리뷰 P3-1)
     assert FIELD_NOT_IN_LEDGER in result.detail
     assert UNSUPPORTED_FIELDS["classification.sector"] not in result.detail
+
+
+@pytest.mark.parametrize("lag", [1, None])
+def test_a_field_the_ledger_carries_but_this_adapter_does_not_serve_says_so(
+    tmp_path: Path,
+    lag: int | None,
+) -> None:
+    """원장 `dataset_profile` 에 있는데 내주지 않는 필드를 "원장이 싣지 않는다"고 하지 않는다(#373).
+
+    실원장은 `classification.sector` 부류를 싣는다. 가르는 기준은 부팅 때
+    읽은 `dataset_profile` 이다.
+    """
+    rows = [*WB_PROFILE_ROWS, ("classification.sector", lag, "원장 날짜")]
+    adapter = EquityDuckdbAdapter(build_workbench_root(tmp_path / "equity", profile_rows=rows))
+
+    reasons = adapter.unavailable_factor_fields()
+
+    assert reasons["classification.sector"] == FIELD_NOT_PROVIDED
+    assert reasons["credit.loan_value"] == FIELD_NOT_IN_LEDGER
+    result = _raw(adapter, fields=("classification.sector",))
+    assert result.status is DataLoadStatus.INVALID_QUERY
+    assert result.detail is not None and FIELD_NOT_PROVIDED in result.detail
+    assert "classification.sector" not in {p.field_id for p in adapter.list_fields()}
 
 
 def test_queries_outside_calendar_coverage_are_no_data(
@@ -944,7 +1008,6 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
         100 * 3 / 68
     )
     assert profiles["short.short_sale_value"].dataset_id == "short_daily"
-    assert profiles["flow.institution_net_buy"].description.startswith("[부분]")
 
 
 def test_latest_fields_never_show_a_filing_before_its_available_date(
@@ -997,6 +1060,41 @@ def test_panel_lag_override_shifts_the_row_and_its_available_date(
     assert (START, "036220:2", "price.adj_close") in cells
 
 
+@pytest.mark.parametrize("field_id", ["price.close", "price.adj_close"])
+def test_grid_lag_cannot_cross_a_relisting_span(tmp_path: Path, field_id: str) -> None:
+    # 5세션 랙은 재상장 공백을 넘어 2023-12-29의 첫 구간에 닿는다.
+    # 원장 기본 랙과 패널 override 양쪽 모두 같은 종목 신원을 지켜야 한다.
+    root = build_workbench_root(
+        tmp_path / "equity",
+        profile_rows=[
+            (name, 5 if name == field_id else lag, basis) for name, lag, basis in WB_PROFILE_ROWS
+        ],
+    )
+    adapter = EquityDuckdbAdapter(root)
+    for overrides in ((), (FieldLag(field_id, 5),)):
+        panel = adapter.load_panel(
+            ResearchPanelQuery(
+                start=START,
+                end=START,
+                security_ids=("000660:1", "036220:2"),
+                field_ids=(field_id,),
+                lag_overrides=overrides,
+            )
+        )
+        assert panel.ok
+        assert {cell.security_id for cell in panel.cells} == {"000660:1"}
+        assert panel.cells[0].available_date == date(2023, 12, 29)
+
+    raw = _raw(adapter, start=START, end=START, fields=(field_id,))
+    assert raw.ok
+    relisted = next(row for row in raw.observations if row.security_id == "036220:2")
+    assert relisted.fields == ()
+    continuing = next(row for row in raw.observations if row.security_id == "000660:1")
+    assert len(continuing.fields) == 1
+    assert continuing.fields[0].value == panel.cells[0].value
+    assert continuing.fields[0].available_date == panel.cells[0].available_date
+
+
 def test_panel_rejects_unknown_or_malformed_security_ids(
     adapter: EquityDuckdbAdapter, root: Path
 ) -> None:
@@ -1034,7 +1132,22 @@ def test_universe_securities_reads_names_through_the_observation_market(
     assert adapter.universe_securities("KRX", "krx.unknown", START) == ()
 
 
-# ── FactorMetadataPort · FactorObservationPort ────────────────────────────────
+def test_list_universes_answers_the_policy_ids_the_run_accepts(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """실행 설정 드롭다운의 선택지는 원장 `universe_policy` 의 id 와 같은 집합이다.
+
+    실행이 받는 id 와 같다.
+    """
+    universes = {item.universe_id: item for item in adapter.list_universes()}
+    # fixture 원장의 두 정책. 문장이 등록된 id 는 표시명을, 없는 id 는 id 를 그대로 이름으로 쓴다.
+    assert list(universes) == ["krx.all", "krx.common-stock"]
+    assert {item.market for item in universes.values()} == {"KRX"}
+    assert universes["krx.common-stock"].label == "KRX 보통주"
+    assert universes["krx.all"].label == "krx.all"
+
+
+# ── FactorMetadataPort · RawObservationPort ────────────────────────────────
 
 
 def test_factor_metadata_and_observations_come_from_the_same_panel(
@@ -1043,30 +1156,27 @@ def test_factor_metadata_and_observations_come_from_the_same_panel(
     metadata = adapter.resolve_factor_fields(("price.adj_close", "short.short_balance_ratio"))
     assert [f.field_id for f in metadata.fields] == ["price.adj_close"]
     assert metadata.data_snapshot_id == adapter.snapshot().snapshot_id
-    observations = adapter.load_factor_observations(
-        FactorObservationQuery(("price.adj_close",), START, END, minimum_history_sessions=2)
+    observations = adapter.load_raw_observations(
+        RawObservationQuery("KRX", "krx.common-stock", START, END, ("price.adj_close",), 1)
     )
     assert observations.data_snapshot_id == metadata.data_snapshot_id
     dates = {o.as_of for o in observations.observations}
     assert min(dates) == date(2024, 1, 5) and max(dates) == END
-    assert all(o.forward_return is None for o in observations.observations)
     assert any(not o.universe_member for o in observations.observations)  # 000660 정지일
 
 
 def test_factor_observations_mark_cells_the_ledger_masked(adapter: EquityDuckdbAdapter) -> None:
-    """팩터 연구 경로도 원장이 가린 셀을 `masked` 로 싣는다 — 결측 정책이 채우지 않게(#298)."""
-    observations = adapter.load_factor_observations(
-        FactorObservationQuery(("credit.margin_balance",), START, END, minimum_history_sessions=1)
+    """원시 관측 경로는 원장이 가린 셀을 `MASKED` 로 싣는다 — 결측 정책이 채우지 않게(#298)."""
+    observations = adapter.load_raw_observations(
+        RawObservationQuery("KRX", "krx.common-stock", START, END, ("credit.margin_balance",), 0)
     ).observations
     cells = {
-        (item.as_of, item.security_id): field
-        for item in observations
-        for field in item.fields
+        (item.as_of, item.security_id): field for item in observations for field in item.fields
     }
     # 권리락일(01-04) 행은 신용 랙 3세션 뒤(01-09)에 보인다 — 가린 셀이다
     masked = cells[(date(2024, 1, 9), "000660:1")]
-    assert (masked.value, masked.masked) == (None, True)
-    assert not cells[(date(2024, 1, 9), "005930:1")].masked
+    assert (masked.value, masked.kind) == (None, CellKind.MASKED)
+    assert cells[(date(2024, 1, 9), "005930:1")].kind is not CellKind.MASKED
 
 
 def test_factor_field_catalog_lists_every_field_as_a_numeric_series(
@@ -1097,7 +1207,7 @@ def test_factor_catalog_does_not_offer_a_factor_whose_field_the_ledger_lacks(
     (`resolve_factor_fields`)로 판정하고, compile 목록(`factor_field_catalog`)도 같은 메서드를
     부른다.
     """
-    service = FactorResearchService(build_default_factor_registry(), adapter, adapter)
+    service = FactorResearchService(build_default_factor_registry(), adapter)
 
     def catalog(availability: FactorAvailability) -> set[str]:
         query = FactorCatalogQuery(availability=(availability,), page_size=100)
@@ -1277,7 +1387,7 @@ def test_backtest_dataset_reads_roots_without_the_basis_column(
         BacktestDataQuery(date(2024, 1, 11), date(2024, 1, 12), ("005930:1",), None)
     )
     assert [b.session for b in dataset.bars] == [date(2024, 1, 11), date(2024, 1, 12)]
-    assert [w.code for w in dataset.warnings] == ["equity.reference_rows_dropped"]
+    assert dataset.warnings == ()
 
 
 def test_backtest_dataset_refuses_unknown_and_index_ids(
@@ -1336,7 +1446,9 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
     뺐다(#292 리뷰 P2-2).
     """
     macro_fields = {
-        "financial.book_equity", "consensus.forward_eps", "credit.margin_balance",
+        "financial.book_equity",
+        "consensus.forward_eps",
+        "credit.margin_balance",
         "price.adj_close",
     }
     root = build_workbench_root(tmp_path / "equity", catalog=False)
@@ -1581,7 +1693,10 @@ def test_corrupt_catalog_file_or_meta_at_boot_drops_every_macro_source(
     served = {p.field_id for p in broken.list_fields()}
     assert "price.close" in served and "consensus.target_price" in served
     assert not served & {
-        "financial.book_equity", "consensus.forward_eps", "credit.margin_balance", "price.adj_close"
+        "financial.book_equity",
+        "consensus.forward_eps",
+        "credit.margin_balance",
+        "price.adj_close",
     }
     denied = _raw(broken, fields=("consensus.forward_eps",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
@@ -1880,15 +1995,15 @@ def test_truthful_pipeline_momentum_across_a_split_is_continuous_on_adj_close(
     assert momentum("price.close") == pytest.approx(52_000 / 103_000 - 1)
 
 
-def test_source_omitted_zero_enters_factor_windows_on_both_paths(
+def test_source_omitted_zero_enters_factor_windows_on_the_pipeline(
     adapter: EquityDuckdbAdapter,
 ) -> None:
-    """키움 공매도의 원천 생략 0 은 팩터 연구·실행 두 경로에서 값으로 창에 든다(#371 리뷰 P3-2).
+    """키움 공매도의 원천 생략 0 은 공용 실행 경로에서 값으로 창에 든다(#371 리뷰 P3-2).
 
     005930 공매도 대금은 01-08 measured 70,000,000 · 01-09 src_omitted 이고 랙 1 이라 01-09·01-10
     에 보인다. 01-10 의 2세션 평균은 기본 결측 정책(drop)에서 (70,000,000 + 0) / 2 다 — 0 을
-    모르는 결측으로 접으면 창이 서지 않는다. 연구 경로는 `load_factor_observations`, 실행 경로는
-    원시 관측을 팩터 관측으로 옮기는 파이프라인을 지난다.
+    모르는 결측으로 접으면 창이 서지 않는다. 원시 관측을 팩터 관측으로 옮기는 공용
+    파이프라인을 지난다.
     """
     graph = FactorGraph(
         nodes=(
@@ -1898,9 +2013,6 @@ def test_source_omitted_zero_enters_factor_windows_on_both_paths(
         output_node_id="avg",
     )
     registry = build_default_factor_registry()
-    research = FactorResearchService(registry, adapter, adapter).preview(
-        FactorPreviewRequest(graph, START, END)
-    )
     spec = _momentum_spec("short.short_sale_value")
     spec = replace(spec, factors=(replace(spec.factors[0], graph=graph),))
     pipeline = PortfolioDesignService(
@@ -1910,11 +2022,8 @@ def test_source_omitted_zero_enters_factor_windows_on_both_paths(
         factor_registry_version=registry.version,
     ).run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
     key = (date(2024, 1, 10), "005930:1")
-    values = [
-        {(v.as_of, v.security_id): v.value for v in evaluated}
-        for evaluated in (research.evaluation.values, pipeline.factor_evaluations[0].values)
-    ]
-    assert [found[key] for found in values] == [pytest.approx(35_000_000)] * 2
+    values = {(v.as_of, v.security_id): v.value for v in pipeline.factor_evaluations[0].values}
+    assert values[key] == pytest.approx(35_000_000)
 
 
 def test_raw_load_reports_monotonic_progress_ending_at_one(adapter: EquityDuckdbAdapter) -> None:

@@ -3,10 +3,8 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type Dispatch,
   type KeyboardEvent,
   type ReactNode,
-  type SetStateAction,
 } from "react";
 
 import type {
@@ -16,6 +14,7 @@ import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import {
   catalogProfiles,
+  requiresValue,
   type FormControl,
   type FormField,
   type FormListItem,
@@ -50,13 +49,15 @@ import {
   useItemRemoval,
   type CommitPlanner,
 } from "../model/use-field-editing";
-import { useRevealSelection } from "../model/use-reveal-selection";
+import { useRevealSelection, useRevealedOpen } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 import "./strategy-form-panel.css";
 
 export type FormCatalogs = {
   equityFields: readonly DatasetFieldProfile[] | null;
+  /** 정합성 owner가 판본 불일치를 확인한 경우 로딩과 구별한다. */
+  equityIncompatible?: boolean;
 };
 
 type StrategyFormPanelProps = {
@@ -87,7 +88,7 @@ const UNSET = "__unset__";
  * 목록 섹션(factors·rules·parameters)의 편집은 P4-03이 더한다.
  */
 export const StrategyFormPanel = ({
-  form: { projection, stale, firstParsePending, tree },
+  form: { projection, stale, firstParsePending, noValidParse, tree },
   transactions,
   catalogs,
   schema = null,
@@ -104,7 +105,7 @@ export const StrategyFormPanel = ({
   return (
     <section
       ref={container}
-      className="strategy-form"
+      className="strategy-form ui-control-touch"
       aria-label={t("form.panel.label")}
     >
       <header className="strategy-form__header">
@@ -141,7 +142,9 @@ export const StrategyFormPanel = ({
           {t(
             firstParsePending
               ? "form.panel.firstParsePending"
-              : "form.panel.loading",
+              : noValidParse
+                ? "form.panel.noValidParse"
+                : "form.panel.loading",
           )}
         </p>
       ) : (
@@ -190,9 +193,9 @@ const FormSectionView = ({
 }) => {
   const notesId = useId();
   const [open, setOpen] = useRevealedOpen(
-    section,
-    selectedPointer,
-    revealSignal,
+    selectedPointer !== undefined && sectionCovers(section, selectedPointer)
+      ? `${selectedPointer}:${revealSignal ?? 0}`
+      : null,
   );
   if (section.kind === "list") {
     return (
@@ -282,12 +285,11 @@ const SectionToggle = ({
   return (
     <button
       type="button"
-      className="strategy-form__toggle"
+      className="strategy-form__toggle ui-disclosure-toggle"
       aria-expanded={open}
       onClick={onToggle}
       title={tDescription(descriptionKey) ?? undefined}
     >
-      <span aria-hidden="true">{open ? "▾" : "▸"}</span>{" "}
       {name === null ? null : (
         <span className="strategy-form__name">{name}</span>
       )}
@@ -359,9 +361,9 @@ const FormListSectionView = ({
       ),
     );
   const [open, setOpen] = useRevealedOpen(
-    section,
-    selectedPointer,
-    revealSignal,
+    selectedPointer !== undefined && sectionCovers(section, selectedPointer)
+      ? `${selectedPointer}:${revealSignal ?? 0}`
+      : null,
   );
   const settling = transactions.settling;
   const addBlocked = addition.blocked;
@@ -383,7 +385,7 @@ const FormListSectionView = ({
       <div hidden={!open}>
         <div className="strategy-form__control">
           {kinds !== null ? (
-            <select
+            <select className="ui-select"
               aria-label={`${section.key} · ${t("form.list.kind")}`}
               value={chosenKind ?? ""}
               onChange={(event) => setKind(event.target.value)}
@@ -413,7 +415,7 @@ const FormListSectionView = ({
             {t("form.list.add")}
           </Button>
           {presets.length > 0 ? (
-            <select
+            <select className="ui-select"
               aria-label={`${section.key} · ${t("form.list.addExample")}`}
               value=""
               disabled={settling}
@@ -638,29 +640,6 @@ const sectionCovers = (section: FormSection, pointer: string): boolean =>
     : pointer === section.pointer ||
       pointer.startsWith(`${section.pointer}/`);
 
-/**
- * 접기 상태. 문제 행이 이 섹션 안을 가리키면(같은 행을 다시 눌러도 `revealSignal`이 오른다) 접혀 있던
- * 섹션을 펴서 인라인 본문이 열린 채로 드러나게 한다(WORKFLOW P1-04, P1-01 reveal과 한 쌍).
- * 렌더 중 파생이다 — effect로 열면 스크롤(`useRevealSelection`)이 접힌 높이로 먼저 계산된다.
- */
-const useRevealedOpen = (
-  section: FormSection,
-  selectedPointer: string | undefined,
-  revealSignal: number | undefined,
-): [boolean, Dispatch<SetStateAction<boolean>>] => {
-  const [open, setOpen] = useState(true);
-  const request =
-    selectedPointer !== undefined && sectionCovers(section, selectedPointer)
-      ? `${selectedPointer}:${revealSignal ?? 0}`
-      : null;
-  const [served, setServed] = useState<string | null>(request);
-  if (request !== served) {
-    setServed(request);
-    if (request !== null && !open) setOpen(true);
-  }
-  return [open, setOpen];
-};
-
 /** 편집 컨트롤이 없는 행(링크·const)은 `<label for>` 대신 `aria-labelledby`로 이름을 잇는다(리뷰 DEFECT-P402-004). */
 const isPassiveControl = (control: FormControl): boolean =>
   control.kind === "graph-link" ||
@@ -681,6 +660,7 @@ export const FormFieldsEditor = ({
   sectionDiagnostics = true,
   names,
   showIdentifiers = true,
+  requirementTags = false,
 }: {
   section: ObjectSection;
   transactions: SourceTransactions;
@@ -696,6 +676,8 @@ export const FormFieldsEditor = ({
   sectionDiagnostics?: boolean;
   names?: SummaryNames;
   showIdentifiers?: boolean;
+  /** 필수 별표 대신 "필수"·"선택" 표식을 라벨 옆에 둔다(새 전략 안내). */
+  requirementTags?: boolean;
 }) => (
   <>
     {/* 그래프 노드 진단은 노드 **객체** pointer로 오므로 어느 필드도 흡수하지 않는다. 그런 진단이
@@ -708,6 +690,7 @@ export const FormFieldsEditor = ({
         key={field.pointer}
         names={names}
         showIdentifiers={showIdentifiers}
+        requirementTags={requirementTags}
         section={section}
         field={field}
         transactions={transactions}
@@ -783,6 +766,7 @@ const FormFieldRow = ({
   selectedPointer,
   names,
   showIdentifiers = true,
+  requirementTags = false,
 }: {
   section: ObjectSection;
   field: FormField;
@@ -793,6 +777,7 @@ const FormFieldRow = ({
   selectedPointer?: string;
   names?: SummaryNames;
   showIdentifiers?: boolean;
+  requirementTags?: boolean;
 }) => {
   const id = useId();
   const labelId = `${id}-label`;
@@ -848,7 +833,20 @@ const FormFieldRow = ({
           trim해 "이름key"로 붙어 읽힌다(P1-03 리뷰). */}
       {name === null ? null : " "}
       {showIdentifiers ? <code className="strategy-form__key">{field.key}</code> : null}
-      {field.required ? <span aria-hidden="true"> *</span> : null}
+      {requirementTags ? (
+        <>
+          {" "}
+          {/* 기본값이 있거나 지금 꺼진 필수 칸은 채우지 않아도 되므로 "선택"이다(단계 완료 판정과 같은 술어). */}
+          <span
+            className="strategy-form__requirement"
+            data-required={requiresValue(field, section) ? "true" : undefined}
+          >
+            {t(requiresValue(field, section) ? "form.field.required" : "form.field.optional")}
+          </span>
+        </>
+      ) : field.required ? (
+        <span aria-hidden="true"> *</span>
+      ) : null}
       {(field.displayUnit ?? field.unit) ? (
         <>
           {/* 키와 단위 사이 공백도 형제 text node다 — 요소 안에 두면 "key· %"로 붙어 읽힌다. */}
@@ -905,10 +903,10 @@ const FormFieldRow = ({
       ) : null}
       {!field.written && field.hasDefault ? (
         <p className="strategy-form__hint">
-          {t("form.field.defaultHint").replace(
-            "{value}",
-            draftOf(field.defaultValue) || "null",
-          )}
+          {/* 값이 없는 기본값(null·빈 문자열)은 "기본값 null" 대신 비워 둬도 된다는 사람 말로 보인다. */}
+          {draftOf(field.defaultValue) === ""
+            ? t("form.field.defaultEmptyHint")
+            : t("form.field.defaultHint").replace("{value}", draftOf(field.defaultValue))}
         </p>
       ) : !field.written && field.defaultFrom !== null && showIdentifiers ? (
         <p className="strategy-form__hint">
@@ -1013,7 +1011,7 @@ export const FieldControl = (props: ControlProps) => {
     if (options === null) return <TextualControl {...props} />;
     const known = options.some((option) => option.value === current);
     return (
-      <select
+      <select className="ui-select"
         id={id}
         aria-label={ariaLabel}
         aria-describedby={describedBy}
@@ -1148,7 +1146,7 @@ const TextualControl = ({
     setPristine(false);
   };
   const input = (
-    <input
+    <input className="ui-input"
       id={id}
       aria-label={ariaLabel}
       aria-describedby={describedBy}

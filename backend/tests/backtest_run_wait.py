@@ -23,8 +23,10 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     RawObservationQuery,
     RawObservationSet,
 )
+from strategy_workbench.domain.backtest.facade.runs import RunStatus
 
-TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+# 종결 판정의 정본은 `RunStatus.is_terminal`이다. HTTP 응답의 문자열 상태와 맞추려고 값으로 편다.
+TERMINAL_STATUSES = frozenset(status.value for status in RunStatus if status.is_terminal)
 _POLL_INTERVAL_S = 0.01
 
 

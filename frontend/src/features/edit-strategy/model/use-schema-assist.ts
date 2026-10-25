@@ -1,3 +1,4 @@
+import { metadataCoherence } from "./metadata-coherence";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
@@ -23,9 +24,9 @@ import type {
 import {
   buildCompletionSource,
   buildHoverSource,
-  factorCatalogCoherence,
   projectAssistMetadata,
   type AssistDeps,
+  type AssistMetadata,
 } from "./schema-assist";
 import type { JsonSchema } from "./schema-navigator";
 
@@ -40,6 +41,8 @@ export type SchemaAssist = {
   schema: JsonSchema | null;
   /** Same query-owned metadata, exposed intact for the read-only Contract Inspector. */
   inspectorSource: ContractInspectorSource;
+  /** 정합 확인을 통과한 카탈로그만 편집 필드 선택기에 전달한다. */
+  fieldPickerCatalogs: AssistMetadata["fieldPickerCatalogs"];
   /**
    * 연산자 카탈로그(P1-03, spec D8). Graph 팔레트가 읽는다. `loading`은 편집기 assist의 `loading`과
    * 분리한다 — 카탈로그가 늦어도 편집기 완성·hover는 기다릴 이유가 없다.
@@ -54,10 +57,9 @@ const CATALOG_PAGE = { page_size: 100 } as const;
 
 const resourceState = (
   pending: boolean,
-  error: boolean,
   hasData: boolean,
 ): ContractResourceState =>
-  hasData ? "ready" : pending ? "loading" : error ? "error" : "error";
+  hasData ? "ready" : pending ? "loading" : "error";
 
 /**
  * Binds the schema-driven editor assistance to live data: runtime schema and contract (P1-05)
@@ -107,11 +109,11 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
     factors.isPending;
   const schemaVersion = schema.data?.schema_version ?? null;
   const runtimeSchema = (schemaData as JsonSchema | undefined) ?? null;
-  const snippetCoherence = factorCatalogCoherence(
-    schema.data ?? null,
-    contract.data ?? null,
-    factors.data ?? null,
-  );
+  const snippetCoherence = metadataCoherence({
+    schema: schema.data ?? null,
+    contract: contract.data ?? null,
+    factorCatalog: factors.data ?? null,
+  }).factorRegistry;
   const snippetSource = useMemo<SnippetCatalogSource>(
     () => ({
       schema: assistMetadata.schema,
@@ -126,12 +128,12 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
     [
       assistMetadata.catalogs.factors,
       assistMetadata.schema,
-      contract.isPending,
       contract.isError,
-      factors.isPending,
       factors.isError,
-      schema.isPending,
       schema.isError,
+      contract.isPending,
+      factors.isPending,
+      schema.isPending,
       snippetCoherence,
     ],
   );
@@ -153,39 +155,31 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       state: {
         schema: resourceState(
           schema.isPending,
-          schema.isError,
           schema.data !== undefined,
         ),
         contract: resourceState(
           contract.isPending,
-          contract.isError,
           contractData !== undefined,
         ),
         equityCatalog: resourceState(
           fields.isPending,
-          fields.isError,
           fields.data !== undefined,
         ),
         factorCatalog: resourceState(
           factors.isPending,
-          factors.isError,
           factors.data !== undefined,
         ),
       },
     }),
     [
-      contract.isError,
       contract.isPending,
       contract.data,
       contractData,
       factors.data,
-      factors.isError,
       factors.isPending,
       fields.data,
-      fields.isError,
       fields.isPending,
       schema.data,
-      schema.isError,
       schema.isPending,
     ],
   );
@@ -197,6 +191,7 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       schemaVersion,
       schema: runtimeSchema,
       inspectorSource,
+      fieldPickerCatalogs: assistMetadata.fieldPickerCatalogs,
       operators,
       snippetSource,
     }),
@@ -204,6 +199,7 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       completionSource,
       hoverSource,
       inspectorSource,
+      assistMetadata.fieldPickerCatalogs,
       loading,
       operators,
       schemaVersion,

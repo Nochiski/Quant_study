@@ -4,6 +4,8 @@ import { parseSource } from "../../../shared/lib/yaml12";
 import {
   canValidateDocument,
   currentDiagnostics,
+  currentParse,
+  currentParseOutcome,
   currentCompile,
   currentSpec,
   documentReducer,
@@ -52,6 +54,22 @@ const run = (
 ) => actions.reduce(documentReducer, state);
 
 describe("document state machine", () => {
+  it("현재 구문 결과만 선택하고 오래된 성공 결과는 투영용 fallback에 남긴다", () => {
+    let state = initialDocumentState("yaml", "title: first\n");
+    const first = parseSource(state.source, "yaml");
+    state = run(state, { type: "parsed", version: state.sourceVersion, result: first });
+    expect(currentParse(state)).toBe(first);
+    expect(currentParseOutcome(state)).toBe(first);
+    state = run(state, { type: "edit", source: "title: [broken\n" });
+    expect(currentParseOutcome(state)).toBeNull();
+    expect(currentParse(state)).toBeNull();
+    expect(state.lastValidParse?.result).toBe(first);
+    const rejected = parseSource(state.source, "yaml");
+    state = run(state, { type: "parsed", version: state.sourceVersion, result: rejected });
+    expect(currentParseOutcome(state)).toBe(rejected);
+    expect(currentParse(state)).toBeNull();
+  });
+
   it("walks editing → parsing → structurally-valid → semantically-valid", () => {
     let state = initialDocumentState("yaml", "");
     state = run(state, { type: "edit", source: "title: a\n" });
@@ -273,58 +291,6 @@ describe("document state machine", () => {
     expect(state.compiled).toBeNull();
   });
 
-  it("accepts a backend canonical base only for the exact loaded document", () => {
-    let state = run(initialDocumentState(), {
-      type: "load",
-      format: "yaml",
-      source: "title: A\n",
-      strategyId: "A",
-      baseRevision: 1,
-      baseSpecHash: "hA",
-    });
-    const documentEpoch = state.documentEpoch;
-    state = run(state, { type: "edit", source: "title: edited\n" });
-
-    const wrongHash = run(state, {
-      type: "base-compiled",
-      documentEpoch,
-      source: "title: A\n",
-      specHash: "wrong",
-      canonicalJson: '{"title":"wrong"}',
-    });
-    expect(wrongHash).toBe(state);
-
-    state = run(state, {
-      type: "base-compiled",
-      documentEpoch,
-      source: "title: A\n",
-      specHash: "hA",
-      canonicalJson: '{"title":"A"}',
-    });
-    expect(state.savedCanonicalJson).toBe('{"title":"A"}');
-    expect(state.source).toBe("title: edited\n");
-    expect(state.compiled).toBeNull();
-
-    const previous = state;
-    state = run(state, {
-      type: "load",
-      format: "yaml",
-      source: "title: B\n",
-      strategyId: "B",
-      baseRevision: 1,
-      baseSpecHash: "hB",
-    });
-    expect(
-      run(state, {
-        type: "base-compiled",
-        documentEpoch: previous.documentEpoch,
-        source: "title: A\n",
-        specHash: "hA",
-        canonicalJson: '{"title":"stale"}',
-      }),
-    ).toBe(state);
-  });
-
   it("keeps a mismatched save canonical fail-closed until the saved hash recompiles", () => {
     let state = run(initialDocumentState(), {
       type: "load",
@@ -356,7 +322,6 @@ describe("document state machine", () => {
       sourceVersion: state.sourceVersion,
     });
 
-    expect(state.savedCanonicalJson).toBeNull();
     expect(state.compiled).toBeNull();
     expect(state.compiledVersion).toBe(state.sourceVersion - 1);
     expect(state.phase).toBe("structurally-valid");
@@ -373,7 +338,6 @@ describe("document state machine", () => {
       version: state.sourceVersion,
       outcome: okOutcome("hB"),
     });
-    expect(state.savedCanonicalJson).toBe('{"title":"x"}');
     expect(currentCompile(state)?.specHash).toBe("hB");
   });
 
@@ -425,7 +389,6 @@ describe("document state machine", () => {
       outcome: okOutcome("h1"),
     });
     expect(state.phase).toBe("saved"); // matches the base hash and the text is unchanged
-    expect(state.savedCanonicalJson).toBe('{"title":"x"}');
 
     state = run(state, { type: "edit", source: "title: b\n" });
     expect(state.dirty).toBe(true);
@@ -440,7 +403,6 @@ describe("document state machine", () => {
       outcome: okOutcome("h2"),
     });
     expect(state.phase).toBe("semantically-valid");
-    expect(state.savedCanonicalJson).toBe('{"title":"x"}');
     state = run(state, {
       type: "saved",
       strategyId: "s1",
@@ -454,7 +416,6 @@ describe("document state machine", () => {
     expect(state.phase).toBe("saved");
     expect(state.dirty).toBe(false);
     expect(state.baseRevision).toBe(4);
-    expect(state.savedCanonicalJson).toBe('{"title":"b"}');
   });
 
   it("rejects save responses from an older loaded document", () => {

@@ -8,6 +8,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     DataSnapshot,
     ResearchPanelQuery,
     ResearchPanelResult,
+    UniverseDefinition,
     UniverseHistoryQuery,
     UniverseHistoryResult,
 )
@@ -19,6 +20,13 @@ class EquityDataPort(Protocol):
     def snapshot(self) -> DataSnapshot: ...
 
     def list_fields(self) -> tuple[DatasetFieldProfile, ...]: ...
+
+    def list_universes(self) -> tuple[UniverseDefinition, ...]:
+        """실행 설정 `universe_id` 로 고를 수 있는 유니버스 전부(id 오름차순).
+
+        화면 드롭다운의 출처다.
+        """
+        ...
 
     def load_universe(self, query: UniverseHistoryQuery) -> UniverseHistoryResult: ...
 

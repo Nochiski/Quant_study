@@ -23,6 +23,7 @@ SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "strategy_workbench"
 # 진단 메시지가 읽히도록 유스케이스 서비스를 먼저 이름으로 건다.
 ENVIRONMENT_CONSUMERS = (
     "application/backtest_run/_service.py",
+    "application/backtest_run/_computation.py",
     "application/portfolio_design/_service.py",
     "application/portfolio_design/_trace_service.py",
 )
@@ -65,6 +66,7 @@ def test_no_module_reads_the_retired_document_sections() -> None:
 # 문서 브리지 값으로 되돌아가고, 매니페스트는 실행하지 않은 설정을 기록한다(리뷰 P0).
 PREVIEW_REQUEST_CALLERS = (
     "application/backtest_run/_service.py",
+    "application/backtest_run/_computation.py",
     "application/portfolio_design/_service.py",
     "application/portfolio_design/_trace_service.py",
 )

@@ -111,8 +111,8 @@ CHAIN_NAMES = (
 CHAIN = (*(RULES[name] for name in CHAIN_NAMES), rules_s19.DATASET_PROFILE)
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 FIELDS = ("price.close", "price.adj_close", "price.market_cap")
-# 체인이 다 서면 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 29 + 내부 스코프 price.adj_close.
-# 남는 13 은 원천·컬럼이 없거나(11) 굽지 않기로 한 것(2)이라 여기서도 unavailable 이다.
+# 체인이 다 서면 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 33 + 내부 스코프 price.adj_close.
+# 남는 9 는 원천·컬럼이 없거나 굽지 않기로 한 것이라 여기서도 unavailable 이다(#421 이 네 필드를 연결).
 ALL_FIELDS = (
     "price.close", "price.open", "price.volume", "price.market_cap",
     "price.shares_outstanding", "price.trading_value", "price.adj_close",
@@ -122,9 +122,16 @@ ALL_FIELDS = (
     "consensus.forward_eps", "consensus.forward_sales", "consensus.eps_dispersion",
     "consensus.target_price", "consensus.recommendation", "consensus.analyst_count",
     "flow.foreign_net_buy", "flow.institution_net_buy", "flow.retail_net_buy",
-    "short.short_sale_value", "short.borrowed_quantity", "credit.margin_balance",
+    "flow.foreign_ownership", "flow.foreign_limit_exhaustion", "flow.pension_net_buy",
+    # 내부 스코프 — flow_daily.samo_fund_krw(#608). WISE 13필드는 원장 S26 표가 이 체인에 없어 unavailable 이다
+    "flow.private_fund_net_buy",
+    "short.short_sale_value", "short.short_sale_volume", "short.borrowed_quantity",
+    "credit.margin_balance",
     "event.dividend_per_share", "event.buyback_amount", "event.insider_net_buy",
 )
+# 원장 선언(`dataset_profile` 행)이 아직 main 계보에 없는 필드(#608) — 원장 S26·사모 선언(e1.30.0)이 서버 배포본
+# 계보에만 있다. 그 계보가 main 에 합쳐지면 어댑터가 대장 랙을 읽어 위 등식이 깨진다 — 그때 이 목록을 비운다.
+LEDGER_PENDING_FIELDS = frozenset({"flow.private_fund_net_buy"})
 SPLIT = date(2018, 5, 4)
 HALT_LAST = date(2018, 5, 3)
 AFTER_SPLIT = date(2018, 5, 8)  # 분할 적용일 다음 세션(05-07 대체공휴일) — 랙 1 필드가 05-04 행을 본다
@@ -190,8 +197,11 @@ def test_snapshot_id_앞부분은_카탈로그_meta_와_같다(adapter, built: P
     ledger, separator, _ = adapter.snapshot().snapshot_id.partition(SNAPSHOT_CONTRACT_SEPARATOR)
     assert (ledger, separator) == (meta["snapshot_id"], SNAPSHOT_CONTRACT_SEPARATOR)
     assert {p.field_id for p in adapter.list_fields()} == set(ALL_FIELDS)
-    # 체인이 `dataset_profile` 까지 지어 어댑터가 대장 경로를 밟는다 — 폴백 랙은 쓰지 않는다(#246)
-    assert not [p.field_id for p in adapter.list_fields() if "fallback" in p.available_date_basis]
+    # 체인이 `dataset_profile` 까지 지어 어댑터가 대장 경로를 밟는다 — 폴백 랙은 쓰지 않는다(#246).
+    # 예외는 원장 선언이 아직 main 계보에 없는 필드뿐이고, 선언이 들어오면 이 등식이 깨져 목록을 지운다
+    assert {
+        p.field_id for p in adapter.list_fields() if "fallback" in p.available_date_basis
+    } == LEDGER_PENDING_FIELDS
     # 카탈로그는 S21 본판이 요구하는 매크로 둘을 새로 싣는다(v_consensus·v_fin_latest)
     names = {sig.split("(", 1)[0] for sig in meta["macros"]}
     assert {"v_adj_price_fwd", "v_consensus", "v_fin_latest"} <= names
@@ -270,7 +280,7 @@ def test_미지원_필드는_unavailable_이고_mock_대체가_없다(adapter) -
     reasons = adapter.unavailable_factor_fields()  # compile 진단과 같은 사유 표(#316)
     # 격자 3테이블이 다 서도 남는 미지원 — 사유는 한 문장이고, 컬럼 부재(S08-2)·원천 축 부재(S10
     # 판정) 같은 구분은 어댑터 `_specs.UNSUPPORTED_FIELDS` 의 메모에만 남는다(#316 리뷰 P3-1)
-    for field_id in ("classification.sector", "flow.foreign_ownership", "credit.net_buy"):
+    for field_id in ("classification.sector", "flow.block_buy", "credit.net_buy"):
         r = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=(field_id,))
         assert r.status is DataLoadStatus.INVALID_QUERY and "unavailable" in str(r.detail)
         assert reasons[field_id] in str(r.detail) and "S08-2" not in str(r.detail)
@@ -279,8 +289,15 @@ def test_미지원_필드는_unavailable_이고_mock_대체가_없다(adapter) -
 # ── S21 본판: 필드별 1셀 손검산 ───────────────────────────────────────────────
 
 def _cell(result, as_of: date, security_id: str, field_id: str):
-    o = next(o for o in result.observations if (o.as_of, o.security_id) == (as_of, security_id))
-    return next(f for f in o.fields if f.field_id == field_id)
+    # 셀이 없으면 StopIteration 대신 무엇을 찾았는지 남긴다(#586 리뷰)
+    o = next((o for o in result.observations if (o.as_of, o.security_id) == (as_of, security_id)),
+             None)
+    assert o is not None, f"관측 행 없음 — as_of={as_of} security_id={security_id}"
+    cell = next((f for f in o.fields if f.field_id == field_id), None)
+    assert cell is not None, (
+        f"셀 없음 — as_of={as_of} security_id={security_id} field_id={field_id} "
+        f"present={sorted(f.field_id for f in o.fields)}")
+    return cell
 
 
 def test_2018_05_04_가격_6필드는_KRX_원장_행_그대로다(adapter) -> None:
@@ -355,10 +372,11 @@ def test_2026_08_컨센서스_의견_임원지분_1셀(adapter) -> None:
     # 08-20 세션에는 08-14 접수 4건 합(1,040주)이 최신이다. majorstock 축은 섞이지 않는다
     insider = _cell(r, BACKFILL_END, "005930:1", "event.insider_net_buy")
     assert (insider.value, insider.available_date) == (1_040.0, date(2026, 8, 14))
-    # 절단본 corp_event 에 tsstk_aq 행이 없어 자사주 필드는 목록엔 있어도 셀이 없다(합성 금지)
-    o = next(o for o in r.observations
-             if (o.as_of, o.security_id) == (BACKFILL_END, "005930:1"))
-    assert "event.buyback_amount" not in {f.field_id for f in o.fields}
+    # 자사주 취득 결정 — 원장 사건 어휘 `treasury_buy` 행을 읽는다(#583, 전에는 원천 표 이름
+    # `tsstk_aq` 로 걸러 셀이 없었다). 08-21 접수 결정은 as_of(08-20) 뒤라 보이지 않고, 그 앞의
+    # 03-18 접수 1건(보통주 7,174,300,000,000원, stg_event_tsstk_aq.aqpln_prc_ostk)이 최신이다
+    buyback = _cell(r, BACKFILL_END, "005930:1", "event.buyback_amount")
+    assert (buyback.value, buyback.available_date) == (7_174_300_000_000.0, date(2026, 3, 18))
 
 
 def test_2018_05_04_격자_3테이블은_stage_원장_값_그대로다(adapter) -> None:

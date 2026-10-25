@@ -1,3 +1,4 @@
+import { useWholeDocumentReplacement } from "./editor-harness";
 import { EditorView } from "@codemirror/view";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -68,7 +69,8 @@ const Harness = ({
     sourceVersion: number;
     canonicalJson: string;
   } | null>(null);
-  const autosave = useAutosave(state, dispatch, {
+  const replacement = useWholeDocumentReplacement();
+  const autosave = useAutosave(state, replacement.replace, {
     schemaVersion,
     storage,
     now: () => "2026-09-04T10:00:00.000Z",
@@ -84,7 +86,11 @@ const Harness = ({
       {autosave.recovery ? (
         <RecoveryBanner recovery={autosave.recovery} />
       ) : null}
-      <SourceEditor state={state} dispatch={dispatch} />
+      <SourceEditor
+        state={state}
+        dispatch={dispatch}
+        onEditorReady={replacement.onEditorReady}
+      />
       <button
         type="button"
         onClick={() =>

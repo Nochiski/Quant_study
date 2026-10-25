@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from strategy_workbench.bootstrap import _http, _server
+from strategy_workbench.bootstrap import _container, _http, _server
 
 
 class _UvicornCommand:
@@ -106,6 +106,38 @@ def test_the_e2e_trial_hold_is_off_unless_a_non_negative_number_is_set(
         _http.runtime_trial_hold_seconds()
 
 
+@pytest.mark.parametrize("configured", ["0", "-2", "big", "inf", "nan"])
+def test_the_run_memory_reserve_is_estimated_unless_a_positive_number_of_gb_is_set(
+    monkeypatch, configured: str
+) -> None:
+    """run-worker spec D8: 메모리 가드의 예약치는 추정식이고, 설정하면 그 GB 로 고정한다."""
+    monkeypatch.delenv(_http.RUN_MEMORY_RESERVE_GB_ENV, raising=False)
+    assert _http.runtime_run_memory_reserve_gb() is None
+    monkeypatch.setenv(_http.RUN_MEMORY_RESERVE_GB_ENV, " 3.5 ")
+    assert _http.runtime_run_memory_reserve_gb() == 3.5
+
+    monkeypatch.setenv(_http.RUN_MEMORY_RESERVE_GB_ENV, configured)
+    with pytest.raises(ValueError, match="positive number of GB"):
+        _http.runtime_run_memory_reserve_gb()
+
+
+def test_run_isolation_comes_from_the_environment_and_unknown_values_stop_the_build(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """run-worker spec D9: 기본은 스레드이고, 모르는 값은 스레드로 돌아가지 않고 멈춘다."""
+    monkeypatch.delenv(_http.RUN_ISOLATION_ENV, raising=False)
+    assert _http.runtime_run_isolation() == "thread"
+    monkeypatch.setenv(_http.RUN_ISOLATION_ENV, " process ")
+    assert _http.runtime_run_isolation() == "process"
+
+    with pytest.raises(ValueError, match="unsupported run isolation"):
+        _container.build_container(artifact_root=tmp_path, run_isolation="processes")
+    # e2e hold 는 worker 와 엔진 관문으로 왕복한다(spec D11) — 프로세스 방식에서도 켤 수 있다.
+    _container.build_container(
+        artifact_root=tmp_path, run_isolation="process", trial_hold_seconds=1.0
+    )
+
+
 def test_importing_and_building_test_app_never_opens_the_runtime_database(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -140,3 +172,49 @@ def test_importing_and_building_test_app_never_opens_the_runtime_database(
     assert child_artifacts.is_dir()
     _http.build_runtime_http_app()
     assert configured.is_file()
+
+
+def test_runtime_artifact_root_does_not_clean_another_servers_staging(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """개발 서버의 staging을 둔 채 E2E 서버를 조립해도 다른 루트는 건드리지 않는다(#333)."""
+    from strategy_workbench.bootstrap import _container
+
+    development = tmp_path / "development"
+    staging = development / ".active-run.tmp"
+    staging.mkdir(parents=True)
+    payload = staging / "partial"
+    payload.write_text("commit in progress", encoding="utf-8")
+    isolated = tmp_path / "e2e" / "backtest-runs"
+    monkeypatch.setattr(_container, "DEFAULT_RUN_ARTIFACT_ROOT", development)
+    monkeypatch.setenv(_http.ARTIFACT_ROOT_ENV, str(isolated))
+
+    _http.build_runtime_http_app()
+
+    assert payload.read_text(encoding="utf-8") == "commit in progress"
+    assert isolated.is_dir()
+
+
+def test_container_boot_removes_staging_left_in_its_own_artifact_root(tmp_path: Path) -> None:
+    """부팅 청소는 composition root 가 자기 산출물 루트에서 한 번 한다(run-worker spec D4)."""
+    from strategy_workbench.bootstrap import _container
+
+    root = tmp_path / "backtest-runs"
+    orphan = root / ".killed-run.0123abcd.tmp"
+    orphan.mkdir(parents=True)
+
+    _container.build_container(artifact_root=root)
+
+    assert not orphan.exists()
+
+
+def test_explicit_http_artifact_root_is_forwarded_without_reading_runtime_env(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """라이브러리 조립은 명시 경로만 읽어 두 E2E 앱의 루트를 분리한다."""
+    ignored = tmp_path / "runtime"
+    explicit = tmp_path / "ideas"
+    monkeypatch.setenv(_http.ARTIFACT_ROOT_ENV, str(ignored))
+    _http.build_http_app(artifact_root=explicit)
+    assert explicit.is_dir()
+    assert not ignored.exists()

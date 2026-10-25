@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import Counter
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,36 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment(tmp_path: Pat
     assert ledger["trial_count"] == preview.json()["trial_count_after"]
     # 칸마다 학습 두 번 + 창마다 고른 칸의 검증 실행 한 번(같은 시도 키라 재확인이다).
     assert sum(len(group["runs"]) for group in ledger["trials"]) == 6 + 2
+    # 로드맵 M6 시간 어림: 처음엔 계열에 잰 실행이 없고, 실험이 끝난 뒤엔 최근 완료 실행 다섯 개가
+    # 근거다. 학습 6회·검증 2회를 차례로 더하므로 근거 실행 하나보다 길다.
+    assert preview.json()["time_estimate"] is None
+    estimate = client.post("/api/v1/experiments/preview", json=request).json()["time_estimate"]
+    longest = max(
+        run["seconds"] for group in ledger["trials"] for run in group["runs"] if run["seconds"]
+    )
+    assert estimate["sample_count"] == 5
+    assert estimate["total_seconds"] >= longest > 0
+    # 끝난 실험은 남은 실행이 없다(로드맵 M6 ETA). 근거는 미리 계산과 같은 계열 원장이다.
+    remaining = client.get(
+        f"/api/v1/experiments/{experiment['record']['experiment_id']}/remaining-time"
+    )
+    assert remaining.json() == {"total_seconds": 0.0, "sample_count": 5}
+    assert client.get("/api/v1/experiments/missing/remaining-time").status_code == 404
+    # 감사 기록(로드맵 M6): 학습 6회와 창마다 검증 1회가 넘기고·시작하고·끝난 기록이 시각 순으로
+    # 남는다.
+    audit = client.get(f"/api/v1/experiments/{experiment['record']['experiment_id']}/audit").json()
+    assert audit[0]["kind"] == "created"
+    assert Counter(event["kind"] for event in audit) == {
+        "created": 1,
+        "trial_submitted": 6,
+        "window_picked": 2,
+        "run_started": 8,
+        "run_finished": 8,
+    }
+    times = [datetime.fromisoformat(event["occurred_at"]) for event in audit]
+    assert times == sorted(times)
+    # 창 검증 실행의 사건은 창에 귀속된다.
+    assert sum(event["window_index"] is not None for event in audit) == 2 + 2 + 2
     listed = client.get("/api/v1/experiments", params={"limit": 1}).json()
     assert [item["record"]["experiment_id"] for item in listed["items"]] == [
         experiment["record"]["experiment_id"]
@@ -191,6 +222,11 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment(tmp_path: Pat
     assert sessions == sorted(set(sessions))
     assert walk_forward["gap"] is None
     assert walk_forward["out_of_sample_sharpe"] is not None
+    assert walk_forward["evaluation_basis"] == "window_restart_returns"
+    assert "같은 초기자본으로 다시 실행" in walk_forward["interpretation"]
+    assert "진입비용·손익은 포함하지" in walk_forward["interpretation"]
+    assert "현금·보유 수량을 이월하지" in walk_forward["interpretation"]
+    assert "실제 연속 계좌의 손익이 아닙니다" in walk_forward["interpretation"]
     # 워밍업은 검증 창 앞에서 읽고 성과에서는 뺀다: 첫 검증 실행의 곡선은 검증 시작일부터지만, 그날
     # 이미 20세션 모멘텀으로 종목을 골라 주문을 낸다.
     tested = client.get(f"/api/v1/backtests/{picks[0]['run_id']}/result").json()
@@ -213,7 +249,11 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment(tmp_path: Pat
     assert [cell["score"] for cell in parameter_map.json()["cells"]] == pytest.approx(
         [sum(values) / 2 for values in expected.values()]
     )
-    assert [cell["verdict"] for cell in parameter_map.json()["cells"]].count("recommended") == 1
+    # 추천은 칸 점수·고원 점수가 모두 양수인 칸뿐이다(후속 4). mock 자료의 세 칸은 학습 샤프가 0
+    # 이하라 추천하지 않고 이유를 싣는다.
+    assert all(cell["score"] <= 0 for cell in parameter_map.json()["cells"])
+    assert [cell["verdict"] for cell in parameter_map.json()["cells"]].count("recommended") == 0
+    assert parameter_map.json()["no_recommendation"] == "non_positive_score"
 
 
 def test_a_capacity_sweep_from_a_finished_run_leaves_the_trial_count_as_it_was() -> None:
@@ -445,3 +485,44 @@ def test_a_held_experiment_can_be_paused_streamed_and_cancelled() -> None:
     assert set(final["trial_counts"]) == {"cancelled"}
     assert prioritised.json()["record"]["controls"] == {"paused": False, "priority": 2}
     assert (missing.status_code, missing.json()["detail"]["code"]) == (404, "experiment.not_found")
+
+
+def test_constraints_shrink_the_grid_and_survive_storage(tmp_path: Path) -> None:
+    # 로드맵 M6: 제약을 어긴 칸은 실행하지 않고(미리 계산의 조합·실행·새 시도 수가 함께 준다),
+    # 저장한 설계를 다시 읽어도 제약이 남는다.
+    client = TestClient(build_http_app(research_db_path=tmp_path / "research.sqlite3"))
+    request = _experiment(client) | {
+        "constraints": [{"left": "scale", "operator": "gt", "right_value": -1.0}]
+    }
+
+    preview = client.post("/api/v1/experiments/preview", json=request)
+    assert preview.status_code == 200, preview.text
+    assert {
+        key: preview.json()[key] for key in ("combination_count", "run_count", "trial_count_after")
+    } == {"combination_count": 2, "run_count": 4, "trial_count_after": 2}
+
+    created = client.post("/api/v1/experiments", json=request)
+    assert created.status_code == 202, created.text
+    experiment_id = created.json()["record"]["experiment_id"]
+    trials = client.get(f"/api/v1/experiments/{experiment_id}/trials").json()
+    assert sorted({trial["trial"]["parameter_values"]["scale"] for trial in trials}) == [0.0, 1.0]
+    assert len(trials) == 4
+    # 첫 앱의 실험 스레드가 끝난 뒤 같은 파일을 새 앱으로 다시 연다.
+    # 도는 중에 열면 두 앱이 경합한다.
+    _wait_until_finished(client, experiment_id)
+    reread = TestClient(build_http_app(research_db_path=tmp_path / "research.sqlite3"))
+    stored = reread.get(f"/api/v1/experiments/{experiment_id}").json()
+    assert stored["record"]["design"]["search"]["constraints"] == [
+        {"left": "scale", "operator": "gt", "right_parameter": None, "right_value": -1.0}
+    ]
+
+
+def test_a_constraint_on_an_unsearched_parameter_is_rejected(tmp_path: Path) -> None:
+    client = TestClient(build_http_app(research_db_path=tmp_path / "research.sqlite3"))
+    request = _experiment(client) | {
+        "search": {},
+        "constraints": [{"left": "scale", "operator": "gt", "right_value": 0.0}],
+    }
+    response = client.post("/api/v1/experiments/preview", json=request)
+    assert response.status_code == 422, response.text
+    assert "experiment.search.invalid_constraint" in response.text

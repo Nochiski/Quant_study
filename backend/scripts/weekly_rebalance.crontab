@@ -1,0 +1,13 @@
+# S07 주간 리밸런싱 예약 실행 — 서버 crontab 의 정본(UTC). 시각은 KST − 9시간이다.
+# 서버 crontab 의 S07 줄은 이 파일과 같아야 한다. 바꿀 때는 기존 crontab 을 ~/s07/backup 에 남긴 뒤
+# 이 파일의 줄로 갈아 끼운다. 잠금은 스크립트가 작업 폴더에서 잡는다(open·chase 같은 잠금).
+#
+# KST 08:55 fills(15:35 까지) · 09:05 open · 09:15~11:30 10분마다 chase · 15:40 close
+# · 매일 09:00 prepare(휴장 첫날에만 돌고 주말 보강판을 기다린다, 2026-10-23 사용자 결정)
+55 23 * * 0-4 $HOME/s07/app/backend/scripts/weekly_rebalance_cron.sh fills 15:35 >> $HOME/logs/s07/fills.log 2>&1
+5 0 * * 1-5 $HOME/s07/app/backend/scripts/weekly_rebalance_cron.sh open >> $HOME/logs/s07/open.log 2>&1
+15-55/10 0 * * 1-5 $HOME/s07/app/backend/scripts/weekly_rebalance_cron.sh chase >> $HOME/logs/s07/chase.log 2>&1
+*/10 1 * * 1-5 $HOME/s07/app/backend/scripts/weekly_rebalance_cron.sh chase >> $HOME/logs/s07/chase.log 2>&1
+0-30/10 2 * * 1-5 $HOME/s07/app/backend/scripts/weekly_rebalance_cron.sh chase >> $HOME/logs/s07/chase.log 2>&1
+40 6 * * 1-5 $HOME/s07/app/backend/scripts/weekly_rebalance_cron.sh close >> $HOME/logs/s07/close.log 2>&1
+0 0 * * * $HOME/s07/app/backend/scripts/weekly_rebalance_cron.sh prepare >> $HOME/logs/s07/prepare.log 2>&1

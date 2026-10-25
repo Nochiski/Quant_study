@@ -1,16 +1,16 @@
 ---
 plan_version: 1
 project: validation-lab
-project_status: SELF_CHECK
-current_phase: V4,V5
-current_pr: V4-02,V4-03,V4-04,V5-01
-active_prs: [V4-02, V4-03, V4-04, V5-01]
-parallel_window: [V4-02, V4-03, V4-04, V5-01]
-last_updated: 2026-09-30T15:46:05+09:00
+project_status: IN_PROGRESS
+current_phase: V6
+current_pr: V6-01
+active_prs: [V6-01]
+parallel_window: [V6-01]
+last_updated: 2026-10-18T11:04:28+09:00
 planned_prs: 28
-merged_prs: 17
-approved_prs: 17
-progress_percent: 61
+merged_prs: 26
+approved_prs: 26
+progress_percent: 93
 ---
 
 # 검증 랩 실시간 진행 계획
@@ -23,19 +23,38 @@ progress_percent: 61
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
-| Current phase | `V4,V5` |
-| Current/next PR | `V4-02,V4-03,V4-04,V5-01` |
-| Active PR | `V4-02, V4-03, V4-04, V5-01` |
-| Progress | `17 / 28 merged (61%)` |
-| Approved | `17 / 28` |
-| Aggregated at | `2026-09-30 15:46 KST` |
+| Project status | `IN_PROGRESS` |
+| Current phase | `V6` |
+| Current/next PR | `V6-01` |
+| Active PR | `V6-01` |
+| Progress | `26 / 28 merged (93%)` |
+| Approved | `26 / 28` |
+| Aggregated at | `2026-10-18 11:04 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
-[update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
+[공용 Python progress 도구](../../../tools/quant_study_dev/plan_progress.py)가 생성하며 직접 수정하지 않는다.
+기존 PowerShell wrapper는 호환용으로 유지한다.
 
 ## 현재 결정
+
+- 2026-10-18 리드 인계: #546 회귀 접수 상한(`5811d232`)·#547 V6 모의 core(`35278827`) 머지를 확인했다. #548 선택 파라미터 배선은 main `28bafecf`로 머지됐고 최종 12개 검사가 통과해 V5-02를 완료로 전환했다. V5-04는 #549 main `45328d0b` 머지·12개 검사 통과로 완료했고 V5-06 #550은 main `366dc241`, V5-07 #551은 main `c2f46dfb`로 머지돼 V5 전체를 완료했으며 V6는 모의 core 부분 구현이다. 키움 없이 남는 연구·회계·모의 절차·운영 준비와 실제 브로커 연결 작업을 [별도 인계](./KIWOOM-INDEPENDENT.md)로 구분한다. 수익성 평가는 2026-10-19 주간 예정인 별도 연구이며, 미머지 항목의 완료 수는 올리지 않는다.
+
+- 2026-10-18 사용자: 키움 연결 없이 가능한 작업을 우선한다. 이에 따라 리드는 이번 V6-01 구현 범위를
+  사전등록·합성 모의 절차 core로 정했다. 실제 개봉·실자료 관측·UI는 남기며 별도 simulation namespace의
+  기록은 실제 연구 권위가 아니다.
+
+- 2026-10-17 사용자: 앞으로 기능을 구현할 때마다 실데이터(로컬 원장, duckdb 어댑터)에 연결해 **우선** 확인한다.
+  WORKFLOW 공통 gate에 "실데이터 확인" 단계를 더했고 절차·열람 기록은 [REAL-DATA-CHECKS.md](./REAL-DATA-CHECKS.md)다.
+  이미 머지한 #538·#539·#540은 같은 날 소급 확인했다.
+- 2026-10-17 사용자: 남은 병행 항목은 번호 낮은 순(V4-05 → V5-02 잔여 → V6-01)으로 진행한다. 퀀트 방법론
+  결정은 묻지 않고 업계 관행·수학적 근거로 정해 PR 설계 결정에 남긴다. V4-05는 FF3·Carhart 2×3 시가총액 가중 정렬과
+  Newey·West HAC 일별 회귀로 정했다(WORKFLOW V4-05 결정).
+- 2026-10-17 사용자: UI 정리 뒤 다음 로드맵 작업을 재개하고 전체 잔여량을 확인한다. 첫 범위는
+  [V5-02 실행 검증 카드](./V5-02-run-validation-card.md)(US-DM-10)다. 좋은 백테스트 숫자만 보고
+  투입하지 않도록 저장된 PSR·현재 계열 DSR·N·계산 근거·부재 이유를 읽게 한다. 최종 비용 후
+  수익 목표와 S03 신호/S04 계좌 성과 검증은 별도이며 이번 mock 구현을 실자료 수익 검증 완료로
+  올리지 않는다. AI 검증 요약은 US-DM-12에 보존하고 V5-02 전체는 계속 미완료다.
 
 - 2026-09-29 제품 소유자: 검증 랩 UI/UX 기획(디자인보드)을 승인하고 전체 앱 UX·lang2 정합 보강을 지시했다.
 - 2026-09-29 제품 소유자: 전략 계열 = `strategy_id` + 계보 상속, 초기화 불가·합치기만(spec D2).
@@ -71,10 +90,10 @@ progress_percent: 61
 | V1 | Research window seal, run persistence, trial ledger | 5 | 5 | `MERGED` |
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 3 | `MERGED` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 5 | `MERGED` |
-| V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 1 | `SELF_CHECK` |
-| V5 | Screens (after lang2 merge signal) | 7 | 2 | `SELF_CHECK` |
-| V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
-| **Total** |  | **28** | **17** | **61%** |
+| V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 5 | `MERGED` |
+| V5 | Screens (after lang2 merge signal) | 7 | 7 | `MERGED` |
+| V6 | Holdout one-time opening | 2 | 0 | `IN_PROGRESS` |
+| **Total** |  | **28** | **26** | **93%** |
 <!-- PLAN:PHASES:END -->
 
 ## V0 — 기획 패키지
@@ -116,33 +135,54 @@ progress_percent: 61
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `V4-01` | PSR 지표 | V0-01, #274 머지 | `MERGED` | [#363](https://github.com/Nochiski/Quant_study/pull/363) · `review_vlab_v4_01` APPROVE(P2-1·P3-1~3 반영) · main 머지 `838fd24d`(2026-09-30) |
-| [ ] | `V4-02` | DSR·선택 기록 | V4-01, V3-05 | `SELF_CHECK` | [#385](https://github.com/Nochiski/Quant_study/pull/385) |
-| [ ] | `V4-03` | 고원·민감도 | V4-02 | `SELF_CHECK` | [#403](https://github.com/Nochiski/Quant_study/pull/403) |
-| [ ] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `SELF_CHECK` | [#410](https://github.com/Nochiski/Quant_study/pull/410) 1/2 · [#422](https://github.com/Nochiski/Quant_study/pull/422) 2/2 |
-| [ ] | `V4-05` | 팩터 회귀(시장·규모·가치·모멘텀, HAC) | V4-04 | `PLANNED` | — |
+| [x] | `V4-02` | DSR·선택 기록 | V4-01, V3-05 | `MERGED` | [#385](https://github.com/Nochiski/Quant_study/pull/385) |
+| [x] | `V4-03` | 고원·민감도 | V4-02 | `MERGED` | [#403](https://github.com/Nochiski/Quant_study/pull/403) |
+| [x] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `MERGED` | [#410](https://github.com/Nochiski/Quant_study/pull/410) 1/2 · [#422](https://github.com/Nochiski/Quant_study/pull/422) 2/2 |
+| [x] | `V4-05` | 팩터 회귀(시장·규모·가치·모멘텀, HAC) | V4-04 | `MERGED` | [#538](https://github.com/Nochiski/Quant_study/pull/538) · 독립 Opus 리뷰 APPROVE(P2-1·P3-1~3 반영, P3-4 유지) · main 머지 `b759fd44`(2026-10-17) |
 
 ## V5 — 화면 (각 화면의 backend PR 뒤)
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04 | `SELF_CHECK` | [#402](https://github.com/Nochiski/Quant_study/pull/402) 스택 1/2(목록·대기열 조작·새 실험·backend 칸), [#407](https://github.com/Nochiski/Quant_study/pull/407) 2/2(모니터·진행 스트림·완료 알림·스토리 e2e) |
-| [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `PLANNED` | — |
+| [x] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04, V3-05 | `MERGED` | [#402](https://github.com/Nochiski/Quant_study/pull/402) 스택 1/2(목록·대기열 조작·새 실험·backend 칸), [#407](https://github.com/Nochiski/Quant_study/pull/407) 2/2(모니터·진행 스트림·완료 알림·스토리 e2e) |
+| [x] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `MERGED` | 첫 slice: [PSR·DSR 카드/조회 계약](./V5-02-run-validation-card.md), [#537](https://github.com/Nochiski/Quant_study/pull/537) main 머지 `c8b87b65`(2026-10-17). 둘째 slice: AI 결과 설명 검증 근거(US-DM-12, `구현됨-e2e`) [#539](https://github.com/Nochiski/Quant_study/pull/539) · 리뷰 1차 REQUEST_CHANGES(P2 2·P3 4) 전부 반영. 셋째 slice: 튼튼한지 확인하기·표본 밖 곡선(US-DM-11·US-CS-09, `구현됨-e2e`) [#540](https://github.com/Nochiski/Quant_study/pull/540) main 머지 `f3f58356`. backend 구현·전체 회귀 4820 passed/1 skipped(기존 live opt-in), 관련 회귀 150 passed. frontend 전체 111 files/1434 passed, 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초); root 시각 QA 4 PNG·독립 리뷰 확정 P1/P2 없음. 추적·미리보기 parameter_values는 [#548](https://github.com/Nochiski/Quant_study/pull/548), main `28bafecf`로 머지, 최종 12개 검사 통과. 마지막 배선까지 통합해 V5-02 완료 |
 | [x] | `V5-03` | 백테스트 이력 종류 칼럼·전략 이력 원장 탭·계열 합치기 | V1-05 | `MERGED` | [#386](https://github.com/Nochiski/Quant_study/pull/386) · main 머지 `3f6b3853`(2026-09-30) |
-| [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V4-03 | `PLANNED` | — |
+| [x] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V5-02, V4-03 | `MERGED` | [#549](https://github.com/Nochiski/Quant_study/pull/549), main `45328d0b` 머지, 최종 12개 검사 통과: 서버 지도·전역 범례·명시 선택을 표시. 판정·선택 snapshot·N·DSR owner 보존 |
 | [x] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `MERGED` | [#345](https://github.com/Nochiski/Quant_study/pull/345) · main 머지 `ebf2a6ea`(2026-09-30) |
-| [ ] | `V5-06` | 용량 스윕·팩터 회귀 화면 | V5-02, V4-04, V4-05 | `PLANNED` | — |
-| [ ] | `V5-07` | IDE 진입점·탐색 토글 | V5-02, V5-03, lang2 P4-04 머지, lang2 P5-02 머지 | `PLANNED` | — |
+| [x] | `V5-06` | 용량 스윕·팩터 회귀 화면 | V5-02, V4-04, V4-05 | `MERGED` | [#550](https://github.com/Nochiski/Quant_study/pull/550), main `366dc241` 머지, 최종 head `21d9bffc`, 12개 검사 통과. 비용·용량/팩터 회귀 보고서 구현·검증 완료. 기존 보고서 API/단위·원장 N·지연 응답 경계 재사용. 선행 활성 접수 상한 [#546](https://github.com/Nochiski/Quant_study/pull/546)은 머지됨 |
+| [x] | `V5-07` | IDE 진입점·탐색 토글 | V5-02, V5-03, lang2 P4-04 머지, lang2 P5-02 머지 | `MERGED` | [#551](https://github.com/Nochiski/Quant_study/pull/551), main `c2f46dfb` 머지, 최종 head `09de4ca2`, 12개 검사 통과. [IDE 계약](./V5-07-ide-research.md). IDE 계열 N·현재 환경/선택 파라미터 전달·레시피 탐색 구현·검증 완료. 원문·undo·focus owner와 history entry별 Form 경계를 보존. 명시 접수 전 실험 생성 없음 |
 
 ## V6 — 홀드아웃 개봉
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V6-01` | 개봉 backend(사양 동결·기준 등록·개봉 원장) | V1-01, V1-05, V4-02 | `PLANNED` | — |
+| [ ] | `V6-01` | 개봉 backend(사양 동결·기준 등록·개봉 원장) | V1-01, V1-05, V4-02 | `IN_PROGRESS` | [사전등록·모의 core 계약](./V6-01-preregistration-simulation.md): [#547](https://github.com/Nochiski/Quant_study/pull/547) core만 main `35278827`로 머지(검증 head `ed365ad4`). 동결 등록·전역 simulation claim·기준 비교·SQLite 영속 구현. 실제 개봉 권한/원천 연결·HTTP/bootstrap·UI는 미완료. 합성 판정을 실제 후보 통과로 승격하지 않음 |
 | [ ] | `V6-02` | 개봉 화면 | V6-01, V5-02 | `PLANNED` | — |
 
 ## 현재 작업 Packet
 
-- V0-01: 이 패키지·spec·유저 스토리 등록. 브랜치 `docs/validation-lab-plan`, base main `f49e0afd`.
+- V6-01 core: `feat/holdout-simulation-core`, base `4de3a50e`. [계약](./V6-01-preregistration-simulation.md)의
+  등록·모의 claim·재시작 소모 유지·기준 비교를 구현했다. [#547](https://github.com/Nochiski/Quant_study/pull/547) core 머지 `35278827`(검증 head `ed365ad4`). 관련 회귀와 정적 검사는 로컬 근거이며
+  전체 backend 검증·공식 CI·머지 여부는 해당 검증 기록에서 확인한다. 실제 개봉·UI는 미완료다.
+
+- V5-02 첫 slice: `feat/run-validation-card`, base main `bc8f3030`.
+  [계약·의도·잔여 범위](./V5-02-run-validation-card.md)를 정본으로 삼는다. 기존 계산 owner·불변
+  결과/후보 선택 스냅숏·계열 N 규칙을 보존한 별도 읽기 전용 report GET/SDK와 US-DM-10 카드를 구현했다.
+- 확인된 backend 전체: 4820 passed, 1 skipped(기존 live opt-in), 34 warnings, 약 199초.
+  관련 domain/application/HTTP·원장/선택·architecture 150 passed는 전체에 포함하므로 합산하지 않는다.
+  frontend 전체 111 files/1434 passed(83.21초), 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초)를 확인했다.
+  root가 기본 카드·계산 근거 PNG 4장을 직접 검토했고 독립 리뷰의 확정 P1/P2는 없었다.
+  이 문서는 로컬 검증 기록이며 공식 CI·머지 상태는 해당 PR의 checks·merge 기록에서 확인한다.
+- V5-06 선행 접수 상한 #546과 V6 모의 core #547은 머지됐다. V5-02 parameter_values 배선 #548도 main `28bafecf`로 머지됐다. V5-04 #549도 main `45328d0b`로 머지됐다. V5-06 #550과 V5-07 #551도 각각 main `366dc241`·`c2f46dfb`로 머지돼 V5는 완료다. V6는 core만 부분 구현이고 실제 개봉·UI가 남는다. 전체 다음 범위는 [키움 독립 작업 인계](./KIWOOM-INDEPENDENT.md)를 따른다.
+
+## V5 종료 검토
+
+2026-10-18 독립 읽기 리뷰에서 최종 8개 인계 문서의 의도·증거·SoT와 책임 경계를 확인했고 확정 P1/P2는 없었다.
+계산·판정·시도 원장과 선택 스냅숏은 기존 domain/application owner가, 공개 입출력 계약은 backend DTO/OpenAPI가, 프론트 wire 호출은 생성 SDK/shared gateway가,
+조회 상태·실행별 cache는 entity query가, 표시·입력·명시 행동은 UI가 소유하는 경계를 유지했다.
+#550·#551은 각각 최종 12개 검사가 통과한 뒤 실제 main 머지를 확인했다. 기능별 합성·실자료 기술 QA와
+수익성 평가는 구분하며 V5 완료를 자동매매 준비나 수익 검증 완료로 올리지 않는다.
+V6-01은 사전등록·simulation core만 부분 구현된 `IN_PROGRESS`이고 실제 개봉·원천 연결·UI와 V6-02는 남아 있다.
 
 ## Review 기록
 
@@ -152,9 +192,19 @@ progress_percent: 61
 
 ## 변경 기록
 
+- 2026-10-17: V5-02 첫 slice #537 머지 기록. V4-05 팩터 회귀 backend #538 머지. V5-02 둘째 slice(US-DM-12) #539.
+
+- 2026-10-17: V5-02 첫 검증 카드 slice를 `IN_PROGRESS`로 인계하고 전체 미완료 범위를 명시.
+
 - 2026-09-29: 패키지 생성(V0-01).
 
 ## 갱신 절차
 
-PR 상태를 바꾼 뒤 `powershell -File docs/planning/validation-lab/tools/update-plan-progress.ps1`을 돌리고,
-`-Check`로 집계가 최신인지 확인한다.
+PR 상태를 바꾼 뒤 저장소 루트에서 공용 도구로 집계를 갱신하고 검사한다.
+
+```bash
+uv run --no-sync python -m quant_study_dev.plan_progress --profile validation-lab
+uv run --no-sync python -m quant_study_dev.plan_progress --profile validation-lab --check
+```
+
+기존 PowerShell wrapper는 호환용이며 삭제하지 않는다.

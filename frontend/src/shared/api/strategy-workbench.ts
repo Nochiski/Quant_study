@@ -1,5 +1,11 @@
 import { client } from "./generated/client.gen";
 import {
+  addLibraryFactorVersion,
+  getLibraryFactor,
+  listLibraryFactors,
+  matchLibraryFactors,
+  saveLibraryFactor,
+  setLibraryFactorVisibility,
   cancelBacktest,
   cancelExperiment,
   compileStrategyDocument,
@@ -7,15 +13,35 @@ import {
   createExperiment,
   createStrategyDocument,
   deleteStrategyDraft,
+  diffStrategyDraft,
   diffStrategyRevisions,
   explainFactorGraph,
   getEquityCatalog,
   getExperiment,
+  getExperimentAudit,
+  getExperimentRemainingTime,
   getExperimentWalkForward,
+  getExperimentParameterMap,
+  selectExperimentTrial,
+  previewRobustnessCheck,
+  createRobustnessCheck,
+  listRobustnessChecks,
+  getExperimentContinuousAccount,
+  runExperimentContinuousAccount,
+  getContinuousAccount,
   getFactorCatalog,
   getBacktestRequest,
   getBacktestSummary,
   getBacktestResult,
+  getBacktestAccountReport,
+  getBacktestHoldings,
+  getBacktestSecurityTrades,
+  getBacktestSessionHoldings,
+  getBacktestValidationReport,
+  getBacktestFactorRegression,
+  previewCapacitySweep,
+  createCapacitySweep,
+  getExperimentCapacity,
   getStrategyDraft,
   getStrategyDocument,
   getStrategyDocumentContract,
@@ -25,6 +51,7 @@ import {
   getRunEnvironmentSchema,
   getTrialLedger,
   listBacktests,
+  listEquityUniverses,
   listExperimentTrials,
   listExperiments,
   listStrategies,
@@ -41,23 +68,42 @@ import {
   upgradeStrategyDocument,
 } from "./generated/sdk.gen";
 import type {
+  RunFactorRegression,
+  CapacitySweepRequest,
+  CapacityReport,
+  ContinuousAccountLatest,
+  ContinuousAccountState,
+  AccountReport,
+  AccountReportStatus,
+  AccountReportSummary,
+  AccountReportProvenance,
+  HoldingChange,
+  HoldingsOverview,
+  SecurityTradesReport,
+  SessionHoldingsReport,
+  RunValidationReport,
   ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,
   BacktestCancelResult,
   BacktestRunState,
   BacktestRunSummary,
+  RunHeadline,
   BacktestStartResponse,
   CompileRequest,
   CompiledDocument,
   DatasetFieldProfile,
   DiffEntry,
+  DraftDiff,
+  DraftDiffRequest,
   Experiment,
+  ExperimentAuditEvent,
   ExperimentControlsRequest,
   ExperimentPage,
   ExperimentTrialState,
   ExperimentPreview,
   ExperimentRequest,
+  RobustnessPreview,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,
@@ -75,6 +121,12 @@ import type {
   PageBacktestRunSummary,
   PageRevisionSummary,
   PageStrategySummary,
+  AddLibraryVersionBody,
+  LibraryFactorBody,
+  LibraryFactorList,
+  LibraryFactorMatchesBody,
+  LibraryMatchesBody,
+  SaveLibraryFactorBody,
   ResearchCatalog,
   ReviseDocumentRequest,
   RevisionDiff,
@@ -83,6 +135,7 @@ import type {
   RunEnvironmentSchema,
   RunKind,
   SaveDocumentRequest,
+  UniverseDefinition,
   SaveStrategyDraftRequest,
   SavedRevisionReference,
   SourceDiagnostic,
@@ -98,10 +151,18 @@ import type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  TimeEstimate,
   TrialLedger,
+  TrialRunRole,
   TrialPreview,
   UpgradedDocument,
   WalkForwardReport,
+  ParameterMap,
+  CellPlateau,
+  ExperimentSelection,
+  ExperimentSelectionRequest,
+  CellVerdict,
+  SearchAxis,
 } from "./generated/types.gen";
 
 export const configureStrategyWorkbenchApi = (baseUrl: string): void => {
@@ -504,6 +565,26 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "retryExperimentTrial");
   },
 
+  /** 실험·trial·attempt 에 일어난 일의 시각 순 기록(로드맵 M6 감사 기록). */
+  async getExperimentAudit(
+    experimentId: string,
+  ): Promise<ExperimentAuditEvent[]> {
+    const response = await getExperimentAudit({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "getExperimentAudit");
+  },
+
+  /** 남은 실행의 시간 어림(로드맵 M6 ETA). 계열에 시간을 잰 완료 실행이 없으면 null. */
+  async getExperimentRemainingTime(
+    experimentId: string,
+  ): Promise<TimeEstimate | null> {
+    const response = await getExperimentRemainingTime({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "getExperimentRemainingTime");
+  },
+
   /** 워크포워드 결과(창별 자동 선택·검증 실행·유지율, 검증 랩 V3-05). */
   async getExperimentWalkForward(
     experimentId: string,
@@ -512,6 +593,67 @@ export const strategyWorkbenchApi = {
       path: { experiment_id: experimentId },
     });
     return unwrap(response, "getExperimentWalkForward");
+  },
+
+  async getExperimentParameterMap(experimentId: string): Promise<ParameterMap> {
+    const response = await getExperimentParameterMap({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "getExperimentParameterMap");
+  },
+
+  async selectExperimentTrial(experimentId: string, body: ExperimentSelectionRequest): Promise<ExperimentSelection> {
+    return unwrap(await selectExperimentTrial({ path: { experiment_id: experimentId }, body }), "selectExperimentTrial");
+  },
+
+  /** 결과 실행의 "튼튼한지 확인하기" 미리 계산. 기본 설계는 backend 가 정한다(US-DM-11). */
+  async previewRobustnessCheck(runId: string): Promise<RobustnessPreview> {
+    const response = await previewRobustnessCheck({ path: { run_id: runId } });
+    return unwrap(response, "previewRobustnessCheck");
+  },
+
+  async createRobustnessCheck(runId: string): Promise<Experiment> {
+    const response = await createRobustnessCheck({ path: { run_id: runId } });
+    return unwrap(response, "createRobustnessCheck");
+  },
+
+  /** 결과 실행에서 만든 확인 실험, 최근에 만든 순. */
+  async listRobustnessChecks(runId: string): Promise<Experiment[]> {
+    const response = await listRobustnessChecks({ path: { run_id: runId } });
+    return unwrap(response, "listRobustnessChecks");
+  },
+
+  async getExperimentContinuousAccount(
+    experimentId: string,
+  ): Promise<ContinuousAccountLatest> {
+    return unwrap(
+      await getExperimentContinuousAccount({
+        path: { experiment_id: experimentId },
+      }),
+      "getExperimentContinuousAccount",
+    );
+  },
+
+  async runExperimentContinuousAccount(
+    experimentId: string,
+    clientRequestId: string,
+  ): Promise<ContinuousAccountState> {
+    return unwrap(
+      await runExperimentContinuousAccount({
+        path: { experiment_id: experimentId },
+        body: { client_request_id: clientRequestId },
+      }),
+      "runExperimentContinuousAccount",
+    );
+  },
+
+  async getContinuousAccount(
+    evaluationId: string,
+  ): Promise<ContinuousAccountState> {
+    return unwrap(
+      await getContinuousAccount({ path: { evaluation_id: evaluationId } }),
+      "getContinuousAccount",
+    );
   },
 
   /**
@@ -565,6 +707,51 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getBacktestResult");
   },
 
+  async backtestAccountReport(runId: string): Promise<AccountReport> {
+    const response = await getBacktestAccountReport({
+      path: { run_id: runId },
+    });
+    return unwrap(response, "getBacktestAccountReport");
+  },
+
+  async getBacktestHoldings(runId: string): Promise<HoldingsOverview> {
+    return unwrap(await getBacktestHoldings({ path: { run_id: runId } }), "getBacktestHoldings");
+  },
+
+  /** `session` 은 `YYYY-MM-DD`. 계좌 기록이 없는 날은 200 의 `session_not_recorded` 로 답한다. */
+  async getBacktestSessionHoldings(runId: string, session: string): Promise<SessionHoldingsReport> {
+    return unwrap(
+      await getBacktestSessionHoldings({ path: { run_id: runId, session } }),
+      "getBacktestSessionHoldings",
+    );
+  },
+
+  async getBacktestSecurityTrades(runId: string, securityId: string): Promise<SecurityTradesReport> {
+    return unwrap(
+      await getBacktestSecurityTrades({ path: { run_id: runId, security_id: securityId } }),
+      "getBacktestSecurityTrades",
+    );
+  },
+
+  /** 현재 원장 통계는 완료 결과 파일과 별도로 조회한다. */
+  async getBacktestValidationReport(runId: string): Promise<RunValidationReport> {
+    const response = await getBacktestValidationReport({ path: { run_id: runId } });
+    return unwrap(response, "getBacktestValidationReport");
+  },
+
+  async getBacktestFactorRegression(runId: string): Promise<RunFactorRegression> {
+    return unwrap(await getBacktestFactorRegression({ path: { run_id: runId } }), "getBacktestFactorRegression");
+  },
+  async previewCapacitySweep(request: CapacitySweepRequest): Promise<ExperimentPreview> {
+    return unwrap(await previewCapacitySweep({ body: request }), "previewCapacitySweep");
+  },
+  async createCapacitySweep(request: CapacitySweepRequest): Promise<Experiment> {
+    return unwrap(await createCapacitySweep({ body: request }), "createCapacitySweep");
+  },
+  async getExperimentCapacity(experimentId: string): Promise<CapacityReport> {
+    return unwrap(await getExperimentCapacity({ path: { experiment_id: experimentId } }), "getExperimentCapacity");
+  },
+
   /** 취소 요청. 다른 소유자(실험)가 써서 계속 돌면 `kept_by_owners` 가 참이다(#382). */
   async cancelBacktest(runId: string): Promise<BacktestCancelResult> {
     const response = await cancelBacktest({ path: { run_id: runId } });
@@ -600,6 +787,55 @@ export const strategyWorkbenchApi = {
   ): Promise<FactorExplanation> {
     const response = await explainFactorGraph({ body: request, signal });
     return unwrap(response, "explainFactorGraph");
+  },
+
+  async listLibraryFactors(includeHidden = false): Promise<LibraryFactorList> {
+    const response = await listLibraryFactors({
+      query: { include_hidden: includeHidden },
+    });
+    return unwrap(response, "listLibraryFactors");
+  },
+
+  async getLibraryFactor(libraryId: string): Promise<LibraryFactorBody> {
+    const response = await getLibraryFactor({ path: { library_id: libraryId } });
+    return unwrap(response, "getLibraryFactor");
+  },
+
+  async saveLibraryFactor(
+    request: SaveLibraryFactorBody,
+  ): Promise<LibraryFactorBody> {
+    const response = await saveLibraryFactor({ body: request });
+    return unwrap(response, "saveLibraryFactor");
+  },
+
+  async addLibraryFactorVersion(
+    libraryId: string,
+    request: AddLibraryVersionBody,
+  ): Promise<LibraryFactorBody> {
+    const response = await addLibraryFactorVersion({
+      path: { library_id: libraryId },
+      body: request,
+    });
+    return unwrap(response, "addLibraryFactorVersion");
+  },
+
+  async setLibraryFactorVisibility(
+    libraryId: string,
+    hidden: boolean,
+  ): Promise<LibraryFactorBody> {
+    const response = await setLibraryFactorVisibility({
+      path: { library_id: libraryId },
+      body: { hidden },
+    });
+    return unwrap(response, "setLibraryFactorVisibility");
+  },
+
+  async matchLibraryFactors(
+    request: LibraryMatchesBody,
+    signal?: AbortSignal,
+  ): Promise<LibraryFactorMatchesBody> {
+    const response = await matchLibraryFactors({ body: request, signal });
+    return unwrap(response, "matchLibraryFactors");
   },
 
   async listStrategies(
@@ -682,7 +918,7 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "compileStrategyDocument");
   },
 
-  /** 1.0 텍스트를 1.1로 다시 쓴 source와 그 compile 결과. 실패(422)는 텍스트를 바꾸지 않는다. */
+  /** 은퇴한 버전의 텍스트를 현재 지원 버전으로 다시 쓴 source와 그 compile 결과. 실패(422)는 텍스트를 바꾸지 않는다. */
   async upgradeStrategyDocument(
     request: CompileRequest,
     signal?: AbortSignal,
@@ -703,6 +939,12 @@ export const strategyWorkbenchApi = {
   async getRunEnvironmentSchema(): Promise<RunEnvironmentSchema> {
     const response = await getRunEnvironmentSchema();
     return unwrap(response, "getRunEnvironmentSchema");
+  },
+
+  /** 연결된 시장 데이터가 실행에 쓸 수 있는 유니버스. 실행 설정 드롭다운의 유일한 출처다. */
+  async listEquityUniverses(): Promise<UniverseDefinition[]> {
+    const response = await listEquityUniverses();
+    return unwrap(response, "listEquityUniverses");
   },
 
   /** 그래프 노드 연산자 정의 전부(P1-03, spec D8). 팔레트·라벨이 읽는 유일한 연산자 목록이다. */
@@ -734,6 +976,20 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "reviseStrategyDocument");
   },
 
+  /** 저장 전 의미 비교도 backend revision diff와 같은 정책으로 계산한다. */
+  async diffStrategyDraft(
+    strategyId: string,
+    request: DraftDiffRequest,
+    signal?: AbortSignal,
+  ): Promise<DraftDiff> {
+    const response = await diffStrategyDraft({
+      path: { strategy_id: strategyId },
+      body: request,
+      signal,
+    });
+    return unwrap(response, "diffStrategyDraft");
+  },
+
   /** Semantic diff between two stored revisions (identity, comments, formatting invisible). */
   async diffStrategyRevisions(
     strategyId: string,
@@ -763,23 +1019,42 @@ export type EquityCatalogQuery = NonNullable<GetEquityCatalogData["query"]>;
 export type FactorCatalogQuery = NonNullable<GetFactorCatalogData["query"]>;
 
 export type {
+  RunFactorRegression,
+  CapacitySweepRequest,
+  CapacityReport,
+  RunValidationReport,
+  ContinuousAccountLatest,
+  ContinuousAccountState,
+  AccountReport,
+  AccountReportStatus,
+  AccountReportSummary,
+  AccountReportProvenance,
+  HoldingChange,
+  HoldingsOverview,
+  SecurityTradesReport,
+  SessionHoldingsReport,
   ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,
   BacktestCancelResult,
   BacktestRunState,
   BacktestRunSummary,
+  RunHeadline,
   BacktestStartResponse,
   CompileRequest,
   CompiledDocument,
   DatasetFieldProfile,
   DiffEntry,
+  DraftDiff,
+  DraftDiffRequest,
   Experiment,
+  ExperimentAuditEvent,
   ExperimentControlsRequest,
   ExperimentPage,
   ExperimentTrialState,
   ExperimentPreview,
   ExperimentRequest,
+  RobustnessPreview,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,
@@ -801,6 +1076,7 @@ export type {
   RevisionSummary,
   RunEnvironment,
   RunEnvironmentSchema,
+  UniverseDefinition,
   RunKind,
   SaveDocumentRequest,
   SaveStrategyDraftRequest,
@@ -815,8 +1091,16 @@ export type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  TimeEstimate,
   TrialLedger,
+  TrialRunRole,
   TrialPreview,
   UpgradedDocument,
   WalkForwardReport,
+  ParameterMap,
+  CellPlateau,
+  ExperimentSelection,
+  ExperimentSelectionRequest,
+  CellVerdict,
+  SearchAxis,
 };

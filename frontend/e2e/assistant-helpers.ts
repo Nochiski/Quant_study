@@ -33,12 +33,26 @@ export const progress = (page: Page) =>
  * 새로고침 뒤에는 배치에 남은 열림 상태로 이미 펼쳐져 있고 그때는 상단 바 토글이 사라진다 —
  * 그래서 버튼이 있을 때만 누른다.
  */
+/**
+ * AI 창이 떠 있으면 접는다. 편집기는 최소화한 채 시작하지만(PR #624 결정) 직접 연 기록이 남은 시나리오가 접힌
+ * 상태에서 여는 흐름을 보려면 이것으로 먼저 접는다.
+ */
+export const collapseAssistant = async (page: Page) => {
+  const panel = assistant(page);
+  if (await panel.isVisible()) {
+    await page.keyboard.press("Alt+A");
+    await expect(panel).toBeHidden();
+  }
+};
+
 export const openAssistant = async (page: Page) => {
   const toggle = page.getByRole("button", {
     name: "AI 어시스턴트",
     exact: true,
   });
-  if ((await toggle.count()) > 0) await toggle.click();
+  // 상단 바 토글은 창이 떠 있어도 남는다(aria-expanded 로 열림을 보인다). 닫혀 있을 때만 누른다.
+  if ((await toggle.count()) > 0 && (await toggle.getAttribute("aria-expanded")) === "false")
+    await toggle.click();
   await expect(
     assistant(page).getByRole("heading", { name: "AI 어시스턴트" }),
   ).toBeVisible();

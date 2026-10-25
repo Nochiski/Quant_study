@@ -11,36 +11,64 @@
 
 ## 바로 실행
 
-Python 3.11 이상, uv, Node.js 22.18 이상이 필요하다. 저장소 루트에서 frontend 의존성을 설치하고
-터미널 두 개로 서버를 실행한다.
+Python 3.11 이상, uv, Node.js 22.18 이상이 필요하다. 저장소 루트에서 처음 한 번 의존성을 설치한다.
+아래 명령은 macOS·Linux·Windows에서 같다.
 
-```powershell
+```sh
 npm ci --prefix frontend
+uv sync --project backend --extra parquet --extra equity --extra llm
 ```
 
-```powershell
-# 터미널 1 · FastAPI backend
-uv run server
+한 터미널에서 frontend와 backend를 함께 실행하고, 준비가 끝나면 브라우저를 연다.
+
+```sh
+uv run dev --open
 ```
 
-```powershell
-# 터미널 2 · Vite frontend
-npm run dev
+브라우저를 자동으로 열지 않으려면 다음 명령을 쓴다. 종료할 때 `Ctrl+C`를 누르면 두 서버가 함께
+종료된다. `dev`는 backend·frontend 의존성을 자동 설치하거나 동기화하지 않으며 설치한 extra와
+Rust 확장을 유지한다. 단 서버를 시작하기 전에 Rust 백테스트 코어(`backtest_core`)가 없거나 현재
+Rust 소스보다 오래됐으면, 이미 설치된 backend 환경 안에서 그 확장만 release로 빌드한다.
+
+```sh
+uv run dev
 ```
 
-브라우저에서 <http://localhost:5173/>을 연다. backend health endpoint는
-<http://127.0.0.1:8000/api/v1/health>다. 기본 Rust core를 쓰려면 먼저 `backend`에서 다음 확장을
-설치한다. 설치하지 않은 경우 실행 설정에서 `Python reference`를 선택할 수 있다.
+화면 주소는 <http://localhost:5173/>, backend health endpoint는
+<http://127.0.0.1:8000/api/v1/health>다. 기본 포트 8000·5173 중 하나라도 사용 중이면 시작을
+거절하며 기존 서버를 종료하지 않는다. 개별 기동은 아래 [실행](#실행) 절을 참고한다.
 
-```powershell
+기본 `Rust` core로 백테스트하려면 Rust 툴체인(<https://rustup.rs>)만 설치해 두면 된다. 확장에는 빌드할 때
+Rust 소스 지문이 들어가고(`backtest_core.SOURCE_DIGEST`), 엔진은 소스 트리가 있으면 이를 현재 소스와
+비교해 오래되거나 불러올 수 없는 확장을 쓰지 않는다(`CoreUnavailable`: 다시 빌드하라는 안내). 판정은
+프로세스마다 한 번이고 백테스트 run은 run마다 새 worker 프로세스라, 서버를 띄운 채 다시 빌드하면 다음
+run부터 새 코어를 쓴다. `uv run dev`는 시작 전에 backend에 이 상태를 물어 없거나 깨졌거나 오래됐거나
+디버그 빌드면 release로 빌드한다. 수동 빌드에서 crate 루트·상위 폴더에 `rust-toolchain`이나
+`.cargo/config.toml`을 새로 만들었다면 `build.rs`를 touch한 뒤 빌드한다(`dev`는 자동으로 한다). 처음 빌드는 몇 분 걸릴 수 있다. cargo를 찾지
+못하거나 빌드가 실패해도 경고만 내고 서버는 그대로 시작하며(다음 실행에서 다시 시도), 그동안은
+백테스트 실행 설정에서 `Python reference`를 선택한다. 자동 빌드를 끄려면 `uv run dev --no-rust-build`
+또는 환경 변수 `QUANT_STUDY_DEV_SKIP_RUST_BUILD=1`을 쓴다. `dev`를 거치지 않고 backend만 띄울 때는
+다음 명령으로 직접 빌드한다.
+
+```sh
 cd backend
-uv sync --extra parquet --extra equity --extra llm
-uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
+uv run --no-sync maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
+cd ..
 ```
 
 extra 목록은 CI(`.github/workflows/ci.yml`)와 같다. `equity`는 실데이터 duckdb adapter, `llm`은 AI
 어시스턴트 공급자 SDK다. extra를 빼고 `uv sync`를 다시 돌리면 설치해 둔 extra 패키지와
-`maturin develop`로 넣은 Rust 확장이 함께 빠지므로, 그때는 위 두 줄을 다시 실행한다.
+`maturin develop`로 넣은 Rust 확장이 함께 빠지므로, 그때는 extra를 포함한 환경 설치를 다시 실행한다.
+Rust 확장은 다음 `uv run dev`가 다시 빌드한다.
+
+편집기는 **전략 편집**과 **중간 결과**를 명시해서 전환하며 원문·추적 범위·결과를 유지한다.
+구조·계약·AI 보조 영역은 필요할 때 열고, 그래프에서는 전략 구성·선정 미리보기·팩터 레시피·노드 캔버스의
+입구로 현재 과업을 고른다. 화면 구성과 점검 범위는
+[편집기 사용성 검토](docs/planning/ui-layout-polish/editor-usability-review.md)를 참고한다.
+
+실험 trial의 **이 설정 추적**은 그 실행의 파라미터를 현재 문서·현재 실행 환경의 선정 미리보기·추적·백테스트에
+적용한다. 출처를 읽지 못하거나 저장 리비전이 다르면 차단하며, **문서 기본값으로 돌아가기**를 명시해야 기본값을 쓴다.
+선택한 실행 당시의 기간이나 환경을 재현하는 기능은 아니다.
 
 ## 현재 제품 범위
 
@@ -51,13 +79,16 @@ extra 목록은 CI(`.github/workflows/ci.yml`)와 같다. `equity`는 실데이�
 | 팩터 그래프, TargetTape와 노드별 중간 결과 추적             | 구현 완료                                                        |
 | Python reference·Persistent Rust 백테스트와 전문 결과 화면  | 구현 완료                                                        |
 | 전략·리비전·백테스트 이력과 실행 provenance                 | 구현 완료                                                        |
+| 파라미터 실험·워크포워드 창별 비교                           | 구현 완료. 창마다 초기자본을 다시 시작한 비교 결과로 표시        |
+| mock 연속 계좌 평가                                        | 구현 완료. 실험 상세에서 명시 실행·진행·계좌 결과·실패 이유 확인 |
 | 실행 설정 패널(시장·기간·유니버스·체결·비용)                | 구현 완료. schema 1.2부터 전략 문서 밖에서 실행마다 정한다       |
 | schema 1.2 업그레이더                                       | 구현 완료. 1.0·1.1 문서를 1.2로 옮긴다                           |
 | AI 어시스턴트                                               | 구현 완료. 설정 화면에서 공급자 연결, 전략 화면 채팅에서 제안 적용 |
 | 백테스트 결과 AI 설명                                       | 구현 완료. 결과 화면 사이드바에서 결과와 지표를 쉬운 말로 설명   |
-| 그래프 표현(파이프라인·레시피·노드 캔버스)                  | 후속. strategy-language-2-0 P4~P6                                |
+| 그래프 표현(파이프라인·레시피·노드 캔버스)                  | 구현 완료. strategy-language-2-0 P4~P6(2026-10-13)               |
 | 실제 시장 DB                                                | 카엘 서버 equity 층을 `ledger_sync`로 로컬에 받아 duckdb 어댑터로 연결(기본은 PIT mock adapter) |
-| 배포·실시간·주문·운영 리스크                                | 자동매매 확장을 위한 `향후` 경계이며 아직 실제 주문 기능이 아님  |
+| 실자료 수익성 검증                                         | 2026-10-19 주간 예정(2026-10-17 기준). mock 검증과 별도           |
+| 배포·실시간·실브로커 주문·운영 리스크                       | 후속 범위. 키움 실거래 연결·실제 주문은 구현하지 않음            |
 
 YAML 원문은 authoring source, backend의 typed `StrategySpec`은 실행 의미의 단일 정본이다.
 JSON/Diff는 같은 compile 결과의 read-only projection이고, Form과 Graph는 runtime schema × parse tree
@@ -67,7 +98,27 @@ projection 위에서 source 트랜잭션으로 YAML을 고치는 편집기다(�
 schema 1.2부터 시장·기간·유니버스·체결·비용은 전략 문서가 아니라 실행 요청의 `RunEnvironment`(실행
 설정)가 소유한다. 실행 설정을 바꿔도 `spec_hash`와 revision은 그대로이고 `environment_hash`만 달라진다.
 
+완료된 파라미터 실험의 **연속 계좌 평가**는 mock 자료에서 동결된 창별 후보를 한 계좌로 이어
+실행한다. 초기자본 기준 손익·비용·위험 지표와 평가 기간·후보 출처를 별도 기록하며 기존 창별
+재시작 비교와 구분한다. 이 연결은 실자료 수익성이나 실거래 준비를 검증한 결과가 아니다.
+현재 범위와 다음 연구의 기준은 [연구→자동매매 진행 현황](docs/planning/research-to-trading/README.md)과
+[S04 연속 평가 계약](docs/planning/research-to-trading/S04-walk-forward.md)을 따른다.
+
+홀드아웃 준비의 [V6-01 사전등록·모의 검증 core](docs/planning/validation-lab/V6-01-preregistration-simulation.md)는
+동결 후보·기준과 일회성 모의 claim을 영속화한다. 합성 지표로 절차를 확인하는 범위이며 실제 봉인
+개봉·실자료 후보 통과·개봉 UI는 제공하지 않는다. 이 core는 #547로 머지된 부분 구현이며 V6 전체 완료가 아니다.
+
+키움 없이 먼저 진행하는 범위와 다음 작업은 [키움 독립 작업 인계](docs/planning/validation-lab/KIWOOM-INDEPENDENT.md)를
+따른다. 회귀 접수 상한(#546)·V6 모의 core(#547)·선택 파라미터 배선(#548)은 머지됐고 V5-02는 완료됐다.
+후보 지도(#549, main `45328d0b`)·비용/회귀 보고서(#550, main `366dc241`)·IDE 연구 진입점(#551, main `c2f46dfb`)도 머지됐다. 검증 랩은 26/28(93%)로 V5 화면을 완료했으며, 이는 전체 자동매매의 완료율이 아니다. 이후에도 사전등록 모의 화면, 데이터·회계 검산, 신호 연구·실자료 계좌 평가와 운영 준비를 진행할 수 있다.
+실제 모의계좌 주문·체결 대사는 브로커 연결이 필요하다. 2026-10-19 주간 예정인 실자료 수익성 평가는 기능·화면의
+기술 QA와 별도이며, 봉인 개봉·자본 투입·실거래 승인을 뜻하지 않는다.
+
 ## 구조
+
+편집기 제목 옆 **연구**에서 계열 시도 수를 확인하고, 저장한 현재 원문·선택 파라미터·현재 환경을
+기존 실험 만들기로 보내거나 레시피 탐색을 전환한다. 미저장 변경을 옛 저장본으로 대신 보내지 않는다.
+범위와 검증 기준은 [V5-07 연구 진입점](docs/planning/validation-lab/V5-07-ide-research.md)을 따른다.
 
 ```
 backend/
@@ -85,13 +136,18 @@ docs/
 ├─ planning/                # initiative 기획 패키지(WORKFLOW·PLAN)
 ├─ product/user-stories/    # 페르소나·유저 스토리 하네스
 └─ superpowers/             # 설계 spec·ADR·로드맵, 구현 플랜, 스파이크
-tools/quant_study_dev/      # 루트 개발 명령: `uv run server`, 유저 스토리 검사(user_story_trace), 병합 충돌 표식 검사(conflict_markers)
+tools/quant_study_dev/      # 루트 개발 명령: `uv run dev`, `uv run server`, 스토리 검사·충돌 표식 검사
 database/                   # 원장 수집(KRX·키움·KIS·DART·WISE)·stage·equity 파이프라인 + 서버 SFTP 동기화(ledger_sync) — src·docs·tests 추적, data/·logs/ 는 git 제외
 workspace/         # 개인 작업 공간 workspace/<이름>/ — docs·src 추적, data/·logs/ 는 git 제외
 ```
 
 전략 작성 화면의 YAML source와 JSON/Form/Graph/Diff projection은 같은 StrategySpec 계약을 사용한다.
-Parameter Search는 이 route 위에 연결할 후속 milestone이다.
+파라미터 실험·워크포워드 비교·mock 연속 계좌 평가는 실험 화면에서 확인한다.
+
+완료 백테스트의 검증 카드는 저장된 PSR과 현재 계열의 시도 수를 반영한 DSR·계산 근거를 보여준다.
+원장은 명시적으로 다시 조회하며, 통계 값이 없는 이유와 조회 오류를 구분한다. 실수익성 검증을
+뜻하지 않으며 자세한 범위와 남은 작업은 [실행 검증 카드 계약](docs/planning/validation-lab/V5-02-run-validation-card.md)을 따른다.
+
 Equity 층은 `backend`의 duckdb outbound adapter(`STRATEGY_WORKBENCH_EQUITY_ADAPTER=duckdb`)가 읽고,
 환경변수를 주지 않으면 같은 application port를 구현하는 PIT mock adapter로 뜬다. 실데이터 연결 절차는
 아래 [실데이터 연결](#실데이터-연결) 절 참고.
@@ -110,10 +166,12 @@ Strategy Workbench의 전체 계획과 체크리스트는
 | [strategy-workbench-yaml-ui](docs/planning/strategy-workbench-yaml-ui/README.md)     | YAML-first Strategy Workbench 문서 IDE       | 완료                  |
 | [strategy-gui-editing](docs/planning/strategy-gui-editing/README.md)                 | schema 1.1, Form/Graph 편집                  | 완료                  |
 | [ai-assistant](docs/planning/ai-assistant/README.md)                                 | AI 어시스턴트, 백테스트 결과 AI 설명         | 완료                  |
-| [strategy-language-2-0](docs/planning/strategy-language-2-0/README.md)               | schema 1.2, 실행 설정, 그래프 표현           | 진행 중 (다음 P3-03)  |
+| [strategy-language-2-0](docs/planning/strategy-language-2-0/README.md)               | schema 1.2, 실행 설정, 그래프 표현           | 완료                  |
+| [research-to-trading](docs/planning/research-to-trading/README.md)                 | 연구 보존·신호 평가·연속 계좌·오프라인 실행 | mock 연속 평가 UI 연결, 실자료 수익성 검증은 별도 |
 
 설계 spec:
 
+- [화면 디자인 정본](design-system/strategy-workbench/MASTER.md): 화면 위계·타이포·컨트롤·반응형 배치 기준
 - [schema 1.1 · GUI 편집](docs/superpowers/specs/2026-09-17-strategy-schema-1-1-and-gui-editing-design.md)
 - [AI 어시스턴트](docs/superpowers/specs/2026-09-20-ai-assistant-design.md)
 - [전략 언어 2.0(schema 1.2 · 그래프 표현)](docs/superpowers/specs/2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md)
@@ -207,31 +265,52 @@ uv run pyright
 uv run python examples/run_demo.py      # PyKRX CSV(005930)로 골든크로스 백테스트
 uv run python examples/run_krx_demo.py  # KRX 원장 parquet 슬라이스로 동일 전략 실행
 uv run python examples/run_krx_demo.py <원장 디렉토리>   # quant-data 빌드 전체 대상
-uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release  # 기본 Workbench 백테스트에 필요
+uv run --no-sync maturin develop --manifest-path rust/backtest_core/Cargo.toml --release  # 기본 Workbench 백테스트에 필요
 uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 데모
 ```
 
-Strategy Workbench 개발 서버:
+Strategy Workbench 개발 서버는 저장소 루트에서 함께 기동한다. 의존성·선택적 Rust 확장 설치는
+위 [바로 실행](#바로-실행)을 따른다.
 
-```bash
+```sh
+uv run dev --open
+```
+
+`--open`은 frontend와 backend의 HTTP 준비를 확인한 뒤 브라우저를 연다. 생략하면 서버만 시작한다.
+기본 포트는 backend `127.0.0.1:8000`, frontend `127.0.0.1:5173`이며 `Ctrl+C`로 둘 다 종료한다.
+두 서버는 같은 DB·데이터 adapter 환경 변수를 상속하고 기본값은 PIT mock adapter다.
+
+각 서버를 따로 실행하는 기존 명령도 사용할 수 있다.
+
+```sh
 # 저장소 루트 · 터미널 1
 uv run server
 
 # 저장소 루트 · 터미널 2
-npm ci --prefix frontend
 npm run dev
 ```
 
 `uv run server`는 backend의 FastAPI/Uvicorn 개발 서버(`127.0.0.1:8000`, reload)를,
 `npm run dev`는 frontend의 Vite 개발 서버(`localhost:5173`)를 실행한다. 백엔드 옵션은
 그대로 전달된다(예: `uv run server --port 8123`). 기존처럼 `backend`와 `frontend`
-디렉터리 안에서 각각 실행해도 같은 owner의 설정을 사용한다. 서버가 저장한 전략 revision은
-기본적으로 `backend/.local/strategy-revisions.sqlite3`에 유지된다. 다른 위치가 필요하면 서버
-시작 전에 `STRATEGY_WORKBENCH_DB_PATH`를 설정한다. 서버 자체는 Rust 확장 없이도 시작하지만,
+디렉터리 안에서 각각 실행해도 같은 owner의 설정을 사용한다. HTTP 런타임의 저장 파일은 다음과
+같다. 다른 위치가 필요하면 서버 시작 전에 해당 환경 변수를 설정한다.
+
+| 기록 | 기본 경로 | 경로 환경 변수 |
+| --- | --- | --- |
+| 전략 리비전 | `backend/.local/strategy-revisions.sqlite3` | `STRATEGY_WORKBENCH_DB_PATH` |
+| 백테스트·실험 | `backend/.local/research.sqlite3` | `STRATEGY_WORKBENCH_RESEARCH_DB_PATH` |
+| 별도 연속 계좌 평가 | `backend/.local/continuous-accounts.sqlite3` | `STRATEGY_WORKBENCH_CONTINUOUS_DB_PATH` |
+
+연속 평가 DB에는 요청 ID·진행·완료 결과를 별도로 보존한다. 같은 요청의 재전송은 다시 실행하지
+않으며 서버 재시작 때 미완료 평가는 `interrupted`로 남는다. 서버 자체는 Rust 확장 없이도 시작하지만,
 기본 `rust` core 백테스트는 위 `maturin develop` 설치가 없으면 명시적인 `CoreUnavailable`로
 실패하며 Python core로 조용히 대체하지 않는다.
 
 화면별 사용법과 오류 복구는 [사용자 매뉴얼](docs/manual/strategy-workbench/README.md)에 있다.
+파라미터 탐색 실험 상세에서는 [지도와 후보 선택](docs/planning/validation-lab/V5-04-candidate-map.md)으로
+칸과 주변 성과를 비교하고, 학습 창·이유를 명시해 선택 기록과 해당 실행의 결과 검증 카드를 읽는다.
+선택 당시 N·DSR은 현재 원장 조회값과 구분하며 추천을 실거래 판단으로 사용하지 않는다.
 매뉴얼 스크린샷은 두 서버를 격리 DB로 실행한 뒤 `frontend`에서
 `npm run docs:capture`로 실제 브라우저 시나리오를 다시 실행해 갱신한다.
 
@@ -305,7 +384,7 @@ uv run server
 | `code-style.md`               | `**/*.py`                            | 기존 헬퍼 재사용, 기능/정리 커밋 분리, ruff·pyright 게이트, 네이밍 |
 | `python.md`                   | `**/*.py`                            | 성공/실패는 튜플 대신 Result 값 타입으로                           |
 | `error-messages.md`           | `**/*.py`                            | 예외·로그에 재현 가능한 컨텍스트 포함                              |
-| `testing.md`                  | `{backend,database}/{tests,scripts}/`, `tools/tests/` | 산출물 파일 존재/내용을 단언하는 테스트 금지, 런타임 상태 경로 격리 |
+| `testing.md`                  | `{backend,database,tools}/**/*.py`, `backend/rust/` | 테스트를 언제 쓰나·어떻게 쓰나·언제 지우나(커버리지는 기준 아님), real > fake > mock, 산출물 단언 금지, 런타임 상태 경로 격리 |
 | `pr-review.md`                | 전체                                 | PR 본문 양식, 결함 보고 4요소                                      |
 | `collaboration-language.md`   | 전체                                 | 코드 주석·Issue·PR 한글 작성 규칙의 단일 정본                      |
 | `backend-package-boundary.md` | `backend/**/*.py`                    | 헥사고날 방향, facade, `DEPENDS_ON`, mock adapter 경계             |
@@ -314,5 +393,5 @@ uv run server
 | `frontend-fsd.md`             | `frontend/src/`                      | FSD 단방향, slice 격리, public API                                 |
 | `frontend-api-state.md`       | frontend API/state                   | 생성 SDK, 서버·draft·UI 상태 소유권                                |
 | `frontend-ui-quality.md`      | frontend UI                          | primitive, token, 접근성, i18n, raw metric                         |
-| `frontend-testing.md`         | frontend test/e2e                    | 사용자 동작·wire 경계 테스트                                       |
+| `frontend-testing.md`         | frontend test/e2e                    | 사용자 동작·wire 경계 테스트, 프론트 경로의 쓰나·지우나 기준          |
 | `frontend-react-effects.md`   | `frontend/src/`                      | React 밖 콜백이 읽는 상태는 commit 시점에 동기화(`useCommittedRef`) |

@@ -68,6 +68,7 @@ const plans = (): ExecutionPlansState => ({
         },
         plan: {
           missing_policy: "drop",
+          evaluation_version: "factor-evaluation-v1",
           graph_hash: "graph-hash",
           plan_hash: "plan-hash",
           registry_version: "registry-v1",
@@ -268,5 +269,10 @@ describe("Strategy IDE debugger composition", () => {
     expect(
       buildStrategyDebuggerAvailability(documentState(), plans(), null),
     ).toEqual({ context: null, reason: "environment" });
+  });
+  it("선택 요청 확인 전에는 차단하고 준비된 값과 출처만 같은 문맥으로 전달한다", () => {
+    expect(buildStrategyDebuggerAvailability(documentState(), plans(), ENVIRONMENT, { ready: false, runId: "run-a", values: undefined })).toEqual({ context: null, reason: "parameters" });
+    const availability = buildStrategyDebuggerAvailability(documentState(), plans(), ENVIRONMENT, { ready: true, runId: "run-a", values: { scale: 0 } });
+    expect(availability.context).toMatchObject({ parameterSourceRunId: "run-a", parameterValues: { scale: 0 }, environment: ENVIRONMENT });
   });
 });

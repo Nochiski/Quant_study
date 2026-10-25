@@ -49,6 +49,29 @@ class RootServerSmokeTest(unittest.TestCase):
         environment["STRATEGY_WORKBENCH_RESEARCH_DB_PATH"] = str(
             Path(runtime_directory.name) / "research.sqlite3"
         )
+        environment["STRATEGY_WORKBENCH_CONTINUOUS_DB_PATH"] = str(
+            Path(runtime_directory.name) / "continuous-accounts.sqlite3"
+        )
+        # 서버는 부팅 때 산출물 루트의 고아 staging을 지우고 어시스턴트 DB를 연다. 개발 서버의
+        # 기본 `.local` 상태를 건드리지 않도록 이 실행의 임시 폴더로 격리한다(#495).
+        environment["STRATEGY_WORKBENCH_ARTIFACT_ROOT"] = str(
+            Path(runtime_directory.name) / "backtest-runs"
+        )
+        environment["STRATEGY_WORKBENCH_ASSISTANT_DB_PATH"] = str(
+            Path(runtime_directory.name) / "assistant.sqlite3"
+        )
+        environment["STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH"] = str(
+            Path(runtime_directory.name) / "secrets.json"
+        )
+        # AI 공급자·키움 연결 저장 파일. 비우면 개발자의 실제 내 문서 `auto_trading/.env`를 연다.
+        environment["STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH"] = str(
+            Path(runtime_directory.name) / "auto_trading.env"
+        )
+        # 개발자 셸의 실자료·공급자 선택과 무관하게 부팅하며 중첩 uv가 extras를 지우지 않는다.
+        environment["STRATEGY_WORKBENCH_EQUITY_ADAPTER"] = "mock"
+        environment.pop("STRATEGY_WORKBENCH_EQUITY_ROOT", None)
+        environment["STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER"] = "1"
+        environment["UV_NO_SYNC"] = "1"
         process = subprocess.Popen(
             [
                 "uv",

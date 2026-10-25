@@ -1,0 +1,5 @@
+.experiment-list__hint {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}

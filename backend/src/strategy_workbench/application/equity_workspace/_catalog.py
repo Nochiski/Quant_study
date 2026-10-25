@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil
 
 from strategy_workbench.domain.equity.facade.research_data import (
     DatasetFieldProfile,
     DataSnapshot,
     FieldFrequency,
 )
+from strategy_workbench.domain.paging.facade.page import paginate, validate_page_request
 
 
 @dataclass(frozen=True)
@@ -20,12 +20,7 @@ class FieldCatalogQuery:
     page_size: int = 20
 
     def __post_init__(self) -> None:
-        if self.page < 1:
-            raise ValueError(f"catalog page must be >= 1 — page={self.page}")
-        if not 1 <= self.page_size <= 100:
-            raise ValueError(
-                f"catalog page_size must be within [1, 100] — page_size={self.page_size}"
-            )
+        validate_page_request(self.page, self.page_size)
 
 
 @dataclass(frozen=True)
@@ -53,14 +48,14 @@ def build_research_catalog(
     query: FieldCatalogQuery,
 ) -> ResearchCatalog:
     fields = tuple(profile for profile in all_fields if _matches_query(profile, query))
-    start = (query.page - 1) * query.page_size
+    window = paginate(fields, query.page, query.page_size)
     return ResearchCatalog(
         snapshot=snapshot,
-        fields=fields[start : start + query.page_size],
-        total=len(fields),
-        page=query.page,
-        page_size=query.page_size,
-        page_count=ceil(len(fields) / query.page_size),
+        fields=window.items,
+        total=window.total,
+        page=window.page,
+        page_size=window.page_size,
+        page_count=window.page_count,
         facets=FieldCatalogFacets(
             dataset_ids=tuple(sorted({field.dataset_id for field in all_fields})),
             units=tuple(sorted({field.unit for field in all_fields})),

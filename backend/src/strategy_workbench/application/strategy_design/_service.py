@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
+from strategy_workbench.domain.factor.facade.expression import FactorGraph, FieldNode
 from strategy_workbench.domain.strategy.facade.explanation import (
     StrategyExplanation,
     explain_strategy,
@@ -11,9 +12,7 @@ from strategy_workbench.domain.strategy.facade.explanation import (
 from strategy_workbench.domain.strategy.facade.specification import (
     EligibilityStep,
     FactorDirection,
-    FactorGraph,
     FactorSignal,
-    FieldNode,
     PortfolioStep,
     RiskStep,
     SignalStep,

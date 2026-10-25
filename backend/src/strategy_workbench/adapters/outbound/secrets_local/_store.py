@@ -18,26 +18,32 @@
 
 from __future__ import annotations
 
-import errno as errno_module
-import getpass
 import json
 import os
-import subprocess
 import sys
-import tempfile
-from collections.abc import Callable, Sequence
-from contextlib import suppress
+from collections.abc import Sequence
 from pathlib import Path
 from threading import RLock
-from typing import TypeAlias
 
 from strategy_workbench.application.assistant_chat.facade.ports import (
     ProviderSecretMissingError,
 )
 
 from ._errors import SecretStoreStorageError
+from ._private_file import (
+    ICACLS_OUTPUT_ENCODING,
+    CommandRunner,
+    atomic_write_restricted,
+    default_windows_account,
+    errno_name,
+    icacls_command,
+    restrict_owner_only,
+    run_icacls,
+    windows_account_name,
+)
 
 __all__ = [
+    "ICACLS_OUTPUT_ENCODING",
     "CommandRunner",
     "LocalFileProviderSecretStore",
     "SECRETS_DIRECTORY_NAME",
@@ -52,8 +58,6 @@ __all__ = [
 
 SECRETS_DIRECTORY_NAME = "quant-workbench"
 SECRETS_FILE_NAME = "secrets.json"
-
-CommandRunner: TypeAlias = Callable[[Sequence[str]], None]
 
 
 def resolve_default_secrets_path(*, platform: str, appdata: str | None, home: Path) -> Path:
@@ -80,60 +84,6 @@ def default_secrets_path() -> Path:
     return resolve_default_secrets_path(
         platform=sys.platform, appdata=os.environ.get("APPDATA"), home=Path.home()
     )
-
-
-def windows_account_name(*, userdomain: str | None, username: str | None, fallback: str) -> str:
-    """`icacls`에 넘길 계정 이름(순수 함수). 도메인이 있으면 `DOMAIN\\user`로 한정한다.
-
-    도메인 가입 장비에서 계정 이름만 주면 `icacls`가 로컬 계정 중에서 찾다 실패해 `put`이 통째로
-    깨진다. 로컬 계정뿐인 장비에서는 `%USERDOMAIN%`이 장비 이름이라 그대로도 해석된다.
-    """
-    if username and userdomain:
-        return f"{userdomain}\\{username}"
-    return username or fallback
-
-
-def default_windows_account() -> str:
-    """현재 프로세스의 OS 계정 값으로 위 계산을 돌린다."""
-    return windows_account_name(
-        userdomain=os.environ.get("USERDOMAIN"),
-        username=os.environ.get("USERNAME"),
-        fallback=getpass.getuser(),
-    )
-
-
-def icacls_command(path: Path, *, account: str) -> tuple[str, ...]:
-    """상속을 끊고 `account`에만 전체 권한을 주는 `icacls` 인자."""
-    return ("icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:F")
-
-
-def run_icacls(command: Sequence[str]) -> None:
-    """`icacls`를 돌리고 실패하면 저장 오류로 바꾼다.
-
-    권한 설정이 조용히 실패하면 키가 상속된 ACL로 남는다. 실패는 반드시 쓰기 전체를 되돌린다.
-
-    메시지에는 명령 배열도 `stderr`도 싣지 않는다. 둘 다 비밀 파일 경로를 그대로 담는다.
-    """
-    try:
-        # shell을 거치지 않고 고정된 인자 배열만 넘긴다. 경로는 인자라 인용 문제가 없다.
-        completed = subprocess.run(list(command), capture_output=True, text=True, check=False)
-    except OSError as error:
-        raise SecretStoreStorageError(
-            f"could not run the ACL command — operation=icacls errno={_errno_name(error)}"
-        ) from error
-    if completed.returncode != 0:
-        raise SecretStoreStorageError(
-            "could not restrict the secrets file ACL — "
-            f"operation=icacls returncode={completed.returncode} "
-            f"stderr_bytes={len(completed.stderr)}"
-        )
-
-
-def _errno_name(error: OSError) -> str:
-    """OSError의 errno를 이름으로. 숫자만으로는 어떤 실패인지 읽히지 않는다."""
-    if error.errno is None:
-        return "UNKNOWN"
-    return errno_module.errorcode.get(error.errno, f"ERRNO_{error.errno}")
 
 
 class LocalFileProviderSecretStore:
@@ -205,7 +155,7 @@ class LocalFileProviderSecretStore:
         except OSError as error:
             raise SecretStoreStorageError(
                 f"could not read the provider secrets file — operation=read "
-                f"errno={_errno_name(error)}",
+                f"errno={errno_name(error)}",
                 path=self._path,
             ) from error
         try:
@@ -233,94 +183,17 @@ class LocalFileProviderSecretStore:
         return secrets
 
     def _write(self, secrets: dict[str, str]) -> None:
-        directory = self._prepare_directory()
-        try:
-            descriptor, temporary_name = tempfile.mkstemp(
-                dir=directory, prefix=".secrets-", suffix=".tmp"
-            )
-            os.close(descriptor)
-        except OSError as error:
-            raise SecretStoreStorageError(
-                f"could not create the provider secrets temporary file — operation=mkstemp "
-                f"errno={_errno_name(error)}",
-                path=self._path,
-            ) from error
-
-        temporary = Path(temporary_name)
-        try:
-            # 내용보다 권한이 먼저다. 순서가 바뀌면 평문이 잠깐 느슨한 권한으로 디스크에 눕는다.
-            self._restrict(temporary)
-            with temporary.open("w", encoding="utf-8") as stream:
-                json.dump(secrets, stream, ensure_ascii=False, sort_keys=True, indent=2)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, self._path)
-        except OSError as error:
-            self._discard(temporary)
-            raise SecretStoreStorageError(
-                f"could not write the provider secrets file — operation=replace "
-                f"entries={len(secrets)} errno={_errno_name(error)}",
-                path=self._path,
-            ) from error
-        except BaseException:
-            self._discard(temporary)
-            raise
-        self._sync_directory(directory)
-
-    def _prepare_directory(self) -> Path:
-        """비밀 파일이 놓일 디렉터리. **이 adapter가 만들었을 때만** 0700으로 좁힌다.
-
-        이미 있던 디렉터리의 권한은 건드리지 않는다. 경로는 bootstrap이 고르므로 홈이나 공유
-        설정 디렉터리를 가리킬 수 있고, 그걸 말없이 좁히면 같은 디렉터리를 쓰던 다른
-        프로세스·사용자가 조용히 접근을 잃는다(놀람 최소화). 비밀 값 자체는 파일 권한 0600이
-        지키므로 디렉터리가 느슨해도 값은 새지 않는다.
-        """
-        directory = self._path.parent
-        try:
-            directory.mkdir(parents=True)
-        except FileExistsError:
-            return directory
-        except OSError as error:
-            raise SecretStoreStorageError(
-                f"could not create the provider secrets directory — operation=mkdir "
-                f"errno={_errno_name(error)}",
-                path=self._path,
-            ) from error
-        if self._platform != "win32":
-            try:
-                os.chmod(directory, 0o700)
-            except OSError as error:
-                raise SecretStoreStorageError(
-                    f"could not restrict the provider secrets directory — operation=chmod "
-                    f"errno={_errno_name(error)}",
-                    path=self._path,
-                ) from error
-        return directory
-
-    def _sync_directory(self, directory: Path) -> None:
-        """rename 자체를 디스크에 확정한다.
-
-        내용은 `fsync`했지만 디렉터리 항목은 별개다. 이걸 빼면 갑작스러운 전원 차단에서 교체가
-        통째로 유실돼 직전 키로 되돌아간다. Windows는 디렉터리 핸들을 이렇게 열 수 없어 건너뛴다.
-        """
-        if self._platform == "win32":
-            return
-        with suppress(OSError):
-            descriptor = os.open(directory, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+        atomic_write_restricted(
+            self._path,
+            json.dumps(secrets, ensure_ascii=False, sort_keys=True, indent=2),
+            platform=self._platform,
+            restrict=self._restrict,
+            label="provider secrets file",
+            temporary_prefix=".secrets-",
+            detail=f"entries={len(secrets)}",
+        )
 
     def _restrict(self, path: Path) -> None:
-        if self._platform == "win32":
-            account = self._account or default_windows_account()
-            self._run_command(icacls_command(path, account=account))
-            return
-        os.chmod(path, 0o600)
-
-    @staticmethod
-    def _discard(temporary: Path) -> None:
-        """실패한 임시 파일을 지운다. 남겨 두면 평문 사본이 하나 더 생긴다."""
-        with suppress(OSError):
-            temporary.unlink()
+        restrict_owner_only(
+            path, platform=self._platform, run_command=self._run_command, account=self._account
+        )

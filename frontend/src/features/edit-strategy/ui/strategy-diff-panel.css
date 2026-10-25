@@ -158,11 +158,13 @@
 .strategy-diff__selectors select {
   min-width: 0;
   padding: var(--space-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
   background: var(--surface-panel);
   color: var(--text);
-  font: inherit;
+  font-family: inherit;
+  font-size: var(--text-size-body);
+  line-height: var(--line-height-body);
 }
 
 .strategy-diff button:focus-visible,
@@ -173,7 +175,37 @@
 }
 
 @media (max-width: 760px) {
+  .strategy-diff,
+  .strategy-diff__source,
+  .strategy-diff__revision,
+  .strategy-diff__revision > section,
+  .strategy-diff__source-scroll {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .strategy-diff > header {
+    flex-wrap: wrap;
+  }
+
+  .strategy-diff > header > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
   .strategy-diff__selectors {
     grid-template-columns: 1fr;
+  }
+
+  /* 원문은 공백·행을 그대로 읽고 기존 단일 스크롤 영역 안에서 가로로 이동한다. */
+  .strategy-diff__source table {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .strategy-diff__source code {
+    white-space: pre;
+    overflow-wrap: normal;
+    word-break: normal;
   }
 }

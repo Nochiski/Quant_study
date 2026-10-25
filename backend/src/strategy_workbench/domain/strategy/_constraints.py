@@ -145,6 +145,11 @@ class FieldApplicability:
 
 
 FIELD_APPLICABILITY: tuple[FieldApplicability, ...] = (
+    FieldApplicability(
+        "/portfolio/tie_breaker_direction",
+        (ApplicabilityCondition("/portfolio/tie_breaker_factor_id", not_null=True),),
+        "strategy.contract.applicable.tie_breaker_direction",
+    ),
     # `_compiler.py::_selection_counts`: top_n이면 selection_count(+long_short이면
     # short_selection_count),
     # percentile이면 selection_percentile로 양쪽 count를 계산한다.
@@ -349,6 +354,8 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         "strategy.risk.long_only_exposure",
         "strategy.risk.risk_field",
         "strategy.risk.risk_source_conflict",
+        "strategy.portfolio.tie_breaker_factor_missing",
+        "strategy.portfolio.tie_breaker_factor_excluded",
         "strategy.risk.risk_factor_missing",
         "strategy.risk.risk_factor_excluded",
         "strategy.risk.sector_neutral_side",

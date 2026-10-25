@@ -6,6 +6,7 @@ import {
   strategyDocumentQuery,
   strategyRevisionsQuery,
 } from "../../../entities/strategy";
+import { useDraftSemanticDiff } from "../model/use-draft-semantic-diff";
 import { t } from "../../../shared/config";
 import { lineDiff, type TextDiff } from "../../../shared/lib/text-diff";
 import { Badge } from "../../../shared/ui";
@@ -209,7 +210,7 @@ const RevisionComparison = ({
     <div className="strategy-diff__revision">
       <div className="strategy-diff__selectors">
         <label htmlFor={baseId}>{t("diff.revision.base")}</label>
-        <select
+        <select className="ui-select"
           id={baseId}
           value={active.base}
           onChange={(event) =>
@@ -226,7 +227,7 @@ const RevisionComparison = ({
           ))}
         </select>
         <label htmlFor={targetId}>{t("diff.revision.target")}</label>
-        <select
+        <select className="ui-select"
           id={targetId}
           value={active.target}
           onChange={(event) =>
@@ -300,6 +301,7 @@ export const StrategyDiffPanel = ({
   active,
   revision,
 }: StrategyDiffPanelProps) => {
+  const semantic = useDraftSemanticDiff(state, active);
   if (!active) return null;
   const draft = projectDraftDiff(state);
   return (
@@ -339,7 +341,7 @@ export const StrategyDiffPanel = ({
         <p className="strategy-diff__caption">
           {t("diff.semantic.backendOwned")}
         </p>
-        <SemanticState semantic={draft.semantic} />
+        <SemanticState semantic={semantic} />
       </section>
 
       {revision ? (

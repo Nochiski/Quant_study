@@ -1,10 +1,11 @@
+import { failureReason } from "../../../shared/api";
 import type { ReactNode } from "react";
 
 import { backtestStartRejectionMessage } from "../../../entities/backtest";
 import { t } from "../../../shared/config";
 import { Badge, Button, FailureNotice, Tooltip } from "../../../shared/ui";
 import type { BacktestSourceDecision } from "../model/backtest-source";
-import type { DocumentState } from "../model/document-state";
+import { type DocumentState } from "../model/document-state";
 import type { RunBacktestStatus } from "../model/use-run-backtest";
 import "./document-toolbar.css";
 
@@ -24,15 +25,11 @@ type DocumentToolbarProps = {
   runFieldLabel?: (field: string) => string | null;
   /** 시작 거절을 한 번에 고치는 교정(예: 연구 구간 거절의 시작일 옮기기). 없으면 null. */
   runRejectionFix?: (
-    code: string | null,
-    values: Readonly<Record<string, string>>,
+    error: unknown,
   ) => { label: string; apply: () => void } | null;
   decision: BacktestSourceDecision;
   runStatus: RunBacktestStatus;
 };
-
-const short = (hash: string | null): string =>
-  hash === null || hash === "" ? "—" : `${hash.slice(0, 12)}…`;
 
 const decisionLabel = (decision: BacktestSourceDecision): string => {
   switch (decision.kind) {
@@ -72,35 +69,11 @@ export const DocumentToolbar = ({
 }: DocumentToolbarProps) => {
   const fix =
     runStatus.kind === "failed" && runRejectionFix !== undefined
-      ? runRejectionFix(runStatus.code, runStatus.values)
-      : null;
-  const current =
-    state.compiled !== null && state.compiledVersion === state.sourceVersion
-      ? state.compiled
+      ? runRejectionFix(runStatus.error)
       : null;
   return (
     <div className="doc-toolbar">
       <dl className="doc-toolbar__identity">
-        <div>
-          <dt>{t("toolbar.schemaVersion")}</dt>
-          <dd>{current?.schemaVersion ?? "—"}</dd>
-        </div>
-        <div>
-          <dt>{t("toolbar.sourceHash")}</dt>
-          <dd>
-            <code title={current?.sourceHash ?? undefined}>
-              {short(current?.sourceHash ?? null)}
-            </code>
-          </dd>
-        </div>
-        <div>
-          <dt>{t("toolbar.specHash")}</dt>
-          <dd>
-            <code title={current?.specHash ?? undefined}>
-              {short(current?.specHash ?? null)}
-            </code>
-          </dd>
-        </div>
         <div>
           <dt>{t("toolbar.dirty")}</dt>
           <dd>
@@ -111,7 +84,6 @@ export const DocumentToolbar = ({
         </div>
       </dl>
       <div className="doc-toolbar__actions">
-        {runSettings}
         <Button
           size="small"
           onClick={onValidate}
@@ -144,6 +116,7 @@ export const DocumentToolbar = ({
               : t("toolbar.backtest")}
           </Button>
         </Tooltip>
+        <div className="doc-toolbar__settings">{runSettings}</div>
         {runStatus.kind === "accepted" ? (
           <span className="doc-toolbar__run-status" role="status">
             {t("toolbar.run.accepted").replace("{runId}", runStatus.runId)}
@@ -155,14 +128,8 @@ export const DocumentToolbar = ({
         <FailureNotice
           className="doc-toolbar__error"
           title={t("toolbar.run.failed")}
-          message={backtestStartRejectionMessage(
-            runStatus.code,
-            runStatus.field === null || runFieldLabel === undefined
-              ? null
-              : runFieldLabel(runStatus.field),
-            runStatus.values,
-          )}
-          reason={runStatus.detail}
+          message={backtestStartRejectionMessage(runStatus.error, runFieldLabel)}
+          reason={failureReason(runStatus.error)}
         >
           {fix === null ? undefined : (
             <Button size="small" tone="primary" onClick={fix.apply}>

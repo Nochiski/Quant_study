@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { messages, type MessageKey } from "../messages";
+import { messages, tDuration, type MessageKey } from "../messages";
 
 const placeholders = (message: string): string[] =>
   [...message.matchAll(/\{([A-Za-z0-9_.-]+)\}/g)]
@@ -39,6 +39,17 @@ describe("message catalog contract", () => {
     ).toBe(true);
   });
 
+  it("leaves per-field meaning to the backend field description", () => {
+    // 필드마다의 뜻·한계는 어댑터 필드 설명 한 곳이 싣는다. 사전 문장이 field_id 를 들어 원장·평가
+    // 규칙을 옮기면 규칙이 바뀔 때 이 사본만 옛 약속을 한다(#373 DR-A-05).
+    const fieldId =
+      /\b(?:price|financial|consensus|flow|short|credit|event|classification|benchmark)\.[a-z_]+/u;
+    const leaked = (Object.keys(messages.ko) as MessageKey[]).filter(
+      (key) => fieldId.test(messages.ko[key]) || fieldId.test(messages.en[key]),
+    );
+    expect(leaked).toEqual([]);
+  });
+
   it("does not ship obsolete phase placeholder copy", () => {
     const allCopy = [
       ...Object.values(messages.ko),
@@ -47,5 +58,15 @@ describe("message catalog contract", () => {
     expect(allCopy).not.toMatch(
       /Phase\s+\d|later phases?|이후 단계|추후 단계/i,
     );
+  });
+});
+
+describe("tDuration", () => {
+  it("rounds up and switches units at a minute and an hour", () => {
+    expect(tDuration(0.2)).toBe("1초");
+    expect(tDuration(59.1)).toBe("1분 0초");
+    expect(tDuration(61.2)).toBe("1분 2초");
+    expect(tDuration(3599.5)).toBe("1시간 0분");
+    expect(tDuration(3661)).toBe("1시간 2분");
   });
 });

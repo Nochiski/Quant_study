@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 // 편집기 입력·문서 검증 대기는 e2e 와 같은 helper 를 쓴다. TS 파일이라 `npm run docs:capture`가 node 에
 // `--experimental-strip-types`를 준다.
-import { editor, expectPhase, replaceSource } from "../e2e/editor-helpers.ts";
+import { editor, expectPhase, replaceSource, RUN_ENVIRONMENT, runSettingsInputs, openRunSettingsGroup } from "../e2e/editor-helpers.ts";
 import { backendPort, previewOrigin } from "../e2e/ports.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -42,12 +42,6 @@ const headed = process.env.WORKBENCH_MANUAL_HEADED === "1";
 // 이 파일에 직접 심는다(`frontend-testing.md`의 은퇴 row seeding 규칙).
 const databasePath = process.env.WORKBENCH_MANUAL_DB_PATH;
 
-/** e2e `workbench-helpers.ts`의 `RUN_ENVIRONMENT`와 같은 값. 그 파일은 생성 SDK 를 확장자 없이 import 해 node 가 바로 부르지 못한다. */
-const RUN_ENVIRONMENT = {
-  start: "2021-01-01",
-  end: "2026-08-31",
-  universe_id: "krx.common-stock",
-};
 /** 결과 설명(19)의 AI 공급자. backend 대본 공급자(`STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER=1`)는 키를 검사하지 않는다. */
 const PROVIDER_LABEL = "Claude";
 const PROVIDER_KEY = "sk-manual-capture-key-0000";
@@ -152,45 +146,6 @@ const captureTall = async (page, filename, locator) => {
   }
 };
 
-/** `top` 영역의 위 끝부터 `bottom` 영역의 아래 끝까지를 한 장으로 찍는다(18). */
-const captureSpan = async (page, filename, top, bottom) => {
-  try {
-    await fitViewportTo(page, bottom, () => alignBelowTopBar(page, bottom));
-    await page.evaluate(() => document.fonts.ready.then(() => undefined));
-    const viewport = page.viewportSize() ?? VIEWPORT;
-    await page.mouse.move(viewport.width - 10, viewport.height - 10);
-    await page.waitForTimeout(100);
-    const topBox = await top.boundingBox();
-    const bottomBox = await bottom.boundingBox();
-    if (topBox === null || bottomBox === null) {
-      throw new Error(`${filename}: 찍을 영역이 화면에 없습니다.`);
-    }
-    const target = resolve(outputDirectory, filename);
-    await page.screenshot({
-      path: target,
-      animations: "disabled",
-      caret: "hide",
-      clip: {
-        x: topBox.x,
-        y: topBox.y,
-        width: topBox.width,
-        height: bottomBox.y + bottomBox.height - topBox.y,
-      },
-    });
-    process.stdout.write(`스크린샷 저장: ${target}\n`);
-  } finally {
-    await page.setViewportSize(VIEWPORT);
-  }
-};
-
-/** 크기 조절 손잡이가 상한에 닿아 있는지 본다. 중간 결과의 상한은 창 높이를 따른다(#262). */
-const expectAtMaximum = async (handle) => {
-  await expect(handle).toHaveAttribute(
-    "aria-valuenow",
-    (await handle.getAttribute("aria-valuemax")) ?? "",
-  );
-};
-
 /** 편집기 자동완성 팝업을 닫는다. 원문을 넣은 뒤 커서 자리의 제안이 떠 있으면 편집기 본문을 가린다(02·04). */
 const closeCompletion = async (page) => {
   const popup = page.locator(".cm-tooltip-autocomplete");
@@ -255,7 +210,7 @@ const backtestButton = page.getByRole("button", {
   exact: true,
 });
 const settingsToggle = page.getByLabel("실행 설정 열기");
-const summaryBand = page.getByRole("region", { name: "실행 설정 요약" });
+const summaryBand = runSettingsInputs(page).summary;
 // 실행 설정 팝오버는 이름이 없다. 첫 묶음(fieldset "실행 환경")의 부모가 팝오버 전체다.
 const settingsPopover = page
   .getByRole("group", { name: "실행 환경", exact: true })
@@ -370,13 +325,8 @@ try {
   await expect(summaryBand).toContainText(
     "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
   );
-  // 차단 문장은 입력 칸 아래에 있어 기본 높이에서는 잘린다. 영역을 최대로 키워 문장까지 담는다.
-  const debuggerHandle = page.getByRole("separator", {
-    name: "중간 결과 크기 조절",
-  });
-  await debuggerHandle.focus();
-  await debuggerHandle.press("End");
-  await expectAtMaximum(debuggerHandle);
+  // 추적은 편집기와 분리된 작업 공간에서 가용 높이를 사용한다.
+  await page.getByRole("button", { name: "중간 결과", exact: true }).click();
   const traceBlocked = debuggerRegion
     .getByRole("status")
     .filter({ hasText: "추적은 실행 설정 위에서 돕니다." });
@@ -439,7 +389,6 @@ try {
     name: "TargetTape 후보와 선택 노드 결과",
   });
   await expect(targetTape).toBeVisible();
-  await expectAtMaximum(debuggerHandle);
   // 중간 결과 영역은 스크롤이 두 겹이다(영역 본문 안에 탭 패널). 바깥은 끝까지 내려 탭 패널에 자리를
   // 주고, 안쪽은 맨 위로 올려 표 머리 행부터 세 종목 행이 다 보이게 한다. `scrollIntoView`는 안쪽까지
   // 끝으로 내려 머리 행을 가린다.
@@ -465,6 +414,7 @@ try {
 
   expect(backtestPosts).toHaveLength(0);
   await settingsToggle.click();
+  await openRunSettingsGroup(page, "고급 실행");
   await page
     .getByRole("combobox", { name: "실행 core" })
     .selectOption("python");
@@ -543,7 +493,9 @@ try {
     "display",
     "grid",
   );
-  await expect(page.getByRole("region", { name: "핵심 성과 지표" })).toHaveCSS(
+  await expect(
+    page.getByRole("region", { name: "결과 한눈에" }).locator(".metric-highlights"),
+  ).toHaveCSS(
     "grid-template-columns",
     /^(?!none$).+/u,
   );
@@ -593,6 +545,7 @@ try {
   await expect(page.getByRole("region", { name: "전략 파이프라인" })).toBeVisible();
   await capture(page, "13-pipeline-editing.png");
 
+  await page.getByRole("button", { name: /· 노드 편집$/ }).first().click();
   const graphEditor = page.getByRole("region", { name: "그래프 편집" });
   await expect(graphEditor).toBeVisible();
   await graphEditor
@@ -601,9 +554,8 @@ try {
   await expect(
     graphEditor.getByRole("group", { name: /선택한 노드/ }),
   ).toContainText("input_node_id");
-  // 편집 표면(노드 목록 + 선택한 노드 속성)만 담는다 — 전체 화면은 DAG 카드가 차지해 편집기가 잘린다.
-  // 영역이 뷰포트보다 길어 고정 상단바가 겹치므로 뷰포트를 늘려 찍는다.
-  await captureTall(page, "14-graph-editing.png", graphEditor);
+  // 실제 작업 공간의 캔버스·선택 속성·복귀 입구를 같은 뷰포트에 담는다.
+  await capture(page, "14-graph-editing.png");
 
   // 7절: 저장된 schema 1.1 revision 을 열면 업그레이드 배너가 뜬다(새 전략 화면에는 없다, #257).
   // 전략 이력(11)에 섞이지 않도록 그 장면을 찍은 뒤에 심는다.
@@ -632,25 +584,16 @@ try {
   await expectPhase(page, "검증 통과");
   await closeCompletion(page);
   await page.getByRole("tab", { name: "그래프", exact: true }).click();
-  const promotedNode = page.getByRole("button", {
-    name: "그래프 노드 선택: 참/거짓을 1/0으로",
-    exact: true,
+  await page.getByRole("button", { name: /· 노드 편집$/ }).first().click();
+  const promotedCanvas = page.getByRole("region", { name: "노드 캔버스" });
+  // 승격은 원문 노드에 붙은 backend 메타데이터로 보인다. 별도의 읽기 전용 DAG를 중복 생성하지 않는다.
+  const promotedNode = promotedCanvas.locator(".node-canvas__node").filter({
+    hasText: "참/거짓을 1/0으로",
   });
-  await expect(promotedNode).toBeVisible();
-  // DAG 카드(제목·계획 요약·노드 목록)만 담는다. 같은 영역 아래의 그래프 편집 표면은 14가 보인다.
-  const dagSection = page.getByRole("region", {
-    name: "FactorGraph DAG",
-    exact: true,
-  });
-  const dagCanvas = page
-    .getByRole("list", { name: "백엔드 계획 순서의 팩터 노드와 입력 연결" })
-    .locator("xpath=..");
-  // 노드 목록은 가로 스크롤이다. 승격 노드는 계획의 마지막이라 오른쪽 끝으로 민다.
-  await dagCanvas.evaluate((element) => {
-    element.scrollLeft = element.scrollWidth;
-  });
+  await expect(promotedNode).toHaveCount(1);
+  await promotedNode.getByRole("button", { name: /^노드 편집:/ }).click();
   await expect(promotedNode).toBeInViewport();
-  await captureSpan(page, "18-promoted-node.png", dagSection, dagCanvas);
+  await capture(page, "18-promoted-node.png");
 
   // 9절: AI 공급자를 등록하고(e2e `ensureProvider`와 같은 단계) 결과 화면에서 AI 에게 묻는다.
   await page.goto(`${frontendUrl}/settings`);

@@ -3,26 +3,34 @@ import { useQuery } from "@tanstack/react-query";
 import {
   backtestErrorSentence,
   requestRejectionMessage,
+  runStatusLabel,
 } from "../../../entities/backtest";
 import {
   EXPERIMENT_POLL_MS,
   experimentQuery,
   experimentStatusLabel,
   experimentStatusTone,
+  experimentRemainingTimeQuery,
   experimentTrialsQuery,
   experimentWalkForwardQuery,
   trialStatusLabel,
   trialStatusTone,
   useExperimentProgress,
   useRetryExperimentTrial,
+  retentionGapLabel,
   walkForwardGapLabel,
   type ExperimentTrialState,
 } from "../../../entities/experiment";
 import { failureReason } from "../../../shared/api";
-import { t, tFill } from "../../../shared/config";
+import { ExperimentCandidateMap } from "../../../features/select-experiment-candidate";
+import { t, tDuration, tFill } from "../../../shared/config";
 import { Link, useParams } from "../../../shared/lib/router";
 import { Badge, Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
+import { AuditTrail } from "./audit-trail";
+import { CapacityReport } from "../../../features/check-capacity";
+import { ContinuousAccount } from "./continuous-account";
+import "./experiment-page.css";
 
 const valuesText = (values: Record<string, unknown>) =>
   Object.entries(values)
@@ -58,13 +66,40 @@ const WalkForward = ({
     ...experimentWalkForwardQuery(experimentId),
     refetchInterval,
   });
-  if (report.data === undefined) return null;
+  if (report.isPending) return <p role="status">{t("page.loading")}</p>;
+  if (report.isError)
+    return (
+      <section
+        className="experiment-section"
+        aria-label={t("experiments.walkForward.title")}
+      >
+        <FailureNotice
+          message={t("experiments.walkForward.loadFailed")}
+          reason={failureReason(report.error)}
+        />
+        <Button
+          size="small"
+          tone="secondary"
+          onClick={() => void report.refetch()}
+        >
+          {t("experiments.walkForward.reload")}
+        </Button>
+      </section>
+    );
   const { data } = report;
+  const retentionGap = data.gap == null ? retentionGapLabel(data) : null;
   return (
-    <section aria-labelledby={`${experimentId}-walk-forward`}>
+    <section
+      className="experiment-section"
+      aria-labelledby={`${experimentId}-walk-forward`}
+    >
       <h2 id={`${experimentId}-walk-forward`}>
         {t("experiments.walkForward.title")}
       </h2>
+      <p className="experiment-interpretation">
+        {data.interpretation ??
+          t("experiments.walkForward.interpretationUnavailable")}
+      </p>
       <p>
         {data.gap === null || data.gap === undefined
           ? tFill("experiments.walkForward.summary", {
@@ -76,7 +111,13 @@ const WalkForward = ({
             })
           : walkForwardGapLabel(data.gap)}
       </p>
-      <div className="data-list-page__scroll">
+      {retentionGap === null ? null : <p>{retentionGap}</p>}
+      <div
+        className="data-list-page__scroll experiment-table-scroll"
+        role="region"
+        tabIndex={0}
+        aria-label={t("experiments.walkForward.windows")}
+      >
         <table className="data-list-page__table">
           <caption className="sr-only">
             {t("experiments.walkForward.title")}
@@ -118,7 +159,7 @@ const WalkForward = ({
                         params={{ runId: pick.run_id }}
                       >
                         <code>{pick.run_id.slice(0, 12)}</code> ·{" "}
-                        {run_status ?? "—"}
+                        {run_status == null ? "—" : runStatusLabel(run_status)}
                       </Link>
                     )}
                     {gap === null || gap === undefined ? null : (
@@ -147,11 +188,19 @@ export const ExperimentPage = () => {
     from: "/research/experiments/$experimentId",
   });
   const experiment = useQuery(experimentQuery(experimentId));
-  const running = experiment.data?.finished === false;
+  const running = experiment.data?.settled === false;
   // 스트림이 끝나기 전에 끊겨도 trial·워크포워드가 맞춰지게 실험 조회와 같은 주기로 보조로 다시 읽는다.
   const refetchInterval = running ? EXPERIMENT_POLL_MS : false;
   const trials = useQuery({
     ...experimentTrialsQuery(experimentId),
+    refetchInterval,
+  });
+  // 남은 시간 어림은 끝나지 않고 도는 동안만 읽는다(로드맵 M6 ETA) — 취소한 실험이 실행을 정리하는
+  // 동안에는 남은 실행이 없다. 계산은 backend 가 하고 화면은 보이기만 한다.
+  const counting = running && experiment.data?.finished === false;
+  const remaining = useQuery({
+    ...experimentRemainingTimeQuery(experimentId),
+    enabled: counting,
     refetchInterval,
   });
   const retry = useRetryExperimentTrial(experimentId);
@@ -170,11 +219,14 @@ export const ExperimentPage = () => {
     );
   const { record, trial_counts: counts } = experiment.data;
   return (
-    <section className="page data-list-page" aria-labelledby="experiment-title">
+    <section
+      className="page data-list-page experiment-page"
+      aria-labelledby="experiment-title"
+    >
       <header className="data-list-page__header">
         <div>
-          <h1 id="experiment-title">
-            {tFill("experiments.detail.title", { id: experimentId })}
+          <h1 id="experiment-title" aria-labelledby="experiment-heading experiment-identifier">
+            <span id="experiment-heading">{t("experiments.detail.heading")}</span>
           </h1>
           <p>
             <Badge tone={experimentStatusTone(experiment.data.status)}>
@@ -187,6 +239,19 @@ export const ExperimentPage = () => {
               failed: counts.failed ?? 0,
             })}
           </p>
+          <p className="experiment-page__identity">
+            <span>{t("experiments.detail.id")}</span>
+            <code id="experiment-identifier">{experimentId}</code>
+          </p>
+          {counting && remaining.isSuccess ? (
+            <p>
+              {remaining.data
+                ? tFill("experiments.detail.remaining", {
+                    total: tDuration(remaining.data.total_seconds),
+                  })
+                : t("experiments.detail.remainingUnknown")}
+            </p>
+          ) : null}
         </div>
         <span className="data-list-page__actions">
           <Link
@@ -205,69 +270,108 @@ export const ExperimentPage = () => {
           </Link>
         </span>
       </header>
-      <div className="data-list-page__panel">
-        {retry.isError ? (
-          <FailureNotice
-            title={t("experiments.detail.retryFailed")}
-            message={requestRejectionMessage(
-              retry.error,
-              "experiments.controlFailed",
-            )}
-            reason={failureReason(retry.error)}
-          />
-        ) : null}
-        <div className="data-list-page__scroll">
-          <table className="data-list-page__table">
-            <caption className="sr-only">
-              {t("experiments.detail.trials")}
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">{t("experiments.detail.trial")}</th>
-                <th scope="col">{t("experiments.new.parameter")}</th>
-                <th scope="col">{t("experiments.new.train")}</th>
-                <th scope="col">{t("experiments.status")}</th>
-                <th scope="col">{t("experiments.detail.run")}</th>
-                <th scope="col">{t("history.actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trials.data.map((state) => (
-                <tr key={state.trial.index}>
-                  <td>#{state.trial.index + 1}</td>
-                  <td>{valuesText(state.trial.parameter_values)}</td>
-                  <td>
-                    {/* 창이 없는 trial(용량 확인, V4-04)은 기반 기간 전체를 돈다. */}
-                    {state.trial.window === null ||
-                    state.trial.window === undefined
-                      ? "—"
-                      : `${state.trial.window.train_start} ~ ${state.trial.window.train_end}`}
-                  </td>
-                  <td>
-                    <Badge tone={trialStatusTone(state.status)}>
-                      {trialStatusLabel(state.status)}
-                    </Badge>
-                  </td>
-                  <td>
-                    <RunCell state={state} />
-                  </td>
-                  <td>
-                    {state.retryable ? (
-                      <Button
-                        size="small"
-                        tone="ghost"
-                        disabled={retry.isPending}
-                        onClick={() => retry.mutate(state.trial.index)}
-                      >
-                        {t("experiments.detail.retry")}
-                      </Button>
-                    ) : null}
-                  </td>
+      {/* 끝난 탐색 실험에 기록한 후보가 없으면 다음 할 일을 맨 위에 둔다(RD-10-B). */}
+      {record.design.kind !== "capacity_sweep" &&
+      experiment.data.status === "completed" &&
+      experiment.data.selections.length === 0 ? (
+        <p className="experiment-page__next" role="note">
+          <strong>{t("experiments.detail.next")}</strong>{" "}
+          {t("experiments.detail.next.candidate")}{" "}
+          <a className="ui-button ui-button--primary ui-button--small" href="#candidate">
+            {t("experiments.detail.next.go")}
+          </a>
+        </p>
+      ) : null}
+      <div className="experiment-page__sections">
+        {record.design.kind === "capacity_sweep" ? null : (
+          <div id="candidate" tabIndex={-1}>
+            <ExperimentCandidateMap experiment={experiment.data} trials={trials.data} />
+          </div>
+        )}
+        <section className="data-list-page__panel">
+          <h2
+            id="experiment-trials-title"
+            className="experiment-section__title"
+          >
+            {t("experiments.detail.trials")}
+          </h2>
+          {retry.isError ? (
+            <FailureNotice
+              title={t("experiments.detail.retryFailed")}
+              message={requestRejectionMessage(
+                retry.error,
+                "experiments.controlFailed",
+              )}
+              reason={failureReason(retry.error)}
+            />
+          ) : null}
+          <div
+            className="data-list-page__scroll experiment-table-scroll"
+            role="region"
+            tabIndex={0}
+            aria-label={t("experiments.detail.trials")}
+          >
+            <table className="data-list-page__table">
+              <caption className="sr-only">
+                {t("experiments.detail.trials")}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">{t("experiments.detail.trial")}</th>
+                  <th scope="col">{t("experiments.new.parameter")}</th>
+                  <th scope="col">{t("experiments.new.train")}</th>
+                  <th scope="col">{t("experiments.status")}</th>
+                  <th scope="col">{t("experiments.detail.run")}</th>
+                  <th scope="col">{t("history.actions")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {trials.data.map((state) => (
+                  <tr key={state.trial.index}>
+                    <td>#{state.trial.index + 1}</td>
+                    <td>{valuesText(state.trial.parameter_values)}</td>
+                    <td>
+                      {/* 창이 없는 trial(용량 확인, V4-04)은 기반 기간 전체를 돈다. */}
+                      {state.trial.window === null ||
+                      state.trial.window === undefined
+                        ? "—"
+                        : `${state.trial.window.train_start} ~ ${state.trial.window.train_end}`}
+                    </td>
+                    <td>
+                      <Badge tone={trialStatusTone(state.status)}>
+                        {trialStatusLabel(state.status)}
+                      </Badge>
+                    </td>
+                    <td>
+                      <RunCell state={state} />
+                    </td>
+                    <td>
+                      {state.status === "completed" && state.attempts.at(-1)?.run_id && record.run.strategy_source?.kind === "saved_revision" ? (
+                        <Link
+                          className="ui-button ui-button--small ui-button--secondary"
+                          to="/research/strategies/$strategyId/revisions/$revision"
+                          params={{ strategyId: record.run.strategy_source.strategy_id, revision: String(record.run.strategy_source.revision) }}
+                          search={{ run: state.attempts.at(-1)!.run_id!, view: "graph" }}
+                        >{t("backtest.parameters.inspect")}</Link>
+                      ) : null}
+                      {state.retryable ? (
+                        <Button
+                          size="small"
+                          tone="ghost"
+                          disabled={retry.isPending}
+                          onClick={() => retry.mutate(state.trial.index)}
+                        >
+                          {t("experiments.detail.retry")}
+                        </Button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        {record.design.kind === "capacity_sweep" ? <CapacityReport experimentId={experimentId} settled={experiment.data.settled} /> : null}
         {record.design.measured ? (
           <WalkForward
             experimentId={experimentId}
@@ -275,6 +379,15 @@ export const ExperimentPage = () => {
             refetchInterval={refetchInterval}
           />
         ) : null}
+        {record.design.measured ? (
+          <ContinuousAccount experimentId={experimentId} />
+        ) : null}
+        <section className="data-list-page__panel experiment-audit">
+          <AuditTrail
+            experimentId={experimentId}
+            refetchInterval={refetchInterval}
+          />
+        </section>
       </div>
     </section>
   );

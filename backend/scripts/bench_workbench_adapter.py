@@ -84,9 +84,9 @@ from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
-    BacktestRunSpec,
     ExecutionCore,
     MetricWindow,
+    ResolvedBacktestRunSpec,
     StrategyProvenance,
     StrategySourceKind,
 )
@@ -221,6 +221,7 @@ def synthetic_dataset(
     )
     dataset = BacktestDataset(
         data_snapshot_id=_SNAPSHOT_ID,
+        sessions=sessions,
         bars=records,
         memberships=memberships,
         corporate_actions=(),
@@ -327,7 +328,7 @@ def execution_request(
     spec_hash = strategy_spec_hash(spec)
     return BacktestExecutionRequest(
         run_id=f"bench-workbench-{core.value}",
-        spec=BacktestRunSpec(
+        spec=ResolvedBacktestRunSpec(
             strategy=spec,
             core=core,
             environment=environment,
@@ -341,6 +342,9 @@ def execution_request(
             spec_hash=spec_hash,
             schema_version=spec.identity.schema_version,
         ),
+        # 측정용 실행은 원문·계열 출처가 없다. 빠뜨린 것이 아니라 없음을 명시한다.
+        strategy_source=None,
+        lineage_strategy_id=None,
     )
 
 

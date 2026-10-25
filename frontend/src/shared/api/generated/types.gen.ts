@@ -5,6 +5,148 @@ export type ClientOptions = {
 };
 
 /**
+ * AccountReport
+ */
+export type AccountReport = {
+  /**
+   * Detail
+   */
+  detail: string | null;
+  /**
+   * Evaluation Basis
+   */
+  evaluation_basis?: "initial_capital";
+  /**
+   * Interpretation
+   */
+  interpretation?: string;
+  provenance: AccountReportProvenance;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  status: AccountReportStatus;
+  summary: AccountReportSummary | null;
+  /**
+   * Warnings
+   */
+  warnings: Array<DataWarning>;
+};
+
+/**
+ * AccountReportProvenance
+ */
+export type AccountReportProvenance = {
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
+  /**
+   * Engine Version
+   */
+  engine_version: string;
+  /**
+   * Environment Hash
+   */
+  environment_hash: string;
+  /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version: string | null;
+  /**
+   * Metric Registry Version
+   */
+  metric_registry_version: string;
+  /**
+   * Run Fingerprint
+   */
+  run_fingerprint: string;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+  /**
+   * Strategy Hash
+   */
+  strategy_hash: string;
+  strategy_provenance: StrategyProvenance;
+  /**
+   * Target Tape Hash
+   */
+  target_tape_hash: string;
+};
+
+/**
+ * AccountReportStatus
+ */
+export type AccountReportStatus =
+  "available" | "empty_snapshots" | "invalid_input";
+
+/**
+ * AccountReportSummary
+ */
+export type AccountReportSummary = {
+  /**
+   * Final Cash
+   */
+  final_cash: number;
+  /**
+   * Final Equity
+   */
+  final_equity: number;
+  /**
+   * First Snapshot Date
+   */
+  first_snapshot_date: string;
+  /**
+   * Initial Cash
+   */
+  initial_cash: number;
+  /**
+   * Last Snapshot Date
+   */
+  last_snapshot_date: string;
+  /**
+   * Pnl
+   */
+  pnl: number;
+  /**
+   * Snapshot Count
+   */
+  snapshot_count: number;
+  /**
+   * Total Return
+   */
+  total_return: number;
+};
+
+/**
+ * AddLibraryVersionBody
+ */
+export type AddLibraryVersionBody = {
+  /**
+   * Expected Latest
+   */
+  expected_latest: number;
+  /**
+   * Factor
+   */
+  factor: {
+    [key: string]: unknown;
+  };
+  /**
+   * Note
+   */
+  note?: string | null;
+  /**
+   * Parameters
+   */
+  parameters?: Array<{
+    [key: string]: unknown;
+  }>;
+};
+
+/**
  * ApplicableCondition
  */
 export type ApplicableCondition = {
@@ -271,6 +413,24 @@ export type AssistantSecretMissingDetail = {
 };
 
 /**
+ * AssistantStorageUnavailableDetail
+ *
+ * 공급자 저장 파일(내 문서 `auto_trading/.env`) 자체를 읽거나 쓸 수 없다(3차 리뷰 4).
+ *
+ * 연결 테스트 전에 거절한다. 사용자가 파일을 고치거나 지워야 풀린다. 경로·값은 싣지 않는다.
+ */
+export type AssistantStorageUnavailableDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.storage_unavailable";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * AssistantTurnContextMismatchDetail
  *
  * 턴 요청의 `context`가 세션 모드와 맞지 않는다(결과 설명 spec R5).
@@ -339,6 +499,9 @@ export type AssistantUnprocessableResponse = {
         code: "assistant.provider_secret_missing";
       } & AssistantSecretMissingDetail)
     | ({
+        code: "assistant.storage_unavailable";
+      } & AssistantStorageUnavailableDetail)
+    | ({
         code: "assistant.document_ref_invalid";
       } & AssistantDocumentRefInvalidDetail)
     | ({
@@ -382,6 +545,8 @@ export type BacktestCancelResult = {
     | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
+    | "backtest.run.worker_exited"
+    | "backtest.run.worker_mismatch"
     | null;
   /**
    * Kept By Owners
@@ -412,6 +577,10 @@ export type BacktestCancelResult = {
     | "completed"
     | "cancelled"
     | "failed";
+  /**
+   * Started At
+   */
+  started_at?: string | null;
   status: RunStatus;
   /**
    * Updated At
@@ -456,6 +625,27 @@ export type BacktestParameterInvalidDetail = {
    * Parameter Id
    */
   parameter_id: string;
+};
+
+/**
+ * BacktestRequestRetiredDetail
+ */
+export type BacktestRequestRetiredDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.request_retired";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestRequestRetiredResponse
+ */
+export type BacktestRequestRetiredResponse = {
+  detail: BacktestRequestRetiredDetail;
 };
 
 /**
@@ -612,7 +802,7 @@ export type BacktestRunResult = {
  *
  * A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
  *
- * `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
+ * `strategy` stays for existing HTTP and CLI callers; new callers use `strategy_source`
  * so a run can name a saved revision (P1-09). The run service rejects a request carrying both
  * or neither (one coded 422, `backtest.run.invalid`).
  * After resolution the run spec stored in the manifest carries both: `strategy` is the exact
@@ -684,6 +874,8 @@ export type BacktestRunState = {
     | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
+    | "backtest.run.worker_exited"
+    | "backtest.run.worker_mismatch"
     | null;
   /**
    * Message
@@ -710,6 +902,10 @@ export type BacktestRunState = {
     | "completed"
     | "cancelled"
     | "failed";
+  /**
+   * Started At
+   */
+  started_at?: string | null;
   status: RunStatus;
   /**
    * Updated At
@@ -735,6 +931,7 @@ export type BacktestRunSummary = {
    * Experiment Paused
    */
   experiment_paused: boolean;
+  headline?: RunHeadline | null;
   kind: RunKind;
   run: BacktestRunState;
   strategy_provenance: StrategyProvenance;
@@ -914,6 +1111,34 @@ export type BlockedTrialAttempt = {
    * Trial Key
    */
   trial_key: string;
+};
+
+/**
+ * BrokerErrorDetail
+ */
+export type BrokerErrorDetail = {
+  /**
+   * Code
+   */
+  code:
+    | "broker.request_invalid"
+    | "broker.credentials_invalid"
+    | "broker.storage_unavailable";
+  /**
+   * Field
+   */
+  field?: string | null;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BrokerErrorResponse
+ */
+export type BrokerErrorResponse = {
+  detail: BrokerErrorDetail;
 };
 
 /**
@@ -1154,6 +1379,22 @@ export type ChoiceParameter = {
 };
 
 /**
+ * ClosedHolding
+ */
+export type ClosedHolding = {
+  change: HoldingChange;
+  /**
+   * Previous Quantity
+   */
+  previous_quantity: string;
+  /**
+   * Realized Pnl
+   */
+  realized_pnl: number | null;
+  security: SecurityLabel;
+};
+
+/**
  * ComparisonNode
  */
 export type ComparisonNode = {
@@ -1242,6 +1483,20 @@ export type ConditionalNode = {
 };
 
 /**
+ * ConnectionOutcome
+ */
+export type ConnectionOutcome =
+  | "connected"
+  | "not_saved"
+  | "mode_mismatch"
+  | "ip_not_allowed"
+  | "auth_failed"
+  | "account_mismatch"
+  | "no_response"
+  | "refused"
+  | "unreadable";
+
+/**
  * ConstantNode
  */
 export type ConstantNode = {
@@ -1257,6 +1512,396 @@ export type ConstantNode = {
    * Value
    */
   value: number;
+};
+
+/**
+ * ConstraintOperator
+ */
+export type ConstraintOperator = "lt" | "le" | "gt" | "ge" | "eq" | "ne";
+
+/**
+ * ContinuousAccountErrorDetail
+ */
+export type ContinuousAccountErrorDetail = {
+  /**
+   * Code
+   */
+  code:
+    | "continuous.mock_only"
+    | "continuous.unfinished"
+    | "continuous.unsupported"
+    | "continuous.no_cell"
+    | "continuous.source_invalid"
+    | "continuous.prepare_failed"
+    | "continuous.request_invalid"
+    | "continuous.request_conflict"
+    | "continuous.busy"
+    | "continuous.execution_failed"
+    | "continuous.interrupted"
+    | "continuous.not_found"
+    | "continuous.result_unreadable";
+  /**
+   * Field
+   */
+  field?: string | null;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * ContinuousAccountErrorResponse
+ */
+export type ContinuousAccountErrorResponse = {
+  detail: ContinuousAccountErrorDetail;
+};
+
+/**
+ * ContinuousAccountLatest
+ */
+export type ContinuousAccountLatest = {
+  /**
+   * Data Mode
+   */
+  data_mode: string;
+  evaluation: ContinuousAccountState | null;
+  /**
+   * Interpretation
+   */
+  interpretation?: string;
+  readiness: ContinuousReadiness;
+  /**
+   * Status
+   */
+  status: "not_started" | "running" | "completed" | "failed" | "interrupted";
+};
+
+/**
+ * ContinuousAccountManifest
+ */
+export type ContinuousAccountManifest = {
+  /**
+   * Annualization Days
+   */
+  annualization_days: number;
+  /**
+   * Candidates
+   */
+  candidates: Array<ContinuousCandidateProvenance>;
+  /**
+   * Choices
+   */
+  choices: Array<FrozenWindowChoice>;
+  core: ExecutionCore;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Data Mode
+   */
+  data_mode?: "mock";
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
+  /**
+   * Engine Version
+   */
+  engine_version: string;
+  environment: RunEnvironment;
+  /**
+   * Environment Hash
+   */
+  environment_hash: string;
+  /**
+   * Evaluation Basis
+   */
+  evaluation_basis?: "continuous_account";
+  /**
+   * Evaluation Fingerprint
+   */
+  evaluation_fingerprint?: string;
+  /**
+   * Evaluation Id
+   */
+  evaluation_id: string;
+  /**
+   * Evaluator Version
+   */
+  evaluator_version?: "continuous-account-v1";
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version: string;
+  /**
+   * Frame Sources
+   */
+  frame_sources: Array<ScheduledFrameSource>;
+  /**
+   * Initial Cash
+   */
+  initial_cash: number;
+  /**
+   * Metric Registry Version
+   */
+  metric_registry_version: string;
+  /**
+   * Revision
+   */
+  revision: number;
+  schedule: ContinuousScheduleProvenance;
+  /**
+   * Scheduled Tape Hash
+   */
+  scheduled_tape_hash: string;
+  /**
+   * Schema Version
+   */
+  schema_version?: "continuous-account-result-v1";
+  /**
+   * Selection Time Policy
+   */
+  selection_time_policy?: "assumed_train_end_close";
+  /**
+   * Source
+   */
+  source: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+};
+
+/**
+ * ContinuousAccountResult
+ */
+export type ContinuousAccountResult = {
+  artifacts: RawArtifactBundle;
+  /**
+   * Curve
+   */
+  curve: Array<ContinuousCurvePoint>;
+  /**
+   * Interpretation
+   */
+  interpretation?: string;
+  manifest: ContinuousAccountManifest;
+  /**
+   * Metric Definitions
+   */
+  metric_definitions: Array<MetricDefinition>;
+  /**
+   * Metrics
+   */
+  metrics: Array<MetricValue>;
+  summary: AccountReportSummary;
+  /**
+   * Total Fees
+   */
+  total_fees: number;
+  /**
+   * Total Sell Tax
+   */
+  total_sell_tax: number;
+  /**
+   * Warnings
+   */
+  warnings: Array<DataWarning>;
+};
+
+/**
+ * ContinuousAccountStartRequest
+ */
+export type ContinuousAccountStartRequest = {
+  /**
+   * Client Request Id
+   */
+  client_request_id: string;
+};
+
+/**
+ * ContinuousAccountState
+ */
+export type ContinuousAccountState = {
+  /**
+   * Completed At
+   */
+  completed_at?: string | null;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error Code
+   */
+  error_code?:
+    | "continuous.mock_only"
+    | "continuous.unfinished"
+    | "continuous.unsupported"
+    | "continuous.no_cell"
+    | "continuous.source_invalid"
+    | "continuous.prepare_failed"
+    | "continuous.request_invalid"
+    | "continuous.request_conflict"
+    | "continuous.busy"
+    | "continuous.execution_failed"
+    | "continuous.interrupted"
+    | "continuous.not_found"
+    | "continuous.result_unreadable"
+    | null;
+  /**
+   * Error Detail
+   */
+  error_detail?: string | null;
+  /**
+   * Evaluation Id
+   */
+  evaluation_id: string;
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  /**
+   * Progress
+   */
+  progress: number;
+  result?: ContinuousAccountResult | null;
+  /**
+   * Stage
+   */
+  stage:
+    | "preparing"
+    | "pipeline"
+    | "compiling"
+    | "engine"
+    | "completed"
+    | "failed"
+    | "interrupted";
+  status: ContinuousAccountStatus;
+};
+
+/**
+ * ContinuousAccountStatus
+ */
+export type ContinuousAccountStatus =
+  "running" | "completed" | "failed" | "interrupted";
+
+/**
+ * ContinuousCandidateProvenance
+ */
+export type ContinuousCandidateProvenance = {
+  /**
+   * Candidate Id
+   */
+  candidate_id: string;
+  /**
+   * Factor Plan Hashes
+   */
+  factor_plan_hashes: Array<[string, string]>;
+  /**
+   * Parameter Values
+   */
+  parameter_values: Array<[string, number | number | string | boolean]>;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  /**
+   * Strategy Hash
+   */
+  strategy_hash: string;
+};
+
+/**
+ * ContinuousCurvePoint
+ */
+export type ContinuousCurvePoint = {
+  /**
+   * Equity
+   */
+  equity: number;
+  /**
+   * Session
+   */
+  session: string;
+};
+
+/**
+ * ContinuousReadiness
+ */
+export type ContinuousReadiness = {
+  /**
+   * Code
+   */
+  code:
+    | "continuous.mock_only"
+    | "continuous.unfinished"
+    | "continuous.unsupported"
+    | "continuous.no_cell"
+    | "continuous.source_invalid"
+    | "continuous.prepare_failed"
+    | "continuous.request_invalid"
+    | "continuous.request_conflict"
+    | "continuous.busy"
+    | "continuous.execution_failed"
+    | "continuous.interrupted"
+    | "continuous.not_found"
+    | "continuous.result_unreadable"
+    | null;
+  /**
+   * Detail
+   */
+  detail: string;
+  /**
+   * Ready
+   */
+  ready: boolean;
+};
+
+/**
+ * ContinuousScheduleProvenance
+ *
+ * 도메인이 확정한 파생 사실을 HTTP·저장 경계에서 빠뜨리지 않는 명시 투영.
+ */
+export type ContinuousScheduleProvenance = {
+  /**
+   * Execution Timing
+   */
+  execution_timing: string;
+  /**
+   * Policy Version
+   */
+  policy_version: string;
+  /**
+   * Schedule Hash
+   */
+  schedule_hash: string;
+  /**
+   * Selections
+   */
+  selections: Array<WindowSelection>;
+  /**
+   * Sessions
+   */
+  sessions: Array<string>;
+  /**
+   * Target Scope
+   */
+  target_scope: string;
+  /**
+   * Time In Force
+   */
+  time_in_force: string;
+  /**
+   * Transitions
+   */
+  transitions: Array<SelectionTransition>;
 };
 
 /**
@@ -1289,6 +1934,46 @@ export type CreateSessionRequest = {
    * Title
    */
   title?: string;
+};
+
+/**
+ * CredentialsFileBody
+ */
+export type CredentialsFileBody = {
+  /**
+   * Path
+   *
+   * AI 공급자·키움 모의 연결을 저장하는 `.env`의 절대 경로. 예전 저장(사용자 설정 폴더)을 쓰는 서버는 null이다.
+   */
+  path: string | null;
+  /**
+   * Problems
+   */
+  problems: Array<CredentialsFileProblemBody>;
+};
+
+/**
+ * CredentialsFileProblemBody
+ */
+export type CredentialsFileProblemBody = {
+  /**
+   * Fields
+   */
+  fields: Array<string>;
+  /**
+   * Message
+   *
+   * 사용자에게 그대로 보일 한글 문장. 값은 담지 않는다.
+   */
+  message: string;
+  /**
+   * Reason
+   */
+  reason: string;
+  /**
+   * Section
+   */
+  section: "file" | "ai" | "kiwoom";
 };
 
 /**
@@ -1443,6 +2128,110 @@ export type DatasetRevision = {
 };
 
 /**
+ * DeflatedSharpeEvidence
+ *
+ * 조회한 계열 원장을 근거로 한 세션 단위 통계.
+ *
+ * 원래 실행 결과·선택 당시 스냅숏을 변경하지 않는다. 대표 행 자체는 기존 원장 조회가 제공한다.
+ * 판본 목록과 미상 수는 분산에 쓰는 대표 샤프가 있는 시도만 대상으로 한다.
+ */
+export type DeflatedSharpeEvidence = {
+  /**
+   * Annualization Days
+   *
+   * 해당 실행에 기록된 연환산 거래일.
+   */
+  annualization_days: number;
+  /**
+   * Expected Maximum Sharpe
+   *
+   * 계산한 운 기준선 SR₀(세션 단위). N=1이면 0, 계산 전 부재 판정이면 null이다.
+   */
+  expected_maximum_sharpe: number | null;
+  /**
+   * Lineage Id
+   *
+   * 계열 합치기를 해소한 생존 계열. 계열 없는 초안은 null이다.
+   */
+  lineage_id: string | null;
+  /**
+   * Merged Lineage Ids
+   *
+   * 이 생존 계열에 합쳐진 계열 식별자.
+   */
+  merged_lineage_ids: Array<string>;
+  /**
+   * Registry Mixed
+   *
+   * 알려진 대표 판본들과 해당 실행 판본을 합친 집합에 둘 이상 판본이 있는지 여부.
+   */
+  registry_mixed: boolean;
+  /**
+   * Representative Count
+   *
+   * 샤프가 있는 시도 대표 자료 수. N과 다를 수 있으며 재확인 실행은 포함하지 않는다.
+   */
+  representative_count: number;
+  /**
+   * Representative Registry Versions
+   *
+   * 대표 샤프가 있는 시도들의 알려진 지표 판본 집합(정렬). 현재 실행의 판본 목록이 아니다.
+   */
+  representative_registry_versions: Array<string>;
+  /**
+   * Session Sharpe
+   *
+   * 해당 실행의 FULL 연율 샤프를 연환산 거래일로 환산한 세션 샤프. 계산하지 않았으면 null이다.
+   */
+  session_sharpe: number | null;
+  /**
+   * Session Standard Error
+   *
+   * 같은 실행의 FULL 샤프 표준오차를 환산한 세션 단위 값. 계산하지 않았으면 null이다.
+   */
+  session_standard_error: number | null;
+  /**
+   * Trial Count
+   *
+   * 현재 계열 원장의 시도 수 N. 재확인/결과 없음은 제외하고 파산 시도는 포함한다. 계열이 없으면 null이다.
+   */
+  trial_count: number | null;
+  /**
+   * Trial Sharpe Variance
+   *
+   * 계산한 대표 세션 샤프의 표본분산(n−1). N=1이면 0, 계산 전 부재 판정이면 null이다.
+   */
+  trial_sharpe_variance: number | null;
+  /**
+   * 값이 없을 때의 단일 판정 사유. 값이 있으면 null이다.
+   */
+  unavailable_reason: DeflatedSharpeUnavailableReason | null;
+  /**
+   * Unknown Registry Count
+   *
+   * 대표 샤프가 있지만 지표 판본이 기록되지 않은 시도 수. 판본 일치를 추측하지 않는다.
+   */
+  unknown_registry_count: number;
+  /**
+   * Value
+   *
+   * 현재 계열 원장으로 계산한 DSR(0~1). 저장된 PSR이나 후보 선택 당시 스냅숏이 아니다.
+   */
+  value: number | null;
+};
+
+/**
+ * DeflatedSharpeUnavailableReason
+ */
+export type DeflatedSharpeUnavailableReason =
+  | "no_lineage"
+  | "no_counted_trials"
+  | "sharpe_unavailable"
+  | "standard_error_unavailable"
+  | "nonpositive_standard_error"
+  | "insufficient_representatives";
+
+/**
  * DiagnosticAnchor
  *
  * 진단이 가리키는 자리. 고칠 곳이 값이 아니라 키 자체인 진단(예: 모르는 키)은 키다.
@@ -1531,6 +2320,53 @@ export type DoneView = {
    * Type
    */
   type: "done";
+};
+
+/**
+ * DraftDiff
+ *
+ * 저장 리비전과 현재 원문의 의미 차이. 저장 상태를 바꾸지 않는다.
+ */
+export type DraftDiff = {
+  /**
+   * Base Revision
+   */
+  base_revision: number;
+  /**
+   * Base Spec Hash
+   */
+  base_spec_hash: string;
+  /**
+   * Changes
+   */
+  changes: Array<DiffEntry>;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+  /**
+   * Target Spec Hash
+   */
+  target_spec_hash: string;
+};
+
+/**
+ * DraftDiffRequest
+ */
+export type DraftDiffRequest = {
+  /**
+   * Base Revision
+   */
+  base_revision: number;
+  format: SourceFormat;
+  /**
+   * Source
+   */
+  source: string;
 };
 
 /**
@@ -1666,6 +2502,17 @@ export type EquityCurvePoint = {
 };
 
 /**
+ * ExcludedFactorPeriods
+ */
+export type ExcludedFactorPeriods = {
+  /**
+   * Count
+   */
+  count: number;
+  reason: FactorPeriodGap;
+};
+
+/**
  * ExclusionReason
  */
 export type ExclusionReason =
@@ -1706,6 +2553,10 @@ export type Experiment = {
    * Selections
    */
   selections: Array<ExperimentSelection>;
+  /**
+   * Settled
+   */
+  settled: boolean;
   status: ExperimentStatus;
   /**
    * Trial Counts
@@ -1748,6 +2599,66 @@ export type ExperimentAdmissionErrorResponse = {
         code: "portfolio.strategy.invalid";
       } & PortfolioStrategyInvalidDetail);
 };
+
+/**
+ * ExperimentAuditEvent
+ */
+export type ExperimentAuditEvent = {
+  /**
+   * Attempt
+   */
+  attempt?: number | null;
+  /**
+   * Code
+   */
+  code?: string | null;
+  kind: ExperimentAuditKind;
+  /**
+   * Occurred At
+   */
+  occurred_at: string;
+  /**
+   * Paused
+   */
+  paused?: boolean | null;
+  /**
+   * Priority
+   */
+  priority?: number | null;
+  /**
+   * Reason
+   */
+  reason?: string | null;
+  /**
+   * Run Id
+   */
+  run_id?: string | null;
+  run_status?: RunStatus | null;
+  /**
+   * Trial Index
+   */
+  trial_index?: number | null;
+  /**
+   * Window Index
+   */
+  window_index?: number | null;
+};
+
+/**
+ * ExperimentAuditKind
+ */
+export type ExperimentAuditKind =
+  | "created"
+  | "controls_changed"
+  | "trial_submitted"
+  | "trial_rejected"
+  | "window_picked"
+  | "window_no_cell"
+  | "window_rejected"
+  | "run_started"
+  | "run_finished"
+  | "candidate_selected"
+  | "cancelled";
 
 /**
  * ExperimentControls
@@ -1830,7 +2741,14 @@ export type ExperimentErrorDetail = {
     | "experiment.capacity.invalid_amounts"
     | "experiment.kind.mismatch"
     | "experiment.not_found"
+    | "experiment.robustness.not_single"
+    | "experiment.robustness.period_too_short"
+    | "experiment.robustness.run_not_found"
+    | "experiment.robustness.running"
+    | "experiment.robustness.too_many_parameters"
+    | "experiment.search.invalid_constraint"
     | "experiment.search.invalid_values"
+    | "experiment.search.no_feasible_point"
     | "experiment.search.too_many_points"
     | "experiment.search.unknown_parameter"
     | "experiment.selection.not_completed"
@@ -1902,6 +2820,7 @@ export type ExperimentPreview = {
    * Run Count
    */
   run_count: number;
+  time_estimate: TimeEstimate | null;
   /**
    * Trial Count
    */
@@ -1933,6 +2852,10 @@ export type ExperimentRecord = {
    */
   experiment_id: string;
   run: BacktestRunSpec;
+  /**
+   * Source Run Id
+   */
+  source_run_id?: string | null;
   split: SplitSpec | null;
 };
 
@@ -1942,6 +2865,12 @@ export type ExperimentRecord = {
  * 실험 만들기·미리 계산 요청.
  */
 export type ExperimentRequest = {
+  /**
+   * Constraints
+   *
+   * 탐색 축 사이의 조합 제약(예: fast < slow). 모두 만족하는 칸만 실행하고, 걸러진 칸은 실행되지 않아 시도 수에도 들지 않는다. 비우면 곱집합 전체다.
+   */
+  constraints?: Array<ParameterConstraint>;
   run: BacktestRunSpec;
   /**
    * Search
@@ -2083,44 +3012,6 @@ export type ExperimentTrialState = {
   selectable: boolean;
   status: TrialStatus;
   trial: ExperimentTrial;
-};
-
-/**
- * FactorAnalytics
- */
-export type FactorAnalytics = {
-  /**
-   * Coverage
-   */
-  coverage: number;
-  /**
-   * Decay
-   */
-  decay: number | null;
-  /**
-   * Information Coefficient
-   */
-  information_coefficient: number | null;
-  /**
-   * Observation Count
-   */
-  observation_count: number;
-  /**
-   * Quantile Spread
-   */
-  quantile_spread: number | null;
-  /**
-   * Rank Information Coefficient
-   */
-  rank_information_coefficient: number | null;
-  /**
-   * Turnover
-   */
-  turnover: number | null;
-  /**
-   * Valid Count
-   */
-  valid_count: number;
 };
 
 /**
@@ -2267,20 +3158,6 @@ export type FactorDefinition = {
 export type FactorDirection = "high" | "low";
 
 /**
- * FactorEvaluation
- */
-export type FactorEvaluation = {
-  /**
-   * Output Node Id
-   */
-  output_node_id: string;
-  /**
-   * Values
-   */
-  values: Array<FactorValue>;
-};
-
-/**
  * FactorExecutionPlan
  */
 export type FactorExecutionPlan = {
@@ -2288,6 +3165,10 @@ export type FactorExecutionPlan = {
    * As Of Policy
    */
   as_of_policy?: string;
+  /**
+   * Evaluation Version
+   */
+  evaluation_version: string;
   /**
    * Graph Hash
    */
@@ -2381,6 +3262,25 @@ export type FactorExplanation = {
 };
 
 /**
+ * FactorExposure
+ */
+export type FactorExposure = {
+  /**
+   * Beta
+   */
+  beta: number;
+  factor: FactorKind;
+  /**
+   * Standard Error
+   */
+  standard_error: number;
+  /**
+   * T Value
+   */
+  t_value: number | null;
+};
+
+/**
  * FactorGraph
  */
 export type FactorGraph = {
@@ -2398,6 +3298,7 @@ export type FactorGraph = {
     | GroupNode
     | ComparisonNode
     | ConditionalNode
+    | FillNode
   >;
   /**
    * Output Node Id
@@ -2444,38 +3345,26 @@ export type FactorGraphValidation = {
 };
 
 /**
- * FactorMatrixCacheKey
+ * FactorKind
  */
-export type FactorMatrixCacheKey = {
-  /**
-   * As Of End
-   */
-  as_of_end: string;
-  /**
-   * As Of Start
-   */
-  as_of_start: string;
-  /**
-   * Data Snapshot Id
-   */
-  data_snapshot_id: string;
-  /**
-   * Fingerprint
-   */
-  fingerprint: string;
-  /**
-   * Parameters
-   */
-  parameters: Array<ResolvedFactorParameter>;
-  /**
-   * Plan Hash
-   */
-  plan_hash: string;
-  /**
-   * Registry Version
-   */
-  registry_version: string;
-};
+export type FactorKind = "market" | "size" | "value" | "momentum";
+
+/**
+ * FactorMatchStatus
+ *
+ * 전략 문서의 팩터 항목이 라이브러리와 어떤 관계인가.
+ */
+export type FactorMatchStatus = "current" | "outdated" | "modified";
+
+/**
+ * FactorPeriodGap
+ */
+export type FactorPeriodGap =
+  | "base_rate_not_covered"
+  | "no_market_weight"
+  | "size_value_empty"
+  | "size_momentum_empty"
+  | "no_factor_period";
 
 /**
  * FactorPreference
@@ -2483,48 +3372,75 @@ export type FactorMatrixCacheKey = {
 export type FactorPreference = "high" | "low";
 
 /**
- * FactorPreview
+ * FactorRegressionFit
  */
-export type FactorPreview = {
-  analytics: FactorAnalytics;
-  cache_key: FactorMatrixCacheKey;
+export type FactorRegressionFit = {
   /**
-   * Data Snapshot Id
+   * Alpha Annualized
    */
-  data_snapshot_id: string;
-  evaluation: FactorEvaluation;
-  plan: FactorExecutionPlan;
+  alpha_annualized: number;
+  /**
+   * Alpha Per Session
+   */
+  alpha_per_session: number;
+  /**
+   * Alpha Standard Error
+   */
+  alpha_standard_error: number;
+  /**
+   * Alpha T Value
+   */
+  alpha_t_value: number | null;
+  /**
+   * Exposures
+   */
+  exposures: Array<FactorExposure>;
+  /**
+   * Hac Lag
+   */
+  hac_lag: number;
+  /**
+   * R Squared
+   */
+  r_squared: number | null;
 };
 
 /**
- * FactorPreviewRequest
+ * FactorRegressionReport
  *
- * Preview request. The data snapshot is owned by the adapter (P1.5-01).
- *
- * `expected_data_snapshot_id` is optional provenance the client saw in the catalog; when it
- * differs from the adapter's actual snapshot the preview fails closed instead of silently
- * computing against different data.
+ * 회귀 결과. `fit` 이 없으면 `unavailable_reason` 이 있다.
  */
-export type FactorPreviewRequest = {
+export type FactorRegressionReport = {
   /**
-   * As Of End
+   * Annualization Days
    */
-  as_of_end: string;
+  annualization_days: number;
   /**
-   * As Of Start
+   * Excluded Periods
    */
-  as_of_start: string;
+  excluded_periods: Array<ExcludedFactorPeriods>;
+  fit: FactorRegressionFit | null;
   /**
-   * Expected Data Snapshot Id
+   * Observation Count
    */
-  expected_data_snapshot_id?: string | null;
-  graph: FactorGraph;
-  missing?: MissingPolicy | null;
+  observation_count: number;
   /**
-   * Parameters
+   * Strategy Period Count
    */
-  parameters?: Array<ResolvedFactorParameter>;
+  strategy_period_count: number;
+  unavailable_reason: FactorRegressionUnavailableReason | null;
 };
+
+/**
+ * FactorRegressionUnavailableReason
+ */
+export type FactorRegressionUnavailableReason =
+  | "insufficient_observations"
+  | "singular_design"
+  | "data_snapshot_changed"
+  | "data_unavailable"
+  | "computing"
+  | "computation_failed";
 
 /**
  * FactorSignal
@@ -2573,24 +3489,6 @@ export type FactorValidationIssue = {
  * FactorValidationSeverity
  */
 export type FactorValidationSeverity = "error" | "warning";
-
-/**
- * FactorValue
- */
-export type FactorValue = {
-  /**
-   * As Of
-   */
-  as_of: string;
-  /**
-   * Security Id
-   */
-  security_id: string;
-  /**
-   * Value
-   */
-  value: number | null;
-};
 
 /**
  * FailureCode
@@ -2835,6 +3733,34 @@ export type FieldValueType =
   "price" | "amount" | "ratio" | "count" | "category";
 
 /**
+ * FillNode
+ *
+ * 입력의 결측 칸을 상수로 채운다(#608).
+ *
+ * 실행 결측 정책(`RunEnvironment.missing`)과 달리 그래프 안 한 자리에서만 채우고, 원장이 가린 칸은
+ * 채우지 않는다(#298). 있는 것끼리 가중 평균(빈 입력은 가중치에서 뺀다)·"비교값이 없으면 변화 0"
+ * 같은 규칙을 문서에 명시하는 용도다.
+ */
+export type FillNode = {
+  /**
+   * Fill Value
+   */
+  fill_value: number;
+  /**
+   * Input Node Id
+   */
+  input_node_id: string;
+  /**
+   * Kind
+   */
+  kind: "fill";
+  /**
+   * Node Id
+   */
+  node_id: string;
+};
+
+/**
  * FloatParameter
  */
 export type FloatParameter = {
@@ -2862,6 +3788,41 @@ export type FloatParameter = {
    * Step
    */
   step?: number | null;
+};
+
+/**
+ * FrozenWindowChoice
+ */
+export type FrozenWindowChoice = {
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id?: string | null;
+  /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
+  /**
+   * Parameter Values
+   */
+  parameter_values: Array<[string, number | number | string | boolean]>;
+  /**
+   * Training Run Id
+   */
+  training_run_id: string;
+  /**
+   * Trial Index
+   */
+  trial_index: number;
+  /**
+   * Validation Run Id
+   */
+  validation_run_id: string;
+  window: WalkForwardWindow;
+  /**
+   * Window Index
+   */
+  window_index: number;
 };
 
 /**
@@ -2903,12 +3864,103 @@ export type HttpValidationError = {
 };
 
 /**
+ * HoldingChange
+ *
+ * 한 세션에서 한 종목의 보유가 어떻게 바뀌었나.
+ */
+export type HoldingChange =
+  "opened" | "added" | "reduced" | "held" | "sold" | "removed";
+
+/**
+ * HoldingPeriod
+ *
+ * 계좌 기록 세션에서 끊김 없이 들고 있던 구간(양끝 포함).
+ */
+export type HoldingPeriod = {
+  /**
+   * End
+   */
+  end: string;
+  /**
+   * Open
+   */
+  open: boolean;
+  /**
+   * Start
+   */
+  start: string;
+};
+
+/**
+ * HoldingRow
+ */
+export type HoldingRow = {
+  change: HoldingChange;
+  /**
+   * Filled Quantity
+   */
+  filled_quantity: string | null;
+  /**
+   * Market Value
+   */
+  market_value: number;
+  /**
+   * Quantity
+   */
+  quantity: string;
+  security: SecurityLabel;
+  /**
+   * Unrealized Return
+   */
+  unrealized_return: number | null;
+  /**
+   * Weight
+   */
+  weight: number | null;
+};
+
+/**
+ * HoldingsOverview
+ */
+export type HoldingsOverview = {
+  /**
+   * Fill Count
+   */
+  fill_count: number;
+  /**
+   * Final Holding Count
+   */
+  final_holding_count: number;
+  /**
+   * First Session
+   */
+  first_session: string | null;
+  /**
+   * Last Session
+   */
+  last_session: string | null;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Securities
+   */
+  securities: Array<SecurityTradeSummary>;
+  /**
+   * Trade Sessions
+   */
+  trade_sessions: Array<TradeSessionSummary>;
+};
+
+/**
  * ImpactModel
  *
  * 체결가에 얹는 시장충격 모델(spec D7).
  *
  * `fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×
- * √(체결 수량 / ADV)(`_impact.py`)를 뜻한다. `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
+ * √(Q / ADV)(`_impact.py`, Q = 참여 한도 적용 후·여력 제한 전 주문 수량)를 뜻한다.
+ * `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
  */
 export type ImpactModel = "fixed_bps" | "sqrt";
 
@@ -2960,6 +4012,268 @@ export type IntegerParameter = {
    * Step
    */
   step?: number;
+};
+
+/**
+ * KiwoomMockConnectionBody
+ */
+export type KiwoomMockConnectionBody = {
+  /**
+   * Account Tail
+   */
+  account_tail: string | null;
+  /**
+   * Saved
+   */
+  saved: boolean;
+  /**
+   * Unreadable
+   *
+   * 저장된 항목이 깨져 읽지 못했다. 다시 저장하거나 지우면 고쳐진다.
+   */
+  unreadable?: boolean;
+};
+
+/**
+ * KiwoomMockConnectionCheckBody
+ */
+export type KiwoomMockConnectionCheckBody = {
+  /**
+   * Account Tail
+   */
+  account_tail: string | null;
+  /**
+   * Message
+   */
+  message: string;
+  outcome: ConnectionOutcome;
+};
+
+/**
+ * LibraryDiagnosticBody
+ */
+export type LibraryDiagnosticBody = {
+  /**
+   * Code
+   */
+  code: string;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Pointer
+   */
+  pointer: string;
+  /**
+   * Severity
+   */
+  severity: "error" | "warning" | "info";
+};
+
+/**
+ * LibraryErrorDetail
+ */
+export type LibraryErrorDetail = {
+  /**
+   * Code
+   */
+  code:
+    | "library.request_invalid"
+    | "library.factor.invalid"
+    | "library.factor.not_found"
+    | "library.factor.key_exists"
+    | "library.version.unchanged"
+    | "library.version.conflict";
+  /**
+   * Current Version
+   */
+  current_version?: number | null;
+  /**
+   * Diagnostics
+   */
+  diagnostics?: Array<LibraryDiagnosticBody> | null;
+  /**
+   * Existing Library Id
+   */
+  existing_library_id?: string | null;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * LibraryErrorResponse
+ */
+export type LibraryErrorResponse = {
+  detail: LibraryErrorDetail;
+};
+
+/**
+ * LibraryFactorAvailabilityBody
+ */
+export type LibraryFactorAvailabilityBody = {
+  /**
+   * Available
+   */
+  available: boolean;
+  /**
+   * Missing Fields
+   */
+  missing_fields: Array<string>;
+  /**
+   * Reasons
+   */
+  reasons: Array<string>;
+};
+
+/**
+ * LibraryFactorBody
+ */
+export type LibraryFactorBody = {
+  availability: LibraryFactorAvailabilityBody;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Description
+   */
+  description: string;
+  /**
+   * Hidden
+   */
+  hidden: boolean;
+  /**
+   * Key
+   */
+  key: string;
+  /**
+   * Latest Version
+   */
+  latest_version: number;
+  /**
+   * Library Id
+   */
+  library_id: string;
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Versions
+   */
+  versions: Array<LibraryFactorVersionBody>;
+};
+
+/**
+ * LibraryFactorList
+ */
+export type LibraryFactorList = {
+  /**
+   * Items
+   */
+  items: Array<LibraryFactorBody>;
+};
+
+/**
+ * LibraryFactorMatchBody
+ */
+export type LibraryFactorMatchBody = {
+  /**
+   * Factor Id
+   */
+  factor_id: string;
+  /**
+   * Factor Index
+   */
+  factor_index: number;
+  /**
+   * Latest Version
+   */
+  latest_version: number;
+  /**
+   * Library Id
+   */
+  library_id: string;
+  /**
+   * Matched Version
+   */
+  matched_version: number | null;
+  status: FactorMatchStatus;
+};
+
+/**
+ * LibraryFactorMatchesBody
+ */
+export type LibraryFactorMatchesBody = {
+  /**
+   * Compiled
+   */
+  compiled: boolean;
+  /**
+   * Matches
+   */
+  matches: Array<LibraryFactorMatchBody>;
+};
+
+/**
+ * LibraryFactorVersionBody
+ */
+export type LibraryFactorVersionBody = {
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Factor
+   */
+  factor: {
+    [key: string]: unknown;
+  };
+  /**
+   * Identity
+   */
+  identity: string;
+  /**
+   * Note
+   */
+  note: string | null;
+  /**
+   * Parameters
+   */
+  parameters: Array<{
+    [key: string]: unknown;
+  }>;
+  /**
+   * Version
+   */
+  version: number;
+};
+
+/**
+ * LibraryMatchesBody
+ */
+export type LibraryMatchesBody = {
+  /**
+   * Format
+   */
+  format: "yaml" | "json";
+  /**
+   * Source
+   */
+  source: string;
+};
+
+/**
+ * LibraryVisibilityBody
+ */
+export type LibraryVisibilityBody = {
+  /**
+   * Hidden
+   */
+  hidden: boolean;
 };
 
 /**
@@ -3109,6 +4423,13 @@ export type MonthlyReturnPoint = {
    */
   year: number;
 };
+
+/**
+ * NoRecommendation
+ *
+ * 추천 칸이 없는 이유. 화면은 번역만 한다.
+ */
+export type NoRecommendation = "no_scored_cell" | "non_positive_score";
 
 /**
  * NodeContract
@@ -3317,6 +4638,30 @@ export type PanelPreviewCostEstimate = {
 };
 
 /**
+ * ParameterConstraint
+ *
+ * 탐색 축 값과 다른 탐색 축 값(`right_parameter`) 또는 상수(`right_value`)의 관계.
+ *
+ * 둘 중 정확히 하나를 쓴다. 비교하는 두 쪽은 같은 종류(유한한 숫자끼리, 또는 같은 타입의 선택지
+ * 값끼리)여야 하고, 크기 비교(`lt`·`le`·`gt`·`ge`)는 숫자 값끼리만 한다.
+ */
+export type ParameterConstraint = {
+  /**
+   * Left
+   */
+  left: string;
+  operator: ConstraintOperator;
+  /**
+   * Right Parameter
+   */
+  right_parameter?: string | null;
+  /**
+   * Right Value
+   */
+  right_value?: number | number | string | boolean | null;
+};
+
+/**
  * ParameterMap
  *
  * 파라미터 지도(V4-03). 칸 판정 규칙은 `domain/experiment/_plateau.py` 다.
@@ -3326,6 +4671,7 @@ export type ParameterMap = {
    * Cells
    */
   cells: Array<CellPlateau>;
+  no_recommendation?: NoRecommendation | null;
 };
 
 /**
@@ -3480,6 +4826,14 @@ export type PortfolioFrameSummary = {
  */
 export type PortfolioPreview = {
   engine: EngineCompatibility;
+  /**
+   * Parameter Values
+   *
+   * 문서 기본값을 포함해 해소한 평가 파라미터. tape.strategy_hash는 저장 문서 의미이고 값별 계산 출력은 tape_hash로 구분한다.
+   */
+  parameter_values?: {
+    [key: string]: number | number | string | boolean;
+  };
   tape: TargetTape;
   /**
    * Warnings
@@ -3492,6 +4846,12 @@ export type PortfolioPreview = {
  */
 export type PortfolioPreviewRequest = {
   environment?: RunEnvironment | null;
+  /**
+   * Parameter Values
+   */
+  parameter_values?: {
+    [key: string]: number | number | string | boolean;
+  };
   spec: StrategySpec;
 };
 
@@ -3565,6 +4925,11 @@ export type PortfolioStep = {
    */
   short_selection_count?: number;
   side?: PortfolioSide;
+  tie_breaker_direction?: FactorDirection;
+  /**
+   * Tie Breaker Factor Id
+   */
+  tie_breaker_factor_id?: string | null;
   /**
    * Turnover Buffer Count
    */
@@ -3603,6 +4968,9 @@ export type PortfolioUnprocessableResponse = {
     | ({
         code: "backtest.run.field_invalid";
       } & BacktestRunFieldInvalidDetail)
+    | ({
+        code: "backtest.run.parameter_invalid";
+      } & BacktestParameterInvalidDetail)
     | ({
         code: "backtest.run.environment_required";
       } & BacktestEnvironmentRequiredDetail)
@@ -3795,6 +5163,10 @@ export type ProvidersView = {
  */
 export type RawArtifactBundle = {
   /**
+   * Corporate Actions
+   */
+  corporate_actions?: Array<RawCorporateAction> | null;
+  /**
    * Costs
    */
   costs: Array<RawCost>;
@@ -3802,6 +5174,10 @@ export type RawArtifactBundle = {
    * Fills
    */
   fills: Array<RawFill>;
+  /**
+   * Order Updates
+   */
+  order_updates?: Array<RawOrderUpdate> | null;
   /**
    * Orders
    */
@@ -3826,6 +5202,48 @@ export type RawArtifactBundle = {
    * Trades
    */
   trades: Array<RawTrade>;
+};
+
+/**
+ * RawCorporateAction
+ *
+ * 엔진이 보유에 실제로 적용한 분할·병합(`CORPORATE_ACTION_APPLIED`)을 그대로 옮긴 기록.
+ *
+ * 엔진은 같은 세션의 어떤 체결보다 먼저 적용한다. 수량은 정수 문자열이고 `ratio` 는 구주 1주당
+ * 신주 수(Decimal 문자열)다. 엔진은 `old × ratio` 를 1e-9 에서 반올림한 이론 수량을 0 쪽으로 내려
+ * `new_quantity` 로 두고, 버린 단주 `settled_quantity`(이론 수량 − 새 수량, 숏이면 음수)를 정산
+ * 세션 시가로 `cash_paid` 만큼 현금 정산한다. 단주는 엔진 규칙(`scale_quantity`)으로 정한 값이라
+ * 소비자가 비율로 다시 곱하지 않는다.
+ */
+export type RawCorporateAction = {
+  /**
+   * Cash Paid
+   */
+  cash_paid: number;
+  /**
+   * New Quantity
+   */
+  new_quantity: string;
+  /**
+   * Old Quantity
+   */
+  old_quantity: string;
+  /**
+   * Ratio
+   */
+  ratio: string;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Settled Quantity
+   */
+  settled_quantity: string;
 };
 
 /**
@@ -3883,6 +5301,10 @@ export type RawFill = {
    */
   security_id: string;
   /**
+   * Sell Tax
+   */
+  sell_tax?: number | null;
+  /**
    * Session
    */
   session: string;
@@ -3932,6 +5354,38 @@ export type RawOrder = {
    * Time In Force
    */
   time_in_force: string;
+};
+
+/**
+ * RawOrderUpdate
+ *
+ * 엔진 주문 상태 기록을 그대로 투영한다. 사유 코드는 견적 owner만 판정한다.
+ */
+export type RawOrderUpdate = {
+  /**
+   * Cap Volume
+   */
+  cap_volume?: number | null;
+  /**
+   * Detail
+   */
+  detail?: string | null;
+  /**
+   * Order Id
+   */
+  order_id: string;
+  /**
+   * Reason Code
+   */
+  reason_code?: string | null;
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Status
+   */
+  status: string;
 };
 
 /**
@@ -4320,18 +5774,12 @@ export type ResearchPreview = {
 export type ResearchWarningSeverity = "info" | "warning";
 
 /**
- * ResolvedFactorParameter
+ * RetentionGap
+ *
+ * 곡선이 났는데도(`WalkForwardGap` 없음) 유지율이 비는 이유. 화면은 번역만 한다.
  */
-export type ResolvedFactorParameter = {
-  /**
-   * Parameter Id
-   */
-  parameter_id: string;
-  /**
-   * Value
-   */
-  value: number | number | string | boolean;
-};
+export type RetentionGap =
+  "out_of_sample_unavailable" | "no_train_sharpe" | "non_positive_train_sharpe";
 
 /**
  * ReviseDocumentRequest
@@ -4470,6 +5918,47 @@ export type RiskStep = {
 };
 
 /**
+ * RobustnessPreview
+ *
+ * "튼튼한지 확인하기" 미리 계산.
+ *
+ * 숫자 파라미터지만 팩터 출력이 읽지 않아 펴지 않고 지금 값에 둔 파라미터(`robustness_search`)를
+ * 함께 싣는다 — 확인 창이 그 사정을 말한다.
+ */
+export type RobustnessPreview = {
+  /**
+   * Combination Count
+   */
+  combination_count: number;
+  design: ExperimentDesign;
+  /**
+   * Lineage Id
+   */
+  lineage_id: string;
+  /**
+   * New Trial Count
+   */
+  new_trial_count: number;
+  /**
+   * Run Count
+   */
+  run_count: number;
+  time_estimate: TimeEstimate | null;
+  /**
+   * Trial Count
+   */
+  trial_count: number;
+  /**
+   * Trial Count After
+   */
+  trial_count_after: number;
+  /**
+   * Unread Parameters
+   */
+  unread_parameters?: Array<string>;
+};
+
+/**
  * RollingMetricPoint
  */
 export type RollingMetricPoint = {
@@ -4550,6 +6039,12 @@ export type RunEnvironment = {
  */
 export type RunEnvironmentSchema = {
   /**
+   * Options Schema
+   */
+  options_schema: {
+    [key: string]: unknown;
+  };
+  /**
    * Schema
    */
   schema: {
@@ -4559,6 +6054,79 @@ export type RunEnvironmentSchema = {
    * Schema Hash
    */
   schema_hash: string;
+};
+
+/**
+ * RunFactorRegression
+ *
+ * 불변 실행과 그 데이터 판으로 잰 팩터 회귀. 계열 통계(N·t 기준)는 조회 시점 원장이다.
+ */
+export type RunFactorRegression = {
+  /**
+   * Alpha T Threshold
+   *
+   * 알파 t 값의 기준(N ≥ 20 이면 3.0, 아니면 2.0, Harvey·Liu·Zhu 2016). 계열이 없어 N 을 모르면 null.
+   */
+  alpha_t_threshold: number | null;
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
+  /**
+   * Factor Evaluation Version
+   *
+   * 단면을 계산한 팩터 평가 규칙 판본. 같은 run 이라도 이 판본이나 레지스트리 판본이 바뀌면 값이 달라질 수 있다. 파이프라인을 돌리지 못했으면 null.
+   */
+  factor_evaluation_version: string | null;
+  /**
+   * Factor Registry Version
+   */
+  factor_registry_version: string;
+  /**
+   * Momentum Factor Id
+   */
+  momentum_factor_id: string;
+  report: FactorRegressionReport;
+  /**
+   * Run Fingerprint
+   */
+  run_fingerprint: string;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Trial Count
+   *
+   * 조회 시점 계열 원장의 시도 수 N. 계열 없는 실행은 null.
+   */
+  trial_count: number | null;
+  /**
+   * Value Factor Id
+   */
+  value_factor_id: string;
+};
+
+/**
+ * RunHeadline
+ *
+ * 완료 run 의 머리 지표(FULL 범위). 목록이 결과 파일을 열지 않고 읽는 투영이다(재설계 결정 1).
+ *
+ * 값은 결과의 지표 레지스트리 값 그대로이고 사용 불가면 None 이다. 다시 계산하지 않는다.
+ */
+export type RunHeadline = {
+  /**
+   * Max Drawdown
+   */
+  max_drawdown: number | null;
+  /**
+   * Sharpe
+   */
+  sharpe: number | null;
+  /**
+   * Total Return
+   */
+  total_return: number | null;
 };
 
 /**
@@ -4578,10 +6146,6 @@ export type RunKind = "single" | "experiment_trial" | "walk_forward_validation";
  */
 export type RunManifest = {
   /**
-   * Annualization Days
-   */
-  annualization_days: number;
-  /**
    * Completed At
    */
   completed_at: string;
@@ -4593,7 +6157,6 @@ export type RunManifest = {
    * Data Snapshot Id
    */
   data_snapshot_id: string;
-  engine_core: ExecutionCore;
   /**
    * Engine Version
    */
@@ -4604,21 +6167,13 @@ export type RunManifest = {
    */
   environment_hash: string;
   /**
-   * Fee Bps
+   * Factor Evaluation Version
    */
-  fee_bps: number;
-  /**
-   * Initial Cash
-   */
-  initial_cash: number;
+  factor_evaluation_version?: string | null;
   /**
    * Metric Registry Version
    */
   metric_registry_version: string;
-  /**
-   * Participation Rate
-   */
-  participation_rate: number;
   /**
    * Run Fingerprint
    */
@@ -4632,10 +6187,6 @@ export type RunManifest = {
    * Schema Version
    */
   schema_version?: string;
-  /**
-   * Slippage Bps
-   */
-  slippage_bps: number;
   /**
    * Strategy Hash
    */
@@ -4679,6 +6230,37 @@ export type RunStatus =
   | "failed";
 
 /**
+ * RunValidationReport
+ *
+ * PSR은 저장된 FULL 지표(없으면 미기록), DSR은 observed_at에 조회한 원장 기준이다.
+ */
+export type RunValidationReport = {
+  dsr: DeflatedSharpeEvidence;
+  /**
+   * Metric Registry Version
+   */
+  metric_registry_version: string;
+  /**
+   * Observed At
+   *
+   * application 시계로 기록한 현재 계열 원장 조회 시점. 완료/선택 시각이 아니며 동시 쓰기와의 DB 스냅숏 격리를 추가하지 않는다.
+   */
+  observed_at: string;
+  /**
+   * 저장된 FULL PSR MetricValue 그대로. null은 미기록이고 MetricValue.value null은 원래 부재 사유를 따른다. 재계산하지 않는다.
+   */
+  psr: MetricValue | null;
+  /**
+   * Run Fingerprint
+   */
+  run_fingerprint: string;
+  /**
+   * Run Id
+   */
+  run_id: string;
+};
+
+/**
  * SaveDocumentRequest
  */
 export type SaveDocumentRequest = {
@@ -4687,6 +6269,60 @@ export type SaveDocumentRequest = {
    * Source
    */
   source: string;
+};
+
+/**
+ * SaveKiwoomMockConnectionBody
+ */
+export type SaveKiwoomMockConnectionBody = {
+  /**
+   * Account Number
+   *
+   * 모의 계좌번호 10자리('-' 허용). 요청 전용이며 응답에는 끝 4자리만 실린다.
+   */
+  account_number: string;
+  /**
+   * App Key
+   *
+   * 키움 모의투자 App Key. 요청 전용이며 어떤 응답에도 실리지 않는다.
+   */
+  app_key: string;
+  /**
+   * Secret Key
+   *
+   * 키움 모의투자 App Secret. 요청 전용이며 어떤 응답에도 실리지 않는다.
+   */
+  secret_key: string;
+};
+
+/**
+ * SaveLibraryFactorBody
+ */
+export type SaveLibraryFactorBody = {
+  /**
+   * Description
+   */
+  description?: string;
+  /**
+   * Factor
+   */
+  factor: {
+    [key: string]: unknown;
+  };
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Note
+   */
+  note?: string | null;
+  /**
+   * Parameters
+   */
+  parameters?: Array<{
+    [key: string]: unknown;
+  }>;
 };
 
 /**
@@ -4765,6 +6401,42 @@ export type SavedStrategy = {
 };
 
 /**
+ * ScheduledFrameSource
+ *
+ * 선택 근거 창과 체결일 소속 창을 구분한다. 창이 바뀌어도 근거를 소급 교체하지 않는다.
+ */
+export type ScheduledFrameSource = {
+  /**
+   * Candidate Id
+   */
+  candidate_id: string;
+  /**
+   * Execution On
+   */
+  execution_on: string;
+  /**
+   * Execution Window Index
+   */
+  execution_window_index: number;
+  /**
+   * Selection Window Index
+   */
+  selection_window_index: number;
+  /**
+   * Signal As Of
+   */
+  signal_as_of: string;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  /**
+   * Strategy Hash
+   */
+  strategy_hash: string;
+};
+
+/**
  * SearchActivityView
  */
 export type SearchActivityView = {
@@ -4818,13 +6490,69 @@ export type SearchBudgetExhaustedView = {
  *
  * 탐색 축들의 곱집합이 그리드다. 축 순서는 전략 문서의 파라미터 선언 순서다.
  *
- * 축이 없으면 문서 기본값 한 칸(좌표 `()`)이다.
+ * 축이 없으면 문서 기본값 한 칸(좌표 `()`)이다. 제약(`constraints`)을 모두 만족하는 칸만 실행한다.
  */
 export type SearchSpec = {
   /**
    * Axes
    */
   axes: Array<SearchAxis>;
+  /**
+   * Constraints
+   */
+  constraints?: Array<ParameterConstraint>;
+};
+
+/**
+ * SecurityFillRow
+ */
+export type SecurityFillRow = {
+  /**
+   * Fee
+   */
+  fee: number;
+  /**
+   * Fill Id
+   */
+  fill_id: string;
+  /**
+   * Notional
+   */
+  notional: number;
+  /**
+   * Price
+   */
+  price: number;
+  /**
+   * Quantity
+   */
+  quantity: string;
+  /**
+   * Sell Tax
+   */
+  sell_tax: number | null;
+  /**
+   * Side
+   */
+  side: string;
+};
+
+/**
+ * SecurityLabel
+ */
+export type SecurityLabel = {
+  /**
+   * Name
+   */
+  name: string | null;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Ticker
+   */
+  ticker: string | null;
 };
 
 /**
@@ -4850,9 +6578,110 @@ export type SecurityRef = {
 };
 
 /**
+ * SecurityTradeSession
+ */
+export type SecurityTradeSession = {
+  change: HoldingChange;
+  /**
+   * Fills
+   */
+  fills: Array<SecurityFillRow>;
+  /**
+   * Quantity After
+   */
+  quantity_after: string | null;
+  /**
+   * Realized Pnl
+   */
+  realized_pnl: number | null;
+  /**
+   * Session
+   */
+  session: string;
+};
+
+/**
+ * SecurityTradeSummary
+ */
+export type SecurityTradeSummary = {
+  /**
+   * Fill Count
+   */
+  fill_count: number;
+  /**
+   * Final Quantity
+   */
+  final_quantity: string | null;
+  /**
+   * Final Unrealized Return
+   */
+  final_unrealized_return: number | null;
+  /**
+   * Holding Periods
+   */
+  holding_periods: Array<HoldingPeriod>;
+  /**
+   * Realized Pnl
+   */
+  realized_pnl: number | null;
+  security: SecurityLabel;
+};
+
+/**
+ * SecurityTradesReport
+ */
+export type SecurityTradesReport = {
+  /**
+   * Detail
+   */
+  detail: string | null;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  security: SecurityLabel;
+  /**
+   * Sessions
+   */
+  sessions: Array<SecurityTradeSession>;
+  status: SecurityTradesStatus;
+};
+
+/**
+ * SecurityTradesStatus
+ */
+export type SecurityTradesStatus = "available" | "security_not_traded";
+
+/**
  * SelectionMethod
  */
 export type SelectionMethod = "top_n" | "percentile";
+
+/**
+ * SelectionTransition
+ */
+export type SelectionTransition = {
+  /**
+   * Candidate Changed
+   */
+  candidate_changed: boolean;
+  /**
+   * Candidate Id
+   */
+  candidate_id: string;
+  /**
+   * Execution On
+   */
+  execution_on: string;
+  /**
+   * Signal As Of
+   */
+  signal_as_of: string;
+  /**
+   * Window Index
+   */
+  window_index: number;
+};
 
 /**
  * SellTax
@@ -4889,6 +6718,92 @@ export type SessionHistoryView = {
    */
   turns: Array<TurnView>;
   usage: SessionUsageView;
+};
+
+/**
+ * SessionHoldings
+ */
+export type SessionHoldings = {
+  /**
+   * Cash
+   */
+  cash: number;
+  /**
+   * Cash Weight
+   */
+  cash_weight: number | null;
+  /**
+   * Closed
+   */
+  closed: Array<ClosedHolding>;
+  /**
+   * Equity
+   */
+  equity: number;
+  /**
+   * Holdings
+   */
+  holdings: Array<HoldingRow>;
+  /**
+   * Session
+   */
+  session: string;
+  totals: SessionTradeTotals;
+};
+
+/**
+ * SessionHoldingsReport
+ */
+export type SessionHoldingsReport = {
+  /**
+   * Detail
+   */
+  detail: string | null;
+  holdings: SessionHoldings | null;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Session
+   */
+  session: string;
+  status: SessionHoldingsStatus;
+};
+
+/**
+ * SessionHoldingsStatus
+ */
+export type SessionHoldingsStatus = "available" | "session_not_recorded";
+
+/**
+ * SessionTradeTotals
+ */
+export type SessionTradeTotals = {
+  /**
+   * Buy Count
+   */
+  buy_count: number;
+  /**
+   * Buy Notional
+   */
+  buy_notional: number;
+  /**
+   * Fees
+   */
+  fees: number;
+  /**
+   * Sell Count
+   */
+  sell_count: number;
+  /**
+   * Sell Notional
+   */
+  sell_notional: number;
+  /**
+   * Taxes
+   */
+  taxes: number;
 };
 
 /**
@@ -5461,6 +7376,40 @@ export type StrategyExplanationStep = {
 };
 
 /**
+ * StrategyFactorPreview
+ */
+export type StrategyFactorPreview = {
+  missing: MissingPolicy;
+  /**
+   * Missing Count
+   */
+  missing_count: number;
+  /**
+   * Top
+   */
+  top: Array<StrategyFactorPreviewRow>;
+  /**
+   * Valid Count
+   */
+  valid_count: number;
+};
+
+/**
+ * StrategyFactorPreviewRow
+ */
+export type StrategyFactorPreviewRow = {
+  security: SecurityRef | null;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Value
+   */
+  value: number;
+};
+
+/**
  * StrategyIdentity
  */
 export type StrategyIdentity = {
@@ -5766,6 +7715,12 @@ export type StrategyTraceRequest = {
    */
   offset?: number;
   /**
+   * Parameter Values
+   */
+  parameter_values?: {
+    [key: string]: number | number | string | boolean;
+  };
+  /**
    * Security Ids
    *
    * Securities to trace. An empty list skips per-security rows and returns only the as-of summary.
@@ -5798,9 +7753,22 @@ export type StrategyTraceResponse = {
    */
   as_of: string;
   /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
+  /**
    * Factor Id
    */
   factor_id: string;
+  factor_preview: StrategyFactorPreview;
+  /**
+   * Parameter Values
+   *
+   * 기본값을 포함한 해소 평가 값. spec_hash/provenance는 문서 의미, plan_hash는 계산 구조이며 파라미터 값 변경으로 바꾸지 않는다.
+   */
+  parameter_values?: {
+    [key: string]: number | number | string | boolean;
+  };
   /**
    * Plan Hash
    */
@@ -5999,6 +7967,10 @@ export type TargetTape = {
    */
   execution_timing?: string;
   /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
+  /**
    * Frames
    */
   frames: Array<TargetFrame>;
@@ -6042,6 +8014,20 @@ export type ThinkingSummaryView = {
    * Type
    */
   type: "thinking_summary";
+};
+
+/**
+ * TimeEstimate
+ */
+export type TimeEstimate = {
+  /**
+   * Sample Count
+   */
+  sample_count: number;
+  /**
+   * Total Seconds
+   */
+  total_seconds: number;
 };
 
 /**
@@ -6312,6 +8298,9 @@ export type TraceUnprocessableResponse = {
         code: "backtest.run.field_invalid";
       } & BacktestRunFieldInvalidDetail)
     | ({
+        code: "backtest.run.parameter_invalid";
+      } & BacktestParameterInvalidDetail)
+    | ({
         code: "backtest.run.environment_required";
       } & BacktestEnvironmentRequiredDetail)
     | ({
@@ -6329,6 +8318,32 @@ export type TraceValueStatus =
   | "divide_by_zero"
   | "group_missing"
   | "masked";
+
+/**
+ * TradeSessionSummary
+ */
+export type TradeSessionSummary = {
+  /**
+   * Closed Count
+   */
+  closed_count: number;
+  /**
+   * Fill Count
+   */
+  fill_count: number;
+  /**
+   * Holding Count
+   */
+  holding_count: number;
+  /**
+   * Opened Count
+   */
+  opened_count: number;
+  /**
+   * Session
+   */
+  session: string;
+};
 
 /**
  * TrialAttempt
@@ -6516,9 +8531,17 @@ export type TrialRun = {
    */
   run_id: string;
   /**
+   * Seconds
+   */
+  seconds?: number | null;
+  /**
    * Session Sharpe
    */
   session_sharpe?: number | null;
+  /**
+   * Span Days
+   */
+  span_days?: number | null;
   status: RunStatus;
 };
 
@@ -6561,7 +8584,7 @@ export type TurnAcceptedView = {
 /**
  * TurnContextPayload
  *
- * 한 턴이 보는 문서 상태. 서버가 문서를 들지 않으므로 요청마다 실려 온다(spec D7).
+ * 한 턴이 보는 편집기 상태. 저장 문서와 별개로 아직 저장하지 않은 원문·진단을 요청에 싣는다.
  */
 export type TurnContextPayload = {
   /**
@@ -6706,6 +8729,33 @@ export type UniverseCoverageSummary = {
    * Session Count
    */
   session_count: number;
+};
+
+/**
+ * UniverseDefinition
+ *
+ * 연결된 시장 데이터 어댑터가 실행에 쓸 수 있다고 답하는 유니버스 하나.
+ *
+ * 실행 설정의 `universe_id` 가 고를 수 있는 값의 owner 는 어댑터다. 표시명·설명은 사람이 읽는
+ * 문장이라 어댑터가 완성해 싣는다(화면은 다시 조립하지 않는다).
+ */
+export type UniverseDefinition = {
+  /**
+   * Description
+   */
+  description: string;
+  /**
+   * Label
+   */
+  label: string;
+  /**
+   * Market
+   */
+  market: string;
+  /**
+   * Universe Id
+   */
+  universe_id: string;
 };
 
 /**
@@ -6904,12 +8954,19 @@ export type ValidationIssue = {
 /**
  * ValidationKind
  */
-export type ValidationKind = "syntax" | "semantic" | "capability";
+export type ValidationKind = "semantic" | "capability";
 
 /**
  * ValidationSeverity
  */
 export type ValidationSeverity = "error" | "warning";
+
+/**
+ * WalkForwardEvaluationBasis
+ *
+ * 연결곡선이 측정하는 대상. 실제 계좌 연속 평가는 별도 계약으로 구분해야 한다.
+ */
+export type WalkForwardEvaluationBasis = "window_restart_returns";
 
 /**
  * WalkForwardGap
@@ -6939,7 +8996,12 @@ export type WalkForwardReport = {
    * Curve
    */
   curve: Array<EquityCurvePoint>;
+  evaluation_basis?: WalkForwardEvaluationBasis;
   gap: WalkForwardGap | null;
+  /**
+   * Interpretation
+   */
+  interpretation?: string;
   /**
    * Out Of Sample Sharpe
    */
@@ -6948,6 +9010,11 @@ export type WalkForwardReport = {
    * Retention
    */
   retention: number | null;
+  retention_gap?: RetentionGap | null;
+  /**
+   * Train Sharpe Mean
+   */
+  train_sharpe_mean?: number | null;
   /**
    * Windows
    */
@@ -7000,6 +9067,8 @@ export type WalkForwardWindowResult = {
     | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
+    | "backtest.run.worker_exited"
+    | "backtest.run.worker_mismatch"
     | null;
   run_status: RunStatus | null;
 };
@@ -7065,6 +9134,30 @@ export type WindowPick = {
    * Trial Index
    */
   trial_index: number | null;
+  /**
+   * Window Index
+   */
+  window_index: number;
+};
+
+/**
+ * WindowSelection
+ *
+ * 학습만으로 동결한 후보. known_as_of는 해당 날짜 종가 이후를 뜻한다.
+ *
+ * candidate_id는 외부에서 동결한 불변 신원이다. 이 타입은 후보 내용이나 학습 출처를
+ * 증명하지 않는다. WindowPick.created_at은 실행 당시 시각이므로 이를 대신할 수 없다.
+ */
+export type WindowSelection = {
+  /**
+   * Candidate Id
+   */
+  candidate_id: string | null;
+  /**
+   * Known As Of
+   */
+  known_as_of: string;
+  window: WalkForwardWindow;
   /**
    * Window Index
    */
@@ -7170,9 +9263,11 @@ export type DeleteAssistantProviderErrors = {
    */
   404: AssistantNotFoundResponse;
   /**
-   * Validation Error
+   * Response 422 Deleteassistantprovider
+   *
+   * A coded assistant rejection or a malformed request envelope
    */
-  422: HttpValidationError;
+  422: AssistantUnprocessableResponse | RequestValidationResponse;
 };
 
 export type DeleteAssistantProviderError =
@@ -7206,9 +9301,11 @@ export type ActivateAssistantProviderErrors = {
    */
   404: AssistantNotFoundResponse;
   /**
-   * Validation Error
+   * Response 422 Activateassistantprovider
+   *
+   * A coded assistant rejection or a malformed request envelope
    */
-  422: HttpValidationError;
+  422: AssistantUnprocessableResponse | RequestValidationResponse;
 };
 
 export type ActivateAssistantProviderError =
@@ -7656,6 +9753,50 @@ export type GetBacktestStatusResponses = {
 export type GetBacktestStatusResponse =
   GetBacktestStatusResponses[keyof GetBacktestStatusResponses];
 
+export type GetBacktestAccountReportData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/account-report";
+};
+
+export type GetBacktestAccountReportErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestAccountReportError =
+  GetBacktestAccountReportErrors[keyof GetBacktestAccountReportErrors];
+
+export type GetBacktestAccountReportResponses = {
+  /**
+   * Successful Response
+   */
+  200: AccountReport;
+};
+
+export type GetBacktestAccountReportResponse =
+  GetBacktestAccountReportResponses[keyof GetBacktestAccountReportResponses];
+
 export type CancelBacktestData = {
   body?: never;
   path: {
@@ -7730,6 +9871,190 @@ export type StreamBacktestEventsResponses = {
   200: unknown;
 };
 
+export type GetBacktestFactorRegressionData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/factor-regression";
+};
+
+export type GetBacktestFactorRegressionErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestFactorRegressionError =
+  GetBacktestFactorRegressionErrors[keyof GetBacktestFactorRegressionErrors];
+
+export type GetBacktestFactorRegressionResponses = {
+  /**
+   * Successful Response
+   */
+  200: RunFactorRegression;
+};
+
+export type GetBacktestFactorRegressionResponse =
+  GetBacktestFactorRegressionResponses[keyof GetBacktestFactorRegressionResponses];
+
+export type GetBacktestHoldingsData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/holdings";
+};
+
+export type GetBacktestHoldingsErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestHoldingsError =
+  GetBacktestHoldingsErrors[keyof GetBacktestHoldingsErrors];
+
+export type GetBacktestHoldingsResponses = {
+  /**
+   * Successful Response
+   */
+  200: HoldingsOverview;
+};
+
+export type GetBacktestHoldingsResponse =
+  GetBacktestHoldingsResponses[keyof GetBacktestHoldingsResponses];
+
+export type GetBacktestSecurityTradesData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+    /**
+     * Security Id
+     */
+    security_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/holdings/securities/{security_id}";
+};
+
+export type GetBacktestSecurityTradesErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestSecurityTradesError =
+  GetBacktestSecurityTradesErrors[keyof GetBacktestSecurityTradesErrors];
+
+export type GetBacktestSecurityTradesResponses = {
+  /**
+   * Successful Response
+   */
+  200: SecurityTradesReport;
+};
+
+export type GetBacktestSecurityTradesResponse =
+  GetBacktestSecurityTradesResponses[keyof GetBacktestSecurityTradesResponses];
+
+export type GetBacktestSessionHoldingsData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+    /**
+     * Session
+     */
+    session: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/holdings/sessions/{session}";
+};
+
+export type GetBacktestSessionHoldingsErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestSessionHoldingsError =
+  GetBacktestSessionHoldingsErrors[keyof GetBacktestSessionHoldingsErrors];
+
+export type GetBacktestSessionHoldingsResponses = {
+  /**
+   * Successful Response
+   */
+  200: SessionHoldingsReport;
+};
+
+export type GetBacktestSessionHoldingsResponse =
+  GetBacktestSessionHoldingsResponses[keyof GetBacktestSessionHoldingsResponses];
+
 export type GetBacktestRequestData = {
   body?: never;
   path: {
@@ -7747,6 +10072,10 @@ export type GetBacktestRequestErrors = {
    * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
+  /**
+   * The stored request names a retired strategy schema
+   */
+  410: BacktestRequestRetiredResponse;
   /**
    * Validation Error
    */
@@ -7810,6 +10139,128 @@ export type GetBacktestResultResponses = {
 export type GetBacktestResultResponse =
   GetBacktestResultResponses[keyof GetBacktestResultResponses];
 
+export type CreateRobustnessCheckData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/robustness-check";
+};
+
+export type CreateRobustnessCheckErrors = {
+  /**
+   * Response 404 Createrobustnesscheck
+   *
+   * The result run or its base strategy revision does not exist
+   */
+  404: ExperimentErrorResponse | BacktestStrategyNotFoundResponse;
+  /**
+   * Response 409 Createrobustnesscheck
+   *
+   * A check of this run is still running, or the base revision is stale
+   */
+  409: ExperimentErrorResponse | BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type CreateRobustnessCheckError =
+  CreateRobustnessCheckErrors[keyof CreateRobustnessCheckErrors];
+
+export type CreateRobustnessCheckResponses = {
+  /**
+   * Successful Response
+   */
+  202: Experiment;
+};
+
+export type CreateRobustnessCheckResponse =
+  CreateRobustnessCheckResponses[keyof CreateRobustnessCheckResponses];
+
+export type PreviewRobustnessCheckData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/robustness-check/preview";
+};
+
+export type PreviewRobustnessCheckErrors = {
+  /**
+   * Response 404 Previewrobustnesscheck
+   *
+   * The result run or its base strategy revision does not exist
+   */
+  404: ExperimentErrorResponse | BacktestStrategyNotFoundResponse;
+  /**
+   * Response 409 Previewrobustnesscheck
+   *
+   * A check of this run is still running, or the base revision is stale
+   */
+  409: ExperimentErrorResponse | BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type PreviewRobustnessCheckError =
+  PreviewRobustnessCheckErrors[keyof PreviewRobustnessCheckErrors];
+
+export type PreviewRobustnessCheckResponses = {
+  /**
+   * Successful Response
+   */
+  200: RobustnessPreview;
+};
+
+export type PreviewRobustnessCheckResponse =
+  PreviewRobustnessCheckResponses[keyof PreviewRobustnessCheckResponses];
+
+export type ListRobustnessChecksData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/robustness-checks";
+};
+
+export type ListRobustnessChecksErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListRobustnessChecksError =
+  ListRobustnessChecksErrors[keyof ListRobustnessChecksErrors];
+
+export type ListRobustnessChecksResponses = {
+  /**
+   * Response Listrobustnesschecks
+   *
+   * Successful Response
+   */
+  200: Array<Experiment>;
+};
+
+export type ListRobustnessChecksResponse =
+  ListRobustnessChecksResponses[keyof ListRobustnessChecksResponses];
+
 export type GetBacktestSummaryData = {
   body?: never;
   path: {
@@ -7845,6 +10296,182 @@ export type GetBacktestSummaryResponses = {
 
 export type GetBacktestSummaryResponse =
   GetBacktestSummaryResponses[keyof GetBacktestSummaryResponses];
+
+export type GetBacktestValidationReportData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/validation-report";
+};
+
+export type GetBacktestValidationReportErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestValidationReportError =
+  GetBacktestValidationReportErrors[keyof GetBacktestValidationReportErrors];
+
+export type GetBacktestValidationReportResponses = {
+  /**
+   * Successful Response
+   */
+  200: RunValidationReport;
+};
+
+export type GetBacktestValidationReportResponse =
+  GetBacktestValidationReportResponses[keyof GetBacktestValidationReportResponses];
+
+export type DeleteKiwoomMockConnectionData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/broker-connections/kiwoom-mock";
+};
+
+export type DeleteKiwoomMockConnectionErrors = {
+  /**
+   * Unprocessable Entity
+   */
+  422: BrokerErrorResponse;
+};
+
+export type DeleteKiwoomMockConnectionError =
+  DeleteKiwoomMockConnectionErrors[keyof DeleteKiwoomMockConnectionErrors];
+
+export type DeleteKiwoomMockConnectionResponses = {
+  /**
+   * Successful Response
+   */
+  204: void;
+};
+
+export type DeleteKiwoomMockConnectionResponse =
+  DeleteKiwoomMockConnectionResponses[keyof DeleteKiwoomMockConnectionResponses];
+
+export type GetKiwoomMockConnectionData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/broker-connections/kiwoom-mock";
+};
+
+export type GetKiwoomMockConnectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: KiwoomMockConnectionBody;
+};
+
+export type GetKiwoomMockConnectionResponse =
+  GetKiwoomMockConnectionResponses[keyof GetKiwoomMockConnectionResponses];
+
+export type SaveKiwoomMockConnectionData = {
+  body: SaveKiwoomMockConnectionBody;
+  path?: never;
+  query?: never;
+  url: "/api/v1/broker-connections/kiwoom-mock";
+};
+
+export type SaveKiwoomMockConnectionErrors = {
+  /**
+   * Unprocessable Entity
+   */
+  422: BrokerErrorResponse;
+};
+
+export type SaveKiwoomMockConnectionError =
+  SaveKiwoomMockConnectionErrors[keyof SaveKiwoomMockConnectionErrors];
+
+export type SaveKiwoomMockConnectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: KiwoomMockConnectionBody;
+};
+
+export type SaveKiwoomMockConnectionResponse =
+  SaveKiwoomMockConnectionResponses[keyof SaveKiwoomMockConnectionResponses];
+
+export type VerifyKiwoomMockConnectionData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/broker-connections/kiwoom-mock/verify";
+};
+
+export type VerifyKiwoomMockConnectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: KiwoomMockConnectionCheckBody;
+};
+
+export type VerifyKiwoomMockConnectionResponse =
+  VerifyKiwoomMockConnectionResponses[keyof VerifyKiwoomMockConnectionResponses];
+
+export type GetContinuousAccountData = {
+  body?: never;
+  path: {
+    /**
+     * Evaluation Id
+     */
+    evaluation_id: string;
+  };
+  query?: never;
+  url: "/api/v1/continuous-accounts/{evaluation_id}";
+};
+
+export type GetContinuousAccountErrors = {
+  /**
+   * Not Found
+   */
+  404: ContinuousAccountErrorResponse;
+  /**
+   * Conflict
+   */
+  409: ContinuousAccountErrorResponse;
+  /**
+   * Gone
+   */
+  410: ContinuousAccountErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ContinuousAccountErrorResponse;
+};
+
+export type GetContinuousAccountError =
+  GetContinuousAccountErrors[keyof GetContinuousAccountErrors];
+
+export type GetContinuousAccountResponses = {
+  /**
+   * Successful Response
+   */
+  200: ContinuousAccountState;
+};
+
+export type GetContinuousAccountResponse =
+  GetContinuousAccountResponses[keyof GetContinuousAccountResponses];
 
 export type GetEquityCatalogData = {
   body?: never;
@@ -7983,6 +10610,25 @@ export type PreviewEquityUniverseResponses = {
 
 export type PreviewEquityUniverseResponse =
   PreviewEquityUniverseResponses[keyof PreviewEquityUniverseResponses];
+
+export type ListEquityUniversesData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/equity/universes";
+};
+
+export type ListEquityUniversesResponses = {
+  /**
+   * Response Listequityuniverses
+   *
+   * Successful Response
+   */
+  200: Array<UniverseDefinition>;
+};
+
+export type ListEquityUniversesResponse =
+  ListEquityUniversesResponses[keyof ListEquityUniversesResponses];
 
 export type ListExperimentsData = {
   body?: never;
@@ -8195,6 +10841,48 @@ export type GetExperimentResponses = {
 export type GetExperimentResponse =
   GetExperimentResponses[keyof GetExperimentResponses];
 
+export type GetExperimentAuditData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/audit";
+};
+
+export type GetExperimentAuditErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentAuditError =
+  GetExperimentAuditErrors[keyof GetExperimentAuditErrors];
+
+export type GetExperimentAuditResponses = {
+  /**
+   * Response Getexperimentaudit
+   *
+   * Successful Response
+   */
+  200: Array<ExperimentAuditEvent>;
+};
+
+export type GetExperimentAuditResponse =
+  GetExperimentAuditResponses[keyof GetExperimentAuditResponses];
+
 export type CancelExperimentData = {
   body?: never;
   path: {
@@ -8274,6 +10962,94 @@ export type GetExperimentCapacityResponses = {
 
 export type GetExperimentCapacityResponse =
   GetExperimentCapacityResponses[keyof GetExperimentCapacityResponses];
+
+export type GetExperimentContinuousAccountData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/continuous-account";
+};
+
+export type GetExperimentContinuousAccountErrors = {
+  /**
+   * Not Found
+   */
+  404: ContinuousAccountErrorResponse;
+  /**
+   * Conflict
+   */
+  409: ContinuousAccountErrorResponse;
+  /**
+   * Gone
+   */
+  410: ContinuousAccountErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ContinuousAccountErrorResponse;
+};
+
+export type GetExperimentContinuousAccountError =
+  GetExperimentContinuousAccountErrors[keyof GetExperimentContinuousAccountErrors];
+
+export type GetExperimentContinuousAccountResponses = {
+  /**
+   * Successful Response
+   */
+  200: ContinuousAccountLatest;
+};
+
+export type GetExperimentContinuousAccountResponse =
+  GetExperimentContinuousAccountResponses[keyof GetExperimentContinuousAccountResponses];
+
+export type RunExperimentContinuousAccountData = {
+  body: ContinuousAccountStartRequest;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/continuous-account";
+};
+
+export type RunExperimentContinuousAccountErrors = {
+  /**
+   * Not Found
+   */
+  404: ContinuousAccountErrorResponse;
+  /**
+   * Conflict
+   */
+  409: ContinuousAccountErrorResponse;
+  /**
+   * Gone
+   */
+  410: ContinuousAccountErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ContinuousAccountErrorResponse;
+};
+
+export type RunExperimentContinuousAccountError =
+  RunExperimentContinuousAccountErrors[keyof RunExperimentContinuousAccountErrors];
+
+export type RunExperimentContinuousAccountResponses = {
+  /**
+   * Successful Response
+   */
+  200: ContinuousAccountState;
+};
+
+export type RunExperimentContinuousAccountResponse =
+  RunExperimentContinuousAccountResponses[keyof RunExperimentContinuousAccountResponses];
 
 export type ControlExperimentData = {
   body: ExperimentControlsRequest;
@@ -8383,6 +11159,48 @@ export type GetExperimentParameterMapResponses = {
 
 export type GetExperimentParameterMapResponse =
   GetExperimentParameterMapResponses[keyof GetExperimentParameterMapResponses];
+
+export type GetExperimentRemainingTimeData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/remaining-time";
+};
+
+export type GetExperimentRemainingTimeErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentRemainingTimeError =
+  GetExperimentRemainingTimeErrors[keyof GetExperimentRemainingTimeErrors];
+
+export type GetExperimentRemainingTimeResponses = {
+  /**
+   * Response Getexperimentremainingtime
+   *
+   * Successful Response
+   */
+  200: TimeEstimate | null;
+};
+
+export type GetExperimentRemainingTimeResponse =
+  GetExperimentRemainingTimeResponses[keyof GetExperimentRemainingTimeResponses];
 
 export type SelectExperimentTrialData = {
   body: ExperimentSelectionRequest;
@@ -8550,6 +11368,236 @@ export type GetExperimentWalkForwardResponses = {
 export type GetExperimentWalkForwardResponse =
   GetExperimentWalkForwardResponses[keyof GetExperimentWalkForwardResponses];
 
+export type ListLibraryFactorsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Include Hidden
+     */
+    include_hidden?: boolean;
+  };
+  url: "/api/v1/factor-library";
+};
+
+export type ListLibraryFactorsErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type ListLibraryFactorsError =
+  ListLibraryFactorsErrors[keyof ListLibraryFactorsErrors];
+
+export type ListLibraryFactorsResponses = {
+  /**
+   * Successful Response
+   */
+  200: LibraryFactorList;
+};
+
+export type ListLibraryFactorsResponse =
+  ListLibraryFactorsResponses[keyof ListLibraryFactorsResponses];
+
+export type SaveLibraryFactorData = {
+  body: SaveLibraryFactorBody;
+  path?: never;
+  query?: never;
+  url: "/api/v1/factor-library";
+};
+
+export type SaveLibraryFactorErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type SaveLibraryFactorError =
+  SaveLibraryFactorErrors[keyof SaveLibraryFactorErrors];
+
+export type SaveLibraryFactorResponses = {
+  /**
+   * Successful Response
+   */
+  201: LibraryFactorBody;
+};
+
+export type SaveLibraryFactorResponse =
+  SaveLibraryFactorResponses[keyof SaveLibraryFactorResponses];
+
+export type MatchLibraryFactorsData = {
+  body: LibraryMatchesBody;
+  path?: never;
+  query?: never;
+  url: "/api/v1/factor-library/matches";
+};
+
+export type MatchLibraryFactorsErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type MatchLibraryFactorsError =
+  MatchLibraryFactorsErrors[keyof MatchLibraryFactorsErrors];
+
+export type MatchLibraryFactorsResponses = {
+  /**
+   * Successful Response
+   */
+  200: LibraryFactorMatchesBody;
+};
+
+export type MatchLibraryFactorsResponse =
+  MatchLibraryFactorsResponses[keyof MatchLibraryFactorsResponses];
+
+export type GetLibraryFactorData = {
+  body?: never;
+  path: {
+    /**
+     * Library Id
+     */
+    library_id: string;
+  };
+  query?: never;
+  url: "/api/v1/factor-library/{library_id}";
+};
+
+export type GetLibraryFactorErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type GetLibraryFactorError =
+  GetLibraryFactorErrors[keyof GetLibraryFactorErrors];
+
+export type GetLibraryFactorResponses = {
+  /**
+   * Successful Response
+   */
+  200: LibraryFactorBody;
+};
+
+export type GetLibraryFactorResponse =
+  GetLibraryFactorResponses[keyof GetLibraryFactorResponses];
+
+export type SetLibraryFactorVisibilityData = {
+  body: LibraryVisibilityBody;
+  path: {
+    /**
+     * Library Id
+     */
+    library_id: string;
+  };
+  query?: never;
+  url: "/api/v1/factor-library/{library_id}";
+};
+
+export type SetLibraryFactorVisibilityErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type SetLibraryFactorVisibilityError =
+  SetLibraryFactorVisibilityErrors[keyof SetLibraryFactorVisibilityErrors];
+
+export type SetLibraryFactorVisibilityResponses = {
+  /**
+   * Successful Response
+   */
+  200: LibraryFactorBody;
+};
+
+export type SetLibraryFactorVisibilityResponse =
+  SetLibraryFactorVisibilityResponses[keyof SetLibraryFactorVisibilityResponses];
+
+export type AddLibraryFactorVersionData = {
+  body: AddLibraryVersionBody;
+  path: {
+    /**
+     * Library Id
+     */
+    library_id: string;
+  };
+  query?: never;
+  url: "/api/v1/factor-library/{library_id}/versions";
+};
+
+export type AddLibraryFactorVersionErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type AddLibraryFactorVersionError =
+  AddLibraryFactorVersionErrors[keyof AddLibraryFactorVersionErrors];
+
+export type AddLibraryFactorVersionResponses = {
+  /**
+   * Successful Response
+   */
+  201: LibraryFactorBody;
+};
+
+export type AddLibraryFactorVersionResponse =
+  AddLibraryFactorVersionResponses[keyof AddLibraryFactorVersionResponses];
+
 export type GetFactorCatalogData = {
   body?: never;
   path?: never;
@@ -8624,33 +11672,6 @@ export type ExplainFactorGraphResponses = {
 
 export type ExplainFactorGraphResponse =
   ExplainFactorGraphResponses[keyof ExplainFactorGraphResponses];
-
-export type PreviewFactorGraphData = {
-  body: FactorPreviewRequest;
-  path?: never;
-  query?: never;
-  url: "/api/v1/factors/preview";
-};
-
-export type PreviewFactorGraphErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError;
-};
-
-export type PreviewFactorGraphError =
-  PreviewFactorGraphErrors[keyof PreviewFactorGraphErrors];
-
-export type PreviewFactorGraphResponses = {
-  /**
-   * Successful Response
-   */
-  200: FactorPreview;
-};
-
-export type PreviewFactorGraphResponse =
-  PreviewFactorGraphResponses[keyof PreviewFactorGraphResponses];
 
 export type ValidateFactorGraphData = {
   body: FactorGraphRequest;
@@ -8758,6 +11779,23 @@ export type GetRunEnvironmentSchemaResponses = {
 
 export type GetRunEnvironmentSchemaResponse =
   GetRunEnvironmentSchemaResponses[keyof GetRunEnvironmentSchemaResponses];
+
+export type GetCredentialsFileData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/settings/credentials-file";
+};
+
+export type GetCredentialsFileResponses = {
+  /**
+   * Successful Response
+   */
+  200: CredentialsFileBody;
+};
+
+export type GetCredentialsFileResponse =
+  GetCredentialsFileResponses[keyof GetCredentialsFileResponses];
 
 export type ListStrategiesData = {
   body?: never;
@@ -9007,6 +12045,40 @@ export type DiffStrategyRevisionsResponses = {
 
 export type DiffStrategyRevisionsResponse =
   DiffStrategyRevisionsResponses[keyof DiffStrategyRevisionsResponses];
+
+export type DiffStrategyDraftData = {
+  body: DraftDiffRequest;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategies/{strategy_id}/draft-diff";
+};
+
+export type DiffStrategyDraftErrors = {
+  /**
+   * Response 422 Diffstrategydraft
+   *
+   * Unprocessable Entity
+   */
+  422: StrategyDocumentInvalidResponse | RequestValidationResponse;
+};
+
+export type DiffStrategyDraftError =
+  DiffStrategyDraftErrors[keyof DiffStrategyDraftErrors];
+
+export type DiffStrategyDraftResponses = {
+  /**
+   * Successful Response
+   */
+  200: DraftDiff;
+};
+
+export type DiffStrategyDraftResponse =
+  DiffStrategyDraftResponses[keyof DiffStrategyDraftResponses];
 
 export type ListStrategyRevisionsData = {
   body?: never;

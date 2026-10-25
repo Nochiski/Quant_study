@@ -9,25 +9,27 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Annotated, Any
 
 from fastapi import FastAPI, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import Field
+from pydantic import AfterValidator, Field
 from pydantic.config import JsonDict
 
 from strategy_workbench.application.experiment_run.facade.experiments import (
     CapacityReport,
     CapacitySweepRequest,
     Experiment,
+    ExperimentAuditEvent,
     ExperimentPage,
     ExperimentPreview,
     ExperimentRequest,
     ExperimentRunService,
     ExperimentTrialState,
     ParameterMap,
+    RobustnessPreview,
     WalkForwardReport,
 )
 from strategy_workbench.application.experiment_run.facade.ports import ExperimentSelection
@@ -36,11 +38,13 @@ from strategy_workbench.domain.experiment.facade.design import (
     ExperimentError,
     ExperimentNotFoundError,
     ExperimentStateError,
+    TimeEstimate,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
     MAX_EXPERIMENT_PRIORITY,
     ExperimentStatus,
     TrialStatus,
+    validate_selection_reason,
 )
 
 from ._backtest_contract import (
@@ -103,7 +107,7 @@ class ExperimentProgress:
 class ExperimentSelectionRequest:
     trial_index: Annotated[int, Field(ge=0)]
     # 공백만 있는 이유는 기록이 아니다.
-    reason: Annotated[str, Field(pattern=r"\S")]
+    reason: Annotated[str, AfterValidator(validate_selection_reason)]
 
 
 class _ExperimentBodyRoute(CodedBodyValidationRoute):
@@ -131,7 +135,11 @@ def register_experiment_routes(
     experiments: ExperimentRunService,
     *,
     admitted: Callable[[Callable[[], Any]], Any],
-) -> None:
+) -> Callable[[], Awaitable[None]]:
+    """실험 라우트를 단다. 돌려준 함수는 서버가 끝날 때 진행 스트림 회수를 마친다(앱 lifespan 이
+    부른다)."""
+    streams = _ExperimentStreamHub(experiments)
+
     async def experiment_error(_: Request, error: Exception) -> JSONResponse:
         assert isinstance(error, ExperimentError)
         return JSONResponse(
@@ -200,6 +208,42 @@ def register_experiment_routes(
             responses=admission,
         )
 
+    robustness = {
+        **admission,
+        404: {
+            "model": ExperimentErrorResponse | BacktestStrategyNotFoundResponse,
+            "description": "The result run or its base strategy revision does not exist",
+        },
+        409: {
+            "model": ExperimentErrorResponse | BacktestStrategyStaleResponse,
+            "description": "A check of this run is still running, or the base revision is stale",
+        },
+    }
+
+    @app.post(
+        "/api/v1/backtests/{run_id}/robustness-check/preview",
+        operation_id="previewRobustnessCheck",
+        responses=robustness,
+    )
+    def preview_robustness_check(run_id: str) -> RobustnessPreview:
+        """결과 실행의 "튼튼한지 확인하기" 미리 계산 — 기본 설계와 새로 세는 시도 수(US-DM-11)."""
+        return admitted(lambda: experiments.preview_robustness(run_id))
+
+    @app.post(
+        "/api/v1/backtests/{run_id}/robustness-check",
+        operation_id="createRobustnessCheck",
+        status_code=202,
+        responses=robustness,
+    )
+    def create_robustness_check(run_id: str) -> Experiment:
+        """결과 실행의 기본 설계로 실험을 만들고 대기열에 넣는다(US-DM-11)."""
+        return admitted(lambda: experiments.create_robustness(run_id))
+
+    @app.get("/api/v1/backtests/{run_id}/robustness-checks", operation_id="listRobustnessChecks")
+    def list_robustness_checks(run_id: str) -> list[Experiment]:
+        """결과 실행에서 "튼튼한지 확인하기"로 만든 실험, 최근에 만든 순. 없으면 빈 목록."""
+        return list(experiments.robustness_checks(run_id))
+
     @app.get("/api/v1/experiments", operation_id="listExperiments")
     def list_experiments(
         after: Annotated[str | None, Query(min_length=1)] = None,
@@ -243,7 +287,7 @@ def register_experiment_routes(
         없으면 마지막 수를 보낸 뒤 닫는다."""
         experiments.get(experiment_id)
         return StreamingResponse(
-            _progress_stream(experiments, experiment_id),
+            streams.stream(experiment_id),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -266,6 +310,26 @@ def register_experiment_routes(
         """창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율(V3-05). 사용자 후보 선택
         (`selections`)과 다르다."""
         return experiments.walk_forward(experiment_id)
+
+    @app.get(
+        "/api/v1/experiments/{experiment_id}/remaining-time",
+        operation_id="getExperimentRemainingTime",
+        responses=rejected,
+    )
+    def get_experiment_remaining_time(experiment_id: str) -> TimeEstimate | None:
+        """남은 실행의 시간 어림(로드맵 M6 ETA). 실험 조회·진행 스트림과 따로 둔다 — 계열 원장을
+        읽어 목록·스트림 폴링마다 치르지 않게 한다. 근거가 없으면 null."""
+        return experiments.remaining_time(experiment_id)
+
+    @app.get(
+        "/api/v1/experiments/{experiment_id}/audit",
+        operation_id="getExperimentAudit",
+        responses=rejected,
+    )
+    def get_experiment_audit(experiment_id: str) -> tuple[ExperimentAuditEvent, ...]:
+        """실험 생성·조작·trial attempt·실행 시작과 끝·창 선택·후보 선택·취소를 시각 순으로
+        보인다(로드맵 M6 감사 기록)."""
+        return experiments.audit(experiment_id)
 
     @app.get(
         "/api/v1/experiments/{experiment_id}/parameter-map",
@@ -329,6 +393,8 @@ def register_experiment_routes(
         """완료된 trial 을 후보로 고른 기록을 남긴다(spec D9). 되돌릴 수 없다."""
         return experiments.select(experiment_id, request.trial_index, request.reason)
 
+    return streams.close
+
 
 async def _progress_stream(
     experiments: ExperimentRunService,
@@ -336,6 +402,7 @@ async def _progress_stream(
     *,
     poll_seconds: float = _EXPERIMENT_POLL_SECONDS,
     keepalive_seconds: float = SSE_KEEPALIVE_SECONDS,
+    read: Callable[[str], Awaitable[Experiment]] | None = None,
 ) -> AsyncIterator[str]:
     """창을 닫아도 실험은 서버에서 돈다 — 스트림은 진행을 보이기만 한다(spec D6).
 
@@ -345,17 +412,172 @@ async def _progress_stream(
     last: ExperimentProgress | None = None
     last_frame_at = time.monotonic()
     while True:
-        experiment = await asyncio.to_thread(experiments.get, experiment_id)
+        experiment = (
+            await asyncio.to_thread(experiments.get, experiment_id)
+            if read is None
+            else await read(experiment_id)
+        )
         progress = ExperimentProgress(experiment.status, experiment.trial_counts)
         if progress != last:
             yield sse_frame(sequence=sequence, event="progress", data=progress)
             sequence, last, last_frame_at = sequence + 1, progress, time.monotonic()
         # 취소한 실험도 도는 trial 이 끝날 때까지는 닫지 않아 마지막 프레임이 최종 수다.
-        if experiment.status.is_terminal and not (
-            progress.trial_counts.keys() & {TrialStatus.RUNNING, TrialStatus.QUEUED}
-        ):
+        if experiment.settled:
             return
         if time.monotonic() - last_frame_at >= keepalive_seconds:
             yield SSE_KEEPALIVE_FRAME
             last_frame_at = time.monotonic()
         await asyncio.sleep(poll_seconds)
+
+
+@dataclass
+class _SharedProgress:
+    condition: asyncio.Condition = field(default_factory=asyncio.Condition)
+    subscribers: int = 0
+    version: int = 0
+    latest: str | None = None
+    done: bool = False
+    error: Exception | None = None
+    producer: asyncio.Task[None] | None = None
+
+
+class _ExperimentStreamHub:
+    """같은 실험의 구독은 상태 조회 하나를 공유한다. 마지막 연결이 닫히면 반복 조회를 멈춘다.
+
+    저장된 실험 상태를 캐시하지 않는다. 구독 중인 실험마다 최신 SSE 프레임 하나만 보관하며
+    느린 연결에 중간 프레임을 쌓지 않는다. 새 연결도 마지막 상태를 즉시 받는다.
+    진행 중인 스레드 조회는 완료까지 따로 소유하여 재접속이 중복 조회를 만들지 않는다.
+    """
+
+    def __init__(
+        self, experiments: ExperimentRunService, *, poll_seconds: float = _EXPERIMENT_POLL_SECONDS
+    ) -> None:
+        self._experiments = experiments
+        self._poll_seconds = poll_seconds
+        self._streams: dict[str, _SharedProgress] = {}
+        # 생산자 취소는 실행 중인 스레드를 중단하지 않는다. 실제 조회의 수명은 연결과 분리한다.
+        self._reads: dict[str, asyncio.Task[Experiment]] = {}
+        self._closing = False
+        self._shutdown: asyncio.Task[None] | None = None
+
+    async def stream(self, experiment_id: str) -> AsyncGenerator[str, None]:
+        if self._closing:
+            return
+        shared = self._streams.get(experiment_id)
+        if shared is None or shared.done:
+            shared = _SharedProgress()
+            self._streams[experiment_id] = shared
+            shared.producer = asyncio.create_task(self._produce(experiment_id, shared))
+        shared.subscribers += 1
+        seen = 0
+        try:
+            while True:
+                frame: str | None = None
+                async with shared.condition:
+                    if shared.version == seen and not shared.done:
+                        try:
+                            await asyncio.wait_for(
+                                shared.condition.wait_for(
+                                    lambda observed=seen: shared.version != observed or shared.done
+                                ),
+                                timeout=SSE_KEEPALIVE_SECONDS,
+                            )
+                        except TimeoutError:
+                            frame = SSE_KEEPALIVE_FRAME
+                    if shared.version != seen:
+                        seen, frame = shared.version, shared.latest
+                    elif shared.done:
+                        if shared.error is not None:
+                            raise shared.error
+                        return
+                if frame is not None:
+                    yield frame
+        finally:
+            shared.subscribers -= 1
+            if shared.subscribers == 0:
+                if self._streams.get(experiment_id) is shared:
+                    self._streams.pop(experiment_id, None)
+                if shared.producer is not None:
+                    shared.producer.cancel()
+                    try:
+                        await shared.producer
+                    except asyncio.CancelledError:
+                        # 생산자 자신의 취소는 정상 회수다. 이 구독 작업이 취소되는 중이면 그
+                        # 취소를 삼키지 않고 전파한다(끊긴 연결이 정상 종료로 보이지 않게).
+                        task = asyncio.current_task()
+                        if task is not None and task.cancelling():
+                            raise
+
+    async def close(self) -> None:
+        """종료 요청자가 취소돼도 실제 조회 회수를 마친 뒤 취소를 돌려준다."""
+        if self._shutdown is None:
+            self._closing = True
+            entries = list(self._streams.values())
+            self._streams.clear()
+            tasks = [shared.producer for shared in entries if shared.producer is not None]
+            for task in tasks:
+                task.cancel()
+            self._shutdown = asyncio.create_task(self._drain(entries, tasks))
+        shutdown = self._shutdown
+        cancelled = False
+        while not shutdown.done():
+            try:
+                await asyncio.shield(shutdown)
+            except asyncio.CancelledError:
+                # 여러 close 호출은 같은 회수를 기다린다. 한 호출의 취소가 공유 작업이나
+                # 조회 task를 취소해 실제 스레드의 추적을 지워서는 안 된다.
+                cancelled = True
+        shutdown.result()
+        if self._shutdown is shutdown:
+            self._shutdown = None
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _drain(self, entries: list[_SharedProgress], tasks: list[asyncio.Task[None]]) -> None:
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            # 저장소가 닫히기 전에 실제 스레드가 조회를 마칠 때까지 기다린다.
+            await asyncio.gather(*self._reads.values(), return_exceptions=True)
+        finally:
+            # 시작 전에 취소된 task는 _produce의 finally를 실행하지 않는다. 종료 owner가
+            # 직접 종결을 알리므로 첫 프레임을 기다리는 구독도 반드시 깨어난다.
+            for shared in entries:
+                async with shared.condition:
+                    shared.done = True
+                    shared.condition.notify_all()
+            self._closing = False
+
+    async def _read(self, experiment_id: str) -> Experiment:
+        task = self._reads.get(experiment_id)
+        if task is None:
+            task = asyncio.create_task(asyncio.to_thread(self._experiments.get, experiment_id))
+            self._reads[experiment_id] = task
+
+            def finished(done: asyncio.Task[Experiment]) -> None:
+                if self._reads.get(experiment_id) is done:
+                    self._reads.pop(experiment_id, None)
+                # 마지막 구독이 떠난 뒤 실패해도 회수한다.
+                # 연결된 생산자는 await로 같은 오류를 받는다.
+                if not done.cancelled():
+                    done.exception()
+
+            task.add_done_callback(finished)
+        return await asyncio.shield(task)
+
+    async def _produce(self, experiment_id: str, shared: _SharedProgress) -> None:
+        try:
+            async for frame in _progress_stream(
+                self._experiments, experiment_id, poll_seconds=self._poll_seconds, read=self._read
+            ):
+                if frame.startswith(":"):
+                    continue
+                async with shared.condition:
+                    shared.version += 1
+                    shared.latest = frame
+                    shared.condition.notify_all()
+        except Exception as error:
+            shared.error = error
+        finally:
+            async with shared.condition:
+                shared.done = True
+                shared.condition.notify_all()

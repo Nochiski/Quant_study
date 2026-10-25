@@ -4,31 +4,45 @@ from pathlib import Path
 from strategy_workbench.adapters.inbound.http_api.facade.api import create_app
 from strategy_workbench.application.backtest_run.facade.runs import DEFAULT_RUN_SLOTS
 
+from . import _secrets
 from ._assistant import (
     DEFAULT_ASSISTANT_SETTINGS,
     PROVIDER_ADAPTER_FACTORIES,
     AssistantSettings,
     scripted_provider_factories,
 )
-from ._container import build_container
+from ._container import DEFAULT_RUN_ISOLATION, build_container
 
 DEFAULT_STRATEGY_REPOSITORY_PATH = (
     Path(__file__).resolve().parents[3] / ".local" / "strategy-revisions.sqlite3"
 )
 DEFAULT_ASSISTANT_DB_PATH = Path(__file__).resolve().parents[3] / ".local" / "assistant.sqlite3"
 DEFAULT_RESEARCH_DB_PATH = Path(__file__).resolve().parents[3] / ".local" / "research.sqlite3"
+DEFAULT_CONTINUOUS_DB_PATH = (
+    Path(__file__).resolve().parents[3] / ".local" / "continuous-accounts.sqlite3"
+)
 STRATEGY_REPOSITORY_PATH_ENV = "STRATEGY_WORKBENCH_DB_PATH"
+ARTIFACT_ROOT_ENV = "STRATEGY_WORKBENCH_ARTIFACT_ROOT"
 RESEARCH_DB_PATH_ENV = "STRATEGY_WORKBENCH_RESEARCH_DB_PATH"
+CONTINUOUS_DB_PATH_ENV = "STRATEGY_WORKBENCH_CONTINUOUS_DB_PATH"
 EQUITY_ADAPTER_ENV = "STRATEGY_WORKBENCH_EQUITY_ADAPTER"
 EQUITY_ROOT_ENV = "STRATEGY_WORKBENCH_EQUITY_ROOT"
 ALLOWED_ORIGINS_ENV = "STRATEGY_WORKBENCH_ALLOWED_ORIGINS"
 RUN_SLOTS_ENV = "STRATEGY_WORKBENCH_RUN_SLOTS"
 E2E_TRIAL_HOLD_SECONDS_ENV = "STRATEGY_WORKBENCH_E2E_TRIAL_HOLD_SECONDS"
+RUN_ISOLATION_ENV = "STRATEGY_WORKBENCH_RUN_ISOLATION"
+RUN_MEMORY_RESERVE_GB_ENV = "STRATEGY_WORKBENCH_RUN_MEMORY_RESERVE_GB"
 DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = ("http://localhost:5173",)
 ASSISTANT_DB_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_DB_PATH"
 ASSISTANT_SECRETS_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH"
 ASSISTANT_ALLOW_INSECURE_BASE_URL_ENV = "STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL"
 ASSISTANT_FAKE_PROVIDER_ENV = "STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER"
+# AI 공급자·키움 모의 연결을 저장하는 `.env` 경로. 없으면 내 문서 `auto_trading/.env`다.
+# 테스트·e2e는
+# 반드시 임시 경로로 바꾼다 — 그러지 않으면 실행이 개발자의 실제 문서 폴더에 쓴다.
+CREDENTIALS_ENV_PATH_ENV = "STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH"
+# 브라우저 e2e 전용. 키움 "연결 확인"을 대본 probe로 바꾼다. 정확히 "1"일 때만 켠다.
+BROKER_FAKE_PROBE_ENV = "STRATEGY_WORKBENCH_BROKER_FAKE_PROBE"
 
 
 def runtime_strategy_repository_path() -> Path:
@@ -40,6 +54,18 @@ def runtime_research_db_path() -> Path:
     """실행 기록 DB(검증 랩 spec D3). 전략 DB 의 불변 트리거와 섞지 않으려고 파일을 나눈다."""
     configured = os.environ.get(RESEARCH_DB_PATH_ENV)
     return Path(configured).expanduser() if configured else DEFAULT_RESEARCH_DB_PATH
+
+
+def runtime_continuous_db_path() -> Path:
+    """일반 실험·전략 기록과 분리한 연속 평가 DB 경로."""
+    configured = os.environ.get(CONTINUOUS_DB_PATH_ENV)
+    return Path(configured).expanduser() if configured else DEFAULT_CONTINUOUS_DB_PATH
+
+
+def runtime_artifact_root() -> Path | None:
+    """프로세스가 소유할 산출물 루트. 미설정 기본값은 컨테이너가 소유한다."""
+    configured = os.environ.get(ARTIFACT_ROOT_ENV)
+    return Path(configured).expanduser() if configured else None
 
 
 def runtime_run_slots() -> int:
@@ -67,6 +93,31 @@ def runtime_trial_hold_seconds() -> float:
             f"{E2E_TRIAL_HOLD_SECONDS_ENV}={configured!r}"
         )
     return seconds
+
+
+def runtime_run_memory_reserve_gb() -> float | None:
+    """메모리 가드가 run 마다 잡는 예약치를 고정하는 GB(run-worker spec D8). 없으면 추정식이다."""
+    configured = os.environ.get(RUN_MEMORY_RESERVE_GB_ENV, "").strip()
+    if not configured:
+        return None
+    try:
+        reserve_gb = float(configured)
+    except ValueError:
+        reserve_gb = -1.0
+    if not 0 < reserve_gb < float("inf"):
+        raise ValueError(
+            "run memory reserve env var must be a positive number of GB — "
+            f"{RUN_MEMORY_RESERVE_GB_ENV}={configured!r}"
+        )
+    return reserve_gb
+
+
+def runtime_run_isolation() -> str:
+    """run 계산을 어디서 돌리는가(`thread`·`process`, run-worker spec D9). 없으면 기본값이다.
+
+    허용 값 판정은 `build_container` 가 한다 — 모르는 값은 스레드로 돌아가지 않고 멈춘다.
+    """
+    return os.environ.get(RUN_ISOLATION_ENV, "").strip() or DEFAULT_RUN_ISOLATION
 
 
 def runtime_equity_selection() -> tuple[str, Path | None]:
@@ -119,10 +170,17 @@ def runtime_assistant_settings() -> AssistantSettings:
     """
     configured_db = os.environ.get(ASSISTANT_DB_PATH_ENV)
     configured_secrets = os.environ.get(ASSISTANT_SECRETS_PATH_ENV)
+    configured_credentials = os.environ.get(CREDENTIALS_ENV_PATH_ENV)
     fake_provider = os.environ.get(ASSISTANT_FAKE_PROVIDER_ENV, "").strip() == "1"
     return AssistantSettings(
         db_path=Path(configured_db).expanduser() if configured_db else DEFAULT_ASSISTANT_DB_PATH,
         secrets_path=Path(configured_secrets).expanduser() if configured_secrets else None,
+        credentials_env_path=(
+            Path(configured_credentials).expanduser()
+            if configured_credentials
+            # 모듈 속성으로 부른다. 테스트 격리가 이 기본값을 tmp로 바꾼다(#211과 같은 방식).
+            else _secrets.default_credentials_env_path()
+        ),
         allow_insecure_base_url=(
             os.environ.get(ASSISTANT_ALLOW_INSECURE_BASE_URL_ENV, "").strip() == "1"
         ),
@@ -132,25 +190,39 @@ def runtime_assistant_settings() -> AssistantSettings:
     )
 
 
+def runtime_broker_fake_probe() -> bool:
+    return os.environ.get(BROKER_FAKE_PROBE_ENV, "").strip() == "1"
+
+
 def build_http_app(
     *,
     strategy_repository_path: str | Path | None = None,
     research_db_path: str | Path | None = None,
+    continuous_db_path: str | Path | None = None,
+    artifact_root: Path | None = None,
     run_slots: int = DEFAULT_RUN_SLOTS,
     trial_hold_seconds: float = 0.0,
+    run_isolation: str = DEFAULT_RUN_ISOLATION,
+    run_memory_reserve_gb: float | None = None,
     equity_adapter: str = "mock",
     equity_root: Path | None = None,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
     allowed_origins: tuple[str, ...] = DEFAULT_ALLOWED_ORIGINS,
+    broker_fake_probe: bool = False,
 ):  # return type is inferred from the FastAPI factory at this composition root
     container = build_container(
         strategy_repository_path=strategy_repository_path,
         research_db_path=research_db_path,
+        continuous_db_path=continuous_db_path,
+        artifact_root=artifact_root,
         run_slots=run_slots,
         trial_hold_seconds=trial_hold_seconds,
+        run_isolation=run_isolation,
+        run_memory_reserve_gb=run_memory_reserve_gb,
         equity_adapter=equity_adapter,
         equity_root=equity_root,
         assistant=assistant,
+        broker_fake_probe=broker_fake_probe,
     )
     return create_app(
         strategy_design=container.strategy_design,
@@ -163,9 +235,14 @@ def build_http_app(
         strategy_traces=container.strategy_traces,
         backtest_runs=container.backtest_runs,
         experiments=container.experiments,
+        continuous_accounts=container.continuous_accounts,
+        factor_library=container.factor_library,
+        broker_connections=container.broker_connections,
         assistant_profiles=container.assistant_profiles,
         assistant_chat=container.assistant_chat,
         assistant_turns=container.assistant_turns,
+        credentials_file_path=container.credentials_file_path,
+        credentials_file_issues=container.credentials_file_issues,
         allowed_origins=allowed_origins,
     )
 
@@ -176,10 +253,15 @@ def build_runtime_http_app():
     return build_http_app(
         strategy_repository_path=runtime_strategy_repository_path(),
         research_db_path=runtime_research_db_path(),
+        continuous_db_path=runtime_continuous_db_path(),
+        artifact_root=runtime_artifact_root(),
         run_slots=runtime_run_slots(),
         trial_hold_seconds=runtime_trial_hold_seconds(),
+        run_isolation=runtime_run_isolation(),
+        run_memory_reserve_gb=runtime_run_memory_reserve_gb(),
         equity_adapter=adapter,
         equity_root=root,
         assistant=runtime_assistant_settings(),
+        broker_fake_probe=runtime_broker_fake_probe(),
         allowed_origins=runtime_allowed_origins(),
     )

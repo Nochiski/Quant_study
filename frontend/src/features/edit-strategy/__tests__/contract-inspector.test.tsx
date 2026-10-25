@@ -1,5 +1,6 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
 
 import type {
   FactorCatalog,
@@ -161,9 +162,7 @@ const TREE = {
     {
       factor_id: "alpha",
       graph: {
-        nodes: [
-          { node_id: "px", kind: "field", field_id: "close" },
-        ],
+        nodes: [{ node_id: "px", kind: "field", field_id: "close" }],
         output_node_id: "px",
       },
     },
@@ -517,6 +516,27 @@ describe("field applicability in the contract projection (P2-03)", () => {
 });
 
 describe("ContractInspector UI", () => {
+  it("표시값과 설명을 먼저 읽고 필요할 때 기술 경로를 펼친다", async () => {
+    const user = userEvent.setup();
+    render(
+      <ContractInspector
+        source={source()}
+        selectedPointer="/risk/max_name_weight"
+        tree={TREE}
+        stale={false}
+      />,
+    );
+    expect(screen.getByText("5%")).toBeVisible();
+    expect(screen.getByText("종목별 최대 목표 비중 한도")).toBeVisible();
+    const path = screen.getAllByText("/risk/max_name_weight")[0];
+    expect(path).not.toBeVisible();
+    await user.click(
+      screen.getByText("필드 경로 · 타입 · 기술 근거", { selector: "summary" }),
+    );
+    expect(path).toBeVisible();
+    expect(screen.getByText("number", { selector: "code" })).toBeVisible();
+  });
+
   it("requires a kind before showing a branch-dependent field contract", () => {
     render(
       <ContractInspector
@@ -578,6 +598,9 @@ describe("ContractInspector UI", () => {
     );
     expect(screen.getByText("데이터 필드 · PIT")).toBeInTheDocument();
     expect(screen.getByText("KRX daily close")).toBeInTheDocument();
+    expect(
+      screen.getByText(EQUITY_CATALOG.fields[0].description),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("dataset-snapshot-v1").length).toBeGreaterThan(
       0,
     );
@@ -601,5 +624,33 @@ describe("ContractInspector UI", () => {
     expect(valueOf("빈도")).toBe("일별");
     expect(valueOf("값 타입")).toBe("가격");
     expect(valueOf("셀 상태")).toBe("관측값, 결측");
+  });
+  it("keeps ledger percent metadata distinct from fractional ratios", () => {
+    const tree = structuredClone(TREE);
+    tree.factors[0].graph.nodes[0].field_id = "flow.foreign_ownership";
+    const field = {
+      ...EQUITY_CATALOG.fields[0],
+      field_id: "flow.foreign_ownership",
+      label: "외국인 보유비중",
+      unit: "pct",
+      value_type: "ratio" as const,
+      description: "52.79는 52.79%이며 비율로 쓰려면 100으로 나눕니다.",
+      recommended_lag_sessions: 1,
+    };
+    render(
+      <ContractInspector
+        source={source({
+          equityCatalog: { ...EQUITY_CATALOG, fields: [field] },
+        })}
+        selectedPointer="/factors/0/graph/nodes/0/field_id"
+        tree={tree}
+        stale={false}
+      />,
+    );
+    expect(
+      screen.getByText("단위", { selector: "dt" }).nextElementSibling
+        ?.textContent,
+    ).toBe("pct");
+    expect(screen.getByText(field.description)).toBeInTheDocument();
   });
 });

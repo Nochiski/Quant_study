@@ -17,10 +17,10 @@ from __future__ import annotations
 import importlib
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 
 from backtest_engine.capability import (
     EngineCapabilities,
@@ -91,8 +91,8 @@ from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.ports.universe import UniverseResult
 from backtest_engine.types.actions import GroupPolicy
 from backtest_engine.types.events import (
+    PRICE_ADJUSTING_ACTION_TYPES,
     CorporateActionEvent,
-    CorporateActionType,
     FillEvent,
     OrderStatus,
     OrderUpdateEvent,
@@ -121,6 +121,17 @@ def _instrument_text(instrument: InstrumentId) -> str:
         f"(venue={instrument.venue!r}, symbol={instrument.symbol!r}, "
         f"asset_class={instrument.asset_class.value!r}, currency={instrument.currency!r})"
     )
+
+
+class _UpdateRecorder(Protocol):
+    def __call__(
+        self,
+        order_id: str,
+        status: OrderStatus,
+        detail: str | None,
+        reason_code: str | None = None,
+        cap_volume: int | None = None,
+    ) -> None: ...
 
 
 class _Run:
@@ -355,7 +366,7 @@ class BacktestEngine:
                     run.store.append(fill.ts, RecordKind.FILL, fill)
                     # 매도 거래세는 그 체결 바로 뒤에 청구·기록한다. 매수 여력은 체결을 계획할 때
                     # 이미 같은 금액을 뺐다(`_apply_quote`).
-                    tax = sell_tax(fill, run.config)
+                    tax = sell_tax(fill)
                     if tax is not None:
                         self._ledger(run).charge(tax)
                         run.store.append(tax.ts, RecordKind.COST, tax)
@@ -473,8 +484,7 @@ class BacktestEngine:
                     action.action_type.value,
                     str(action.ratio),
                     str(action.ts),
-                    action.action_type
-                    in (CorporateActionType.SPLIT, CorporateActionType.REVERSE_SPLIT),
+                    action.action_type in PRICE_ADJUSTING_ACTION_TYPES,
                 )
             )
         store.bind_corporate_actions(corporate_actions)
@@ -667,10 +677,23 @@ class BacktestEngine:
         queue = self._queue(run)
         portfolio = self._ledger(run)
 
-        def update(order_id: str, status: OrderStatus, detail: str | None) -> None:
+        def update(
+            order_id: str,
+            status: OrderStatus,
+            detail: str | None,
+            reason_code: str | None = None,
+            cap_volume: int | None = None,
+        ) -> None:
             self._record_update(
                 run,
-                OrderUpdateEvent(ts=snapshot.ts, order_id=order_id, status=status, detail=detail),
+                OrderUpdateEvent(
+                    ts=snapshot.ts,
+                    order_id=order_id,
+                    status=status,
+                    detail=detail,
+                    reason_code=reason_code,
+                    cap_volume=cap_volume,
+                ),
                 snapshot,
             )
 
@@ -690,7 +713,10 @@ class BacktestEngine:
             key=lambda entry: (entry.order.side is not Side.SELL, entry.order_id),
         )
         power = make_buying_power(
-            run.core, portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage
+            run.core,
+            portfolio.snapshot(snapshot.ts),
+            run.config.max_gross_leverage,
+            run.wants_feature(EngineFeature.MARGIN),
         )
         # 바스켓 그룹은 leg를 함께 견적해 정책을 판정한 뒤 체결한다 (단일 주문보다 먼저).
         for group in order_manager.open_groups():
@@ -702,6 +728,11 @@ class BacktestEngine:
                 snapshot.bar(order.instrument),
                 power.available,
                 held=power.quantity_of(order.instrument),
+                leverage=power.leverage,
+                held_mark=power.mark_of(order.instrument),
+                valuation=power.valuation,
+                execution_state=power.execution_state(order.instrument),
+                sell_tax_rate=run.config.sell_tax_rate(snapshot.ts.date()),
             )
             if quote.quantity > 0:
                 self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
@@ -722,7 +753,13 @@ class BacktestEngine:
                 and quote.detail is not None
             ):
                 # 여력 0·유동성 0은 이 세션의 사정일 뿐이다 — 주문은 TIF대로 대기하고 사유만 남긴다.
-                update(order.order_id, OrderStatus.OPEN, quote.detail)
+                update(
+                    order.order_id,
+                    OrderStatus.OPEN,
+                    quote.detail,
+                    quote.reason_code,
+                    quote.cap_volume,
+                )
             elif quote.status is ExecutionStatus.FOK_REJECTED:
                 order_manager.remove(order.order_id)
                 update(order.order_id, OrderStatus.CANCELLED, quote.detail)
@@ -752,14 +789,17 @@ class BacktestEngine:
         self,
         run: _Run,
         snapshot: MarketSnapshot,
-        update: Callable[[str, OrderStatus, str | None], None],
+        update: _UpdateRecorder,
     ) -> None:
         """세션 MARKET 처리를 Rust `process_market`에 맡기고 계획(ops)을 순서대로 적용한다."""
         core = importlib.import_module("backtest_core")
         order_manager = self._orders(run)
         queue = self._queue(run)
         power = make_buying_power(
-            run.core, self._ledger(run).snapshot(snapshot.ts), run.config.max_gross_leverage
+            run.core,
+            self._ledger(run).snapshot(snapshot.ts),
+            run.config.max_gross_leverage,
+            run.wants_feature(EngineFeature.MARGIN),
         )
         if not isinstance(power, RustBuyingPower):  # 코어가 rust면 항상 Rust 누산기다
             raise CoreUnavailable("rust session core requires the rust buying-power tracker")
@@ -813,7 +853,9 @@ class BacktestEngine:
             run.rust_slippage,
             run.config.sell_tax_rate(snapshot.ts.date()),
         )
-        for kind, order_id, quantity, price, slip, fee, payload in ops:
+        for op in ops:
+            kind, order_id, quantity, price, slip, fee, payload, fill_tax = op[:8]
+            reason_code, cap_volume = op[8:] if len(op) > 8 else (None, None)
             match kind:
                 case "fill":
                     entry = order_manager.get(order_id)
@@ -832,6 +874,7 @@ class BacktestEngine:
                         fee=fee,
                         slippage_per_share=slip,
                         cap_volume=snapshot.bar(entry.order.instrument).cap_volume,
+                        sell_tax=fill_tax,
                     )
                     queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
                     if run.wants(EventKind.FILL):
@@ -839,7 +882,9 @@ class BacktestEngine:
                     order_manager.settle(order_id, fill.quantity)
                 case "update":
                     status_text, _, detail = payload.partition("|")
-                    update(order_id, OrderStatus(status_text), detail or None)
+                    update(
+                        order_id, OrderStatus(status_text), detail or None, reason_code, cap_volume
+                    )
                 case "trigger":
                     order_manager.mark_triggered(order_id)
                 case "remove":
@@ -869,7 +914,7 @@ class BacktestEngine:
         quantity: Decimal,
         snapshot: MarketSnapshot,
         power: BuyingPowerTracker,
-        update: Callable[[str, OrderStatus, str | None], None],
+        update: _UpdateRecorder,
     ) -> None:
         """견적을 실제 체결로 확정한다: Fill 큐 적재, 잔량 갱신, 상태 기록, 여력 소모."""
         order = entry.order
@@ -881,12 +926,10 @@ class BacktestEngine:
             snapshot.bar(order.instrument),
             order_manager.next_fill_id(),
             quantity,
-        )
-        tax = sell_tax_amount(
-            fill.side, fill.quantity, fill.price, run.config.sell_tax_rate(fill.ts.date())
+            sell_tax_rate=run.config.sell_tax_rate(snapshot.ts.date()),
         )
         power.consume_quantity(
-            fill.instrument, fill.side, fill.quantity, fill.price, fill.fee + tax
+            fill.instrument, fill.side, fill.quantity, fill.price, fill.fee, fill.sell_tax
         )
         queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
         if run.wants(EventKind.FILL):
@@ -908,11 +951,12 @@ class BacktestEngine:
         group: BasketGroup,
         snapshot: MarketSnapshot,
         power: BuyingPowerTracker,
-        update: Callable[[str, OrderStatus, str | None], None],
+        update: _UpdateRecorder,
     ) -> None:
         order_manager = self._orders(run)
         entries = order_manager.group_entries(group.group_id)
         policy = group.policy
+        diagnostics: dict[str, Quote] = {}
 
         def cancel_all(reason: str) -> None:
             for entry in entries:
@@ -922,6 +966,12 @@ class BacktestEngine:
                     OrderStatus.CANCELLED,
                     f"basket {policy.value} — {reason} group_id={group.group_id} "
                     f"remaining={entry.remaining} ts={snapshot.ts}",
+                    diagnostics[entry.order_id].reason_code
+                    if entry.order_id in diagnostics
+                    else None,
+                    diagnostics[entry.order_id].cap_volume
+                    if entry.order_id in diagnostics
+                    else None,
                 )
             order_manager.drop_group(group.group_id)
 
@@ -952,8 +1002,15 @@ class BacktestEngine:
                 snapshot.bar(entry.order.instrument),
                 power.available,
                 held=power.quantity_of(entry.order.instrument),
+                leverage=power.leverage,
+                held_mark=power.mark_of(entry.order.instrument),
+                valuation=power.valuation,
+                execution_state=power.execution_state(entry.order.instrument),
+                sell_tax_rate=tax_rate,
             )
             quotes.append((entry, quote))
+            if quote.reason_code is not None:
+                diagnostics[entry.order_id] = quote
             if quote.quantity > 0:
                 order = entry.order
                 notional = float(quote.quantity) * quote.price
@@ -962,8 +1019,8 @@ class BacktestEngine:
                     order.side,
                     quote.quantity,
                     quote.price,
-                    run.broker.fee_for(notional)
-                    + sell_tax_amount(order.side, quote.quantity, quote.price, tax_rate),
+                    run.broker.fee_for(notional),
+                    sell_tax_amount(order.side, quote.quantity, quote.price, tax_rate),
                 )
         power.restore(checkpoint)
 
@@ -1008,9 +1065,25 @@ class BacktestEngine:
             (entry, quote, (entry.remaining * tight_quote.quantity) // tight_remaining)
             for entry, quote in quotes
         ]
-        for entry, quote, quantity in planned:
+        for entry, _quote, quantity in planned:
             if quantity > 0:
-                self._apply_quote(run, entry, quote, quantity, snapshot, power, update)
+                # 정수 축소는 매도 대금·숏 청산 여력을 비례 보존하지 않는다.
+                # 현재 장부로 최종 수량을 다시 견적한다.
+                quote = run.broker.constrain_quote(
+                    entry,
+                    _quote,
+                    quantity,
+                    snapshot.bar(entry.order.instrument),
+                    power.available,
+                    held=power.quantity_of(entry.order.instrument),
+                    leverage=power.leverage,
+                    held_mark=power.mark_of(entry.order.instrument),
+                    valuation=power.valuation,
+                    execution_state=power.execution_state(entry.order.instrument),
+                    sell_tax_rate=tax_rate,
+                )
+                if quote.quantity > 0:
+                    self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
         for entry in order_manager.group_entries(group.group_id):
             order_manager.remove(entry.order_id)
             update(
@@ -1026,14 +1099,11 @@ class BacktestEngine:
         run: _Run,
         action: CorporateActionEvent,
         snapshot: MarketSnapshot,
-        update: Callable[[str, OrderStatus, str | None], None],
+        update: _UpdateRecorder,
     ) -> None:
         # _settlement_session이 bar 존재를 보장한다. 기록·적용 시각은 정산 세션이다.
         run.store.append(snapshot.ts, RecordKind.CORPORATE_ACTION, action)
-        confirmed = action.action_type in (
-            CorporateActionType.SPLIT,
-            CorporateActionType.REVERSE_SPLIT,
-        )
+        confirmed = action.action_type in PRICE_ADJUSTING_ACTION_TYPES
         order_manager = self._orders(run)
         remaining_by_id = {
             entry.order_id: entry.remaining for entry in order_manager.open_entries()

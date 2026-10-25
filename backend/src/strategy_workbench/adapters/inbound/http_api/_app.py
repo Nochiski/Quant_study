@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from pathlib import Path
 from threading import Event
 from typing import Annotated, Any, NoReturn, TypeVar
 
@@ -13,11 +16,16 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
+from strategy_workbench.application.backtest_run.facade.factor_regression import (
+    RunFactorRegression,
+)
 from strategy_workbench.application.backtest_run.facade.runs import (
+    AccountReport,
     BacktestArtifactUnreadableError,
     BacktestCancelResult,
     BacktestParameterValueError,
@@ -29,12 +37,22 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunState,
     BacktestRunSummary,
     BacktestStartResponse,
+    HoldingsOverview,
+    RetiredRunRequestError,
     RunKind,
-    RunStatus,
+    SecurityTradesReport,
+    SessionHoldingsReport,
     TrialLedger,
     TrialLineageAlreadyMergedError,
     TrialPreview,
     rejection_code,
+)
+from strategy_workbench.application.backtest_run.facade.validation_report import RunValidationReport
+from strategy_workbench.application.broker_connection.facade.connection import (
+    BrokerConnectionService,
+)
+from strategy_workbench.application.continuous_account.facade.evaluation import (
+    ContinuousAccountService,
 )
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
@@ -49,6 +67,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
     ExperimentRunService,
 )
 from strategy_workbench.application.experiment_run.facade.ports import TrialRunRejectedError
+from strategy_workbench.application.factor_library.facade.library import FactorLibraryService
 from strategy_workbench.application.factor_research.facade.research import (
     FactorAvailability,
     FactorCatalog,
@@ -57,11 +76,7 @@ from strategy_workbench.application.factor_research.facade.research import (
     FactorExplanation,
     FactorGraphRequest,
     FactorGraphValidation,
-    FactorPreview,
-    FactorPreviewRequest,
     FactorResearchService,
-    FactorSnapshotMismatchError,
-    InvalidFactorRequestError,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
     IncompatiblePortfolioRequestError,
@@ -90,6 +105,8 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     DocumentUpgradeDriftError,
     DocumentUpgradeSyntaxError,
     DocumentUpgradeUnsupportedNodeError,
+    DraftDiff,
+    DraftDiffRequest,
     InvalidStrategyDocumentError,
     InvalidStrategyDraftError,
     ReviseDocumentRequest,
@@ -127,15 +144,21 @@ from strategy_workbench.application.strategy_design.facade.ports import (
 from strategy_workbench.domain.backtest.facade.environment import ResearchWindowViolationError
 from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
+    UniverseDefinition,
     UniverseHistoryQuery,
 )
+from strategy_workbench.domain.paging.facade.page import MAX_PAGE_SIZE
 from strategy_workbench.domain.strategy.facade.explanation import StrategyExplanation
-from strategy_workbench.domain.strategy.facade.specification import StrategySpec
+from strategy_workbench.domain.strategy.facade.specification import (
+    InvalidParameterValueError,
+    StrategySpec,
+)
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
 
 from ._assistant_routes import register_assistant_routes
 from ._backtest_contract import (
     Backtest422Response,
+    BacktestRequestRetiredResponse,
     BacktestResultNotReadyResponse,
     BacktestResultUnreadableResponse,
     BacktestRunNotFoundResponse,
@@ -146,12 +169,16 @@ from ._backtest_contract import (
     TrialLineageAlreadyMergedResponse,
     TrialLineageMergeRequest,
 )
+from ._broker_routes import register_broker_connection_routes
+from ._continuous_account_routes import register_continuous_account_routes
 from ._execution_error_contract import (
     Portfolio422Response,
     PortfolioRawObservationInvalidDetail,
 )
 from ._experiment_routes import register_experiment_routes
+from ._factor_library_routes import register_factor_library_routes
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
+from ._settings_routes import CredentialsFileIssue, register_settings_routes
 from ._sse import SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_SECONDS, SSE_POLL_SECONDS, sse_frame
 from ._strategy_document_contract import (
     StrategyDocumentNotUpgradeableDetail,
@@ -182,6 +209,8 @@ from ._trace_contract import (
 )
 
 _T = TypeVar("_T")
+
+logger = logging.getLogger(__name__)
 
 EQUITY_CATALOG_PATH = "/api/v1/equity/catalog"
 FACTOR_CATALOG_PATH = "/api/v1/factors/catalog"
@@ -240,6 +269,39 @@ def _backtest_run_not_found_responses() -> dict[int | str, dict[str, Any]]:
     }
 
 
+def _completed_result_view(read: Callable[[], _T]) -> _T:
+    """완료 결과에서 읽는 조회(보유·매매)가 결과 조회와 같은 404/409/410 을 낸다."""
+    try:
+        return read()
+    except BacktestRunNotFoundError as error:
+        raise _backtest_not_found(error) from error
+    except BacktestResultNotReadyError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "backtest.result.not_ready", "message": str(error)},
+        ) from error
+    except BacktestArtifactUnreadableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"code": "backtest.result.unreadable", "message": str(error)},
+        ) from error
+
+
+def _backtest_result_responses() -> dict[int | str, dict[str, Any]]:
+    """결과와 계좌 보고서 조회가 공유하는 완료·무결성 오류 계약."""
+    return {
+        **_backtest_run_not_found_responses(),
+        409: {
+            "model": BacktestResultNotReadyResponse,
+            "description": "The run has not completed with a result",
+        },
+        410: {
+            "model": BacktestResultUnreadableResponse,
+            "description": "The completed run's result file is missing, altered or unreadable",
+        },
+    }
+
+
 async def _backtest_event_stream(
     backtest_runs: BacktestRunService,
     run_id: str,
@@ -260,12 +322,12 @@ async def _backtest_event_stream(
     sequence = after_sequence
     last_frame_at = time.monotonic()
     while True:
-        settled = backtest_runs.state(run_id).status in (
-            RunStatus.COMPLETED,
-            RunStatus.CANCELLED,
-            RunStatus.FAILED,
-        )
-        for event in backtest_runs.events(run_id, after_sequence=sequence):
+        # 두 조회는 SQLite 쓰기와 공유하는 서비스 잠금을 기다릴 수 있다.
+        # 순서를 보존하되 이벤트 루프가 아니라 동기 작업 스레드에서 기다린다.
+        state = await run_in_threadpool(backtest_runs.state, run_id)
+        settled = state.status.is_terminal
+        events = await run_in_threadpool(backtest_runs.events, run_id, after_sequence=sequence)
+        for event in events:
             sequence = event.sequence
             yield sse_frame(sequence=event.sequence, event="progress", data=event)
             last_frame_at = time.monotonic()
@@ -321,9 +383,14 @@ def create_app(
     strategy_traces: StrategyTraceService,
     backtest_runs: BacktestRunService,
     experiments: ExperimentRunService | None = None,
+    continuous_accounts: ContinuousAccountService | None = None,
+    factor_library: FactorLibraryService | None = None,
+    broker_connections: BrokerConnectionService | None = None,
     assistant_profiles: ProviderProfileService | None = None,
     assistant_chat: AssistantChatService | None = None,
     assistant_turns: AssistantTurnRunner | None = None,
+    credentials_file_path: Path | None = None,
+    credentials_file_issues: Callable[[], Sequence[CredentialsFileIssue]] | None = None,
     allowed_origins: tuple[str, ...],
 ) -> FastAPI:
     """Compose the HTTP surface; the assistant routes appear only when their services arrive.
@@ -336,6 +403,26 @@ def create_app(
     (`bootstrap/_http.py`의 `DEFAULT_ALLOWED_ORIGINS`)이고, 여기에 같은 리터럴을 또 두면 개발 서버
     포트를 옮길 때 한쪽만 바뀐다(Phase B 감사 NB-7).
     """
+    # 서버가 끝날 때 기다릴 회수. 라우트를 다는 쪽이 더하고 lifespan 이 더한 순서대로 부른다.
+    closers: list[Callable[[], Awaitable[None]]] = []
+
+    async def shutdown_runs() -> None:
+        # run 전송이 띄운 worker(예비 포함)를 정리한다(run-worker spec D5·D7).
+        backtest_runs.shutdown()
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        # 예외·취소로 빠져도 정리는 다 한다(#591 리뷰 P3-3). 정리 하나가 실패해도 나머지를
+        # 부르고, 서버를 멈춘 원래 예외를 덮지 않는다 — 정상 종료일 때만 첫 정리 실패를
+        # 올린다(2차 리뷰 nit).
+        try:
+            yield
+        except BaseException:
+            await _clean_up((shutdown_runs, *closers))
+            raise
+        if (failure := await _clean_up((shutdown_runs, *closers))) is not None:
+            raise failure
+
     app = FastAPI(
         title="Quant Strategy Workbench API",
         version="0.1.0",
@@ -344,6 +431,7 @@ def create_app(
             "StrategySpec is the execution source of truth; YAML/JSON documents are compiled by "
             "the server."
         ),
+        lifespan=lifespan,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -356,6 +444,8 @@ def create_app(
     @app.get("/api/v1/health", operation_id="getHealth")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    register_settings_routes(app, credentials_file_path, credentials_file_issues)
 
     @app.get(
         "/api/v1/backtests",
@@ -436,7 +526,14 @@ def create_app(
 
     # 실험 라우트도 어시스턴트처럼 서비스가 올 때만 생긴다. 기반 실행 요청은 시작과 같은 판정이다.
     if experiments is not None:
-        register_experiment_routes(app, experiments, admitted=admitted)
+        closers.append(register_experiment_routes(app, experiments, admitted=admitted))
+    if continuous_accounts is not None:
+        register_continuous_account_routes(app, continuous_accounts)
+    if factor_library is not None:
+        register_factor_library_routes(app, factor_library)
+    # 키움 모의 연결 설정(S06 ②-2)도 서비스가 올 때만 생긴다.
+    if broker_connections is not None:
+        register_broker_connection_routes(app, broker_connections)
 
     strategy_not_found: dict[int | str, dict[str, Any]] = {
         404: {"model": StrategyNotFoundResponse, "description": "The strategy does not exist"}
@@ -491,17 +588,7 @@ def create_app(
     @app.get(
         "/api/v1/backtests/{run_id}/result",
         operation_id="getBacktestResult",
-        responses={
-            **_backtest_run_not_found_responses(),
-            409: {
-                "model": BacktestResultNotReadyResponse,
-                "description": "The run has not completed with a result",
-            },
-            410: {
-                "model": BacktestResultUnreadableResponse,
-                "description": "The completed run's result file is missing, altered or unreadable",
-            },
-        },
+        responses=_backtest_result_responses(),
     )
     def get_backtest_result(run_id: str) -> BacktestRunResult:
         try:
@@ -520,6 +607,93 @@ def create_app(
             ) from error
 
     @app.get(
+        "/api/v1/backtests/{run_id}/validation-report",
+        operation_id="getBacktestValidationReport",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_validation_report(run_id: str) -> RunValidationReport:
+        try:
+            return backtest_runs.validation_report(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+        except BacktestResultNotReadyError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "backtest.result.not_ready", "message": str(error)},
+            ) from error
+        except BacktestArtifactUnreadableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail={"code": "backtest.result.unreadable", "message": str(error)},
+            ) from error
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/factor-regression",
+        operation_id="getBacktestFactorRegression",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_factor_regression(run_id: str) -> RunFactorRegression:
+        try:
+            return backtest_runs.factor_regression(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+        except BacktestResultNotReadyError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "backtest.result.not_ready", "message": str(error)},
+            ) from error
+        except BacktestArtifactUnreadableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail={"code": "backtest.result.unreadable", "message": str(error)},
+            ) from error
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/account-report",
+        operation_id="getBacktestAccountReport",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_account_report(run_id: str) -> AccountReport:
+        try:
+            return backtest_runs.account_report(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+        except BacktestResultNotReadyError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "backtest.result.not_ready", "message": str(error)},
+            ) from error
+        except BacktestArtifactUnreadableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail={"code": "backtest.result.unreadable", "message": str(error)},
+            ) from error
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/holdings",
+        operation_id="getBacktestHoldings",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_holdings(run_id: str) -> HoldingsOverview:
+        return _completed_result_view(lambda: backtest_runs.holdings_overview(run_id))
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/holdings/sessions/{session}",
+        operation_id="getBacktestSessionHoldings",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_session_holdings(run_id: str, session: date) -> SessionHoldingsReport:
+        return _completed_result_view(lambda: backtest_runs.session_holdings(run_id, session))
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/holdings/securities/{security_id}",
+        operation_id="getBacktestSecurityTrades",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_security_trades(run_id: str, security_id: str) -> SecurityTradesReport:
+        return _completed_result_view(lambda: backtest_runs.security_trades(run_id, security_id))
+
+    @app.get(
         "/api/v1/backtests/{run_id}/summary",
         operation_id="getBacktestSummary",
         responses=_backtest_run_not_found_responses(),
@@ -536,7 +710,13 @@ def create_app(
     @app.get(
         "/api/v1/backtests/{run_id}/request",
         operation_id="getBacktestRequest",
-        responses=_backtest_run_not_found_responses(),
+        responses={
+            **_backtest_run_not_found_responses(),
+            410: {
+                "model": BacktestRequestRetiredResponse,
+                "description": "The stored request names a retired strategy schema",
+            },
+        },
     )
     def get_backtest_request(run_id: str) -> BacktestRunSpec:
         """Expose the server-owned accepted assumptions for audit and exact reruns."""
@@ -545,6 +725,13 @@ def create_app(
             return backtest_runs.request(run_id)
         except BacktestRunNotFoundError as error:
             raise _backtest_not_found(error) from error
+        except RetiredRunRequestError as error:
+            # 옛 판 요청을 현재 판으로 올려 내주지 않는다(#313).
+            # 기록과 다른 전략이 재실행되지 않게 한다.
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail={"code": "backtest.run.request_retired", "message": str(error)},
+            ) from error
 
     @app.post(
         "/api/v1/backtests/{run_id}/cancel",
@@ -709,7 +896,7 @@ def create_app(
         unit: Annotated[list[str] | None, Query()] = None,
         frequency: Annotated[list[str] | None, Query()] = None,
         page: int = Query(default=1, ge=1),
-        page_size: int = Query(default=20, ge=1, le=100),
+        page_size: int = Query(default=20, ge=1, le=MAX_PAGE_SIZE),
     ) -> ResearchCatalog:
         return equity_workspace.catalog(
             FieldCatalogQuery(
@@ -721,6 +908,17 @@ def create_app(
                 page_size=page_size,
             )
         )
+
+    @app.get(
+        "/api/v1/equity/universes",
+        operation_id="listEquityUniverses",
+    )
+    def equity_universes() -> list[UniverseDefinition]:
+        """연결된 시장 데이터가 실행에 쓸 수 있는 유니버스(id·표시명·설명).
+
+        실행 설정 드롭다운의 출처다.
+        """
+        return list(equity_workspace.universes())
 
     @app.post(
         "/api/v1/equity/universe/preview",
@@ -758,7 +956,7 @@ def create_app(
         category: Annotated[list[FactorCategory] | None, Query()] = None,
         availability: Annotated[list[FactorAvailability] | None, Query()] = None,
         page: int = Query(default=1, ge=1),
-        page_size: int = Query(default=20, ge=1, le=100),
+        page_size: int = Query(default=20, ge=1, le=MAX_PAGE_SIZE),
     ) -> FactorCatalog:
         return factor_research.catalog(
             FactorCatalogQuery(
@@ -783,32 +981,6 @@ def create_app(
     )
     def explain_factor_graph(request: FactorGraphRequest) -> FactorExplanation:
         return factor_research.explain(request)
-
-    @app.post(
-        "/api/v1/factors/preview",
-        operation_id="previewFactorGraph",
-    )
-    def preview_factor_graph(request: FactorPreviewRequest) -> FactorPreview:
-        try:
-            return factor_research.preview(request)
-        except FactorSnapshotMismatchError as error:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "factor.snapshot_mismatch",
-                    "expected_data_snapshot_id": error.expected,
-                    "actual_data_snapshot_id": error.actual,
-                    "message": str(error),
-                },
-            ) from error
-        except InvalidFactorRequestError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "factor.graph.invalid",
-                    "validation": jsonable_encoder(asdict(error.validation)),
-                },
-            ) from error
 
     @app.get(
         "/api/v1/strategy-drafts/{draft_id}",
@@ -1026,6 +1198,20 @@ def create_app(
         except StrategyNotFoundError as error:
             raise _strategy_not_found(error) from error
 
+    @app.post(
+        "/api/v1/strategies/{strategy_id}/draft-diff",
+        operation_id="diffStrategyDraft",
+        responses={422: {"model": StrategyDocumentSave422Response}},
+    )
+    def diff_strategy_draft(strategy_id: str, request: DraftDiffRequest) -> DraftDiff:
+        """저장 리비전과 편집 중 원문을 같은 도메인 의미 diff로 비교한다."""
+        try:
+            return strategy_documents.diff_draft(strategy_id, request)
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+        except InvalidStrategyDocumentError as error:
+            raise _invalid_document(error) from error
+
     @app.get(
         "/api/v1/strategies/{strategy_id}/diff",
         operation_id="diffStrategyRevisions",
@@ -1063,11 +1249,7 @@ def create_app(
     ) -> StrategyDocumentSchema | Response:
         """Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match)."""
         schema = strategy_authoring.schema()
-        etag = _etag(schema.schema_hash)
-        if if_none_match is not None and _matches(if_none_match, etag):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
-        response.headers["ETag"] = etag
-        return schema
+        return _etag_response(schema.schema_hash, if_none_match, response, schema)
 
     @app.get(
         "/api/v1/run-environments/schema",
@@ -1080,11 +1262,7 @@ def create_app(
     ) -> RunEnvironmentSchema | Response:
         """실행 설정의 런타임 JSON Schema. ETag = 스키마 해시(일치하면 304)."""
         schema = strategy_authoring.run_environment_schema()
-        etag = _etag(schema.schema_hash)
-        if if_none_match is not None and _matches(if_none_match, etag):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
-        response.headers["ETag"] = etag
-        return schema
+        return _etag_response(schema.schema_hash, if_none_match, response, schema)
 
     @app.get(
         "/api/v1/strategy-documents/operators",
@@ -1103,11 +1281,7 @@ def create_app(
         않는다. ETag는 카탈로그 해시이며 If-None-Match가 맞으면 304로 답한다.
         """
         catalog = strategy_authoring.operators()
-        etag = _etag(catalog.catalog_hash)
-        if if_none_match is not None and _matches(if_none_match, etag):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
-        response.headers["ETag"] = etag
-        return catalog
+        return _etag_response(catalog.catalog_hash, if_none_match, response, catalog)
 
     @app.get(
         "/api/v1/strategy-documents/contract",
@@ -1122,14 +1296,15 @@ def create_app(
         with the factor/dataset registry versions and catalog links it pairs with.
         """
         contract = strategy_authoring.contract()
-        etag = _etag(contract.contract_hash)
-        if if_none_match is not None and _matches(if_none_match, etag):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
-        response.headers["ETag"] = etag
-        return StrategyDocumentContractResponse(
-            contract=contract,
-            factor_catalog_url=FACTOR_CATALOG_PATH,
-            equity_catalog_url=EQUITY_CATALOG_PATH,
+        return _etag_response(
+            contract.contract_hash,
+            if_none_match,
+            response,
+            StrategyDocumentContractResponse(
+                contract=contract,
+                factor_catalog_url=FACTOR_CATALOG_PATH,
+                equity_catalog_url=EQUITY_CATALOG_PATH,
+            ),
         )
 
     @app.get(
@@ -1257,6 +1432,17 @@ class StrategyDocumentContractResponse:
     equity_catalog_url: str
 
 
+def _etag_response(
+    content_hash: str, if_none_match: str | None, response: Response, body: _T
+) -> _T | Response:
+    """메타데이터 응답 네 경로가 같은 ETag·304 계약을 따른다."""
+    etag = _etag(content_hash)
+    if if_none_match is not None and _matches(if_none_match, etag):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+    response.headers["ETag"] = etag
+    return body
+
+
 def _etag(schema_hash: str) -> str:
     return f'"{schema_hash}"'
 
@@ -1303,6 +1489,18 @@ def _research_window_rejection(
     return RequestValidationError([{"type": error.code, "loc": loc, "msg": str(error)}])
 
 
+async def _clean_up(cleanups: tuple[Callable[[], Awaitable[None]], ...]) -> Exception | None:
+    """정리를 차례로 모두 부르고 첫 실패를 돌려준다. 실패마다 로그를 남긴다."""
+    first: Exception | None = None
+    for cleanup in cleanups:
+        try:
+            await cleanup()
+        except Exception as error:
+            logger.exception("server shutdown cleanup failed — cleanup=%s", cleanup.__qualname__)
+            first = first or error
+    return first
+
+
 def _raise_run_request_rejection(error: Exception) -> NoReturn:
     """실행 요청 판정의 거절이면 코드화된 HTTP 오류로, 아니면 원래 오류를 그대로 올린다.
 
@@ -1326,7 +1524,7 @@ def _raise_run_request_rejection(error: Exception) -> NoReturn:
             "sealed_end": error.sealed_end.isoformat(),
             "research_start": error.research_start.isoformat(),
         }
-    elif isinstance(error, BacktestParameterValueError):
+    elif isinstance(error, (BacktestParameterValueError, InvalidParameterValueError)):
         detail["parameter_id"] = error.parameter_id
     raise HTTPException(
         status_code=_ADMISSION_STATUS.get(code, status.HTTP_422_UNPROCESSABLE_CONTENT),

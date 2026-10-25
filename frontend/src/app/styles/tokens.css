@@ -1,37 +1,43 @@
-/*
- * Semantic theme tokens (WORKFLOW P2-01, P6-04). The light and soft-dark palettes expose the
- * same component contract; P6-03 owns preference persistence and selects `data-theme`.
- * Components use only semantic names (surface / border / text / accent / status / focus);
- * raw colours live here and nowhere else.
- */
+/* 화면 위계·요소 계약은 design-system/strategy-workbench/MASTER.md가 소유한다.
+ * 이 파일은 밝은 테마와 어두운 테마가 공유하는 의미 토큰의 실제 값을 정의한다. */
 :root {
   color-scheme: light;
 
   /* surfaces */
-  --surface-canvas: #f4f6f8;
+  --surface-canvas: #f5f7fb;
   --surface-panel: #ffffff;
-  --surface-raised: #f9fafb;
-  --surface-subtle: #eef2f5;
-  --surface-inverse: #1c2430;
+  --surface-raised: #f8fafc;
+  --surface-subtle: #edf1f7;
+  --surface-inverse: #172033;
   --overlay-scrim: rgb(28 36 48 / 32%);
 
   /* borders */
-  --border: #d9dee5;
-  --border-strong: #b8c1cc;
+  --border: #dce3ee;
+  --border-strong: #b6c2d4;
+  --border-control: #7b8ba3;
   --border-inverse: #3a4657;
 
   /* text */
-  --text: #1c2430;
-  --text-muted: #5b6675;
-  --text-subtle: #66717f;
+  --text: #172033;
+  --text-muted: #53627a;
+  --text-subtle: #62718a;
   --text-on-accent: #ffffff;
-  --text-inverse: #f4f6f8;
+  --text-inverse: #f5f7fb;
 
-  /* accent (teal from the concept) */
-  --accent: #0b6a60;
-  --accent-hover: #085249;
-  --accent-soft: #e3f4f1;
-  --accent-border: #9fd6cc;
+  /* 주 행동은 수익 상태의 녹색과 구분되는 indigo를 쓴다. */
+  --accent: #3156d3;
+  --accent-hover: #2443b0;
+  --accent-soft: #edf1ff;
+  --accent-border: #c8d2fb;
+
+  /* 실험 내부의 서버 점수 상대색. 숫자는 --text로 읽으며 단계에 수익 판정 의미를 부여하지 않는다. */
+  --heat-1: #f1f5ff;
+  --heat-2: #e0e9fc;
+  --heat-3: #cbdaf8;
+  --heat-4: #b5caf3;
+  --heat-5: #9fbaed;
+  --heat-6: #87a7e5;
+  --heat-7: #6c91d4;
 
   /* status — every status also carries a text/glyph marker in the UI, never colour alone */
   --status-ok: #166a3f;
@@ -44,6 +50,17 @@
   --status-info: #2258b8;
   --status-info-soft: #e6eefc;
 
+  /* 수익 방향 — 국내 관례대로 상승은 빨강, 하락은 파랑이다. 성공·오류 상태색과 역할이 달라 따로 두고,
+   * 화면은 부호와 낭독 문구를 함께 붙여 색만으로 방향을 전하지 않는다. */
+  /* 설정 화면 테마 견본: 테마와 상관없이 밝음·어두움 대표 표면색을 고정으로 보인다. */
+  --theme-swatch-light: #f5f7fb;
+  --theme-swatch-dark: #101725;
+
+  --return-up: #c8322b;
+  --return-down: #1f5fcc;
+  --return-up-soft: #fdeeec;
+  --return-down-soft: #e1ebfb;
+
   /* chart series on the light canvas (>= 3:1 for lines, legend text uses the same ink) */
   --chart-series-1: #0b6a60;
   --chart-series-2: #2258b8;
@@ -53,7 +70,7 @@
   --chart-series-6: #a24f08;
 
   /* focus */
-  --focus-ring: #2e6fd6;
+  --focus-ring: #4669e8;
   --focus-ring-offset: 2px;
 
   /* source syntax */
@@ -61,28 +78,66 @@
   --syntax-string: #176b3a;
   --syntax-number: #713f98;
   --syntax-literal: #974609;
-  --syntax-comment: #66717f;
-  --syntax-punctuation: #5b6675;
+  --syntax-comment: #62718a;
+  --syntax-punctuation: #53627a;
 
-  /* typography: body 14px, secondary text never below 12px */
-  /* Exact-version webfonts keep strict browser snapshots independent of host-installed fonts. */
+  /* 고정 버전 번들 폰트와 역할별 크기로 플랫폼·중첩 배율 차이를 줄인다. */
   --font-sans: "Noto Sans KR Variable", sans-serif;
   --font-mono: "JetBrains Mono Variable", "Noto Sans KR Variable", monospace;
+  --text-size-page-title: 28px;
+  --text-size-section-title: 20px;
+  --text-size-subsection: 16px;
+  --text-size-label: 13px;
   --text-size-body: 14px;
   --text-size-small: 12px;
   --text-size-title: 20px;
   --text-size-display: 28px;
-  --line-height-body: 1.5;
-  --font-weight-strong: 800;
-  --tracking-wide: 0.16em;
+  --line-height-body: 1.6;
+  --line-height-heading: 1.35;
+  --line-height-control: 1.4;
+  --font-weight-heading: 700;
+  --font-weight-label: 600;
+  --font-weight-strong: 700;
+  --tracking-wide: 0.08em;
+
+  /* 일반 폼·편집 도구·표 안 행동은 서로 다른 밀도를 명시한다. */
+  --control-height: 40px;
+  --control-height-compact: 34px;
+  --control-height-dense: 28px;
+  --control-height-touch: 44px;
+  --control-padding-inline: 12px;
+  --page-gutter: 24px;
+  --panel-padding: 20px;
+  --section-gap: 24px;
+  --field-gap: 6px;
+  --content-width: 1280px;
+  --content-width-form: 960px;
+  --metric-card-min-width: 9rem;
 
   /* shape and elevation */
   --radius-small: 6px;
   --radius-medium: 8px;
   --radius-large: 12px;
   --radius-pill: 999px;
-  --shadow-panel: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+  --shadow-panel: 0 1px 2px rgb(23 32 51 / 4%);
+  /* 바탕(--surface-canvas)과 표면색이 가까운 작업 카드를 들어 올린다. 팝오버보다 얕다. */
+  --shadow-card: 0 1px 3px rgb(23 32 51 / 8%);
   --shadow-popover: 0 8px 24px rgb(16 24 40 / 16%);
+
+  /*
+   * 화면 전체에서 겹치는 층(z-index). 값은 여기 한 곳에서만 정한다. 아래에서 위로: 편집기 서랍 → 고정 띠 →
+   * 떠 있는 AI 창·런처 → 툴팁·팝오버·완료 알림 → 펼친 메뉴 → 이탈 확인(모달) → 본문 건너뛰기 링크 → 대화상자.
+   * 떠 있는 창은 서랍·띠 위에 뜨되, 사용자가 연 팝오버·알림과 모달 뒤에 있다 — 모달 배경이 창을 덮어 모달이 열린
+   * 동안 창을 조작할 수 없다. 컴포넌트 안쪽 쌓임(1~5)은 이 층과 무관하게 그 요소 안에서만 쓴다.
+   */
+  --layer-drawer: 15;
+  --layer-sticky: 18;
+  --layer-floating: 19;
+  --layer-popover: 20;
+  --layer-menu: 21;
+  --layer-modal: 25;
+  --layer-skip-link: 30;
+  --layer-dialog: 40;
 
   /* spacing scale */
   --space-1: 4px;
@@ -91,36 +146,46 @@
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+  --space-7: 48px;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
   /* surfaces */
-  --surface-canvas: #111820;
-  --surface-panel: #18222d;
-  --surface-raised: #1e2a36;
-  --surface-subtle: #253441;
+  --surface-canvas: #101725;
+  --surface-panel: #172133;
+  --surface-raised: #1d293b;
+  --surface-subtle: #243247;
   --surface-inverse: #090f15;
   --overlay-scrim: rgb(3 7 12 / 58%);
 
   /* borders */
-  --border: #354352;
-  --border-strong: #536274;
+  --border: #36465e;
+  --border-strong: #596c86;
+  --border-control: #7183a0;
   --border-inverse: #3e4d5e;
 
   /* text */
-  --text: #e6edf3;
-  --text-muted: #acb8c5;
-  --text-subtle: #93a2b1;
-  --text-on-accent: #071d1a;
+  --text: #e9eef7;
+  --text-muted: #a8b5cb;
+  --text-subtle: #94a5bf;
+  --text-on-accent: #132248;
   --text-inverse: #f1f5f8;
 
   /* accent */
-  --accent: #4fc3b1;
-  --accent-hover: #72d5c5;
-  --accent-soft: #173c39;
-  --accent-border: #347f76;
+  --accent: #a8baff;
+  --accent-hover: #c5d0ff;
+  --accent-soft: #24325c;
+  --accent-border: #5d73ba;
+
+  --heat-1: #182230;
+  --heat-2: #1c2a3e;
+  --heat-3: #20324c;
+  --heat-4: #253a59;
+  --heat-5: #2a4266;
+  --heat-6: #2f4a72;
+  --heat-7: #34527e;
 
   /* status */
   --status-ok: #68d391;
@@ -133,6 +198,11 @@
   --status-info: #86b3ff;
   --status-info-soft: #1d3150;
 
+  --return-up: #ff8a80;
+  --return-down: #8fb2ff;
+  --return-up-soft: #3a2224;
+  --return-down-soft: #1c2a45;
+
   /* chart series tuned for the dark canvas */
   --chart-series-1: #4fc3b1;
   --chart-series-2: #86b3ff;
@@ -141,13 +211,20 @@
   --chart-series-5: #72c7ef;
   --chart-series-6: #f0b35f;
 
-  --focus-ring: #7eb4ff;
+  --focus-ring: #b2c3ff;
   --syntax-key: #8bc4ff;
   --syntax-string: #8bd49c;
   --syntax-number: #d7a6ff;
   --syntax-literal: #ffbd7a;
-  --syntax-comment: #93a2b1;
-  --syntax-punctuation: #acb8c5;
-  --shadow-panel: 0 1px 2px rgb(0 0 0 / 28%), 0 2px 5px rgb(0 0 0 / 22%);
+  --syntax-comment: #94a5bf;
+  --syntax-punctuation: #a8b5cb;
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / 12%);
+  --shadow-card: 0 1px 3px rgb(0 0 0 / 28%);
   --shadow-popover: 0 12px 32px rgb(0 0 0 / 42%);
+}
+
+@media (max-width: 720px) {
+  :root {
+    --page-gutter: 16px;
+  }
 }

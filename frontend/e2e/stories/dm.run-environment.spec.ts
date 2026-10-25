@@ -18,6 +18,7 @@ import {
   GOLDEN,
   mustReplace,
   openEditor,
+  openRunSettingsGroup,
   replaceSource,
   requireData,
   RUN_ENVIRONMENT,
@@ -42,7 +43,7 @@ const runAndReadPeriod = async (page: Page): Promise<string> => {
   await backtest(page).click();
   await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
   await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
-    "completed",
+    "완료",
     { timeout: 120_000 },
   );
   const drawer = page.getByRole("group", {
@@ -64,7 +65,7 @@ test(
       mustReplace(GOLDEN, "퀄리티 모멘텀", "US-DM-05 날짜 입력"),
     );
     await expectPhase(page, "검증 통과");
-    const summary = page.getByRole("region", { name: "실행 설정 요약" });
+    const summary = runSettingsInputs(page).summary;
     await summary.getByRole("button", { name: "실행 설정 채우기" }).click();
     const { start, end, universe } = runSettingsInputs(page);
     // OOS 칸의 라벨은 칸 아래 안내 문장까지 감싸, 접근 가능한 이름이 안내로 이어진다.
@@ -86,6 +87,7 @@ test(
     const incomplete = "연·월·일을 모두 올바르게 입력하세요. 예: 2021-01-01";
     await end.click();
     await page.keyboard.type("2026");
+    await openRunSettingsGroup(page, "고급 실행");
     await oos.click();
     await expect(end).toHaveValue("");
     await expect(end).toHaveAccessibleDescription(new RegExp(incomplete, "u"));
@@ -101,7 +103,12 @@ test(
     await expect(end).toHaveValue("2026-08-31");
     await expect(page.getByText(incomplete)).toHaveCount(0);
 
-    await universe.fill(RUN_ENVIRONMENT.universe_id);
+    // 유니버스는 연결된 시장 데이터가 답한 목록에서 고른다. 표시명과 id, 고른 유니버스의 설명이 보인다.
+    await expect(universe.locator("option")).toContainText(["KRX 보통주 (krx.common-stock)"]);
+    await universe.selectOption(RUN_ENVIRONMENT.universe_id);
+    await expect(universe.locator("option:checked")).toHaveText("KRX 보통주 (krx.common-stock)");
+    // e2e backend 는 mock 어댑터라 mock 의 실제 구성을 말하는 설명이다.
+    await expect(universe).toHaveAccessibleDescription(/모의 데이터의 고정 종목 묶음입니다/u);
     await expect(summary).toContainText("2021-01-01");
     await expect(summary).toContainText("2026-08-31");
 
@@ -124,18 +131,22 @@ test(
     await expect(backtest(page)).toBeDisabled();
     await expect(oos).not.toHaveAttribute("aria-invalid", "true");
     await expect(summary).not.toContainText("OOS 시작일 칸을 고치세요");
-    await universe.click();
+    // 초점을 다른 칸으로 옮겨 OOS 칸을 떠난다(드롭다운을 펼치지 않는다).
+    await universe.focus();
     await expect(oos).toHaveValue("");
     await expect(oos).toHaveAttribute("aria-invalid", "true");
-    const oosIncomplete = page.getByText(
-      "연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.",
-    );
-    await expect(oosIncomplete.first()).toBeVisible();
+    const oosIncomplete = page.locator(".backtest-settings__errors").getByRole("listitem").filter({
+      hasText: "연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.",
+    });
+    await expect(oosIncomplete).toBeVisible();
+    await expect(oosIncomplete).toHaveText("OOS 시작일: 연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.");
     await expect(summary).toContainText(
       "실행 설정의 OOS 시작일 칸을 고치세요: 연·월·일까지 모두 올바르게 입력하세요.",
     );
     await expect(backtest(page)).toBeDisabled();
     // 띠의 "실행 설정 고치기"가 OOS 칸으로 초점을 옮긴다(#266 재리뷰 P3-2).
+    await page.keyboard.press("Escape");
+    await expect(oos).toBeHidden();
     await summary.getByRole("button", { name: "실행 설정 고치기" }).click();
     await expect(oos).toBeFocused();
 
@@ -151,7 +162,8 @@ test(
     await expect(oos).toHaveValue("");
     await expect(backtest(page)).toBeDisabled();
     await expect(oos).not.toHaveAttribute("aria-invalid", "true");
-    await universe.click();
+    // 초점을 다른 칸으로 옮겨 OOS 칸을 떠난다(드롭다운을 펼치지 않는다).
+    await universe.focus();
     await expect(oos).toHaveAttribute("aria-invalid", "true");
     // 덜 친 OOS 로는 시작 요청이 한 번도 나가지 않았다.
     expect(starts).toEqual([]);
@@ -175,7 +187,7 @@ test(
     const strategyUrl = `/research/strategies/${strategyId}/revisions/1`;
 
     // 요약 띠: 지금 값과 "전략 문서 밖"이라는 문장. 기간·유니버스는 서버가 기본값을 주지 않는다.
-    const summary = page.getByRole("region", { name: "실행 설정 요약" });
+    const summary = runSettingsInputs(page).summary;
     await expect(summary).toContainText("전략 문서 밖의 값입니다");
     await expect(summary).toContainText(
       "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
@@ -185,6 +197,13 @@ test(
     // 실행 설정: 나머지 칸은 서버(실행 설정 스키마)가 준 기본값으로 채워져 있다.
     const { toggle, start, fee } = runSettingsInputs(page);
     await toggle.click();
+    // 기본값 그대로인 묶음은 요약 줄에 "기본값" 배지를 단다(RD-05-A).
+    for (const group of ["비용", "고급 실행"])
+      await expect(
+        page.getByLabel(group, { exact: true }).and(page.locator("summary")),
+      ).toContainText("기본값");
+    await openRunSettingsGroup(page, "고급 실행");
+    await openRunSettingsGroup(page, "비용");
     await expect(page.getByRole("combobox", { name: "시장" })).toHaveValue(
       "KRX",
     );
@@ -212,6 +231,7 @@ test(
     // 고정 bp 에서만 켜진다. 켜진 세율 칸이 비면 띠가 그 칸을 채우라고 막고, 방식을 되돌리면 꺼진 칸에 남은
     // 세율 값은 실행을 막지 않는다 — 아래 실제 실행이 그 값을 싣지 않은 요청을 서버가 받는지 본다(#343 V2-07).
     await toggle.click();
+    await openRunSettingsGroup(page, "비용");
     const taxMethod = page.getByRole("combobox", { name: "매도 거래세" });
     const taxRate = page.getByRole("spinbutton", {
       name: "매도 거래세율 (bp)",

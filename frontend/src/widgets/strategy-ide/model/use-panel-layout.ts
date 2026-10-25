@@ -1,53 +1,45 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { browserStorage } from "../../../shared/lib/browser-storage";
+import { useCallback, useEffect, useReducer, useState } from "react";
 
-import { useViewportHeight } from "../../../shared/lib/media";
 
-/**
- * Panel sizes and collapse flags of the Strategy IDE. Widget-local by design (WORKFLOW 2.6:
- * panel size is widget state, never URL or server state).
- */
+/** 패널 폭·열림은 위젯의 로컬 상태이며 URL이나 서버 상태를 복제하지 않는다. */
 export type PanelLayout = {
   outlineWidth: number;
   inspectorWidth: number;
+  /** v1 저장 기록과의 호환 값이다. 전용 추적 작업공간의 높이로 사용하지 않는다. */
   debuggerHeight: number;
-  assistantWidth: number;
   outlineOpen: boolean;
   inspectorOpen: boolean;
   debuggerOpen: boolean;
+  /** AI 어시스턴트 창(떠 있는 창)이 열렸는가. */
   assistantOpen: boolean;
   /**
-   * 오른쪽 두 패널(계약·AI) 중 마지막으로 펼친 쪽. 화면이 좁아 둘을 나란히 두면 편집기가 최소 폭
-   * 아래로 내려갈 때, 나중에 연 쪽을 오버레이로 돌리는 판정에 쓴다. 저장하지 않는다.
+   * 사용자가 AI 창을 직접 여닫아 고른 값(없으면 null). 저장하는 것은 이 값뿐이다 — 좁은 화면에서 정한
+   * 기본값(닫힘)이나 다른 조작(계약·개요 서랍 열기)이 덩달아 닫은 것은 `assistantOpen` 만 바꾸고 이 값은 그대로라,
+   * 넓은 화면이나 다음 방문에서는 사용자가 고른 값(또는 기본값)이 이긴다.
    */
-  lastOpenedRight: "inspectorOpen" | "assistantOpen" | null;
+  assistantPreference: boolean | null;
 };
 
 export const PANEL_BOUNDS = {
   outlineWidth: { min: 180, max: 420 },
   inspectorWidth: { min: 240, max: 520 },
-  // 중간 결과 높이의 상한은 고정값이 아니라 창 높이를 따른다(`DEBUGGER_MAX_VIEWPORT_SHARE`). 저장값은
-  // 하한만 보고 받고, 그리는 높이를 그때 창의 상한으로 자른다.
+  // 과거 저장 기록의 유효성만 검사하며 새 작업공간 크기를 제한하지 않는다.
   debuggerHeight: { min: 120, max: Number.POSITIVE_INFINITY },
-  assistantWidth: { min: 280, max: 560 },
 } as const;
-
-/**
- * 중간 결과 패널이 차지할 수 있는 창 높이의 몫. 상한이 480px으로 고정이었을 때는 최대로 키워도 추적 본문이
- * 패널보다 길어(1440×900에서 99px, 1920×1080에서 24px) 연결 추적 아래쪽이 패널 안 스크롤로 가려졌다(#262).
- */
-const DEBUGGER_MAX_VIEWPORT_SHARE = 0.7;
 
 export const DEFAULT_LAYOUT: PanelLayout = {
   outlineWidth: 240,
   inspectorWidth: 320,
   debuggerHeight: 220,
-  assistantWidth: 360,
-  outlineOpen: true,
-  inspectorOpen: true,
-  debuggerOpen: true,
-  // AI 사이드바만 기본 접힘이다: 슬롯을 넘기지 않는 화면과 첫 방문의 레이아웃을 그대로 둔다(B-04).
+  outlineOpen: false,
+  inspectorOpen: false,
+  debuggerOpen: false,
+  // 구조·계약·AI 창 모두 사용자가 명시해서 연다. AI 창은 화면 위에 떠 있어 편집기의 버튼을 가리므로, 사용자가
+  // 직접 연 기록이 없으면 최소화한 채 시작한다(상단 바 토글·Alt+A 로 연다, PR #624 결정 — RD-04-A 의 "처음부터
+  // 열림"을 대체). 저장된 사용자 선택은 그대로 존중한다 — 기본값은 저장 기록에 `assistant` 키가 없을 때만 쓰인다.
   assistantOpen: false,
-  lastOpenedRight: null,
+  assistantPreference: null,
 };
 
 type PanelSizes = Pick<
@@ -55,22 +47,19 @@ type PanelSizes = Pick<
   "outlineWidth" | "inspectorWidth" | "debuggerHeight"
 >;
 /**
- * 복원된 배치. 기존 세 패널 폭은 함께 유효해야 하고, 뒤에 추가된 AI 사이드바 값(`assistantWidth`·
- * `assistantOpen`)은 없으면 기본값으로 둔다 — 이 키를 모르던 v1 기록도 그대로 읽힌다.
+ * 복원된 배치. 기존 세 패널 폭은 함께 유효해야 한다. AI 창 열림은 판본 2 기록의 `open.assistant`(사용자가
+ * 직접 고른 값)만 읽는다 — 판본 1 기록의 `open.assistant` 는 사용자 선택과 자동 기본값을 구분하지 않고 저장됐으므로
+ * 선택으로 보지 않고 버린다(한정 리뷰 2). 옛 AI 열 폭(`sizes.assistantWidth`)도 무시한다.
  */
 export type StoredLayout = PanelSizes &
-  Partial<Pick<PanelLayout, "assistantWidth" | "assistantOpen">>;
+  Partial<Pick<PanelLayout, "assistantOpen" | "assistantPreference">>;
 type LayoutStorage = Pick<Storage, "getItem" | "setItem">;
 
 export const PANEL_LAYOUT_STORAGE_KEY = "quant-workbench.panel-sizes.v1";
-
-const browserStorage = (): LayoutStorage | null => {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-};
+/**
+ * 저장 기록 판본. 2부터 `open.assistant` 는 사용자가 직접 고른 값만 담는다. 1 기록은 폭만 이어받는다.
+ */
+export const PANEL_LAYOUT_VERSION = 2;
 
 const validSize = (
   key: keyof typeof PANEL_BOUNDS,
@@ -96,31 +85,29 @@ export const readPanelSizes = (
       open?: { assistant?: unknown };
     };
     if (
-      record.version !== 1 ||
+      (record.version !== 1 && record.version !== PANEL_LAYOUT_VERSION) ||
       typeof record.sizes !== "object" ||
       record.sizes === null
     )
       return null;
-    const { outlineWidth, inspectorWidth, debuggerHeight, assistantWidth } =
-      record.sizes;
+    const { outlineWidth, inspectorWidth, debuggerHeight } = record.sizes;
     if (
       !validSize("outlineWidth", outlineWidth) ||
       !validSize("inspectorWidth", inspectorWidth) ||
       !validSize("debuggerHeight", debuggerHeight)
     )
       return null;
-    // 범위 밖 값은 기록 전체를 버린다(fail-closed). 없는 값만 기본값으로 떨어진다.
-    if (assistantWidth !== undefined && !validSize("assistantWidth", assistantWidth))
-      return null;
-    const assistantOpen = record.open?.assistant;
+    const assistantOpen =
+      record.version === PANEL_LAYOUT_VERSION ? record.open?.assistant : undefined;
     if (assistantOpen !== undefined && typeof assistantOpen !== "boolean")
       return null;
     return {
       outlineWidth,
       inspectorWidth,
       debuggerHeight,
-      ...(assistantWidth === undefined ? {} : { assistantWidth }),
-      ...(assistantOpen === undefined ? {} : { assistantOpen }),
+      ...(assistantOpen === undefined
+        ? {}
+        : { assistantOpen, assistantPreference: assistantOpen }),
     };
   } catch {
     return null;
@@ -135,20 +122,20 @@ const writePanelSizes = (
     storage?.setItem(
       PANEL_LAYOUT_STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: PANEL_LAYOUT_VERSION,
         sizes: {
           outlineWidth: layout.outlineWidth,
           inspectorWidth: layout.inspectorWidth,
           debuggerHeight: layout.debuggerHeight,
-          assistantWidth: layout.assistantWidth,
         },
-        // 펼침 상태 중 AI 사이드바만 저장한다: 나머지 패널은 기본 펼침이라 복원할 것이 없고,
-        // 사이드바는 기본 접힘이라 열어 둔 선택이 새로고침마다 사라지면 안 된다.
-        open: { assistant: layout.assistantOpen },
+        // 사용자가 직접 고른 AI 창 열림만 복원한다. 나머지는 첫 진입의 주본문 공간을 보장한다.
+        ...(layout.assistantPreference === null
+          ? {}
+          : { open: { assistant: layout.assistantPreference } }),
       }),
     );
   } catch {
-    // Local persistence must never make the editor unusable.
+    // 로컬 저장 실패가 편집을 막아서는 안 된다.
   }
 };
 
@@ -171,17 +158,16 @@ const reduce = (state: PanelLayout, action: Action): PanelLayout => {
   switch (action.type) {
     case "resize":
       return { ...state, [action.panel]: clamp(action.panel, action.value) };
-    case "toggle": {
-      const panel = action.panel;
-      const open = !state[panel];
-      const right = panel === "inspectorOpen" || panel === "assistantOpen";
+    case "toggle":
+      // AI 창을 사용자가 여닫으면 그 값을 선택으로 기록한다. 다른 조작이 덩달아 닫는 `close` 는 열림만 바꾸고
+      // 선택은 건드리지 않는다.
       return {
         ...state,
-        [panel]: open,
-        lastOpenedRight:
-          right && open ? panel : state.lastOpenedRight,
+        [action.panel]: !state[action.panel],
+        ...(action.panel === "assistantOpen"
+          ? { assistantPreference: !state.assistantOpen }
+          : {}),
       };
-    }
     case "close":
       return action.panels.reduce(
         (next, panel) => ({ ...next, [panel]: false }),
@@ -190,32 +176,21 @@ const reduce = (state: PanelLayout, action: Action): PanelLayout => {
   }
 };
 
-export const usePanelLayout = (initial: PanelLayout = DEFAULT_LAYOUT) => {
+/**
+ * `startOpen` 은 저장 기록보다 앞서는 시작 열림이다(안내에서 AI 창을 연 채 편집기로 넘어온 경우). 시작 상태일 뿐이라
+ * 사용자 선택으로 저장하지 않는다.
+ */
+export const usePanelLayout = (initial: PanelLayout = DEFAULT_LAYOUT, startOpen?: { assistant?: boolean }) => {
   const [storage] = useState(browserStorage);
-  const [layout, dispatch] = useReducer(reduce, initial, (base) => ({
-    ...base,
-    ...readPanelSizes(storage),
-  }));
+  const [layout, dispatch] = useReducer(reduce, initial, (base) => {
+    const stored = { ...base, ...readPanelSizes(storage) };
+    return startOpen?.assistant ? { ...stored, assistantOpen: true } : stored;
+  });
   useEffect(() => {
     writePanelSizes(storage, layout);
   }, [layout, storage]);
-  const viewportHeight = useViewportHeight();
-  const debuggerMaxHeight = Math.max(
-    PANEL_BOUNDS.debuggerHeight.min,
-    Math.round(viewportHeight * DEBUGGER_MAX_VIEWPORT_SHARE),
-  );
-  // 그리는 높이만 지금 창의 상한으로 자르고 저장하는 높이(사용자가 고른 값)는 두어, 창을 잠깐 줄였다고
-  // 고른 높이를 잃지 않는다.
-  const drawn = useMemo(
-    () =>
-      layout.debuggerHeight <= debuggerMaxHeight
-        ? layout
-        : { ...layout, debuggerHeight: debuggerMaxHeight },
-    [debuggerMaxHeight, layout],
-  );
   return {
-    layout: drawn,
-    debuggerMaxHeight,
+    layout,
     resize: useCallback(
       (panel: SizePanel, value: number) =>
         dispatch({ type: "resize", panel, value }),

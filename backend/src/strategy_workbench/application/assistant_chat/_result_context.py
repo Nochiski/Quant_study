@@ -14,6 +14,11 @@
    사용자가 화면에서 보는 숫자가 그것이다. 결과 숫자를 해석하는 경고(`benchmark.*`, 섹터 제약
    제외)는 그 full 지표가 왜 사용 불가인지, 초과수익을 어떻게 읽어야 하는지를 알려 주므로 가장
    늦게 던다(이슈 #241).
+4. **검증 근거는 시점을 나눈다(US-DM-12).** `validation.current_ledger` 는 조회 시점(`observed_at`)
+   계열 원장의 DSR 근거이고, `validation.selection_snapshots` 는 이 실행의 trial 을 후보로 고를 때
+   굳힌 값이다. PSR 은 저장된 full 지표를 그대로 옮긴다. 현재 원장 근거는 자르지 않고, 선택
+   스냅숏은 월별 수익률·경고·구간 지표·팩터 다음으로(오래된 것부터) 던다. 근거를 읽지 못하면
+   `validation` 이 null 이다.
 
 필드 이름은 JSON 키로만 쓴다. 전략 언어 요약과 달리 모델이 이 키로 문서를 쓰지 않으므로 스키마에서
 생성하지 않는다. 실행 설정은 `RunEnvironment`를 통째로 옮겨 필드가 늘면 따라 늘게 한다.
@@ -33,6 +38,8 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     MetricValue,
 )
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
+
+from .ports.outgoing.backtest_results import ResultValidationFacts
 
 __all__ = [
     "MAX_RESULT_CONTEXT_CHARS",
@@ -64,9 +71,15 @@ _ELLIPSIS = "…"
 
 
 def summarize_backtest_result(
-    result: BacktestRunResult, *, max_chars: int = MAX_RESULT_CONTEXT_CHARS
+    result: BacktestRunResult,
+    *,
+    validation: ResultValidationFacts | None = None,
+    max_chars: int = MAX_RESULT_CONTEXT_CHARS,
 ) -> str:
-    """결과 요약 JSON 문자열. 길이는 언제나 `max_chars` 이하다."""
+    """결과 요약 JSON 문자열. 길이는 언제나 `max_chars` 이하다.
+
+    `validation` 이 None 이면 검증 근거를 읽지 못한 것이다(요약의 `validation` 이 null).
+    """
     manifest = result.manifest
     definitions = {item.metric_id: item for item in result.metric_definitions}
     full_metrics: list[object] = [
@@ -93,6 +106,20 @@ def summarize_backtest_result(
     ]
     factors = _factor_payloads(result)
     strategy = _strategy_payload(result, factors)
+    selections: list[object] = (
+        []
+        if validation is None
+        else [
+            {
+                "experiment_id": item.experiment_id,
+                "selected_at": item.selected_at.isoformat(),
+                "trial_count": item.trial_count,
+                "deflated_sharpe": item.deflated_sharpe,
+                "ledger_representative_sharpe": item.ledger_representative_sharpe,
+            }
+            for item in sorted(validation.selections, key=lambda item: item.selected_at)
+        ]
+    )
 
     payload: dict[str, object] = {
         "run": {
@@ -101,8 +128,8 @@ def summarize_backtest_result(
         },
         "environment": _plain(asdict(manifest.environment)),
         "capital": {
-            "initial_cash": manifest.initial_cash,
-            "annualization_days": manifest.annualization_days,
+            "initial_cash": manifest.run_spec.initial_cash,
+            "annualization_days": manifest.run_spec.annualization_days,
             "benchmark_security_id": manifest.run_spec.benchmark_security_id,
         },
         "strategy": strategy,
@@ -115,6 +142,7 @@ def summarize_backtest_result(
             "fills": len(result.artifacts.fills),
             "closed_trades": len(result.artifacts.trades),
         },
+        "validation": _validation_payload(validation, selections),
     }
 
     # 덜어 낼 목록, `omitted` 키, 덜 항목을 고르는 규칙의 짝. 앞에 있는 것부터 줄인다(모듈
@@ -124,6 +152,7 @@ def summarize_backtest_result(
         ("warnings", warnings, _ordinary_warning),
         ("window_metrics", window_metrics, _last),
         ("factors", factors, _last),
+        ("selection_snapshots", selections, _first),
         ("warnings", warnings, _last),
     )
     while True:
@@ -145,6 +174,45 @@ def summarize_backtest_result(
                 f"section — run_id={manifest.run_id} chars={len(text)} max_chars={max_chars} "
                 f"full_metrics={len(full_metrics)}"
             )
+
+
+def _validation_payload(
+    validation: ResultValidationFacts | None,
+    selections: list[object],
+) -> dict[str, object] | None:
+    """검증 카드와 같은 근거. `selections` 는 상한 때문에 줄어들 수 있어 호출자가 쥔 목록이다."""
+    if validation is None:
+        return None
+    psr = validation.psr
+    evidence = validation.deflated_sharpe
+    return {
+        "psr": None
+        if psr is None
+        else {
+            "value": psr.value,
+            "sample_count": psr.sample_count,
+            "unavailable_reason": None
+            if psr.unavailable_reason is None
+            else psr.unavailable_reason.value,
+        },
+        "current_ledger": {
+            "observed_at": validation.observed_at.isoformat(),
+            "deflated_sharpe": evidence.value,
+            "unavailable_reason": None
+            if evidence.unavailable_reason is None
+            else evidence.unavailable_reason.value,
+            "lineage_id": evidence.lineage_id,
+            "trial_count": evidence.trial_count,
+            "representative_count": evidence.representative_count,
+            "trial_sharpe_variance": evidence.trial_sharpe_variance,
+            "expected_maximum_sharpe": evidence.expected_maximum_sharpe,
+            "session_sharpe": evidence.session_sharpe,
+            "session_standard_error": evidence.session_standard_error,
+            "registry_mixed": evidence.registry_mixed,
+            "unknown_registry_count": evidence.unknown_registry_count,
+        },
+        "selection_snapshots": selections,
+    }
 
 
 def _first(items: list[object]) -> int | None:

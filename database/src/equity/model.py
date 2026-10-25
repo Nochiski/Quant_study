@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.30.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.31.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -319,6 +319,29 @@ RULES_VERSION = "e1.30.0"                # BuildRecord.rules_version 에 실린�
 # e1.30.0: S26 WISE 3표 신설(`consensus_matrix`·`consensus_annual`·`fin_ratio_wise`, 필드 13) ·
 #          `flow_daily` 필드 `flow.private_fund_net_buy` 선언 · `rules_s19.SOURCE_TABLES` 26 → 29.
 #          `dataset_profile` 행이 14 늘고 기존 표의 산출은 그대로다(플랜 `2026-10-22-equity-wise-fields`).
+# ── main 계보 2차(e8400fba 이후 main, #589·#590·#592, 2026-10-20) — 위 브랜치 e1.20.0·e1.21.0 과
+#    **같은 번호가 다른 규칙**이다. 서버는 이 두 판을 지은 적이 없다(배포는 늘 브랜치 계보였다).
+# main e1.20.0: 2026-10-20 자사주 취득 금액을 주식 종류별 class-row 로 나눈다(#589). 보통주 티커는
+#         보통주식분(`aqpln_prc_ostk`)만, 결정일에 상장돼 있던 우선주가 하나인 법인의 우선주
+#         티커는 기타주식분(`aqpln_prc_estk`)만 받는다. 그런 우선주가 없으면 `unlisted_class`,
+#         둘 이상이면 `class_ambiguous`(둘 다 범위 밖)이고, 상장 여부는 `security_span` 구간으로
+#         본다(#590 리뷰 P3-1). 기타주식만 산 공시는 보통주 행이 없다. `corp_event` 의 행·
+#         `amount_krw` 와 `dataset_profile` 의 `event.buyback_amount` 커버가 바뀐다. 같은 판에서
+#         S19·S20 문장의 「E05 행 0」 서술을 지금 원장대로 고치고(#588) E05 에 레지스트리
+#         `event.buyback_announcement` 를 옮겨 단다(I03 은 사업보고서 확정치 축이라 그 팩터의
+#         재료가 아니다).
+# main e1.21.0: 2026-10-20 S19 `table_rows` 축 커버율의 분모에도 `row_filter` 를 건다(#592). 전에는
+#         분자에만 걸려 분모가 창 안 측정 테이블 전 행이었고, `event.buyback_amount` 커버가 다른
+#         사건 유형의 수에 흔들렸다(절단본 40/50 → 40/41). `row_filter` 가 있는 `table_rows` 다섯
+#         필드(`event.buyback_amount`·`capital_raise_amount`·`insider_net_buy`·
+#         `insider_stake_change`·`major_holder_stake`)의 `dataset_profile` `n_denominator`·
+#         `estimated_coverage_pct` 가 바뀐다. 분자·창·S20 판정은 그대로다.
+# e1.31.0: 갈래 병합 2차(main 4859372f ↔ 서버 갈래 fc6c91eb + W 80102a79, 플랜
+#          `2026-10-24-ledger-merge`) — 브랜치 e1.30.0 판과 견줘 빌드 산출이 바뀌는 것은 main 계보
+#          둘이다: ① `corp_event` `treasury_buy` 주식 종류별 class-row(main e1.20.0) ② `dataset_profile`
+#          `table_rows` 커버율 분모의 `row_filter`(main e1.21.0) · 그 evidence 와 S20 문구. 브랜치 쪽 규칙은
+#          그대로 들어온다. 판본이 바뀌어 첫 빌드는 EG5a 가 skip 이므로 같은 입력으로 두 번 지어
+#          재현성을 확인한다(EQUITY_HANDOFF §6).
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은
@@ -361,7 +384,9 @@ FIELD_FREQUENCIES: tuple[str, ...] = ("session", "monthly", "report", "event", "
 #   grid_session  = universe_daily (ticker, date) 격자 셀 분모 — 세션 빈도 필드(가격·유니버스)
 #   grid_security = 격자의 **종목** 분모 — 월·이벤트 빈도 필드(컨센서스·의견)는 일별 격자로 나누면
 #                   구조적으로 낮게 나온다. FIELD_MAP §3 의 "커버 종목 804 / 810" 이 이 축이다
-#   table_rows    = 소유 테이블 행수 분모 — 법인·접수 축(`fin_std`·4B)은 종목 격자가 없다
+#   table_rows    = 소유 테이블 행수 분모 — 법인·접수 축(`fin_std`·4B)은 종목 격자가 없다.
+#                   `row_filter` 가 있으면 그 행만 분모에 든다(#592). 축별 분모의 정본은
+#                   `rules_s19` docstring 「커버 축」이다
 #   static_label  = 차원표 현재값 라벨(캘린더 창)
 COVERAGE_AXES: tuple[str, ...] = ("grid_session", "grid_security", "table_rows", "static_label")
 GRID_AXES: tuple[str, ...] = ("grid_session", "grid_security")
@@ -399,6 +424,7 @@ class FieldProfile:
     coverage_axis: str                 # COVERAGE_AXES
     scope: str = "field_map"           # FIELD_SCOPES
     row_filter: str | None = None      # 값 행을 고르는 SQL 술어 (`consensus_daily` metric 축)
+    # 행 축(table_rows·static_label)에서는 분모도 이 행으로 좁힌다. 격자 축은 분자만 고른다(#592)
     view_name: str | None = None       # 뷰로 노출되는 필드(`price.adj_close` → v_adj_price_fwd)
     coverage_table: str | None = None  # 커버 측정 테이블. None = 소유 테이블
     coverage_columns: tuple[str, ...] = ()   # 비면 `columns`

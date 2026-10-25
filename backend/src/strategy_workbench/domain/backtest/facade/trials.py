@@ -5,14 +5,18 @@ from strategy_workbench.domain.backtest._trial_key import (
 )
 from strategy_workbench.domain.backtest._trial_ledger import (
     BlockedTrialAttempt,
+    ResolvedLineage,
     TrialLedger,
     TrialLedgerEntry,
     TrialPreview,
     TrialPreviewReason,
     TrialRunRole,
     bankrupt,
+    lineage_root,
     preview_trial,
     representative_sharpe,
+    resolve_lineage,
+    span_days,
     summarize_trial_ledger,
 )
 
@@ -20,6 +24,9 @@ __all__ = [
     "TRIAL_KEY_DEFAULTS_VERSION",
     "TRIAL_KEY_ROLES",
     "BlockedTrialAttempt",
+    "ResolvedLineage",
+    "resolve_lineage",
+    "lineage_root",
     "TrialLedger",
     "TrialLedgerEntry",
     "TrialPreview",
@@ -28,6 +35,7 @@ __all__ = [
     "bankrupt",
     "preview_trial",
     "representative_sharpe",
+    "span_days",
     "summarize_trial_ledger",
     "trial_key",
 ]

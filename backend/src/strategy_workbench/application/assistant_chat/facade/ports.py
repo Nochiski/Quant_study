@@ -1,5 +1,7 @@
 from strategy_workbench.application.assistant_chat.ports.outgoing.backtest_results import (
     BacktestResultPort,
+    ResultSelectionSnapshot,
+    ResultValidationFacts,
 )
 from strategy_workbench.application.assistant_chat.ports.outgoing.chat_sessions import (
     ChatSessionNotFoundError,
@@ -12,6 +14,7 @@ from strategy_workbench.application.assistant_chat.ports.outgoing.llm_provider i
 from strategy_workbench.application.assistant_chat.ports.outgoing.provider_profiles import (
     ProviderProfileNotFoundError,
     ProviderProfileRepository,
+    ProviderStorageUnavailableError,
 )
 from strategy_workbench.application.assistant_chat.ports.outgoing.provider_secrets import (
     ProviderSecretMissingError,
@@ -30,6 +33,9 @@ __all__ = [
     "ProviderProfileRepository",
     "ProviderSecretMissingError",
     "ProviderSecretStore",
+    "ProviderStorageUnavailableError",
+    "ResultSelectionSnapshot",
+    "ResultValidationFacts",
     "StrategyCompilerPort",
     "TurnNotFoundError",
 ]

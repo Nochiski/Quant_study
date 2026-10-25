@@ -26,6 +26,10 @@ bootstrap ─> application + adapters
   `backtest_engine`을 import하지 않는다.
 - `application/<use_case>`: 유스케이스와 그 유스케이스가 요구하는 port를 소유한다.
   concrete adapter를 import하지 않는다.
+- domain·application은 numpy(core 의존성)를 순수 배열 계산에만 쓴다. pyarrow·duckdb는 adapter에만
+  둔다. pyarrow는 optional extra `parquet`이라 그 extra 없는 운영 설치에서 import가 깨지고, duckdb는
+  IO다(columnar-tape spec D2). CI backend job의 extra 없는 단계(`Assistant contract tests without extras`)는 dev 그룹으로 pyarrow를 설치하므로 이 경계를
+  잡지 못하고, 아래 `test_forbidden_imports.py`가 막는다.
 - application → application 화살표는 한 유스케이스가 **다른 유스케이스의 outgoing port를
   소비할 때만** 허용하며, port owner는 그 계약을 먼저 정의한 유스케이스다. 현재 선언된 6개는
   `strategy_authoring → strategy_design`, `portfolio_design → strategy_design`,
@@ -39,11 +43,135 @@ bootstrap ─> application + adapters
   도메인 정책을 새로 판단하지 않는다. 도메인 변환 규칙을 어댑터가 다시 구현하지 않는다.
   `document_codec`은 domain의 `UPGRADE_STEPS`를 주석·순서를 보존하는 컨테이너 위에서 실행만
   하며, 결과가 dict 경로와 같은 tree를 내는지는 application이 다시 parse해 검사한다.
+- adapter → adapter 의존은 선언된 공용 책임 재사용에 한정한다: SQLite 저장 어댑터는
+  무의존 `sqlite_store`의 연결·DDL·시간 규칙을, `backtest_engine`은 `engine_portfolio`의
+  엔진 요구사항·목표 변환을 읽는다. 이 두 간선은 도메인 정책을 복제할 근거가 아니다.
+- S03 연구 실행은 `application/signal_research`가 자체 outgoing `SnapshotGuardPort`·
+  `SignalPipelinePort`·`SignalLabelDataPort`를 소유한다. `adapters/outbound/research_snapshot`은
+  기존 S01 검증 CLI를 UTF-8 subprocess로 연결하고, `adapters/outbound/signal_pipeline`은
+  `application/portfolio_design` facade를 재사용해 기존 raw/factor pipeline 결과를 변환한다.
+  `research_snapshot`은 현재 로드된 `strategy_workbench`·`backtest_engine`의 module origin과
+  package search path를 S01 검증 대상 `backend/src`에 묶는다. 소스 checkout/editable과
+  symlink resolve 일치를 지원하며 별도 wheel 위치는 unsupported로 차단한다. 메모리 변조
+  attestation은 이 출처 검증의 범위 밖이다.
+  이 bridge가 기존 서비스 호출을 담당하며 새 application에서 다른 application 서비스나
+  concrete adapter를 import하지 않는다. `equity_duckdb`의 연구 label adapter는 자체 노드의 기존
+  가격·달력·bar 조회와 원래 security_span을 재사용하며 연구 port와 `domain/signal_evaluation`에
+  의존한다. 원장 `CellKind.MASKED` 키를 label port의 `adjustment_gaps`로 전달하며,
+  개별 진입~만기 구간의 `adjustment_gap` 판정은 순수 evaluator가 소유한다.
+  보존 검증·팩터 식·가격/상장 계약과 원장 가림 술어를 복제하거나 완화하지 않는다.
+  `adapters/inbound/signal_research_cli`는 요청 해석·JSON 내보내기만 맡고 `bootstrap/signal_research`가
+  별도 CLI composition root로 구체 구현을 조립한다. 기존 HTTP bootstrap·API/UI는 변경하지 않는다.
+  상세 계약은 `docs/planning/research-to-trading/S03-runner.md`다.
+- S05 오프라인 실행은 `domain/order_execution`(정수 수량·KRW 값/누적 사실 전이·대사),
+  `application/offline_execution`(자체 `BrokerPort`·`LedgerPort`, 전송·복구 제어),
+  `adapters/outbound/execution_sqlite`(전용 의도 원장)·`adapters/outbound/fake_broker`(네트워크 없는
+  장애 fixture)가 소유한다. `execution_sqlite → sqlite_store`는 위 공용 연결·DDL 규칙의 재사용이며
+  실행 DB의 스키마·owner는 execution_sqlite에 남는다. application은 두 concrete adapter를
+  import하지 않는다. fake의 증분 `fill`은 저장 전 `domain/order_execution`의 `classify_event`를
+  재사용하며, 지정가 위반을 포함한 검증 실패 시 주문·revision·계좌를 바꾸지 않는다.
+  이 slice의 조립은 호출자/테스트가 명시적으로 수행한다. 기존 bootstrap·HTTP에는
+  연결하지 않는다. 상세 실행 계약은 `docs/planning/research-to-trading/S05-offline-execution.md`다.
+- S06 키움 모의 연결은 `adapters/outbound/kiwoom_mock`이 S05 `BrokerPort`를 구현한다. S05 포트·도메인·
+  원장·서비스는 바꾸지 않는다. 키움에 없는 의도 ID·revision은 이 노드의 전용 참조 원장이 소유하고, 누적
+  사실 전이 판정은 `domain/order_execution`의 `classify_event`를 그대로 쓴다. `kiwoom_mock → sqlite_store`는
+  위 공용 연결·DDL 규칙의 재사용이다. HTTP는 표준 라이브러리이며 주소는 모의 도메인 상수 하나다. 키 저장과
+  bootstrap·HTTP 연결은 이 노드의 범위가 아니다. 상세 계약은
+  `docs/planning/research-to-trading/S06-kiwoom-contract.md`다.
+- S06 ②-2의 키움 모의 연결 설정은 `application/broker_connection`이 자기 outgoing 포트
+  (`BrokerCredentialStore`·`BrokerConnectionProbe`)로 소유한다. `secrets_local`이 저장 포트를,
+  `kiwoom_mock`이 연결 확인 포트를 구현하고, HTTP는 `/api/v1/broker-connections/kiwoom-mock`으로 그대로
+  옮긴다. 이 노드는 `application.offline_execution`과 서로 import하지 않는다.
+- S07 주간 리밸런싱 주문안은 `domain/rebalance`(순위·보유·현금·기준가격 → 목표 주식 수, 순수
+  계산)와 `application/weekly_rebalance`(자체 outgoing `SignalSource`·`AccountSource`·`PlanStore`)가
+  소유한다. `adapters/outbound/scope_signal`이 모델 DB의 현재 빌드(장 마감·주말 보강판)에서 순위와 신호일 종가를
+  읽고(pyarrow는 이 어댑터 안에만), `adapters/outbound/rebalance_files`가 주문안·승인을 한 번만 쓴다.
+  `adapters/inbound/weekly_rebalance_cli`는 입력 해석·출력만 맡고, 별도 composition root
+  `bootstrap/weekly_rebalance`(`python -m strategy_workbench.bootstrap.weekly_rebalance`)가 계좌 읽기를
+  S05 실행 원장 대사와 키움 모의 조회로 조립한다. 이 유스케이스는 S05·S06 노드를 import하지 않는다.
+  주문은 자체 outgoing `OrderGateway`·`MarketSource`·`ExecutionLog`로만 낸다. bootstrap의
+  `OfflineOrderGateway`가 S05 `OfflineExecutionService`를 감싸고(새 application → application 화살표
+  없음), `kiwoom_mock`의 `KiwoomMarket`이 주문 어댑터와 같은 접속으로 호가·현재가를 답한다. 주문지
+  알림은 자체 outgoing `NoticeSender`로만 보내고 `adapters/outbound/telegram_notice`(표준 라이브러리,
+  주소는 텔레그램 Bot API 하나)가 구현한다. 원장 고치기는 자체 outgoing `OrderLedgerRepair`로만 하고,
+  bootstrap의 `KiwoomLedgerRepair`가 키움 참조 원장과 S05 `resume`을 감싼다(`OfflineOrderGateway`와 같은
+  방식, 새 application → application 화살표 없음). 상세는
+  `docs/planning/research-to-trading/S07-weekly-rebalance.md`다.
+- 완료 run의 계좌 보고서는 `domain/backtest`의 순수 projection·전용
+  `facade/account_report.py`가 금액·상태·초기자본 기준 해석을 소유한다.
+  `application/backtest_run`은 `self.result(run_id)`의 완료·해시·역직렬화 검증을 한 번 재사용한 뒤
+  projection을 호출하고 application facade를 통해 응답 타입을 공개한다. HTTP는 이를 별도
+  `GET /api/v1/backtests/{run_id}/account-report`로 제공하며 기존 결과 오류를 보존한다.
+  adapter·frontend는 금액을 다시 계산하지 않으며 assistant용 오류→None 포트를 재사용하지 않는다.
+  기존 결과 저장·엔진·일반 analytics·시도 원장은 이 조회 책임에 포함하지 않는다.
+- 완료 run의 보유 종목·매매 조회는 계좌 보고서와 같은 길이다: `domain/backtest`의 순수 투영(`_holdings.py`,
+  전용 `facade/holdings.py`)이 보유·매매 구분·비중을 소유하고, `application/backtest_run`이 `self.result(run_id)`를
+  한 번 검증해 읽은 뒤 투영을 부른다. 종목 이름은 이미 있는 `application.backtest_run → application.portfolio_design`
+  화살표로 `SecurityDirectoryPort.describe_securities`를 소비하며(새 application 화살표 없음), bootstrap 이 equity
+  어댑터를 `security_directory`로 주입한다. 주입이 없으면 이름 칸이 비고 id 만 보인다(이름을 지어내지 않는다).
+- 완료 run의 검증 보고서는 같은 `application/backtest_run`이 `self.result(run_id)`를 한 번 검증한 뒤
+  manifest의 실행 입력·저장 출처로 기존 `_lineage`·`trial_ledger`를 재사용한다. 인라인 출처는 기존
+  `_resolve`와 동등하게 provenance를 None으로 넘겨 명시한 계열을 보존하며, 은퇴 리비전을 재접수
+  검사하지 않는다. `domain/experiment`의 `run_deflated_sharpe_evidence`가 DSR 값·사유·집계 근거를
+  함께 판정하며 기존 scalar·후보 선택도 이 판정을 재사용한다. application이 조회 시각을 주입하고,
+  HTTP의 별도 읽기 전용 `GET /api/v1/backtests/{run_id}/validation-report`가 그대로 노출한다.
+  저장된 FULL PSR은 재계산하지 않으며 결과·시도 수·선택 스냅숏을 갱신하지 않는다.
+- 완료 run의 팩터 회귀(V4-05)도 같은 `application/backtest_run`이 `self.result(run_id)`를 한 번
+  검증한 뒤, 이미 주입된 `PortfolioDesignService.run_pipeline`을 run의 실행 설정으로 다시 돌려 유니버스
+  단면을 읽는다. 새 port·application 화살표는 없다. 모멘텀·가치 기본 graph를 레지스트리에서 읽으려고
+  facade `DEPENDS_ON`에 `domain.factor`를 더했고, 레지스트리는 bootstrap이 주입한다. 팩터 수익률·회귀
+  규칙은 `domain/analytics`가 소유하며 HTTP `GET /api/v1/backtests/{run_id}/factor-regression`이 그대로
+  노출한다.
+- 백테스트 run 계산을 어디서 돌릴지(run-worker spec D10·D13)는 `application/backtest_run`의
+  outgoing `RunExecutionPort`(`ports/outgoing/run_execution.py`)가 계약이다. 계산은 같은 노드의
+  `RunComputation`(`_computation.py`) 하나이고, 서비스는 상태 전이·완료와 취소의 선형화·저장만 한다.
+  `adapters/outbound/run_thread`는 그 계산을 같은 프로세스의 데몬 스레드에서 부르고 GC 구간
+  (`_gc_policy`)을 감싼다. `application.backtest_run` facade에만 의존한다. 어느 전송을 쓸지는
+  bootstrap이 `BacktestRunService(run_execution=...)`로 정한다.
+  `adapters/outbound/run_worker_process`는 같은 포트를 worker 프로세스로 구현한다. IPC 프로토콜 v3
+  (`_protocol.py`)의 인코딩·디코딩, 부모 쪽 감독(`_execution.py`), worker 쪽 줄 주고받기·진행 상한·코드
+  지문과 지문 뒤 첫 프로젝트 모듈 import 를 거절하는 commit 가드(`_worker.py`)를 이 노드 하나가 소유하고 `application.backtest_run`·`domain.backtest` facade에만
+  의존한다. 예비 worker(spec D7: 늘 하나, 쓰면 곧바로 다시 채움, 연속 3회 실패면 멈추고 run 이 직접 띄운 worker 가
+  맞게 부팅하면 다시 채움)도 같은 노드의
+  `ProcessRunExecution`이 소유한다 — 서비스는 예비를 모르고 `start`·`shutdown`과 메모리 가드의 `memory`·`set_memory_hold`만
+  부른다. 메모리 가드(spec D8)의 판정 규칙과 예약치 계수는 `application/backtest_run/_memory_guard.py`가, 가용 메모리·RSS 읽기는
+  같은 노드의 `_memory.py`(Windows `ctypes`, Linux `/proc`)가 소유한다. domain·application은 OS 메모리를 읽지 않는다. worker 쪽
+  composition root는 `bootstrap/run_worker`(`python -m
+  strategy_workbench.bootstrap.run_worker`)다. 부모가 해석해 `boot` 줄에 실은 설정만 쓰고, 서버 조립 함수
+  (`bootstrap` facade의 `build_equity_data`·`build_portfolio_design`·`build_run_versions`)를 재사용하며,
+  `BacktestRunService`는 만들지 않는다. 실행 방식 설정(`STRATEGY_WORKBENCH_RUN_ISOLATION`)은
+  `bootstrap/_http.py`가 읽고 허용 값(`RUN_ISOLATIONS`)과 전송 선택은 `bootstrap/_container.py`가 한다.
+  run 하나의 종결(spec D5)은 그 run 의 감독 스레드 하나가 발행한다. worker 가 끝난 뒤 남긴 staging·결과
+  디렉터리는 `artifact_local`의 `discard_unfinished`(bootstrap 이 주입)가 지우고, 부모 사망 감지는
+  Windows Job Object(`_job_object.py`)와 worker 의 stdin EOF 감시가 맡는다. 판본 대조는 서버가 부팅 때
+  `build_run_versions`로 한 번 계산한 묶음과 worker 의 `ready`를 비교한다(D6). e2e hold 판정은
+  `bootstrap`의 `_TrialHold.release` 하나를 스레드 전송(엔진 앞)과 프로세스 전송(`engine_ready` 왕복,
+  D11)이 함께 부른다.
+- V6-01 모의 사전등록은 `domain/backtest`의 동결 등록·필수 기준 비교와
+  `application/holdout_registration`의 자체 source-pin·simulation-executor·ledger 포트가 소유한다.
+  다른 application 서비스를 직접 import하지 않는다. 기존 `research_sqlite`가 schema v9의
+  별도 simulation 등록·claim·결과 테이블과 commit을 맡는다. commit 성공 반환 뒤에만 executor를
+  호출하며 실제 원천 adapter·HTTP·bootstrap 연결은 없다. 기존 trial/N·blocked-attempt를 쓰지 않는다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
+- 연속 계좌 평가는 `application/continuous_account`가 자체 실험 출처·파이프라인·실행·이력
+  포트를 소유하고, 기존 `application/backtest_run`의 outgoing 데이터 포트만 재사용한다.
+  `continuous_pipeline` outbound bridge가 기존 실험·저장 리비전·선정 파이프라인 facade를
+  연결하며 application끼리 서비스를 import하지 않는다. 이 bridge가 `engine_portfolio`의
+  요구사항 판정을 재사용하는 adapter 간선과 `continuous_account_sqlite → sqlite_store`의
+  공용 연결 간선을 허용한다. 새로운 선정·회계 정책을 복제하는 근거는 아니다.
+  별도 `backtest_engine/_continuous.py`는 같은 노드의 `_run_kernel`·`_artifacts`와 기존
+  analytics owner를 재사용한다. 혼합 후보를 단일 전략 `BacktestRunResult`로 위장하지 않는다.
+  별도 SQLite 이력의 단일 running claim·요청 UUID 멱등성·시작 시 interrupted 처리는
+  단일 서버 프로세스 배포 계약이며 기존 실험 worker·trial key·계열 원장을 변경하지 않는다.
 - `backend/src/backtest_engine`/`backend/rust/backtest_core`는 실행 커널이다. 커널을 import하는
   노드는 둘이다: `adapters/outbound/backtest_engine`(실행·벤치마크 곡선)과
   `adapters/outbound/engine_portfolio`(엔진 요구사항·능력 판정, 목표 행동 변환). 그 밖의 노드에서
   커널을 import하지 않는다. 이 경계를 막는 architecture 테스트는 아직 없어 리뷰로 지킨다.
+- 백테스트 측정 세션 계약은 `application/backtest_run`의 `BacktestDataset.sessions`가 소유한다.
+  기본값 없는 keyword-only 입력이며 equity adapter가 실제 공통 거래일 달력을 답한다.
+  dataset은 오름차순·중복 없음·측정 bar의 달력 포함을 검증하고 `backtest_engine` adapter는
+  bar가 전혀 없는 거래일도 빈 세션으로 커널에 전달한다. 선택 종목·벤치마크 bar의 합집합으로
+  달력을 재구성하지 않아 DAY 만료와 벤치마크 선택에 독립적인 실행 일정을 유지한다.
 
 ## 노드와 facade
 
@@ -64,7 +192,8 @@ bootstrap ─> application + adapters
 
 - 조회 계약 SoT는 `application/equity_workspace/ports/outgoing/equity_data.py`다. raw PIT
   관측 계약은 `application/portfolio_design/ports/outgoing/raw_observations.py`가 별도로
-  소유하며, 두 포트는 같은 셀에 같은 값·공개일을 답해야 한다.
+  소유하며, 두 포트는 같은 셀에 같은 값·공개일을 답해야 한다. 같은 디렉터리의 열 포트
+  `raw_panel.py`(`RawPanel`)는 이 원시 계약을 열로 담을 뿐 정본이 아니다(columnar-tape T2-01).
 - 구현은 둘이다. `adapters/outbound/equity_mock`은 테스트·e2e용 결정적 fixture이며 PIT
   available-date, revision, recommended lag, 실제 0/결측/미수집/coverage gap/원장이 가린 셀(masked)을
   구분한다.
@@ -100,7 +229,7 @@ import는 절대·상대 표기를 가리지 않는다. 게이트가 파일 위�
 
 같은 `backend/tests/architecture/` 폴더의 게이트가 셋 더 있다.
 
-- `test_forbidden_imports.py`: domain·application은 pydantic을 import하지 않고, 누구도 PyYAML을
+- `test_forbidden_imports.py`: domain·application은 pydantic·pyarrow·duckdb를 import하지 않고, 누구도 PyYAML을
   import하지 않으며(YAML 1.2 파서는 ruamel.yaml 하나), 공급자 SDK(`anthropic`·`openai`)는 자기
   outbound adapter 안에만 있다. AST의 `import` 문만 보므로 문자열 import는 리뷰로 확인한다.
 - `test_run_environment_ownership.py`: 실행 설정은 `RunEnvironment` 하나가 소유한다. `src`

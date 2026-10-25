@@ -6,7 +6,8 @@
 `domain.factor`는 팩터 카탈로그 타입에 쓴다. `domain.backtest`·`domain.analytics`는 결과 설명
 세션이 `BacktestResultPort`로 받은 실행 결과의 값 타입이다(결과 설명 spec R2). 결과를 읽는 쪽은
 bootstrap이 감싼 포트라 `application.backtest_run`에는 의존하지 않는다. 턴 문맥의 실행
-설정(`RunEnvironment`)도 `domain.backtest` 타입이다.
+설정(`RunEnvironment`)도 `domain.backtest` 타입이다. `domain.experiment`는 결과 검증 근거의
+DSR 값 타입(`DeflatedSharpeEvidence`)이다(US-DM-12).
 """
 
 DEPENDS_ON: tuple[str, ...] = (
@@ -14,6 +15,7 @@ DEPENDS_ON: tuple[str, ...] = (
     "domain.analytics",
     "domain.assistant",
     "domain.backtest",
+    "domain.experiment",
     "domain.factor",
     "domain.strategy",
 )

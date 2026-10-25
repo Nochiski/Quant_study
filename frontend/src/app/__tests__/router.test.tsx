@@ -14,6 +14,7 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   it,
@@ -21,6 +22,7 @@ import {
 } from "vitest";
 
 import { App } from "../app";
+import type { ResearchCatalog } from "../../shared/api";
 
 const API = "http://localhost:8000";
 
@@ -103,6 +105,11 @@ const backtestSummary = ({
     revision: saved ? 2 : null,
     source_hash: saved ? "b".repeat(64) : "c".repeat(64),
   },
+  // 완료 run 만 머리 지표가 있다(재설계 결정 1). 진행 중 run 은 null 이다.
+  headline:
+    status === "completed"
+      ? { total_return: 0.1234, sharpe: 1.5, max_drawdown: -0.0812 }
+      : null,
 });
 
 const trialLedger = (trialCount: number) => ({
@@ -164,6 +171,34 @@ const openTrialLedger = async (user: ReturnType<typeof userEvent.setup>) => {
 };
 
 const server = setupServer(
+  // 실행 설정 유니버스 칸·요약 띠가 읽는 연결된 시장 데이터의 유니버스 목록.
+  http.get(`${API}/api/v1/equity/universes`, () =>
+    HttpResponse.json([
+      {
+        universe_id: "krx.common-stock",
+        market: "KRX",
+        label: "KRX 보통주",
+        description: "KRX 상장 보통주입니다. 기준일마다 그날 상장돼 있던 종목으로 후보를 다시 고릅니다.",
+      },
+    ]),
+  ),
+  http.get(`${API}/api/v1/experiments`, () =>
+    HttpResponse.json({
+      items: [],
+      next_after: null,
+      slots: { running: 0, total: 2 },
+      max_priority: 10,
+    }),
+  ),
+  http.get(`${API}/api/v1/strategies/:strategyId/trials`, ({ params }) =>
+    HttpResponse.json({
+      lineage_id: params.strategyId,
+      merged_lineage_ids: [],
+      trial_count: 0,
+      trials: [],
+      blocked: [],
+    }),
+  ),
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
     HttpResponse.json(
       { detail: { code: "strategy.draft.not_found" } },
@@ -345,6 +380,9 @@ const server = setupServer(
       strategy_source: null,
     }),
   ),
+  http.get(`${API}/api/v1/backtests/:runId/account-report`, () =>
+    HttpResponse.json({ detail: { code: "backtest.result.unreadable" } }, { status: 410 }),
+  ),
   http.get(`${API}/api/v1/backtests/:runId/result`, () => HttpResponse.error()),
   http.get(`${API}/api/v1/equity/catalog`, () =>
     HttpResponse.json({
@@ -353,8 +391,12 @@ const server = setupServer(
       page_size: 1,
       page_count: 0,
       fields: [],
-      facets: {},
-    }),
+      facets: { dataset_ids: [], frequencies: [], units: [] },
+      snapshot: {
+        snapshot_id: "snap", schema_version: "1", source: "test",
+        built_at: "2026-09-05T00:00:00Z", dataset_revisions: [], point_in_time: true,
+      },
+    } satisfies ResearchCatalog),
   ),
   http.get(`${API}/api/v1/strategies/template`, () =>
     HttpResponse.json(spec(0, "새 팩터 전략")),
@@ -374,11 +416,27 @@ const server = setupServer(
   ),
 );
 
+const scrollIntoView = vi.fn();
+let previousScrollIntoView: PropertyDescriptor | undefined;
+
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeEach(() => {
+  // jsdom이 제공하지 않는 화면 이동 API를 브라우저 동작 검증용으로 보완한다.
+  previousScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
+  scrollIntoView.mockClear();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: scrollIntoView,
+  });
+});
 afterEach(() => {
   cleanup();
   server.resetHandlers();
   vi.unstubAllGlobals();
+  if (previousScrollIntoView)
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", previousScrollIntoView);
+  else
+    delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
 });
 afterAll(() => server.close());
 
@@ -423,6 +481,8 @@ describe("App Shell routes", () => {
     await user.click(button);
     expect(shell).not.toHaveClass("app-shell--collapsed");
     expect(button).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    expect(button).toHaveFocus();
   });
 
   it("opens a saved revision directly and restores the typed view from the URL", async () => {
@@ -491,13 +551,108 @@ describe("App Shell routes", () => {
     ).toBeInTheDocument();
   });
 
-  it("redirects the bare root to the new strategy route", async () => {
+  it("opens the research home at the bare root and guides a first strategy when none exist", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategies`, () =>
+        HttpResponse.json({ items: [], total: 0, offset: 0, limit: 10 }),
+      ),
+    );
     const history = mount("/");
-    await screen.findByRole("heading", { name: "새 전략" });
-    expect(history.location.pathname).toBe("/research/strategies/new");
-    expect(screen.queryByRole("tab", { name: "JSON" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Form" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "그래프" })).toBeEnabled();
+    await screen.findByText("첫 전략을 만들어 보세요");
+    expect(history.location.pathname).toBe("/");
+    expect(screen.getByRole("link", { name: "새 전략 만들기" })).toHaveAttribute(
+      "href",
+      "/research/strategies/new?guide=true",
+    );
+    const account = screen.getByRole("region", { name: /계좌 손익/u });
+    expect(account).toHaveTextContent("미연결");
+    expect(account.textContent).not.toMatch(/\d/u);
+  });
+
+  it("lists waiting candidates, failed runs and unsaved drafts on the research home", async () => {
+    window.localStorage.setItem(
+      "strategy-workbench.draft.new",
+      JSON.stringify({
+        key: "new",
+        format: "yaml",
+        source: "title: 초안",
+        strategyId: null,
+        baseRevision: null,
+        baseSpecHash: null,
+        schemaVersion: "1.2",
+        savedAt: "2026-09-06T00:00:00Z",
+      }),
+    );
+    const failed = backtestSummary({ runId: "run-failed", saved: true, status: "failed" });
+    server.use(
+      http.get(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              ...failed,
+              run: {
+                ...failed.run,
+                stage: "data",
+                error: "boom",
+                error_code: "backtest.run.no_positions",
+              },
+            },
+            backtestSummary({ runId: "run-done", saved: true }),
+          ],
+          total: 2,
+          offset: 0,
+          limit: 20,
+        }),
+      ),
+      http.get(`${API}/api/v1/experiments`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              record: {
+                experiment_id: "exp-waiting-1",
+                created_at: "2026-09-05T00:00:00Z",
+                run: { strategy_source: { kind: "saved_revision", strategy_id: "s1", revision: 2 } },
+              },
+              status: "completed",
+              finished: true,
+              settled: true,
+              selections: [],
+              trial_counts: { completed: 4 },
+            },
+          ],
+          next_after: null,
+          slots: { running: 1, total: 4 },
+          max_priority: 10,
+        }),
+      ),
+    );
+    try {
+      mount("/");
+      const todo = await screen.findByRole("region", { name: "오늘 이어서 할 일" });
+      expect(await within(todo).findByText("후보 선택 대기")).toBeInTheDocument();
+      expect(within(todo).getByRole("link", { name: "후보 보기" })).toHaveAttribute(
+        "href",
+        "/research/experiments/exp-waiting-1#candidate",
+      );
+      expect(await within(todo).findByText(/s1 · v2 백테스트가 .* 단계에서 실패했어요/u)).toBeInTheDocument();
+      expect(within(todo).getByRole("link", { name: "원인 보기" })).toHaveAttribute(
+        "href",
+        "/research/backtests/run-failed",
+      );
+      expect(within(todo).getByText("저장 안 됨")).toBeInTheDocument();
+      expect(within(todo).getByRole("link", { name: "이어서 편집" })).toHaveAttribute(
+        "href",
+        "/research/strategies/new",
+      );
+      expect(screen.getByText("동시 실행 슬롯 1 / 4", { exact: false })).toBeInTheDocument();
+      const results = screen.getByRole("region", { name: "최근 결과" });
+      await waitFor(() => expect(results).toHaveTextContent("12.34%"));
+      expect(screen.getByRole("region", { name: "작업 기록" })).toHaveTextContent(
+        "주문·체결 운영 로그가 아닙니다",
+      );
+    } finally {
+      window.localStorage.removeItem("strategy-workbench.draft.new");
+    }
   });
 
   it("moves legacy bookmarks to a clean YAML draft route", async () => {
@@ -572,7 +727,7 @@ describe("App Shell routes", () => {
     const user = userEvent.setup();
     mount("/research/strategies");
     expect(
-      await screen.findByRole("heading", { name: "전략 이력" }),
+      await screen.findByRole("heading", { name: "전략 세션" }),
     ).toBeInTheDocument();
     expect(await screen.findByText("Alpha strategy")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "최신본 열기" })).toHaveAttribute(
@@ -596,6 +751,88 @@ describe("App Shell routes", () => {
     expect(
       within(revisions).getAllByRole("link", { name: "Diff" })[0],
     ).toHaveAttribute("href", expect.stringContaining("compare=true"));
+  });
+
+  it("shows each strategy's latest result, trial count and waiting experiments in the session list", async () => {
+    const user = userEvent.setup();
+    const saved = (strategyId: string, status: "completed" | "failed") => {
+      const summary = backtestSummary({ runId: `run-${strategyId}`, saved: true, status });
+      return {
+        ...summary,
+        run: { ...summary.run, stage: status === "failed" ? "data" : "completed" },
+        strategy_provenance: { ...summary.strategy_provenance, strategy_id: strategyId },
+      };
+    };
+    server.use(
+      http.get(`${API}/api/v1/strategies`, () =>
+        HttpResponse.json({
+          items: ["good", "bad"].map((strategyId) => ({
+            strategy_id: strategyId,
+            latest_revision: 2,
+            requires_upgrade: false,
+            title: `${strategyId} strategy`,
+            spec_hash: "a".repeat(64),
+            updated_at: "2026-09-04T00:00:00Z",
+          })),
+          total: 2,
+          offset: 0,
+          limit: 20,
+        }),
+      ),
+      http.get(`${API}/api/v1/backtests`, ({ request }) => {
+        const strategyId = new URL(request.url).searchParams.get("strategy_id") ?? "good";
+        return HttpResponse.json({
+          items: [saved(strategyId, strategyId === "bad" ? "failed" : "completed")],
+          total: 1,
+          offset: 0,
+          limit: 1,
+        });
+      }),
+      http.get(`${API}/api/v1/strategies/:strategyId/trials`, ({ params }) =>
+        HttpResponse.json({
+          lineage_id: params.strategyId,
+          merged_lineage_ids: [],
+          trial_count: params.strategyId === "good" ? 3 : 1,
+          trials: [],
+          blocked: [],
+        }),
+      ),
+      http.get(`${API}/api/v1/experiments`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              record: {
+                experiment_id: "exp-done",
+                created_at: "2026-09-05T00:00:00Z",
+                run: { strategy_source: { kind: "saved_revision", strategy_id: "good", revision: 2 } },
+              },
+              status: "completed",
+              finished: true,
+              settled: true,
+              selections: [],
+              trial_counts: { completed: 4 },
+            },
+          ],
+          next_after: null,
+          slots: { running: 0, total: 2 },
+          max_priority: 10,
+        }),
+      ),
+    );
+    mount("/research/strategies");
+    const good = (await screen.findByRole("link", { name: "good strategy" })).closest("tr")!;
+    expect(screen.getByRole("link", { name: "good strategy" })).toHaveAttribute(
+      "href",
+      "/research/strategies/good",
+    );
+    await waitFor(() => expect(good).toHaveTextContent("12.34%"));
+    expect(within(good).getByText("3")).toBeInTheDocument();
+    expect(within(good).getByText("후보 선택 대기 1")).toBeInTheDocument();
+    const bad = screen.getByRole("link", { name: "bad strategy" }).closest("tr")!;
+    expect(await within(bad).findByText("실패")).toBeInTheDocument();
+    expect(within(bad).getByText(/단계에서 실패/)).toBeInTheDocument();
+    await user.click(screen.getByText("계열 시도 수가 무엇인가요?"));
+    expect(screen.getByText(/DSR로 보정할 때 이 수를 씁니다/)).toBeVisible();
   });
 
   it("marks frozen schema 1.0 strategies and revisions in the history lists", async () => {
@@ -940,6 +1177,11 @@ describe("App Shell routes", () => {
     expect(screen.getByText("Inline draft")).toBeInTheDocument();
     expect(screen.getByText("저장 revision")).toBeInTheDocument();
     expect(screen.getByText("bbbbbbbbbbbb")).toBeInTheDocument();
+    // 결과 칸: 완료 run 은 총수익률·샤프·최대 낙폭을 부호와 함께, 진행 중 run 은 "—"(RD-06-A).
+    const savedRow = screen.getByText("run-saved").closest("tr")!;
+    expect(savedRow).toHaveTextContent("총수익률상승 +12.34%");
+    expect(savedRow).toHaveTextContent("샤프1.50");
+    expect(savedRow).toHaveTextContent("최대 낙폭하락 −8.12%");
     expect(screen.getByText("cccccccccccc")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "s1 · v2" })).toHaveAttribute(
       "href",
@@ -1124,11 +1366,11 @@ describe("App Shell routes", () => {
       }),
     );
     mount("/research/backtests");
-    expect(await screen.findByText("running")).toBeInTheDocument();
+    expect(await screen.findByText("실행 중")).toBeInTheDocument();
     await waitFor(() => expect(requests).toBeGreaterThanOrEqual(2), {
       timeout: 2_500,
     });
-    expect((await screen.findAllByText("completed")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("완료")).length).toBeGreaterThan(0);
     const terminalRequestCount = requests;
     await new Promise((resolve) => setTimeout(resolve, 1_200));
     expect(requests).toBe(terminalRequestCount);
@@ -1178,7 +1420,7 @@ describe("App Shell routes", () => {
     mount("/research/backtests/run-trial");
     expect(
       await screen.findByRole("status", { name: "실행 상태" }),
-    ).toHaveTextContent("completed");
+    ).toHaveTextContent("완료");
     expect(
       screen.queryByRole("link", { name: "이 실행으로 실험 만들기" }),
     ).toBeNull();
@@ -1206,7 +1448,7 @@ describe("App Shell routes", () => {
       await screen.findByRole("alert", { name: "실행 오류" }),
     ).toHaveTextContent("malformed security_id");
     expect(screen.getByRole("status", { name: "실행 상태" })).toHaveTextContent(
-      "failed",
+      "실패",
     );
   });
 
@@ -1238,7 +1480,7 @@ describe("App Shell routes", () => {
       alert.textContent?.indexOf("universe_id=") ?? -1,
     );
     expect(screen.getByRole("status", { name: "실행 진행" })).toHaveTextContent(
-      "tape · 2%",
+      "전략 목표 계산 · 2%",
     );
   });
 
@@ -1267,7 +1509,7 @@ describe("App Shell routes", () => {
     expect(alert).toHaveTextContent("유니버스 ID 와 데이터 기간을 확인하세요");
     expect(screen.queryByRole("alert", { name: "실행 오류" })).toBeNull();
     expect(screen.getByRole("status", { name: "실행 상태" })).toHaveTextContent(
-      "cancelled",
+      "취소됨",
     );
   });
 
@@ -1303,7 +1545,10 @@ describe("App Shell routes", () => {
     expect(row).toHaveTextContent(
       "실행 오류: 세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식).",
     );
-    const reason = within(row).getByRole("group");
+    // 행에는 접힌 "재현 정보"도 있어 실패 사유 묶음을 이름으로 고른다.
+    const reason = within(row)
+      .getAllByRole("group")
+      .find((group) => group.textContent?.includes("서버 사유"))!;
     expect(reason).toHaveTextContent("서버 사유");
     expect(reason).not.toHaveAttribute("open");
     expect(
@@ -1351,6 +1596,20 @@ describe("App Shell routes", () => {
     expect(alert).not.toHaveTextContent("백테스트 결과를 불러올 수 없습니다");
   });
 
+  it("설정의 화면 테마를 고르면 바로 바뀌고 저장된다(RD-11-A)", async () => {
+    const user = userEvent.setup();
+    mount("/settings");
+    const themes = await screen.findByRole("radiogroup", { name: "화면 테마" });
+    expect(within(themes).getByRole("radio", { name: "시스템 설정 따르기 (기본)" })).toBeChecked();
+    await user.click(within(themes).getByRole("radio", { name: "어둡게" }));
+    await waitFor(() => expect(globalThis.document.documentElement.dataset.theme).toBe("dark"));
+    expect(JSON.parse(localStorage.getItem("quant-workbench.theme.v1") ?? "null")).toMatchObject({
+      preference: "dark",
+    });
+    await user.click(within(themes).getByRole("radio", { name: "밝게" }));
+    await waitFor(() => expect(globalThis.document.documentElement.dataset.theme).toBe("light"));
+  });
+
   it("opens the settings route with the AI provider section from the shell", async () => {
     const user = userEvent.setup();
     const history = mount("/research/backtests");
@@ -1374,8 +1633,8 @@ describe("App Shell routes", () => {
     expect(
       await screen.findByRole("heading", { name: "백테스트 실행" }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("link", { name: "전략" }));
-    await screen.findByRole("heading", { name: "전략 이력" });
+    await user.click(screen.getByRole("link", { name: "전략 세션" }));
+    await screen.findByRole("heading", { name: "전략 세션" });
     history.back();
     await waitFor(() =>
       expect(history.location.pathname).toBe("/research/backtests/run-1"),

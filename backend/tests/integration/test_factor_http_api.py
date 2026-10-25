@@ -139,88 +139,6 @@ def test_explain_resolves_numeric_and_group_metadata_inside_the_backend() -> Non
     }
 
 
-def test_factor_preview_is_deterministic_and_returns_research_diagnostics() -> None:
-    client = TestClient(build_http_app())
-    catalog = client.get(
-        "/api/v1/factors/catalog",
-        params={"search": "short.short_balance_ratio"},
-    ).json()
-    graph = catalog["factors"][0]["default_graph"]
-    body = {
-        "graph": graph,
-        "as_of_start": "2024-01-02",
-        "as_of_end": "2024-01-10",
-    }
-
-    first = client.post("/api/v1/factors/preview", json=body)
-    second = client.post("/api/v1/factors/preview", json=body)
-
-    assert first.status_code == 200
-    assert first.json() == second.json()
-    payload = first.json()
-    # The adapter, not the client, names the snapshot; the cache key carries the same id.
-    assert payload["data_snapshot_id"] == _snapshot_id(client)
-    assert payload["cache_key"]["data_snapshot_id"] == payload["data_snapshot_id"]
-    assert payload["analytics"]["coverage"] == 1.0
-    assert payload["analytics"]["information_coefficient"] is not None
-    assert len(payload["cache_key"]["fingerprint"]) == 64
-    assert payload["evaluation"]["values"]
-
-
-def test_invalid_factor_preview_returns_structured_validation() -> None:
-    client = TestClient(build_http_app())
-    response = client.post(
-        "/api/v1/factors/preview",
-        json={
-            "graph": {
-                "nodes": [
-                    {
-                        "node_id": "cycle",
-                        "operator": "negate",
-                        "input_node_id": "cycle",
-                        "kind": "unary",
-                    }
-                ],
-                "output_node_id": "cycle",
-            },
-            "as_of_start": "2024-01-02",
-            "as_of_end": "2024-01-03",
-        },
-    )
-
-    assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "factor.graph.invalid"
-    assert response.json()["detail"]["validation"]["issues"][0]["code"] == "factor.graph.cycle"
-
-
-def test_factor_preview_fails_closed_when_the_expected_snapshot_differs() -> None:
-    client = TestClient(build_http_app())
-    catalog = client.get(
-        "/api/v1/factors/catalog",
-        params={"search": "short.short_balance_ratio"},
-    ).json()
-    body = {
-        "graph": catalog["factors"][0]["default_graph"],
-        "expected_data_snapshot_id": "stale-snapshot-from-an-old-catalog",
-        "as_of_start": "2024-01-02",
-        "as_of_end": "2024-01-10",
-    }
-
-    response = client.post("/api/v1/factors/preview", json=body)
-
-    assert response.status_code == 409
-    detail = response.json()["detail"]
-    assert detail["code"] == "factor.snapshot_mismatch"
-    assert detail["expected_data_snapshot_id"] == "stale-snapshot-from-an-old-catalog"
-    assert detail["actual_data_snapshot_id"] == _snapshot_id(client)
-
-    matching = client.post(
-        "/api/v1/factors/preview",
-        json=body | {"expected_data_snapshot_id": _snapshot_id(client)},
-    )
-    assert matching.status_code == 200
-
-
 def _momentum_graph() -> dict[str, object]:
     graph: dict[str, object] = {
         "nodes": [
@@ -272,3 +190,12 @@ def test_explain_without_a_missing_policy_uses_the_run_default() -> None:
 
     assert omitted.json()["plan"]["missing_policy"] == DEFAULT_MISSING_POLICY.value
     assert omitted.json()["plan"]["plan_hash"] == explicit.json()["plan"]["plan_hash"]
+
+
+def test_retired_factor_preview_does_not_offer_a_second_calculation_path() -> None:
+    client = TestClient(build_http_app())
+    assert client.post("/api/v1/factors/preview", json={}).status_code == 404
+    assert (
+        client.post("/api/v1/factors/validate", json={"graph": _momentum_graph()}).status_code
+        == 200
+    )

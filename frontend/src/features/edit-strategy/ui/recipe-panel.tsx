@@ -235,6 +235,7 @@ export const RecipePanel = ({
           <label>
             {t("recipe.previousInput")}
             <select
+              className="ui-select"
               value={draft.previousInput}
               onChange={(event) =>
                 setPending({ ...draft, previousInput: event.target.value })
@@ -249,12 +250,19 @@ export const RecipePanel = ({
           </label>
         )}
         {catalogs.equityFields === null ? (
-          <p role="status">{t("contract.catalog.loading")}</p>
+          <p role="status">
+            {t(
+              catalogs.equityIncompatible
+                ? "contract.catalog.mismatch"
+                : "contract.catalog.loading",
+            )}
+          </p>
         ) : null}
         {draft.fields.map((value, index) => (
           <label key={index}>
             {t("recipe.field")} {index + 1}
             <select
+              className="ui-select"
               value={value}
               onChange={(event) =>
                 setPending({
@@ -342,7 +350,11 @@ export const RecipePanel = ({
     }))
     .filter((group) => group.entries.length > 0);
   return (
-    <section ref={root} className="recipe" aria-label={t("recipe.title")}>
+    <section
+      ref={root}
+      className="recipe ui-control-touch"
+      aria-label={t("recipe.title")}
+    >
       <header
         className="recipe__toolbar"
         aria-current={selectedPointer === graphPointer ? "true" : undefined}
@@ -354,6 +366,10 @@ export const RecipePanel = ({
         <Button tone="ghost" onClick={onAdvanced}>
           {t("recipe.advanced")}
         </Button>
+        <TransactionFeedbackNote
+          feedback={transactions.feedbackFor(OWNER)}
+          owner={OWNER}
+        />
       </header>
       {recipe.kind === "advanced" ? (
         <p>{t("recipe.nonChain")}</p>
@@ -377,6 +393,7 @@ export const RecipePanel = ({
             </fieldset>
           )}
           {links.length === 0 ? <p>{t("recipe.empty")}</p> : null}
+          {draft?.index === 0 ? picker : null}
           <ol className="recipe__steps">
             {links.map((link, index) => {
               const entry = entryOf(link.pointer);
@@ -493,6 +510,13 @@ export const RecipePanel = ({
                       </Button>
                     </div>
                   </article>
+                  {draft !== null &&
+                  draft.index > 0 &&
+                  (draft.replace
+                    ? draft.index === index
+                    : draft.index === index + 1)
+                    ? picker
+                    : null}
                 </li>
               );
             })}
@@ -511,7 +535,6 @@ export const RecipePanel = ({
               </Button>
             </p>
           )}
-          {picker}
           <OperatorPalette
             groups={palette}
             parameterLabels={(entry) =>
@@ -536,10 +559,7 @@ export const RecipePanel = ({
               {tCode(`recipe.error.${failure.reason}`, failure.reason)}
             </p>
           )}
-          <TransactionFeedbackNote
-            feedback={transactions.feedbackFor(OWNER)}
-            owner={OWNER}
-          />
+
           <Button
             tone="ghost"
             aria-expanded={identifiers}

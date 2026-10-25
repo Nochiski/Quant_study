@@ -50,6 +50,12 @@ export type UseAssistChatOptions = {
    * 422 `assistant.turn_context_mismatch`다(결과 설명 spec R5).
    */
   readContext?: () => TurnContextPayload;
+  /**
+   * 패널이 보이는가. 꺼져 있으면 대화 목록·이력을 조회하지 않고, 새 스트림도 열지 않는다(진행 중 턴의 스트림은
+   * 끝까지 둔다). 상태를 화면 위쪽이 들고 패널이 접히거나 숨는 화면(안내의 AI 탭, 편집기 AI 열)이 쓴다.
+   * 기본은 켬이다.
+   */
+  enabled?: boolean;
 };
 
 /** 보내지 못한 질문을 입력칸으로 되돌리는 지시. `nonce`가 바뀔 때만 복원한다. */
@@ -101,6 +107,7 @@ const sessionTitle = (text: string): string => {
 export const useAssistChat = ({
   documentRef,
   readContext,
+  enabled = true,
 }: UseAssistChatOptions): AssistChat => {
   const queryClient = useQueryClient();
   const [selection, setSelection] = useState<Selection>({ kind: "auto" });
@@ -117,7 +124,7 @@ export const useAssistChat = ({
     emptyAssistantChatState,
   );
 
-  const sessions = useQuery(assistantSessionsQuery(documentRef));
+  const sessions = useQuery({ ...assistantSessionsQuery(documentRef), enabled });
   const list = useMemo(() => sessions.data ?? [], [sessions.data]);
   // 목록은 오래된 대화부터 온다 — 문서를 다시 열면 마지막 대화를 이어 본다.
   const sessionId =
@@ -130,7 +137,7 @@ export const useAssistChat = ({
   // 아직 세션이 없으면 조회하지 않는다. 빈 id는 `enabled: false`인 동안 쓰이지 않는 자리 표시다.
   const history = useQuery({
     ...assistantSessionQuery(sessionId ?? ""),
-    enabled: sessionId !== null,
+    enabled: enabled && sessionId !== null,
   });
 
   /**
@@ -205,7 +212,8 @@ export const useAssistChat = ({
   }, []);
 
   const { status: streamStatus, retry: retryStream } = useAssistantEventStream({
-    target: assistantStreamTarget(state),
+    // 접힌 동안에도 진행 중인 턴의 스트림은 끊지 않는다(B-04 리뷰 P3) — 답이 끝나면 다시 열지 않는다.
+    target: enabled || runningNow !== null ? assistantStreamTarget(state) : null,
     lastSequence: state.lastSequence,
     onEvent,
     onHistory,
@@ -220,7 +228,10 @@ export const useAssistChat = ({
     running === null && watchedTurnId !== null
       ? assistantTurn(state, watchedTurnId)
       : null;
-  const busy = createSession.isPending || startTurn.isPending;
+  // 대화 목록을 읽는 동안 보내면 이어 쓸 대화를 모른 채 새 대화를 만든다. 목록이 올 때까지 보내기·추천 질문을
+  // 막는다(최종 리뷰 3). 꺼진 패널은 목록을 읽지 않으므로 막지 않는다.
+  const busy =
+    createSession.isPending || startTurn.isPending || (enabled && sessions.isPending);
 
   const promptTexts = useMemo(
     () =>

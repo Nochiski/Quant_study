@@ -1,3 +1,9 @@
+import {
+  RUN_STATUS,
+  runStageLabel,
+  runStatusLabel,
+} from "../../../entities/backtest";
+
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, type FormEvent } from "react";
 
@@ -6,9 +12,11 @@ import {
   backtestHistoryQuery,
   RUN_KINDS,
   runKindLabel,
+  RunHeadline,
   type BacktestRunSummary,
   type RunKind,
 } from "../../../entities/backtest";
+import { displayTime } from "../../../shared/lib/display-time";
 import { t } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
 import { Badge, Button, EmptyState } from "../../../shared/ui";
@@ -16,29 +24,6 @@ import "../../../shared/ui/data-list.css";
 
 const ROUTE = "/research/backtests";
 const PAGE_SIZE = 25;
-const TONE = {
-  queued: "info",
-  running: "info",
-  cancel_requested: "warn",
-  cancelled: "warn",
-  failed: "error",
-  completed: "ok",
-} as const;
-
-const displayTime = (value: string): string => {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf())
-    ? value
-    : new Intl.DateTimeFormat(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "UTC",
-        timeZoneName: "short",
-      }).format(parsed);
-};
 
 const lastPageOffset = (total: number): number =>
   total === 0 ? 0 : Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE;
@@ -72,7 +57,7 @@ const StrategyFilter = ({
   return (
     <form className="data-list-page__filter" onSubmit={submit}>
       <label htmlFor={inputId}>{t("history.backtests.filter")}</label>
-      <input
+      <input className="ui-input"
         id={inputId}
         ref={inputRef}
         defaultValue={initial}
@@ -272,7 +257,7 @@ export const BacktestsPage = () => {
                     <th scope="col">{t("history.backtests.kind")}</th>
                     <th scope="col">{t("history.backtests.status")}</th>
                     <th scope="col">{t("history.backtests.strategy")}</th>
-                    <th scope="col">{t("history.backtests.provenance")}</th>
+                    <th scope="col">{t("history.backtests.result")}</th>
                     <th scope="col">{t("history.backtests.time")}</th>
                     <th scope="col">{t("history.actions")}</th>
                   </tr>
@@ -284,7 +269,7 @@ export const BacktestsPage = () => {
                         <code>{item.run.run_id}</code>
                         <br />
                         <span className="data-list-page__hash">
-                          {item.run.stage}
+                          {runStageLabel(item.run.stage)}
                         </span>
                       </td>
                       <td>
@@ -314,8 +299,8 @@ export const BacktestsPage = () => {
                         ) : null}
                       </td>
                       <td>
-                        <Badge tone={TONE[item.run.status]}>
-                          {item.run.status}
+                        <Badge tone={RUN_STATUS[item.run.status].tone}>
+                          {runStatusLabel(item.run.status)}
                         </Badge>
                         <br />
                         {Math.round(item.run.progress * 100)}%
@@ -327,9 +312,14 @@ export const BacktestsPage = () => {
                       </td>
                       <td>
                         <StrategySource summary={item} />
+                        {/* 재현 해시는 목록에서 접어 둔다. 결과 화면의 Manifest 가 전체를 보인다(RD-06-A). */}
+                        <details className="ui-disclosure data-list-page__provenance-details">
+                          <summary>{t("history.backtests.provenance")}</summary>
+                          <Provenance summary={item} />
+                        </details>
                       </td>
                       <td>
-                        <Provenance summary={item} />
+                        <RunHeadline headline={item.headline} />
                       </td>
                       <td>
                         {displayTime(item.run.created_at)}

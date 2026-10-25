@@ -82,6 +82,12 @@ const savedContext = (): StrategyDebuggerContext => ({
 });
 
 const traceResponse = (): StrategyTraceResponse => ({
+  factor_preview: {
+    valid_count: 0,
+    missing_count: 0,
+    missing: "drop",
+    top: [],
+  },
   spec_hash: "spec-hash",
   snapshot_id: "snapshot-v1",
   registry_version: "registry-v1",
@@ -246,6 +252,12 @@ const pagedTraceResponse = (
   const explicitHoldings = request.starting_holdings != null;
   const source = request.strategy_source;
   return {
+    factor_preview: {
+      valid_count: 0,
+      missing_count: 0,
+      missing: "drop",
+      top: [],
+    },
     spec_hash: "spec-hash",
     snapshot_id: "snapshot-v1",
     registry_version: "registry-v1",
@@ -340,6 +352,7 @@ afterEach(() => {
   requests = [];
   server.resetHandlers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 afterAll(() => server.close());
 
@@ -381,7 +394,7 @@ const renderDebugger = (ui: ReactElement) => {
 // 문서가 없습니다."가 함께 뜨면 문서가 문제라고 오진한다.
 describe("StrategyDebugger unavailable reasons", () => {
   it.each([
-    ["environment", "추적은 실행 설정 위에서 돕니다."],
+    ["environment", "미리보기와 추적에는 실행 설정(기간·유니버스)이 필요해요."],
     ["preparing", "현재 문서의 실행 계획과 데이터 계약을 확인하고 있습니다."],
     ["no-factors", "추적할 팩터가 없습니다."],
     ["execution-plan", "현재 FactorGraph 실행 계획을 확정할 수 없어"],
@@ -400,6 +413,57 @@ describe("StrategyDebugger unavailable reasons", () => {
 });
 
 describe("StrategyDebugger", () => {
+  it("좁은 화면의 종목 선택은 결과 탭을 왕복해도 유지한다", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query.includes("719px"), media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn() })));
+    const user = userEvent.setup();
+    renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    const picker = await screen.findByRole("combobox", { name: "비교할 종목" });
+    await user.selectOptions(picker, "sec-b");
+    await user.click(screen.getByRole("tab", { name: "원시 데이터" }));
+    await user.click(screen.getByRole("tab", { name: "연결 추적" }));
+    expect(screen.getByRole("combobox", { name: "비교할 종목" })).toHaveValue("sec-b");
+    expect(screen.getByRole("list", { name: "연결 추적" })).toHaveTextContent("sec-b");
+  });
+
+  it("모바일 출처와 경고를 읽은 뒤 Tab으로 나가면 원래 외부 초점을 유지하며 닫는다", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query.includes("719px"), media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn() })));
+    server.use(http.post(`${API}/api/v1/strategies/debug/trace`, () => HttpResponse.json({ ...traceResponse(), warnings: ["경고 원문 전체를 보존합니다."] })));
+    const user = userEvent.setup();
+    renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    const source = await screen.findByText(/추적 출처/, { selector: "summary" });
+    const warning = await screen.findByText("데이터 경고 1건", { selector: "summary" });
+    await user.click(source);
+    expect(source.closest("details")).toHaveAttribute("open");
+    expect(screen.getByLabelText("추적 재현 정보")).toBeVisible();
+    await user.tab();
+    expect(warning).toHaveFocus();
+    expect(source.closest("details")).not.toHaveAttribute("open");
+    await user.click(warning);
+    expect(screen.getByText("경고 원문 전체를 보존합니다.")).toBeVisible();
+    await user.tab();
+    expect(screen.getByRole("tab", { name: "연결 추적" })).toHaveFocus();
+    expect(warning.closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("데스크톱에서는 열린 출처와 경고를 유지하며 결과 탭을 클릭한다", async () => {
+    server.use(http.post(`${API}/api/v1/strategies/debug/trace`, () => HttpResponse.json({ ...traceResponse(), warnings: ["경고 원문 전체를 보존합니다."] })));
+    const user = userEvent.setup();
+    renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    const source = await screen.findByText(/추적 출처/, { selector: "summary" });
+    const warning = await screen.findByText("데이터 경고 1건", { selector: "summary" });
+    await user.click(source);
+    await user.click(screen.getByRole("tab", { name: "TargetTape" }));
+    expect(screen.getByRole("tab", { name: "TargetTape" })).toHaveAttribute("aria-selected", "true");
+    expect(source.closest("details")).toHaveAttribute("open");
+    await user.click(warning);
+    await user.click(screen.getByRole("tab", { name: "원시 데이터" }));
+    expect(screen.getByRole("tab", { name: "원시 데이터" })).toHaveAttribute("aria-selected", "true");
+    expect(warning.closest("details")).toHaveAttribute("open");
+  });
+
   it("uses the generated trace contract and prioritizes exact TargetTape fields", async () => {
     const user = userEvent.setup();
     renderDebugger(<StrategyDebugger {...props()} />);
@@ -772,10 +836,10 @@ describe("StrategyDebugger", () => {
     expect(screen.getByLabelText("기준일")).toHaveValue("");
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
 
-    expect(await screen.findByText("2026-08-31")).toBeInTheDocument();
+    expect(await screen.findByText(/추적 출처/, { selector: "summary" })).toHaveTextContent("2026-08-31");
     expect(requests).toHaveLength(1);
     expect(requests[0]).not.toHaveProperty("as_of");
-    expect(screen.getByText(/서버가 실제 TargetTape/)).toBeInTheDocument();
+    expect(screen.getByLabelText("기준일")).toHaveAccessibleDescription(/서버가 실제 TargetTape/);
   });
 
   it("commits a typed security scope and runs the trace in one submit", async () => {
@@ -1121,7 +1185,7 @@ describe("StrategyDebugger", () => {
     renderDebugger(<StrategyDebugger {...props(null)} />);
     expect(screen.getByRole("button", { name: "추적 실행" })).toBeDisabled();
     expect(
-      screen.getByText(/현재 문서가 아직 실행 가능한 StrategySpec이 아닙니다/),
+      screen.getByText(/문서에 고칠 문제가 있어 아직 미리보거나 추적할 수 없어요/),
     ).toBeInTheDocument();
     expect(requests).toHaveLength(0);
   });
@@ -1293,6 +1357,23 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
     request: StrategyTraceRequest,
   ): StrategyTraceResponse => ({
     ...pagedTraceResponse(request),
+    factor_preview: {
+      valid_count: 81,
+      missing_count: 12,
+      missing: "drop",
+      top: [
+        {
+          security_id: "unselected",
+          value: 987.5,
+          security: {
+            security_id: "unselected",
+            name: "팩터 상위 종목",
+            ticker: "654321",
+            venue: "XKRX",
+          },
+        },
+      ],
+    },
     summary: {
       signal_as_of: "2026-08-31",
       execution_on: "2026-09-01",
@@ -1323,6 +1404,39 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
     },
   });
 
+  it("선택값별 미리보기를 분리하고 늦게 도착한 다른 칸의 응답을 현재 결과로 표시하지 않는다", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    let oldReturned = false;
+    const sent: StrategyTraceRequest[] = [];
+    server.use(http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+      const body = await request.json() as StrategyTraceRequest;
+      sent.push(body);
+      if (body.parameter_values?.scale === 0) { await pending; oldReturned = true; }
+      const result = summaryResponse(body);
+      result.parameter_values = { ...body.parameter_values, extra_default: 12 };
+      result.summary!.targets[0]!.security!.name = body.parameter_values?.scale === 0 ? "이전 칸 종목" : "현재 칸 종목";
+      return HttpResponse.json(result);
+    }));
+    const first = { ...context(), parameterValues: { scale: 0 }, parameterSourceRunId: "run-a" };
+    const second = { ...context(), parameterValues: { scale: 1 }, parameterSourceRunId: "run-b" };
+    const view = renderDebugger(<StrategyPreview context={first} unavailableReason={null} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    view.rerender(<StrategyPreview context={second} unavailableReason={null} />);
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    expect(await screen.findByText("현재 칸 종목")).toBeVisible();
+    expect(sent.map(request => request.parameter_values)).toEqual([{ scale: 0 }, { scale: 1 }]);
+    await user.click(screen.getByText("이번 평가에 사용한 파라미터", { selector: "summary" }));
+    const defaultRow = screen.getByText("extra_default", { selector: "dt" }).parentElement!;
+    expect(within(defaultRow).getByText("12", { selector: "dd" })).toBeVisible();
+    release();
+    await waitFor(() => expect(oldReturned).toBe(true));
+    expect(screen.queryByText("이전 칸 종목")).toBeNull();
+    expect(screen.getByText("현재 칸 종목")).toBeVisible();
+  });
+
   it("명시적 새로고침만 빈 종목·첫 팩터로 요청하고 서버의 날짜·순위·이름·점수를 그대로 표시한다", async () => {
     const requests: StrategyTraceRequest[] = [];
     server.use(
@@ -1350,8 +1464,13 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
     expect(screen.getByText("2026-08-31")).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "7" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "0.123456" })).toBeInTheDocument();
-    for (const count of [93, 41, 17, 23, 12])
+    for (const count of [93, 41, 17, 23])
       expect(screen.getByText(String(count))).toBeInTheDocument();
+    expect(
+      screen.getByRole("table", { name: "팩터 상위 5개 (방향 기준)" }),
+    ).toHaveTextContent("팩터 상위 종목");
+    expect(screen.getByRole("cell", { name: "987.5" })).toBeInTheDocument();
+    expect(screen.getByText("81")).toBeInTheDocument();
     view.rerender(
       <StrategyPreview context={context(4)} unavailableReason={null} />,
     );
@@ -1364,6 +1483,28 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
     expect(
       screen.getByRole("button", { name: "미리보기 새로고침" }),
     ).toBeDisabled();
+  });
+
+  it("선정 종목의 비중을 보이고 '왜 골랐나'는 그 종목과 기준일을 넘긴다(RD-04-C)", async () => {
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) =>
+        HttpResponse.json(summaryResponse((await request.json()) as StrategyTraceRequest)),
+      ),
+    );
+    const explained: { asOf: string; security: string }[] = [];
+    const user = userEvent.setup();
+    renderDebugger(
+      <StrategyPreview
+        context={context()}
+        unavailableReason={null}
+        onExplain={(selection) => explained.push(selection)}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    const targets = await screen.findByRole("table", { name: "선정 종목" });
+    expect(within(targets).getByRole("columnheader", { name: "비중" })).toBeInTheDocument();
+    await user.click(within(targets).getByRole("button", { name: "서버 종목명 · 왜 골랐나" }));
+    expect(explained).toEqual([{ asOf: "2026-08-31", security: expect.any(String) }]);
   });
 
   it("이전 문서의 지연 응답은 현재 미리보기를 채우지 않는다", async () => {
@@ -1415,5 +1556,113 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
       "문서 또는 실행 설정과 맞지 않는 응답",
     );
     expect(screen.queryByText("서버 종목명")).not.toBeInTheDocument();
+  });
+  it("팩터를 바꾸면 이전 결과를 숨기고 새 팩터의 명시적 요청만 표시한다", async () => {
+    const current = context();
+    current.factors.push({
+      ...current.factors[0]!,
+      factorId: "other",
+      label: "다른 팩터",
+    });
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as StrategyTraceRequest;
+        requests.push(body);
+        return HttpResponse.json(summaryResponse(body));
+      }),
+    );
+    renderDebugger(
+      <StrategyPreview context={current} unavailableReason={null} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await screen.findByText("팩터 상위 종목");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "팩터" }),
+      "other",
+    );
+    expect(screen.queryByText("팩터 상위 종목")).not.toBeInTheDocument();
+    expect(screen.getByText("이전 요청 · 새로고침 필요")).toBeInTheDocument();
+    expect(requests).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await screen.findByText("팩터 상위 종목");
+    expect(requests[1]?.factor_id).toBe("other");
+  });
+  it("선택한 팩터가 삭제되면 남은 팩터로 표시와 요청을 함께 복구한다", async () => {
+    const current = context();
+    current.factors.push({ ...current.factors[0]!, factorId: "other", label: "다른 팩터" });
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as StrategyTraceRequest;
+        requests.push(body);
+        return HttpResponse.json(summaryResponse(body));
+      }),
+    );
+    const view = renderDebugger(<StrategyPreview context={current} unavailableReason={null} />);
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByRole("combobox", { name: "팩터" }), "other");
+    view.rerender(<StrategyPreview context={context()} unavailableReason={null} />);
+    expect(screen.getByRole("combobox", { name: "팩터" })).toHaveValue("momentum");
+    expect(screen.getByRole("button", { name: "미리보기 새로고침" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await screen.findByText("팩터 상위 종목");
+    expect(requests[0]?.factor_id).toBe("momentum");
+  });
+  it("미리보기 취소 뒤 늦은 응답이 결과 표를 다시 채우지 않는다", async () => {
+    let finish: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as StrategyTraceRequest;
+        await waiting;
+        return HttpResponse.json(summaryResponse(body));
+      }),
+    );
+    renderDebugger(
+      <StrategyPreview context={context()} unavailableReason={null} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await user.click(
+      await screen.findByRole("button", { name: "미리보기 취소" }),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "추적 요청을 취소했습니다.",
+    );
+    await act(async () => {
+      finish?.();
+      await waiting;
+    });
+    expect(screen.queryByText("팩터 상위 종목")).not.toBeInTheDocument();
+  });
+});
+
+describe("선정 미리보기 조작 안내(확인 단계 UI)", () => {
+  it("미리볼 수 없으면 꺼진 새로고침이 그 이유를 설명으로 읽고, 팩터가 없으면 빈 선택 상자 대신 그 사실을 보인다", () => {
+    renderDebugger(<StrategyPreview context={null} unavailableReason="environment" />);
+    const refresh = screen.getByRole("button", { name: "미리보기 새로고침" });
+    expect(refresh).toBeDisabled();
+    expect(refresh).toHaveAccessibleDescription(
+      "미리보기와 추적에는 실행 설정(기간·유니버스)이 필요해요. 실행 설정을 먼저 채우세요.",
+    );
+    // 문맥이 없으면 "팩터 없음"이 아니라 지금 고를 수 없다고 말한다(리뷰 7).
+    const factor = screen.getByRole("combobox", { name: "팩터" });
+    expect(factor).toBeDisabled();
+    expect(factor).toHaveDisplayValue("지금은 고를 수 없어요");
+  });
+
+  it("기준일 칸은 비워 두면 마지막 리밸런싱일로 본다는 안내를 설명으로 읽는다", () => {
+    renderDebugger(<StrategyPreview context={context()} unavailableReason={null} />);
+    expect(screen.getByLabelText("기준일 (선택)")).toHaveAccessibleDescription(
+      "비워 두면 마지막 리밸런싱일로 봅니다.",
+    );
+    expect(screen.getByRole("button", { name: "미리보기 새로고침" })).toBeEnabled();
+  });
+
+  it("문맥이 있고 팩터가 비었을 때만 \"담은 팩터가 없어요\"라고 말한다(리뷰 7)", () => {
+    renderDebugger(<StrategyPreview context={{ ...context(), factors: [] }} unavailableReason={null} />);
+    expect(screen.getByRole("combobox", { name: "팩터" })).toHaveDisplayValue("담은 팩터가 없어요");
   });
 });

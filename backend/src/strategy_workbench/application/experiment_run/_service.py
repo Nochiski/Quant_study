@@ -23,6 +23,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
 )
 from strategy_workbench.domain.backtest.facade.trials import bankrupt, preview_trial, trial_key
 from strategy_workbench.domain.experiment.facade.design import (
+    WALK_FORWARD_INTERPRETATION,
     CellPlateau,
     ExperimentDesign,
     ExperimentKind,
@@ -31,16 +32,27 @@ from strategy_workbench.domain.experiment.facade.design import (
     ExperimentTrial,
     GridIndex,
     InvalidExperimentSpecError,
+    NoRecommendation,
+    ParameterConstraint,
+    RetentionGap,
     SearchSpec,
     SplitSpec,
+    TimeEstimate,
+    WalkForwardEvaluationBasis,
     WalkForwardGap,
     WalkForwardWindow,
     build_search_spec,
     cell_outcomes,
+    estimate_time,
     experiment_trial_key,
     out_of_sample_sharpe,
     pick_window_cell,
+    planned_spans,
     plateau_map,
+    robustness_end,
+    robustness_search,
+    robustness_split,
+    run_spans,
     stitch_out_of_sample,
     walk_forward_gap,
     walk_forward_retention,
@@ -60,11 +72,19 @@ from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentStatus,
     TrialStatus,
     awaiting_recovery,
+    experiment_settled,
     experiment_status,
+    settled,
     trial_status,
+    validate_selection_reason,
 )
-from strategy_workbench.domain.strategy.facade.specification import ParameterValue, StrategySpec
+from strategy_workbench.domain.strategy.facade.specification import (
+    ParameterValue,
+    StrategySpec,
+    read_parameter_ids,
+)
 
+from ._audit import ExperimentAuditEvent, audit_trail
 from .ports.outgoing.experiment_repository import (
     ExperimentRecord,
     ExperimentRepositoryPort,
@@ -85,7 +105,6 @@ logger = logging.getLogger(__name__)
 # 제출 스레드가 워크포워드를 밀어 주는 간격(초). 창의 학습이 끝나면 늦어도 이만큼 뒤 검증 실행이
 # 뜬다.
 _POLL_SECONDS = 2.0
-_SETTLED_RUNS = (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED)
 
 
 @dataclass(frozen=True)
@@ -102,6 +121,13 @@ class ExperimentRequest:
         }
     )
     split: SplitSpec
+    constraints: list[ParameterConstraint] = field(
+        default_factory=list,
+        metadata={
+            "description": "탐색 축 사이의 조합 제약(예: fast < slow). 모두 만족하는 칸만 "
+            "실행하고, 걸러진 칸은 실행되지 않아 시도 수에도 들지 않는다. 비우면 곱집합 전체다."
+        },
+    )
 
 
 @dataclass(frozen=True)
@@ -126,6 +152,20 @@ class ExperimentPreview:
     # (`experiment_trial_key`).
     new_trial_count: int
     trial_count_after: int
+    # 실험 실행을 차례로 돌린다고 본 시간 어림(`estimate_time`). 계열에 시간을 잰 완료 실행이 없으면
+    # None.
+    time_estimate: TimeEstimate | None
+
+
+@dataclass(frozen=True)
+class RobustnessPreview(ExperimentPreview):
+    """ "튼튼한지 확인하기" 미리 계산.
+
+    숫자 파라미터지만 팩터 출력이 읽지 않아 펴지 않고 지금 값에 둔 파라미터(`robustness_search`)를
+    함께 싣는다 — 확인 창이 그 사정을 말한다.
+    """
+
+    unread_parameters: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -144,6 +184,11 @@ class ExperimentTrialState:
     # 최신 실행이 파산으로 끝났다(`bankrupt`) — 비전략 실패와 달리 전략의 결과다.
     bankrupt: bool = False
 
+    @property
+    def settled(self) -> bool:
+        """trial이 끝났고 재시작 복구를 기다리지 않는다."""
+        return settled(self.status, recovering=self.awaiting_recovery)
+
 
 @dataclass(frozen=True)
 class Experiment:
@@ -155,6 +200,8 @@ class Experiment:
     # 끝났다(완료·취소, `ExperimentStatus.is_terminal`). 화면이 조작 노출·다시 묻기를 이 값으로
     # 가른다.
     finished: bool
+    # 학습·검증 실행까지 모두 멈췄다. 진행 스트림의 종료 여부이며 조작 가능 여부와 다르다.
+    settled: bool
 
 
 @dataclass(frozen=True)
@@ -184,6 +231,13 @@ class WalkForwardReport:
     out_of_sample_sharpe: float | None
     retention: float | None
     gap: WalkForwardGap | None
+    # 기존 계산값을 보존하고 API 소비자에게 평가 대상을 명시한다.
+    evaluation_basis: WalkForwardEvaluationBasis = WalkForwardEvaluationBasis.WINDOW_RESTART_RETURNS
+    interpretation: str = WALK_FORWARD_INTERPRETATION
+    # 유지율의 분모(창마다 고른 칸의 학습 세션 샤프 평균)와, `gap` 없이 유지율만 비었을 때의 이유.
+    # 화면은 이유를 번역만 한다 — 비운 칸을 계산 실패로 읽지 않게 한다.
+    train_sharpe_mean: float | None = None
+    retention_gap: RetentionGap | None = None
 
 
 @dataclass(frozen=True)
@@ -192,6 +246,8 @@ class ParameterMap:
 
     # 그리드 칸 좌표 순.
     cells: tuple[CellPlateau, ...]
+    # 추천 칸이 없으면 그 이유(점수 난 칸 없음·모두 0 이하). 화면은 번역만 한다.
+    no_recommendation: NoRecommendation | None = None
 
 
 @dataclass(frozen=True)
@@ -291,11 +347,78 @@ class ExperimentRunService:
             trial_count=ledger.trial_count,
             new_trial_count=new_trials,
             trial_count_after=ledger.trial_count + new_trials,
+            time_estimate=estimate_time(ledger, planned_spans(design, *_base_range(admitted.run))),
         )
 
     def create(self, request: ExperimentRequest) -> Experiment:
         _, design = self._design(request)
         return self._create(request.run, request.split, design)
+
+    def _robustness(
+        self, run_id: str
+    ) -> tuple[
+        ExperimentRequest, tuple[AdmittedRun, StrategySpec, RunEnvironment], tuple[str, ...]
+    ]:
+        """결과 실행 `run_id` 의 "튼튼한지 확인하기" 실험 요청과 그 기반 접수(US-DM-11).
+
+        기반은 그 실행의 원본 요청이고, 탐색·분할·기간 끝은 `domain/experiment` 의 기본 설계
+        (`robustness_search`·`robustness_split`·`robustness_end`)다. 지표 창은 분할이 정하므로 뺀다.
+        단일 실행만 받는다(실험 trial·검증 실행의 요청은 창 구간·칸 값으로 좁혀져 있다). 저장
+        리비전이 아닌 실행은 실험 기반 규칙대로 `experiment.base.unsaved` 로 거절한다. 셋째 값은
+        팩터 출력이 읽지 않아 펴지 않은 숫자 파라미터다.
+        """
+        source = self._runs.source_run(run_id)
+        if source is None:
+            raise ExperimentNotFoundError(
+                "experiment.robustness.run_not_found",
+                f"튼튼한지 확인할 실행을 찾을 수 없습니다: run_id={run_id}",
+            )
+        if not source.single:
+            raise InvalidExperimentSpecError(
+                "experiment.robustness.not_single",
+                "실험이 돌린 실행은 그 실험 화면에서 확인합니다. 직접 돌린 실행에서 시작하세요: "
+                f"run_id={run_id}",
+            )
+        run = replace(source.request, metric_windows=())
+        base = self._base(run)
+        environment = base[2]
+        split = robustness_split(environment.start, environment.end)
+        end = robustness_end(split, environment.start, environment.end)
+        if end != environment.end and run.environment is not None:
+            # 짧은 꼬리 검증 창을 버린다. 기간이 바뀌었으니 접수 판정을 다시 탄다(드문 경우).
+            run = replace(run, environment=replace(run.environment, end=end))
+            base = self._base(run)
+        search = robustness_search(
+            base[1].parameters, base[0].run.parameter_values, read=read_parameter_ids(base[1])
+        )
+        request = ExperimentRequest(run=run, search=search.search, split=split)
+        return request, base, search.unread
+
+    def preview_robustness(self, run_id: str) -> RobustnessPreview:
+        """ "튼튼한지 확인하기" 실험의 미리 계산 — 확인 창이 새로 세는 시도 수를 먼저 보인다."""
+        request, base, unread = self._robustness(run_id)
+        preview = self._preview(*self._design(request, base))
+        return RobustnessPreview(**vars(preview), unread_parameters=unread)
+
+    def create_robustness(self, run_id: str) -> Experiment:
+        """ "튼튼한지 확인하기" 실험을 만들어 대기열에 넣는다.
+
+        결과 화면이 `run_id` 로 다시 찾는다. 같은 실행의 확인 실험이 아직 끝나지 않았으면 거절한다 —
+        탭 두 개에서 누른 요청이 같은 계산을 두 번 대기열에 올리지 않게 한다.
+        """
+        request, base, _ = self._robustness(run_id)
+        _, design = self._design(request, base)
+        with self._lock:
+            if any(not item.settled for item in self.robustness_checks(run_id)):
+                raise ExperimentStateError(
+                    "experiment.robustness.running",
+                    f"이 실행의 확인 실험이 아직 끝나지 않았습니다: run_id={run_id}",
+                )
+            return self._create(request.run, request.split, design, source_run_id=run_id)
+
+    def robustness_checks(self, run_id: str) -> tuple[Experiment, ...]:
+        """결과 실행 `run_id` 에서 만든 실험, 최근에 만든 순. 없으면 빈 튜플."""
+        return tuple(self._experiment(record) for record in self._repository.by_source_run(run_id))
 
     def create_capacity(self, request: CapacitySweepRequest) -> Experiment:
         """용량 스윕을 만들고 금액마다 기반 실행 구간 전체를 대기열에 넘긴다."""
@@ -303,7 +426,12 @@ class ExperimentRunService:
         return self._create(request.run, None, design)
 
     def _create(
-        self, run: BacktestRunSpec, split: SplitSpec | None, design: ExperimentDesign
+        self,
+        run: BacktestRunSpec,
+        split: SplitSpec | None,
+        design: ExperimentDesign,
+        *,
+        source_run_id: str | None = None,
     ) -> Experiment:
         record = ExperimentRecord(
             experiment_id=self._new_id(),
@@ -312,6 +440,7 @@ class ExperimentRunService:
             split=split,
             design=design,
             controls=DEFAULT_EXPERIMENT_CONTROLS,
+            source_run_id=source_run_id,
         )
         self._repository.add(record)
         self._spawn(lambda: self._submit(record))
@@ -338,8 +467,9 @@ class ExperimentRunService:
 
         이미 완료한 실험은 `experiment.cancel.completed` 로 거절한다 — 목록이 아직 도는 것으로 보인
         틈에 누른 취소가 결과가 다 나온 실험을 취소로 바꾸지 않게 한다(#402 리뷰 P3-3). 완료 판정은
-        `experiment_status` 다. 취소한 실험을 다시 취소하면 그대로 돌려준다.
+        `experiment_status` 다. 재요청은 취소 시각을 보존하고 남은 실행 정리만 다시 시도한다.
         """
+        run_ids: dict[str, None] = {}
         with self._lock:
             record = self._repository.get(experiment_id)
             if (
@@ -352,13 +482,21 @@ class ExperimentRunService:
                 )
             if record.cancelled_at is None:
                 self._repository.cancel(experiment_id, cancelled_at=self._now())
-                self._cancelled.add(experiment_id)
-                for run in (
-                    *self._repository.attempts(experiment_id),
-                    *self._repository.picks(experiment_id),
-                ):
-                    if run.run_id is not None:
-                        self._runs.cancel(run.run_id, owner=experiment_id)
+            self._cancelled.add(experiment_id)
+            for run in (
+                *self._repository.attempts(experiment_id),
+                *self._repository.picks(experiment_id),
+            ):
+                if run.run_id is not None:
+                    run_ids[run.run_id] = None
+        # 취소 표식은 한 번만 기록하고 실행 정리는 매 요청 재시도한다. 표식 뒤 상태 조회나 일부
+        # 취소가 실패해도 남은 run을 잃지 않는다. 이후 제출·재시도는 거절되므로 느린 실행
+        # 취소는 다른 실험을 막지 않게 락 밖에서 한다. 끝난 실행은 일괄 상태로 걸러 낸다.
+        states = self._runs.states(run_ids) if run_ids else {}
+        for run_id in run_ids:
+            state = states.get(run_id)
+            if state is not None and not state.status.is_terminal:
+                self._runs.cancel(run_id, owner=experiment_id)
         return self.get(experiment_id)
 
     def retry(self, experiment_id: str, trial_index: int) -> ExperimentTrialState:
@@ -381,6 +519,22 @@ class ExperimentRunService:
             self._start(record, base, state.trial, attempt=len(state.attempts) + 1)
             return self._trial_state(record, trial_index)
 
+    def run_selections(self, experiment_id: str, run_id: str) -> tuple[ExperimentSelection, ...]:
+        """이 실행으로 끝난 trial 을 고른 선택 기록(검증 근거 US-DM-12). 없으면 빈 튜플.
+
+        trial 의 실행은 마지막 attempt 의 실행이다 — 고를 수 있는 trial 은 마지막 attempt 가 완료된
+        trial 이라 그 실행이 고른 결과다.
+        """
+        latest: dict[int, str | None] = {}
+        for attempt in self._repository.attempts(experiment_id):
+            latest[attempt.trial_index] = attempt.run_id
+        trials = {index for index, latest_run in latest.items() if latest_run == run_id}
+        return tuple(
+            selection
+            for selection in self._repository.selections(experiment_id)
+            if selection.trial_index in trials
+        )
+
     def select(self, experiment_id: str, trial_index: int, reason: str) -> ExperimentSelection:
         """끝난 trial 을 후보로 고른 기록을 남긴다(spec D9).
 
@@ -388,6 +542,7 @@ class ExperimentRunService:
         끝나기 전(대기·도는 trial 이 있다)에는 거절한다 — 설계한 조합이 다 돌기 전의 N 으로 스냅숏이
         굳지 않게 한다. 취소한 실험은 끝났다(돌지 않은 조합은 시도가 아니다).
         """
+        validate_selection_reason(reason)
         record = self._repository.get(experiment_id)
         _require_kind(record, ExperimentKind.PARAMETER_SEARCH)
         state = self._trial_state(record, trial_index)
@@ -398,7 +553,7 @@ class ExperimentRunService:
                 f"experiment_id={experiment_id} trial_index={trial_index} status={state.status}",
             )
         if not state.selectable:
-            unfinished = sum(not _finished(other) for other in self._trial_states(record))
+            unfinished = sum(not other.settled for other in self._trial_states(record))
             raise ExperimentStateError(
                 "experiment.selection.not_finished",
                 "실험의 trial 이 모두 끝난 뒤에 후보를 고를 수 있습니다: "
@@ -423,7 +578,12 @@ class ExperimentRunService:
         self._repository.add_selection(selection)
         return selection
 
-    def _design(self, request: ExperimentRequest) -> tuple[AdmittedRun, ExperimentDesign]:
+    def _design(
+        self,
+        request: ExperimentRequest,
+        base: tuple[AdmittedRun, StrategySpec, RunEnvironment] | None = None,
+    ) -> tuple[AdmittedRun, ExperimentDesign]:
+        """`base` 는 이미 탄 기반 접수(`_base`)다. 없으면 여기서 탄다."""
         run = request.run
         _base_source(run)
         if run.metric_windows:
@@ -432,9 +592,9 @@ class ExperimentRunService:
                 "실험의 측정 창은 분할 규칙이 정합니다. 기반 실행 요청에서 지표 창을 빼세요: "
                 f"metric_windows={len(run.metric_windows)}",
             )
-        admitted, strategy, environment = self._base(run)
+        admitted, strategy, environment = base or self._base(run)
         return admitted, ExperimentDesign(
-            search=build_search_spec(strategy.parameters, request.search),
+            search=build_search_spec(strategy.parameters, request.search, request.constraints),
             parameter_values=admitted.run.parameter_values,
             windows=request.split.measured_windows(
                 environment.start,
@@ -491,7 +651,9 @@ class ExperimentRunService:
                 paused=current.paused if paused is None else paused,
                 priority=current.priority if priority is None else priority,
             )
-            self._repository.set_controls(experiment_id, controls)
+            # 바뀐 것이 없으면 이력을 남기지 않는다(감사 기록은 바뀐 조작만 싣는다).
+            if controls != current:
+                self._repository.set_controls(experiment_id, controls, changed_at=self._now())
             self._runs.schedule(experiment_id, paused=controls.paused, priority=controls.priority)
         return self.get(experiment_id)
 
@@ -499,17 +661,14 @@ class ExperimentRunService:
         """재시작 뒤 취소하지 않은 실험의 대기열 조작을 되살리고 남은 trial 을 다시 넘긴다(spec D6).
 
         남은 trial 은 넘기지 못한 trial(제출이 예상 밖 오류로 멈춘 경우 포함)과 재시작으로 중단된
-        trial 이다. 끝난 실험은 조작만 되살리고(뒤의 재시도가 따른다) 제출 스레드는 띄우지 않는다.
+        trial 이다. 끝난 실험에는 제출 스레드나 레인 설정을 두지 않는다. 조작은 각 접수에서 저장
+        정본으로 복원한다.
         저장된 실험 하나를 읽지 못하면(지금 모델로 디코드되지 않는다) 그 실험만 로그로 건너뛰고
         부팅은 이어 간다.
         """
         for experiment_id in self._repository.open_ids():
             try:
                 record = self._repository.get(experiment_id)
-                controls = record.controls
-                self._runs.schedule(
-                    experiment_id, paused=controls.paused, priority=controls.priority
-                )
                 if self._experiment(record).status is ExperimentStatus.COMPLETED:
                     continue
             except Exception:
@@ -577,7 +736,7 @@ class ExperimentRunService:
                 for index, pick, choice in chosen:
                     if latest.get(index) == pick:  # 다른 제출이 그사이 고르지 않았다
                         self._pick(record, base, index, choice, pick)
-        return all(_finished(state) for state in states)
+        return all(state.settled for state in states)
 
     def walk_forward(self, experiment_id: str) -> WalkForwardReport:
         """창별 선택·검증 실행 결과와, 모든 창의 검증 실행이 완료됐으면 이어 붙인 곡선·표본 밖
@@ -603,7 +762,56 @@ class ExperimentRunService:
         curve = stitch_out_of_sample(segments)
         oos = out_of_sample_sharpe(curve, self._registry, record.run.annualization_days)
         train = [pick.train_sharpe for pick in picks if pick.train_sharpe is not None]
-        return WalkForwardReport(windows, curve, oos, walk_forward_retention(oos, train), None)
+        retention = walk_forward_retention(oos, train)
+        return WalkForwardReport(
+            windows,
+            curve,
+            oos,
+            retention.value,
+            None,
+            train_sharpe_mean=retention.train_sharpe_mean,
+            retention_gap=retention.gap,
+        )
+
+    def remaining_time(self, experiment_id: str) -> TimeEstimate | None:
+        """남은 실행을 차례로 돈다고 본 시간 어림(로드맵 M6 Experiment Monitor ETA, 규칙은
+        `estimate_time`). 남은 실행은 끝나지 않은 trial 과, 워크포워드면 검증이 끝나지 않은 창
+        (`WalkForwardGap.PENDING` — 아직 고르지 않았거나 검증 실행이 돌거나 복구를 기다린다)이다.
+        도는 실행도 처음부터 도는 것처럼 센다 — 진행률이 시간에 비례하지 않아 길게 잡는다. 취소한
+        실험은 남은 실행이 없다. 계열에 시간을 잰 완료 실행이 없으면 None."""
+        record = self._repository.get(experiment_id)
+        trials: list[ExperimentTrial] = []
+        windows: list[WalkForwardWindow] = []
+        if record.cancelled_at is None:
+            trials = [state.trial for state in self._trial_states(record) if not state.settled]
+            if record.design.walks_forward:
+                picks = _latest_by_window(self._repository.picks(experiment_id))
+                runs = self._runs.states({p.run_id for p in picks.values() if p.run_id})
+                windows = [
+                    window
+                    for index, window in enumerate(record.design.windows)
+                    if (pick := picks.get(index)) is None
+                    or _window_result(pick, runs).gap is WalkForwardGap.PENDING
+                ]
+        spans = run_spans(trials, windows, *_base_range(record.run))
+        return estimate_time(self._runs.trial_ledger(record.run), spans)
+
+    def audit(self, experiment_id: str) -> tuple[ExperimentAuditEvent, ...]:
+        """실험·trial·attempt 에 일어난 일의 시각 순 기록(로드맵 M6, 규칙은 `audit_trail`)."""
+        record = self._repository.get(experiment_id)
+        attempts = self._repository.attempts(experiment_id)
+        picks = self._repository.picks(experiment_id)
+        runs = self._runs.states(
+            {item.run_id for item in (*attempts, *picks) if item.run_id is not None}
+        )
+        return audit_trail(
+            record,
+            attempts,
+            picks,
+            self._repository.selections(experiment_id),
+            self._repository.control_changes(experiment_id),
+            runs,
+        )
 
     def parameter_map(self, experiment_id: str) -> ParameterMap:
         """그리드 칸마다 추천·봉우리·실패 판정과 점수·고원 점수·민감도(V4-03, 규칙은
@@ -623,7 +831,8 @@ class ExperimentRunService:
             )
             for state in states
         )
-        return ParameterMap(plateau_map(record.design.search, cell_outcomes(trials)))
+        mapped = plateau_map(record.design.search, cell_outcomes(trials))
+        return ParameterMap(mapped.cells, mapped.no_recommendation)
 
     def capacity(self, experiment_id: str) -> CapacityReport:
         """용량 스윕 금액별 비용 후 샤프·가격 충격·미체결 비율과, 모든 금액이 끝났으면 한계 금액
@@ -680,13 +889,13 @@ class ExperimentRunService:
         waiting = False
         for index in range(count):
             window_states = list(states[index::count])
-            if not all(_finished(s) for s in window_states):
+            if not all(s.settled for s in window_states):
                 continue
             pick = picks.get(index)
             run = runs.get(pick.run_id) if pick is not None and pick.run_id else None
             if pick is None or awaiting_recovery(run):
                 open_windows.append((index, window_states, pick))
-            elif run is not None and run.status not in _SETTLED_RUNS:
+            elif run is not None and not run.status.is_terminal:
                 waiting = True
         return open_windows, waiting
 
@@ -795,6 +1004,7 @@ class ExperimentRunService:
                 _run_request(record.run, trial, start, end),
                 trial_key=experiment_trial_key(base, trial),
                 owner=record.experiment_id,
+                controls=self._repository.controls(record.experiment_id),
             )
         except TrialRunRejectedError as rejected:
             return None, rejected.code, str(rejected)
@@ -810,12 +1020,18 @@ class ExperimentRunService:
             pending=any(state.awaiting_recovery for state in states)
             or self._walk_forward_pending(record, states),
         )
+        validation_runs = self._runs.states(
+            {pick.run_id for pick in self._repository.picks(record.experiment_id) if pick.run_id}
+        )
         return Experiment(
             record=record,
             status=status,
             trial_counts=dict(Counter(statuses)),
             selections=self._repository.selections(record.experiment_id),
             finished=status.is_terminal,
+            settled=experiment_settled(
+                status, statuses, [run.status for run in validation_runs.values()]
+            ),
         )
 
     def _walk_forward_pending(
@@ -842,7 +1058,7 @@ class ExperimentRunService:
             _state(trial, tuple(attempts.get(trial.index, ())), cancelled, runs)
             for trial in record.design.trials()
         )
-        if cancelled or all(_finished(state) for state in states):
+        if cancelled or all(state.settled for state in states):
             return states
         # 실험이 끝나기 전에는 고르지 않는다 — 설계한 조합이 다 돌기 전의 N 으로 스냅숏이 굳는다.
         return tuple(replace(state, selectable=False) for state in states)
@@ -857,11 +1073,6 @@ class ExperimentRunService:
                 f"trials={len(states)}",
             )
         return states[trial_index]
-
-
-def _finished(state: ExperimentTrialState) -> bool:
-    """trial 이 끝났다(복구를 기다리지 않는다)."""
-    return state.status.is_terminal and not state.awaiting_recovery
 
 
 def _state(
@@ -925,8 +1136,12 @@ def _train_range(base: BacktestRunSpec, trial: ExperimentTrial) -> tuple[date, d
     """trial 이 도는 구간 — 창의 학습 구간(엠바고를 뺀 측정 끝까지), 용량 스윕은 기반 실행 구간."""
     if trial.window is not None:
         return trial.window.train_start, trial.window.train_end
+    return _base_range(base)
+
+
+def _base_range(base: BacktestRunSpec) -> tuple[date, date]:
     if base.environment is None:  # pragma: no cover - `_base` 가 검사한 요청만 저장한다
-        raise RuntimeError(f"experiment base run has no run environment — trial={trial.index}")
+        raise RuntimeError("experiment base run has no run environment")
     return base.environment.start, base.environment.end
 
 

@@ -20,10 +20,10 @@ PR은 GitHub 번호(`#123`)로 적는다.
 
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
-| 김철수 | 4 | 2 | 6 | 1 | 13 |
-| 정동민 | 8 | 0 | 3 | 0 | 11 |
-| 한상목 | 15 | 0 | 0 | 1 | 16 |
-| 합계 | 27 | 2 | 9 | 2 | 40 |
+| 김철수 | 13 | 0 | 1 | 0 | 14 |
+| 정동민 | 16 | 0 | 0 | 0 | 16 |
+| 한상목 | 17 | 0 | 0 | 1 | 18 |
+| 합계 | 46 | 0 | 1 | 1 | 48 |
 
 ### 스토리별 추적
 
@@ -31,28 +31,34 @@ PR은 GitHub 번호(`#123`)로 적는다.
 |---|---|---|---|---|---|---|
 | US-CS-01 | 김철수 | 그래프 편집기에서 노드를 더하고 다시 이어 팩터 계산을 바꾼다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: adds a node in the Graph editor, rewires an input, refreshes the plan and saves |
 | US-CS-02 | 김철수 | 두 원천 필드를 가공한 파생 팩터를 정의하고 기존 팩터와 결합한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.derived-factor.spec.ts` :: US-CS-02 두 원천 필드를 나눈 파생 팩터를 모멘텀과 결합해 계획·추적을 확인하고 백테스트한다 |
-| US-CS-03 | 김철수 | 중간값 추적과 실행 계획으로 계산과 공개 시점을 검증한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.derived-factor.spec.ts` :: US-CS-02 두 원천 필드를 나눈 파생 팩터를 모멘텀과 결합해 계획·추적을 확인하고 백테스트한다<br>`frontend/e2e/stories/cs.masked-trace.spec.ts` :: US-CS-03 원장이 가린 신용잔고 칸을 건넌 노드 값과 그 원시 셀을 원장이 가림으로 본다<br>`frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
+| US-CS-03 | 김철수 | 중간값 추적과 실행 계획으로 계산과 공개 시점을 검증한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.debugger-scroll.spec.ts` :: US-CS-03 연결 실패 상태도 추적 입력 끝과 복귀 행동을 창 안에서 읽는다<br>`frontend/e2e/stories/cs.debugger-scroll.spec.ts` :: US-CS-03 작은 분할 기록과 무관하게 세 화면에서 추적하고 편집으로 복귀한다<br>`frontend/e2e/stories/cs.derived-factor.spec.ts` :: US-CS-02 두 원천 필드를 나눈 파생 팩터를 모멘텀과 결합해 계획·추적을 확인하고 백테스트한다<br>`frontend/e2e/stories/cs.masked-trace.spec.ts` :: US-CS-03 원장이 가린 신용잔고 칸을 건넌 노드 값과 그 원시 셀을 원장이 가림으로 본다<br>`frontend/e2e/stories/cs.parameter-trace.spec.ts` :: US-CS-03 실험의 선택값을 현재 문서의 미리보기와 추적에 적용하고 기본값으로 돌아간다<br>`frontend/e2e/stories/cs.parameter-trace.spec.ts` :: US-CS-03 좁고 낮은 다크 화면에서 선택값 출처와 평가 결과를 읽고 기본값으로 돌아간다<br>`frontend/e2e/stories/strategy-tie-breaker.spec.ts` :: 주 점수가 같을 때 선언한 보조 팩터와 방향으로 선정한다<br>`frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests<br>`frontend/e2e/workbench.workflow.spec.ts` :: 레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화면과 뒤로가기를 유지한다 |
 | US-CS-04 | 김철수 | AI에게 팩터 자료 조사와 파라미터 조정안을 맡긴다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 검색 상한에 닿은 턴은 검색 칩 대신 안내 문구를 보이고 새로고침해도 같다<br>`frontend/e2e/assistant.workflow.spec.ts` :: 검색 출처를 링크로 보이고 검증에 실패한 턴은 실패 문구로 끝난다<br>`frontend/e2e/assistant.workflow.spec.ts` :: 팩터 그래프를 바꾸는 제안도 적용 후 백테스트가 팩터 계획 조회를 기다려 실행한다 |
-| US-CS-05 | 김철수 | 단위가 다른 팩터를 결합 전에 정규화한다 | `구현됨-e2e없음` | P5-03 | P5-03 | — |
-| US-CS-06 | 김철수 | 거래대금 상위 20% 같은 횡단면 필터와 변동성 역가중을 쓴다 | `구현됨-e2e없음` | P5-03 | P5-03 | — |
-| US-CS-07 | 김철수 | 노드 캔버스에서 끌어서 잇고 되돌린다 | `예정` | P6-02, P6-03 | P6-02 | — |
-| US-CS-08 | 김철수 | 파생 팩터를 저장해 두고 다른 전략에서 다시 쓴다 | `미계획` | — | — | — |
-| US-CS-09 | 김철수 | 워크포워드 실험으로 표본 밖 성과를 본다 | `예정` | V3-01, V3-05, V5-01, V5-02 | V5-02 | — |
-| US-CS-10 | 김철수 | 파라미터 지도에서 고원을 확인하고 후보를 고른다 | `예정` | V4-03, V5-04 | V5-04 | — |
-| US-CS-11 | 김철수 | 비용을 현실적으로 잡고 운용 금액별 용량을 본다 | `예정` | V2-01, V2-02, V2-03, V4-04, V5-06 | V5-06 | — |
-| US-CS-12 | 김철수 | 팩터 회귀로 진짜 알파가 남는지 본다 | `예정` | V4-05, V5-06 | V5-06 | — |
+| US-CS-05 | 김철수 | 단위가 다른 팩터를 결합 전에 정규화한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-05 1.1 업그레이드는 none과 원시 기여도를 보존한다<br>`frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-05 기본 순위와 세 정규화의 기여도·합계 및 단위 경고를 추적한다 |
+| US-CS-06 | 김철수 | 거래대금 상위 20% 같은 횡단면 필터와 변동성 역가중을 쓴다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-06 100종목 상위 20%의 20개 통과·80개 순위 탈락을 구분한다<br>`frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-06 변동성은 역가중에만 쓰이고 알파가 없으면 compile을 막는다 |
+| US-CS-07 | 김철수 | 노드 캔버스에서 끌어서 잇고 되돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/node-canvas.spec.ts` :: 노드 캔버스 배선·키보드·취소·배치·YAML undo가 같은 원문을 지킨다<br>`frontend/e2e/stories/node-canvas.spec.ts` :: 캔버스의 같은 진단을 다시 선택하면 해당 노드와 인스펙터를 드러낸다 |
+| US-CS-08 | 김철수 | 파생 팩터를 저장해 두고 다른 전략에서 다시 쓴다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.factor-library.spec.ts` :: US-CS-08 파생 팩터를 내 팩터로 저장해 다른 전략에서 꺼내 쓰고, 새 버전은 알림을 보고 바꾼다 |
+| US-CS-09 | 김철수 | 워크포워드 실험으로 표본 밖 성과를 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.robustness-check.spec.ts` :: US-DM-11 US-CS-09 한 번 돌린 결과에서 튼튼한지 확인하기로 시도 수를 먼저 보고 실험을 걸면, 끝난 뒤 표본 밖 곡선·유지율과 추천 후보(또는 추천하지 않는 이유)가 카드에 채워진다 |
+| US-CS-10 | 김철수 | 파라미터 지도에서 고원을 확인하고 후보를 고른다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.candidate-map.spec.ts` :: US-CS-10 좁고 낮은 다크 화면에서 키보드로 후보를 기록하고 결과 근거를 읽는다<br>`frontend/e2e/stories/cs.candidate-map.spec.ts` :: US-CS-10 지도에서 설정을 비교하고 이유와 후보를 기록한 뒤 결과 검증 카드로 이동한다 |
+| US-CS-11 | 김철수 | 비용을 현실적으로 잡고 운용 금액별 용량을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.validation-reports.spec.ts` :: US-CS-11 용량 확인은 시도 수를 늘리지 않고 금액별 비용과 한계 사유를 보인다 |
+| US-CS-12 | 김철수 | 팩터 회귀로 진짜 알파가 남는지 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.validation-reports.spec.ts` :: US-CS-12 실제 mock의 관측 부족과 별도 합성 회귀 숫자·근거를 구별해 읽는다 |
 | US-CS-13 | 김철수 | 기준을 먼저 적고 홀드아웃을 한 번만 연다 | `예정` | V6-01, V6-02 | V6-02 | — |
+| US-CS-14 | 김철수 | 빈 칸을 정한 값으로 채워 결측 규칙을 팩터 안에 적는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.fill-node.spec.ts` :: US-CS-14 빈 칸은 채운 값으로, 원장이 가린 칸은 채우지 않은 채로 추적에서 본다 |
 | US-DM-01 | 정동민 | AI 공급자를 한 번 연결해 둔다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 설정에서 공급자를 등록하면 활성이 되고 키는 꼬리 4자리만 남는다 |
 | US-DM-02 | 정동민 | 모르는 말을 전략 화면에서 바로 묻는다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 사이드바 질문에 답이 스트리밍되고 새로고침해도 이력과 진행 중 턴이 이어진다 |
-| US-DM-03 | 정동민 | 말로 한 아이디어를 AI가 전략으로 바꿔 주고 바로 백테스트한다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다<br>`frontend/e2e/stories/dm.ai-new-strategy.spec.ts` :: US-DM-03 빈 새 전략에서 AI에게 아이디어를 말해 받은 전략을 적용하고 백테스트한다<br>`frontend/e2e/stories/dm.ai-new-strategy.spec.ts` :: US-DM-03 사이드바와 계약 서랍을 어느 입구로 펼쳐도 머리 줄이 펼친 자리에서 눌린다<br>`frontend/e2e/stories/dm.sidebar-scrollbar.spec.ts` :: US-DM-03 스크롤바가 폭을 차지하는 창에서도 사이드바가 붙었다 떴다 하지 않는다 |
-| US-DM-04 | 정동민 | 백테스트 결과에서 핵심 숫자와 자산 곡선을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.backtest-result.spec.ts` :: US-DM-04 저장한 전략을 백테스트하면 핵심 성과 지표 일곱 개와 자산 곡선이 보인다 |
-| US-DM-05 | 정동민 | 기간·유니버스·수수료·슬리피지를 전략 밖 실행 설정에서 정한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.run-environment.spec.ts` :: US-DM-05 날짜 칸에 숫자를 이어 치거나 대시를 넣어 쳐도 그 날짜가 들어가고, 덜 친 날짜는 칸이 알려 준다<br>`frontend/e2e/stories/dm.run-environment.spec.ts` :: US-DM-05 실행 설정에서 기간만 바꿔 다시 돌려도 전략은 그대로이고 실행 기록에 바꾼 기간이 남는다 |
+| US-DM-03 | 정동민 | 말로 한 아이디어를 AI가 전략으로 바꿔 주고 바로 백테스트한다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다<br>`frontend/e2e/stories/dm.ai-new-strategy.spec.ts` :: US-DM-03 AI 창과 계약 서랍을 어느 입구로 펼쳐도 머리 줄이 펼친 자리에서 눌린다<br>`frontend/e2e/stories/dm.ai-new-strategy.spec.ts` :: US-DM-03 빈 새 전략에서 AI에게 아이디어를 말해 받은 전략을 적용하고 백테스트한다<br>`frontend/e2e/stories/dm.sidebar-scrollbar.spec.ts` :: US-DM-03 스크롤바가 폭을 차지하는 창에서도 AI 창이 흔들리지 않는다 |
+| US-DM-04 | 정동민 | 백테스트 결과에서 핵심 숫자와 자산 곡선을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.backtest-result.spec.ts` :: US-DM-04 저장한 전략을 백테스트하면 결과 한눈에·두 축 카드·자산 곡선이 보인다 |
+| US-DM-05 | 정동민 | 기간·유니버스·수수료·슬리피지를 전략 밖 실행 설정에서 정한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.layout-polish.spec.ts` :: US-DM-05 밝은·어두운 데스크톱과 좁은 화면에서 실행 설정을 읽고 키보드로 여닫는다<br>`frontend/e2e/stories/dm.run-environment.spec.ts` :: US-DM-05 날짜 칸에 숫자를 이어 치거나 대시를 넣어 쳐도 그 날짜가 들어가고, 덜 친 날짜는 칸이 알려 준다<br>`frontend/e2e/stories/dm.run-environment.spec.ts` :: US-DM-05 실행 설정에서 기간만 바꿔 다시 돌려도 전략은 그대로이고 실행 기록에 바꾼 기간이 남는다 |
 | US-DM-06 | 정동민 | 화면의 말과 오류 문장을 쉬운 한글로 읽는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 결과 파일을 읽을 수 없는 완료 실행은 결과 화면이 다시 실행하라고 말하고 결과를 다시 묻지 않는다<br>`frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 그래프 편집 화면은 노드 종류·연산자·필드를 한글 이름과 설명으로 보이고 삭제 거부를 노드 이름으로 말한다<br>`frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 실패한 옛 실행은 백테스트 이력과 결과 화면에서 같은 한글 문장으로 보이고 재실행 거절은 고칠 곳을 말한다<br>`frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 필드 이름을 틀리거나 1.0 문법을 쓰면 문제 목록이 한글로 고칠 방법을 말한다<br>`frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 한 번도 사지 않은 실행과 데이터가 모르는 벤치마크는 실패 문장이 고칠 곳을 말한다 |
-| US-DM-07 | 정동민 | 빈 문서에서 그래프 화면만으로 전략을 만들어 백테스트한다 | `예정` | P4-04, P5-03 | P4-04, P5-03 | — |
+| US-DM-07 | 정동민 | 빈 문서에서 그래프 화면만으로 전략을 만들어 백테스트한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 12-1 모멘텀을 만들어 정본 hash로 백테스트한다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 거래대금 상위 20%와 모멘텀을 만들어 백테스트한다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 변동성 역가중을 만들고 참조 이름을 한 번에 되돌린다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 이평 돌파와 선언형 보조 모멘텀을 만들어 백테스트한다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 저PBR·고ROE와 자본총계 필터를 만들어 백테스트한다 |
 | US-DM-08 | 정동민 | 백테스트 결과를 AI에게 쉬운 말로 풀어 달라고 한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.result-explain.spec.ts` :: US-DM-08 완료된 백테스트 결과에서 AI에게 좋은 결과인지 물으면 지표 뜻과 벤치마크 비교를 쉬운 말로 답한다 |
 | US-DM-09 | 정동민 | AI 제안을 적용한 뒤 버튼 한 번으로 되돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다 |
-| US-DM-10 | 정동민 | 결과가 운으로 설명되는지 쉬운 말로 본다 | `예정` | V5-02 | V5-02 | — |
-| US-DM-11 | 정동민 | 버튼 하나로 지금 설정이 튼튼한지 확인한다 | `예정` | V3-05, V5-02 | V5-02 | — |
+| US-DM-10 | 정동민 | 결과가 운으로 설명되는지 쉬운 말로 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.run-validation.spec.ts` :: US-DM-10 1440px에서 원래 통계·키보드 근거·조회 오류를 구별한다<br>`frontend/e2e/stories/dm.run-validation.spec.ts` :: US-DM-10 360px에서 원래 통계·키보드 근거·조회 오류를 구별한다 |
+| US-DM-11 | 정동민 | 버튼 하나로 지금 설정이 튼튼한지 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.robustness-check.spec.ts` :: US-DM-11 US-CS-09 한 번 돌린 결과에서 튼튼한지 확인하기로 시도 수를 먼저 보고 실험을 걸면, 끝난 뒤 표본 밖 곡선·유지율과 추천 후보(또는 추천하지 않는 이유)가 카드에 채워진다 |
+| US-DM-12 | 정동민 | AI 결과 설명에서 검증 근거와 한계를 함께 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.result-validation-ai.spec.ts` :: US-DM-12 AI에게 결과를 믿어도 되는지 물으면 검증 카드의 PSR·DSR 원래 수치와 조회 시점을 함께 답한다<br>`frontend/e2e/stories/dm.result-validation-ai.spec.ts` :: US-DM-12 후보로 고른 뒤 계열 시도가 늘어난 결과에서 AI는 지금 원장 기준과 고를 당시 기준을 나눠 답한다 |
+| US-DM-13 | 정동민 | 새 전략을 단계별 안내를 따라 만든다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.strategy-guide.spec.ts` :: US-DM-13 새 전략을 단계별로 고르면 같은 전략 문서가 만들어지고 편집기에서 이어 쓴다<br>`frontend/e2e/stories/dm.strategy-guide.spec.ts` :: US-DM-13 안내 첫 단계부터 AI 도우미에게 만들 전략을 말하고 제안을 적용하면 단계 값이 채워진다 |
+| US-DM-14 | 정동민 | 화면 테마를 설정에서 고른다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.settings-theme.spec.ts` :: US-DM-14 설정에서 어둡게를 고르면 바로 바뀌고 새로고침 뒤에도 유지된다 |
+| US-DM-15 | 정동민 | 앱을 열면 이어서 할 일과 돌고 있는 일을 먼저 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.research-home.spec.ts` :: US-DM-15 연구 홈은 최근 결과와 작업 기록을 보이고 계좌 칸에는 숫자 없이 미연결만 말한다 |
+| US-DM-16 | 정동민 | 백테스트 결과에서 무엇을 샀고 무엇을 들고 있었는지 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.backtest-holdings.spec.ts` :: US-DM-16 결과 화면에서 매매한 날을 골라 그날 들고 있던 종목을 보고, 종목별 체결 기록을 연다 |
 | US-SM-01 | 한상목 | YAML을 붙여 넣고 오타를 필드 경로로 찾아 고친다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
 | US-SM-02 | 한상목 | 필드의 단위·범위·기본값을 계약 패널에서 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.field-contract.spec.ts` :: US-SM-02 전략 구조에서 필드를 고르면 계약 패널이 단위·범위·표시 값을 알려 준다 |
 | US-SM-03 | 한상목 | 저장할 때마다 새 버전이 쌓이고 버전끼리의 차이와 충돌을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
@@ -64,9 +70,11 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-SM-09 | 한상목 | 모르는 금융 개념을 편집 흐름 안에서 설명받는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.finance-terms.spec.ts` :: US-SM-09 편집 중에 AI와 계약 패널로 금융 개념의 뜻을 확인한다 |
 | US-SM-10 | 한상목 | 실행 설정 항목 옆에서 용어 뜻을 바로 본다 | `미계획` | — | — | — |
 | US-SM-11 | 한상목 | 백테스트를 다시 눌러도 같은 계산이 겹쳐 돌지 않는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.experiments.spec.ts` :: US-SM-11 실험이 도는 실행을 같은 요청으로 다시 시작하면 같은 실행으로 가고, 내 취소는 내 몫만 빼 실험을 취소해야 멈춘다 |
-| US-SM-12 | 한상목 | 시도 수가 자동으로 쌓이고 지울 수 없다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.trial-ledger.spec.ts` :: US-SM-12 시도 원장은 설정을 바꾼 실행만 새 시도로 세고 재확인·결과 없는 요청을 따로 보이며 합치기만 있다 |
+| US-SM-12 | 한상목 | 시도 수가 자동으로 쌓이고 지울 수 없다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.ide-research.spec.ts` :: US-SM-12 좁고 낮은 편집기에서 레시피와 미저장 안내를 읽고 실험을 준비한다<br>`frontend/e2e/stories/sm.ide-research.spec.ts` :: US-SM-12 편집기의 계열과 선택값을 확인하고 현재 환경으로 실험을 준비한다<br>`frontend/e2e/stories/sm.trial-ledger.spec.ts` :: US-SM-12 시도 원장은 설정을 바꾼 실행만 새 시도로 세고 재확인·결과 없는 요청을 따로 보이며 합치기만 있다 |
 | US-SM-13 | 한상목 | 봉인 구간과 겹치는 실행이 이유와 교정 버튼과 함께 막힌다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.research-window.spec.ts` :: US-SM-13 봉인 구간과 겹치는 시작일은 이유와 교정 버튼과 함께 막히고, 실행 전에 시도 수 영향을 알려 준다 |
 | US-SM-14 | 한상목 | 실험 설정을 표로 보고 같은 실험을 다시 만든다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.experiments.spec.ts` :: US-SM-14 US-SM-15 실험을 표로 보고 같은 설정으로 다시 만들며, 대기열의 두 실험을 조작하고 완료 알림으로 후보를 연다 |
 | US-SM-15 | 한상목 | 여러 실험을 대기열에 넣고 창을 닫아도 계속 돈다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.experiments.spec.ts` :: US-SM-14 US-SM-15 실험을 표로 보고 같은 설정으로 다시 만들며, 대기열의 두 실험을 조작하고 완료 알림으로 후보를 연다 |
 | US-SM-16 | 한상목 | 실행 전에 이 실행이 시도 수를 늘리는지 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.research-window.spec.ts` :: US-SM-13 봉인 구간과 겹치는 시작일은 이유와 교정 버튼과 함께 막히고, 실행 전에 시도 수 영향을 알려 준다 |
+| US-SM-17 | 한상목 | 전략 하나의 버전·백테스트·실험을 세션 화면에서 한 흐름으로 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.strategy-session.spec.ts` :: US-SM-17 세션 화면은 버전마다 그 버전으로 돌린 백테스트를 묶고 의도·시도 원장·버전 지문을 함께 보인다 |
+| US-SM-18 | 한상목 | 내 PC에서 내 키움 모의 계좌를 연결하고 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.kiwoom-mock-connection.spec.ts` :: US-SM-18 설정에서 키움 모의 키를 저장하면 계좌 끝 4자리만 보이고 연결 확인이 계좌 대조 결과를 말한다 |
 <!-- USER-STORY-TRACE:END -->

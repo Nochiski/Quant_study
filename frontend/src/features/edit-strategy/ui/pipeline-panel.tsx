@@ -16,14 +16,22 @@ import {
   type FormListItem,
   type FormListSection,
 } from "../model/form-projection";
+import { itemErrorCount } from "../model/diagnostic-counts";
 import { coversPointer } from "../model/diagnostic-navigation";
-import { itemSection, listAddition } from "../model/form-transactions";
+import {
+  draftOf,
+  itemSection,
+  listAddition,
+  renameIdentity,
+} from "../model/form-transactions";
 import {
   cardTemplate,
   itemName,
   pipelineNames,
+  pipelineDocumentProperties,
   placeName,
   projectPipeline,
+  sentenceItems,
   sentencePieces,
   strategySummary,
   unstagedNames,
@@ -36,27 +44,33 @@ import { recipeSummary } from "../model/recipe-projection";
 import type { JsonSchema } from "../model/schema-navigator";
 import {
   NO_FOCUS,
+  type CommitPlanner,
   useFieldCommit,
   useItemRemoval,
 } from "../model/use-field-editing";
 import type { FormProjectionState } from "../model/use-form-projection";
-import { useRevealSelection } from "../model/use-reveal-selection";
+import {
+  useRevealSelection,
+  useRevealedOpen,
+} from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import {
   DiagnosticNotes,
   FieldActions,
   FieldControl,
+  FormFieldsEditor,
   SeverityBadge,
   type FormCatalogs,
   type SliderRange,
 } from "./strategy-form-panel";
+import { LibraryFactorSave } from "./library-factor-save";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 import "./pipeline-panel.css";
 
 /** 캔버스의 feedback owner. Form(`form`)·Graph(`graph`)와 슬롯을 나눈다. */
 const PIPELINE_OWNER = "pipeline";
 
-type CardContext = {
+export type CardContext = {
   /** 카탈로그·참조 선택지의 이름 풀이(요약 띠와 같은 것). */
   names: SummaryNames;
   schema: JsonSchema;
@@ -65,7 +79,16 @@ type CardContext = {
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
   selectedPointer: string | undefined;
+  revealSignal: number | undefined;
   onOpenGraph: ((pointer: string) => void) | undefined;
+  onOpenAdvanced: ((pointer: string) => void) | undefined;
+  /** 팩터 카드에 "내 팩터로 저장"을 둔다(US-CS-08). 라이브러리 API 가 있는 화면만 켠다. */
+  librarySave: boolean;
+  /**
+   * 목록 항목 카드 머리에 항목 이름과 삭제를 둔다(새 전략 안내). 캔버스는 끈 채 카드 끝에 삭제 버튼을
+   * 두고, 안내는 규칙마다 머리 띠가 있어야 규칙끼리 나뉘어 보인다.
+   */
+  itemHeads?: boolean;
 };
 
 export const PipelinePanel = ({
@@ -74,8 +97,10 @@ export const PipelinePanel = ({
   transactions,
   catalogs,
   onOpenGraph,
+  onOpenAdvanced,
   selectedPointer,
   revealSignal,
+  librarySave = false,
 }: {
   /** Form 투영(`useFormProjection`): stale parse 와 진단 규칙을 한 번 판정한 결과. */
   form: FormProjectionState;
@@ -85,8 +110,11 @@ export const PipelinePanel = ({
   catalogs: FormCatalogs;
   /** 팩터의 그래프를 고급 편집기에서 연다(pointer 선택). 없으면 버튼을 그리지 않는다. */
   onOpenGraph?: (pointer: string) => void;
+  onOpenAdvanced?: (pointer: string) => void;
   selectedPointer?: string;
   revealSignal?: number;
+  /** 팩터 카드에 "내 팩터로 저장"을 둔다(US-CS-08). */
+  librarySave?: boolean;
 }) => {
   const container = useRevealSelection<HTMLElement>(
     selectedPointer,
@@ -114,8 +142,13 @@ export const PipelinePanel = ({
           transactions,
           catalogs,
           selectedPointer,
+          revealSignal,
           onOpenGraph,
+          onOpenAdvanced,
+          librarySave,
         };
+  const documentSection =
+    pipeline === null ? null : pipelineDocumentProperties(pipeline);
   return (
     <section
       ref={container}
@@ -129,7 +162,9 @@ export const PipelinePanel = ({
             ? t(
                 form.firstParsePending
                   ? "form.panel.firstParsePending"
-                  : "form.panel.loading",
+                  : form.noValidParse
+                    ? "form.panel.noValidParse"
+                    : "form.panel.loading",
               )
             : strategySummary(pipeline, catalogName)}
         </p>
@@ -140,6 +175,20 @@ export const PipelinePanel = ({
           <Badge tone="warn">{t(`form.disabled.${disabled}`)}</Badge>
         ) : null}
       </header>
+      {documentSection === null || context === null ? null : (
+        <fieldset className="pipeline__properties" disabled={disabled !== null}>
+          <legend>{t("graph.pipeline.documentProperties")}</legend>
+          <FormFieldsEditor
+            section={documentSection}
+            transactions={transactions}
+            catalogs={catalogs}
+            owner={PIPELINE_OWNER}
+            selectedPointer={selectedPointer}
+            names={context.names}
+            showIdentifiers={false}
+          />
+        </fieldset>
+      )}
       <TransactionFeedbackNote
         feedback={transactions.feedbackFor(PIPELINE_OWNER)}
         owner={PIPELINE_OWNER}
@@ -157,11 +206,17 @@ export const PipelinePanel = ({
                 stage={stage}
                 number={index + 1}
                 context={context}
+                flowsOn={index < pipeline.stages.length - 1}
               />
             ))}
             <ExecutionGuide
               number={pipeline.stages.length + 1}
-              outside={unstagedNames(pipeline)}
+              outside={unstagedNames({
+                ...pipeline,
+                unstaged: pipeline.unstaged.filter(
+                  (section) => section.pointer !== documentSection?.pointer,
+                ),
+              })}
             />
           </ol>
         </fieldset>
@@ -174,16 +229,19 @@ const StageColumn = ({
   stage,
   number,
   context,
+  flowsOn,
 }: {
   stage: PipelineStage;
   number: number;
   context: CardContext;
+  /** 다음 단계로 이어지는가. 넓은 화면에서 열 사이에 화살표를 그린다(RD-04-B). */
+  flowsOn: boolean;
 }) => {
   const headingId = useId();
   const notesId = useId();
   const stem = `strategy.stage.${stage.stage}`;
   return (
-    <li className="pipeline__stage">
+    <li className={`pipeline__stage${flowsOn ? " pipeline__stage--flows" : ""}`}>
       <div role="group" aria-labelledby={headingId}>
         <h3 id={headingId} className="pipeline__stage-title">
           <span className="pipeline__stage-number">{number}</span> {tName(stem)}{" "}
@@ -259,12 +317,15 @@ const ExecutionGuide = ({
 /**
  * 목록(규칙·팩터). 항목은 문장 카드(틀 `<목록 설명 키>.card`)이고 추가·삭제는 Form 목록과 같은 연산이다.
  */
-const StageList = ({
+export const StageList = ({
   list,
   context,
+  note,
 }: {
   list: FormListSection;
   context: CardContext;
+  /** 제목 아래 한 줄 안내(항목끼리 어떻게 묶이는지 등). 없으면 그리지 않는다. */
+  note?: string | null;
 }) => {
   const notesId = useId();
   const addReasonId = `${notesId}-add`;
@@ -288,6 +349,9 @@ const StageList = ({
       }
     >
       <p className="pipeline__list-title">{title}</p>
+      {note === undefined || note === null ? null : (
+        <p className="pipeline__hint">{note}</p>
+      )}
       <DiagnosticNotes id={notesId} diagnostics={list.diagnostics} />
       {list.items.length === 0 ? (
         <p className="pipeline__hint">{t("form.list.empty")}</p>
@@ -318,6 +382,7 @@ const StageList = ({
                 NO_FOCUS,
               );
           }}
+          className="pipeline__add"
           aria-label={`${title} · ${t("form.list.add")}`}
         >
           {t("form.list.add")}
@@ -334,7 +399,7 @@ const StageList = ({
 
 /**
  * 목록 항목 카드: 항목 필드로 문장을 채우고 삭제를 둔다(Form 항목과 같은 `useItemRemoval`). identity(`factor_id`)는
- * YAML 식별자라 카드에 두지 않는다 — 이름은 `label` 이 맡고 rename 은 Form·YAML 몫이다(WORKFLOW P4-03 결정 1).
+ * 기본 카드 이름은 `label` 이 맡고 identity 편집은 접힌 영역에서 기존 참조 rename을 쓴다.
  * 팩터의 계산 그래프는 레시피 줄(`RecipeLine`)로 보인다. 삭제 거부는 참조 자리를 이름으로 말한다(결정 3).
  */
 const ListItemCard = ({
@@ -360,33 +425,90 @@ const ListItemCard = ({
     (field) => field.control.kind === "graph-link",
   );
   const identity = item.fields.find((field) => field.key === item.identityKey);
+  const [identifiers, setIdentifiers] = useRevealedOpen(
+    identity !== undefined && context.selectedPointer === identity.pointer
+      ? `${identity.pointer}:${context.revealSignal ?? 0}`
+      : null,
+    false,
+  );
+  const planIdentity: CommitPlanner = (field, value) =>
+    field.key === item.identityKey
+      ? renameIdentity(context.tree, list, item, draftOf(value))
+      : null;
   const shown = item.fields.filter(
     (field) => field !== graph && field !== identity,
   );
+  const removeButton = (
+    <Button
+      size="small"
+      tone={context.itemHeads ? "ghost" : "danger"}
+      onClick={remove}
+      disabled={context.transactions.settling}
+      aria-label={`${label} · ${t("form.list.remove")}`}
+    >
+      {t("form.list.remove")}
+    </Button>
+  );
   return (
     <SentenceCard
+      head={
+        context.itemHeads ? (
+          <>
+            <span className="pipeline__card-name">{label}</span>
+            {removeButton}
+          </>
+        ) : undefined
+      }
+      invalid={itemErrorCount(item) > 0}
       label={label}
       rows={shown.map((field) => ({ field, section }))}
       template={cardTemplate(item.fields, list.descriptionKey)}
       context={context}
       // 칸이 없는 identity 의 진단은 카드 본문으로 남긴다.
-      notes={[...item.diagnostics, ...(identity?.diagnostics ?? [])]}
+      notes={[
+        ...item.diagnostics,
+        ...(identifiers ? [] : (identity?.diagnostics ?? [])),
+      ]}
       owner={item.pointer}
     >
       {graph === undefined ? null : (
         <RecipeLine item={item} graph={graph} label={label} context={context} />
       )}
-      <div className="pipeline__actions">
-        <Button
-          size="small"
-          tone="danger"
-          onClick={remove}
-          disabled={context.transactions.settling}
-          aria-label={`${label} · ${t("form.list.remove")}`}
-        >
-          {t("form.list.remove")}
-        </Button>
-      </div>
+      {graph === undefined || !context.librarySave ? null : (
+        <LibraryFactorSave
+          tree={context.tree}
+          itemPointer={item.pointer}
+          label={label}
+        />
+      )}
+      {identity === undefined ? null : (
+        <div className="pipeline__identity">
+          <Button
+            size="small"
+            tone="ghost"
+            aria-expanded={identifiers}
+            onClick={() => setIdentifiers(!identifiers)}
+          >
+            {t("graph.pipeline.identifiers")}
+          </Button>
+          {identifiers ? (
+            <FormFieldsEditor
+              section={{ ...section, fields: [identity] }}
+              transactions={context.transactions}
+              catalogs={context.catalogs}
+              owner={PIPELINE_OWNER}
+              planCommit={planIdentity}
+              selectedPointer={context.selectedPointer}
+              names={context.names}
+              showIdentifiers={false}
+              sectionDiagnostics={false}
+            />
+          ) : null}
+        </div>
+      )}
+      {context.itemHeads ? null : (
+        <div className="pipeline__actions">{removeButton}</div>
+      )}
       {blocked === null ? null : (
         <p className="strategy-form__invalid" role="alert">
           {t("graph.pipeline.removeBlocked").replace(
@@ -447,6 +569,16 @@ const RecipeLine = ({
           {t("graph.pipeline.openRecipe")}
         </Button>
       )}
+      {context.onOpenAdvanced === undefined ? null : (
+        <Button
+          size="small"
+          tone="ghost"
+          onClick={() => context.onOpenAdvanced?.(graph.pointer)}
+          aria-label={`${label} · ${t("graph.pipeline.openNodes")}`}
+        >
+          {t("graph.pipeline.openNodes")}
+        </Button>
+      )}
     </div>
   );
 };
@@ -455,16 +587,22 @@ const RecipeLine = ({
  * 문장 카드: 틀의 글자와 `{<키>}` 자리(그 행의 컨트롤)를 잇는다. 틀 밖의 행은 이름 라벨 행으로 그리되,
  * 지금 쓰이지 않는 행(적용 조건 거짓)은 문서에 적혀 있을 때만 보인다(경고를 읽고 지울 수 있게).
  */
-const SentenceCard = ({
+export const SentenceCard = ({
   label,
   rows,
   template,
   context,
   notes = [],
   owner,
+  head,
+  invalid = false,
   children,
 }: {
   label: string;
+  /** 카드 머리 띠(항목 이름·삭제). 없으면 머리 없이 문장부터 그린다. */
+  head?: ReactNode;
+  /** 카드 안에 오류 진단이 있는가. 머리 띠가 오류 톤이 된다. */
+  invalid?: boolean;
   rows: readonly PipelineRow[];
   template: string | null;
   context: CardContext;
@@ -478,6 +616,7 @@ const SentenceCard = ({
   const cardId = useId();
   const pieces = template === null ? [] : sentencePieces(template);
   const byKey = new Map(rows.map((row) => [row.field.key, row]));
+  const items = sentenceItems(pieces, (key) => byKey.has(key));
   const placed = new Set(
     pieces.flatMap((piece) =>
       "key" in piece && byKey.has(piece.key) ? [piece.key] : [],
@@ -501,19 +640,26 @@ const SentenceCard = ({
       aria-label={label}
       className="pipeline__card"
       aria-current={selected ? "true" : undefined}
+      data-headed={head === undefined ? undefined : "true"}
+      data-invalid={invalid ? "true" : undefined}
     >
+      {head === undefined ? null : <div className="pipeline__card-head">{head}</div>}
       {pieces.length === 0 ? null : (
         <p className="pipeline__sentence">
-          {pieces.map((piece, index) =>
-            "text" in piece ? (
-              piece.text
-            ) : byKey.has(piece.key) ? (
+          {items.map((item, index) =>
+            "text" in item ? (
+              // 글자 조각도 요소로 둔다 — 줄을 나누는 배치가 조각 단위로 줄바꿈·기준선을 맞춘다.
+              <span key={`text:${index}`} className="pipeline__text">
+                {item.text}
+              </span>
+            ) : byKey.has(item.key) ? (
               <InlineField
-                key={`${piece.key}:${index}`}
-                row={byKey.get(piece.key)!}
-                notesId={notesIdOf(byKey.get(piece.key)!)}
+                key={`${item.key}:${index}`}
+                row={byKey.get(item.key)!}
+                notesId={notesIdOf(byKey.get(item.key)!)}
                 context={context}
-                slider={piece.slider}
+                slider={item.slider}
+                hint={item.hint}
               />
             ) : null,
           )}
@@ -576,16 +722,20 @@ const InlineField = ({
   notesId,
   context,
   slider = false,
+  hint = null,
 }: {
   row: PipelineRow;
   notesId: string;
   context: CardContext;
   /** 틀 자리 `{<키>.slider}`: 숫자 칸 옆에 끄는 막대를 둔다. */
   slider?: boolean;
+  /** 칸 바로 뒤 괄호 도움말(`sentenceItems`). 입력칸 아래 보조 문구로 둔다. */
+  hint?: string | null;
 }) => {
   const id = useId();
   const invalidId = `${id}-invalid`;
   const hintId = `${id}-hint`;
+  const helpId = `${id}-help`;
   const { field, section } = row;
   const name = tName(field.descriptionKey) ?? "";
   const editing = useFieldCommit({
@@ -597,13 +747,20 @@ const InlineField = ({
   });
   const describedBy = [
     editing.invalid === null ? null : invalidId,
+    hint === null || hint === undefined ? null : helpId,
     field.applicable === false ? hintId : null,
     field.diagnostics.length === 0 ? null : notesId,
   ].filter((value): value is string => value !== null);
   return (
     <span
-      className="pipeline__field"
-      aria-current={coversPointer(field.pointer, context.selectedPointer) ? "true" : undefined}
+      className={
+        hint === null ? "pipeline__field" : "pipeline__field pipeline__field--with-help"
+      }
+      aria-current={
+        coversPointer(field.pointer, context.selectedPointer)
+          ? "true"
+          : undefined
+      }
       data-written={field.written}
       data-applicable={
         field.applicable === null ? "unknown" : String(field.applicable)
@@ -622,6 +779,11 @@ const InlineField = ({
         slider={slider ? sliderRange(field.control) : undefined}
         {...editing.control}
       />
+      {hint === null ? null : (
+        <span id={helpId} className="pipeline__field-help">
+          {hint}
+        </span>
+      )}
       {field.applicable === false ? (
         <span id={hintId} className="sr-only">
           {t("form.field.inapplicable")}

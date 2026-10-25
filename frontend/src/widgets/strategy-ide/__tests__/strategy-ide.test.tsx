@@ -70,6 +70,10 @@ const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) => {
   return render(
     <ThemePreferenceProvider>
       <StrategyIde
+        outline={null}
+        snippets={null}
+        inspector={null}
+        debugger={null}
         title="새 전략"
         versionLabel={versionLabel}
         editor={<textarea aria-label="source" />}
@@ -85,6 +89,10 @@ const StatefulViewIde = () => {
   return (
     <ThemePreferenceProvider>
       <StrategyIde
+        outline={null}
+        snippets={null}
+        inspector={null}
+        debugger={null}
         title="새 전략"
         versionLabel="초안"
         editor={<textarea aria-label="source" />}
@@ -99,40 +107,27 @@ const StatefulViewIde = () => {
 };
 
 describe("StrategyIde", () => {
-  it("renders the outline slot and a single set of projection tabs", () => {
+  it("주본문을 먼저 열고 구조·계약·중간 결과는 명시해서 연다", async () => {
     matchMedia(false);
-    mount({
-      outline: (
-        <ul role="tree" aria-label="StrategySpec document structure">
-          <li role="treeitem">parameters</li>
-          <li role="treeitem">risk</li>
-        </ul>
-      ),
-    });
-    const outline = screen.getByRole("navigation", { name: "전략 구조" });
-    expect(within(outline).getByRole("tree")).toHaveTextContent(
-      "parametersrisk",
-    );
-    // Projection views + results tabs; the caller owns inspector content and there is no
-    // Data→…→Execution stepper.
-    expect(
-      new Set(
-        screen.getAllByRole("tablist").map((l) => l.getAttribute("aria-label")),
-      ),
-    ).toEqual(new Set(["표현 전환", "중간 결과"]));
+    const user = userEvent.setup();
+    mount({ outline: <ul role="tree"><li role="treeitem">risk</li></ul> });
+    expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "계약" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "중간 결과" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "편집기" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("complementary", { name: "계약" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("region", { name: "중간 결과" }),
-    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    expect(screen.getByRole("tree")).toHaveTextContent("risk");
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
+    expect(screen.getByRole("complementary", { name: "계약" })).toBeInTheDocument();
+    expect(screen.getAllByRole("tablist")).toHaveLength(1);
   });
 
-  it("resizes every panel linearly by keyboard and pointer, inverting the right/bottom panes", async () => {
+  it("명시해서 연 보조 패널의 폭을 키보드로 조절한다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     mount();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     const outlineHandle = screen.getByRole("separator", {
       name: "전략 구조 크기 조절",
     });
@@ -153,49 +148,61 @@ describe("StrategyIde", () => {
     await user.keyboard("{End}");
     expect(inspectorHandle).toHaveAttribute("aria-valuenow", "520");
 
-    const debuggerHandle = screen.getByRole("separator", {
-      name: "중간 결과 크기 조절",
-    });
-    debuggerHandle.setPointerCapture = vi.fn();
-    debuggerHandle.releasePointerCapture = vi.fn();
-    debuggerHandle.hasPointerCapture = vi.fn(() => true);
-    fireEvent.pointerDown(debuggerHandle, { pointerId: 1, clientY: 500 });
-    for (const clientY of [510, 520, 530]) {
-      fireEvent.pointerMove(debuggerHandle, { pointerId: 1, clientY });
-    }
-    expect(debuggerHandle).toHaveAttribute("aria-valuenow", "190"); // 220 - 30, linear
   });
 
-  it("lets the debugger grow with the window height and keeps the chosen height through a shorter window", async () => {
-    // 상한이 창 높이를 따른다 — 고정 480px이면 큰 창에서도 연결 추적 아래쪽이 가려졌다(#262).
+  it("과거의 작은 분할 높이를 복원해도 추적 작업공간과 편집 원문 상태를 보존한다", async () => {
     matchMedia(false);
-    vi.stubGlobal("innerHeight", 900);
+    localStorage.setItem(PANEL_LAYOUT_STORAGE_KEY, JSON.stringify({version: 1, sizes: {outlineWidth: 240, inspectorWidth: 320, debuggerHeight: 120}}));
     const user = userEvent.setup();
-    mount();
-    const handle = screen.getByRole("separator", {
-      name: "중간 결과 크기 조절",
-    });
-    handle.focus();
-    await user.keyboard("{End}");
-    expect(handle).toHaveAttribute("aria-valuemax", "630");
-    expect(handle).toHaveAttribute("aria-valuenow", "630");
+    mount({ debugger: <input aria-label="추적 종목" defaultValue="SEC001" /> });
+    await user.type(screen.getByRole("textbox", { name: "source" }), "보존할 원문");
+    await user.click(screen.getByRole("button", { name: "중간 결과" }));
+    expect(screen.queryByRole("region", { name: "편집기" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "중간 결과" })).not.toHaveStyle({height: "120px"});
+    expect(screen.queryByRole("separator", { name: "중간 결과 크기 조절" })).not.toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "추적 종목" }), ",SEC002");
+    await user.click(screen.getByRole("button", { name: "전략 편집" }));
+    expect(screen.getByRole("textbox", { name: "source" })).toHaveValue("보존할 원문");
+    await user.click(screen.getByRole("button", { name: "중간 결과" }));
+    expect(screen.getByRole("textbox", { name: "추적 종목" })).toHaveValue("SEC001,SEC002");
+  });
 
-    const resizeWindow = (height: number) =>
-      act(() => {
-        vi.stubGlobal("innerHeight", height);
-        window.dispatchEvent(new Event("resize"));
-      });
-    // 창이 줄면 그 창의 상한으로 그리고, 다시 늘면 고른 높이로 돌아온다.
-    resizeWindow(700);
-    expect(handle).toHaveAttribute("aria-valuenow", "490");
-    resizeWindow(900);
-    expect(handle).toHaveAttribute("aria-valuenow", "630");
+  it("추적 중 계약 서랍을 열면 AI 창은 접히고, 추적과 범위 입력은 유지된다", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    mount({ assistant: <p>AI 대화</p>, debugger: <input aria-label="추적 범위" defaultValue="SEC001" /> });
+    // 직접 연 AI 창은 추적 작업공간으로 가도 닫히지 않는다.
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    await user.click(screen.getByRole("button", { name: "중간 결과" }));
+    expect(screen.getByRole("region", { name: "중간 결과" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
+    // 추적 중 계약은 서랍으로 떠 AI 창과 같은 자리를 덮으므로 창을 접는다(리뷰 6).
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
+    expect(screen.getByRole("region", { name: "중간 결과" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "추적 범위" })).toHaveValue("SEC001");
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).not.toBeInTheDocument();
+    expect(screen.getByText("AI 대화")).toBeInTheDocument();
+  });
+
+  it("추적 중 표현 열기 단축키는 원문을 보존하며 편집으로 복귀한다", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    render(<StatefulViewIde />);
+    await user.type(screen.getByRole("textbox", { name: "source" }), "같은 원문");
+    await user.click(screen.getByRole("button", { name: "중간 결과" }));
+    fireEvent.keyDown(window, { key: "1", altKey: true });
+    expect(screen.getByRole("region", { name: "편집기" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "중간 결과" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    expect(screen.getByRole("textbox", { name: "source" })).toHaveValue("같은 원문");
   });
 
   it("collapses and restores panels with resolvable controls and distinct names", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     mount();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     const collapse = screen
       .getAllByRole("button", { name: /접기/ })
       .map((b) => b.textContent);
@@ -256,30 +263,86 @@ describe("StrategyIde", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("closes wide panels when the viewport becomes narrow", () => {
+  it("작은 화면에서는 보조 패널을 하나씩 전환하고 새 패널로 포커스를 옮긴다", async () => {
+    matchMedia(true);
+    const user = userEvent.setup();
+    mount({ assistant: <button>AI 입력</button> });
+    expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    expect(screen.getByRole("navigation", { name: "전략 구조" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
+    expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "계약 접기" })).toHaveFocus();
+    // 계약 서랍과 AI 창은 같은 자리를 덮으므로 나중에 연 쪽만 남는다(리뷰 6).
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).not.toBeInTheDocument();
+    await user.keyboard("{Alt>}a{/Alt}");
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "계약" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    expect(screen.getByRole("button", { name: "전략 구조 접기" })).toHaveFocus();
+  });
+
+  it.each([true, false])("좁은 화면 전환은 이미 열린 구조와 현재 포커스를 유지한다: %s", async (insideOutline) => {
+    const media = controlledMatchMedia(false);
+    mount({ outline: <button>구조 항목</button> });
+    fireEvent.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    const focused = insideOutline
+      ? screen.getByRole("button", { name: "구조 항목" })
+      : screen.getByRole("textbox", { name: "source" });
+    focused.focus();
+    act(() => media.setMatches(true));
+    expect(screen.getByRole("navigation", { name: "전략 구조" })).toBeInTheDocument();
+    expect(focused).toHaveFocus();
+  });
+
+  it("작은 화면의 구조 버튼은 열림·외부 이탈에도 같은 자리를 유지하고 계약 클릭을 전달한다", async () => {
+    matchMedia(true);
+    const user = userEvent.setup();
+    mount({ outline: <button>구조 항목</button> });
+    const opener = screen.getByRole("button", { name: "전략 구조", expanded: false });
+    const contract = screen.getByRole("button", { name: "계약", expanded: false });
+    await user.click(opener);
+    expect(screen.getByRole("button", { name: "전략 구조", expanded: true })).toBe(opener);
+    expect(screen.getByRole("button", { name: "계약", expanded: false })).toBe(contract);
+    await user.click(contract);
+    expect(screen.getByRole("complementary", { name: "계약" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "전략 구조", expanded: false })).toBe(opener);
+    await user.click(opener);
+    expect(screen.getByRole("button", { name: "전략 구조 접기" })).toHaveFocus();
+    await user.click(opener);
+    expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    expect(opener).toHaveAttribute("aria-expanded", "false");
+    expect(opener).toHaveFocus();
+  });
+
+  it.each([[true, false], [true, true], [false, false], [false, true]])("구조 경계의 키보드 이탈은 compact=%s, shift=%s에서 도착 초점을 유지한다", async (compact, shift) => {
+    matchMedia(compact);
+    const user = userEvent.setup();
+    mount({ outline: <button>구조 안 항목</button>, snippets: <button>마지막 스니펫</button> });
+    const opener = screen.getByRole("button", { name: "전략 구조", expanded: false });
+    await user.click(opener);
+    const left = screen.getByRole("navigation", { name: "전략 구조" }).closest(".ide__left")!;
+    expect(screen.getByRole("button", { name: "전략 구조 접기" })).toHaveFocus();
+    if (!shift) await user.click(screen.getByRole("button", { name: "마지막 스니펫" }));
+    await user.tab({ shift });
+    const arrived = document.activeElement;
+    expect(left.contains(arrived)).toBe(false);
+    expect(arrived).not.toBe(opener);
+    await waitFor(() => expect(arrived).toHaveFocus());
+    if (compact) expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    else expect(screen.getByRole("navigation", { name: "전략 구조" })).toBeInTheDocument();
+  });
+
+  it("좁은 화면으로 바뀌어도 현재 추적 작업공간을 유지한다", () => {
     const media = controlledMatchMedia(false);
     mount();
-    expect(
-      screen.getByRole("complementary", { name: "계약" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("region", { name: "중간 결과" }),
-    ).toBeInTheDocument();
-
+    fireEvent.click(screen.getByRole("button", { name: "중간 결과" }));
+    fireEvent.click(screen.getByRole("button", { name: "계약", expanded: false }));
     act(() => media.setMatches(true));
-
-    expect(
-      screen.getByRole("button", { name: "계약", expanded: false }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "중간 결과", expanded: false }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("complementary", { name: "계약" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("region", { name: "중간 결과" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "계약" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "중간 결과" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "중간 결과" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("lets palette Escape close only the top modal and restore focus inside a narrow drawer", async () => {
@@ -313,16 +376,19 @@ describe("StrategyIde", () => {
     const onRunBacktest = vi.fn();
     mount({
       onRunBacktest,
+      editorActions: <button onClick={onRunBacktest}>백테스트 실행</button>,
       saveStatus: "방금 저장됨",
       meta: { author: "김연구" },
     });
     expect(
       screen.getByRole("navigation", { name: "현재 위치" }),
-    ).toHaveTextContent(/새 전략 v12/);
+    ).toHaveTextContent(/새 전략.*v12/);
     expect(screen.getByText("방금 저장됨")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /백테스트 실행/ }));
     expect(onRunBacktest).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("김연구")).toBeInTheDocument();
+    await user.click(screen.getByText("문서 정보"));
+    expect(screen.getByText("김연구")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
     expect(
       screen.getByRole("navigation", { name: "전략 구조" }),
     ).toBeInTheDocument();
@@ -337,9 +403,33 @@ describe("StrategyIde", () => {
     );
   });
 
+  it("저장 실패는 간결하게 드러내고 문서 정보에서 전체 원인을 읽는다", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    mount({ saveTone: "error", saveStatusSummary: "저장 실패", saveStatus: "서버에 초안을 저장할 수 없습니다. 원문은 로컬에 보존했습니다." });
+    expect(screen.getByText("저장 실패")).toBeVisible();
+    await user.click(screen.getByText("문서 정보"));
+    expect(screen.getByText("서버에 초안을 저장할 수 없습니다. 원문은 로컬에 보존했습니다.")).toBeVisible();
+  });
+
+  it("오류색만으로 저장 실패를 만들지 않고 전달된 저장 전 안내를 표시한다", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    const view = mount({ saveTone: "error", saveStatus: "검증 오류가 있어 저장할 수 없습니다" });
+    expect(screen.queryByText("저장 오류")).not.toBeInTheDocument();
+    expect(screen.queryByText("저장 실패")).not.toBeInTheDocument();
+    view.unmount();
+    mount({ saveTone: "error", saveStatusSummary: "저장 전 검증 오류 수정", saveStatus: "검증 오류가 있어 저장할 수 없습니다" });
+    expect(screen.getByText("저장 전 검증 오류 수정")).toBeVisible();
+    expect(screen.queryByText("저장 실패")).not.toBeInTheDocument();
+    await user.click(screen.getByText("문서 정보"));
+    expect(screen.getByText("검증 오류가 있어 저장할 수 없습니다")).toBeVisible();
+  });
+
   it("renders caller-owned inspector content without sample contract values", () => {
     matchMedia(false);
     mount({ inspector: <div>runtime contract projection</div> });
+    fireEvent.click(screen.getByRole("button", { name: "계약", expanded: false }));
     const inspector = screen.getByRole("complementary", { name: "계약" });
     expect(inspector).toHaveTextContent("runtime contract projection");
     expect(inspector).not.toHaveTextContent("/risk/max_name_weight");
@@ -497,6 +587,35 @@ describe("StrategyIde", () => {
     date.remove();
   });
 
+  it.each([360, 960, 1440])("%ipx의 심볼 명령은 원문 초점을 지키고 떠 있는 보조 패널만 닫는다", async (width) => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: width <= Number(query.match(/max-width:\s*(\d+)px/)?.[1] ?? 0),
+      media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })));
+    const user = userEvent.setup();
+    const onSelectSymbol = vi.fn(() => screen.getByRole("textbox", { name: "source" }).focus());
+    mount({
+      assistant: <button>AI 작성</button>,
+      symbols: [{ id: "/risk/max_name_weight", pointer: "/risk/max_name_weight", label: "최대 종목 비중", description: "/risk/max_name_weight", keywords: ["비중"] }],
+      onSelectSymbol,
+    });
+    // AI 창을 직접 연 뒤 명령을 고른다.
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
+    if (width >= 1280) screen.getByRole("textbox", { name: "source" }).focus();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    await user.type(within(screen.getByRole("dialog", { name: "전략 명령 팔레트" })).getByRole("combobox"), "최대 종목 비중");
+    await user.keyboard("{Enter}");
+    expect(onSelectSymbol).toHaveBeenCalledWith("/risk/max_name_weight");
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "source" })).toHaveFocus());
+    expect(screen.getByRole("region", { name: "편집기" })).toBeInTheDocument();
+    if (width < 1280) {
+      expect(screen.queryByRole("complementary", { name: "계약" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    } else expect(screen.getByRole("complementary", { name: "계약" })).toBeInTheDocument();
+  });
+
   it("searches document symbols and controls panels and theme from the palette", async () => {
     matchMedia(false);
     const user = userEvent.setup();
@@ -578,6 +697,7 @@ describe("StrategyIde", () => {
     matchMedia(false);
     const user = userEvent.setup();
     mount();
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     const collapse = screen.getByRole("button", { name: "계약 접기" });
     collapse.focus();
 
@@ -596,6 +716,7 @@ describe("StrategyIde", () => {
     matchMedia(false);
     const user = userEvent.setup();
     const first = mount();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
     const outline = screen.getByRole("separator", {
       name: "전략 구조 크기 조절",
     });
@@ -605,6 +726,7 @@ describe("StrategyIde", () => {
     first.unmount();
 
     mount();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
     expect(
       screen.getByRole("separator", { name: "전략 구조 크기 조절" }),
     ).toHaveAttribute("aria-valuenow", "256");
@@ -625,14 +747,14 @@ describe("StrategyIde", () => {
     expect(
       JSON.parse(localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY) ?? "null"),
     ).toEqual({
-      version: 1,
+      version: 2,
       sizes: {
         outlineWidth: 256,
         inspectorWidth: 320,
         debuggerHeight: 220,
-        assistantWidth: 360,
       },
-      open: { assistant: false },
+      // 기록이 없던 첫 화면은 AI 창을 연 채로 뜨지만, 사용자가 고르지 않은 열림은 저장하지 않는다 — 좁은 화면의
+      // 기본값(닫힘)이 넓은 화면으로 따라오지 않는다(리뷰 2).
     });
   });
 

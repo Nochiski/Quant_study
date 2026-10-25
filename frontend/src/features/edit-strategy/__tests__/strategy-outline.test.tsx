@@ -24,7 +24,7 @@ import {
   projectStrategyOutlineSymbols,
 } from "../model/strategy-outline";
 import { useStrategyOutline } from "../model/use-strategy-outline";
-import { useOutlineNavigation } from "../model/use-outline-navigation";
+import { useOutlineNavigation } from "./editor-harness";
 import { StrategyOutline } from "../ui/strategy-outline";
 
 afterEach(cleanup);
@@ -264,7 +264,8 @@ describe("Strategy Outline projection", () => {
       loadText: vi.fn(),
       undo: () => false,
       redo: () => false,
-      historyDepth: () => ({ undo: 0, redo: 0 }),
+      subscribeHistory: () => () => {},
+  historyDepth: () => ({ undo: 0, redo: 0 }),
       getHistoryState: () => null,
       restoreHistoryState: vi.fn(),
     };
@@ -307,6 +308,57 @@ describe("Strategy Outline projection", () => {
     expect(onSelectedPointer).toHaveBeenCalledTimes(3);
   });
 
+  it.each(["parse-first", "editor-first"] as const)(
+    "준비 전 경로 reveal은 두 준비 순서(%s)에서 정확한 원문 범위로 한 번 전달된다 (#324)",
+    (order) => {
+      const ready = parsedState();
+      const loading = documentReducer(ready, { type: "load", format: "yaml", source: SOURCE,
+        strategyId: "s2", baseRevision: 2, baseSpecHash: "b".repeat(64) });
+      const parsed = documentReducer(loading, { type: "parsed", version: loading.sourceVersion,
+        result: parseSource(SOURCE, "yaml") });
+      const selected: string[] = [];
+      const focus = vi.fn();
+      const { result, rerender } = renderHook(({ state }: { state: DocumentState }) => useOutlineNavigation({
+        state, schema: SCHEMA, selectedPointer: "/risk/max_name_weight", onSelectedPointer: vi.fn(),
+      }), { initialProps: { state: loading } });
+      const editor: CodeEditorHandle = {
+        getText: () => SOURCE, replaceRange: vi.fn(), getSelection: () => ({ from: 0, to: 0 }),
+        setSelection: (from, to = from) => { selected.push(SOURCE.slice(from, to)); },
+        offsetToPosition: () => ({ line: 0, column: 0 }), positionToOffset: () => 0,
+        scrollTo: vi.fn(), focus, loadText: vi.fn(), undo: () => false, redo: () => false,
+        subscribeHistory: () => () => {},
+  historyDepth: () => ({ undo: 0, redo: 0 }), getHistoryState: () => null, restoreHistoryState: vi.fn(),
+      };
+      if (order === "parse-first") {
+        rerender({ state: parsed });
+        expect(selected).toEqual([]);
+        act(() => result.current.onEditorReady(editor));
+      } else {
+        act(() => result.current.onEditorReady(editor));
+        expect(selected).toEqual([]);
+        rerender({ state: parsed });
+      }
+      expect(selected).toEqual(["0.05"]);
+      expect(focus).toHaveBeenCalledTimes(1);
+      const node = findOutlineNode(result.current.snapshot!.nodes, "/risk/max_name_weight")!;
+      // 같은 경로 반복 클릭도 새 reveal이며 이전 성공 때문에 무시하면 안 된다.
+      act(() => result.current.onSelectOutlineNode(node));
+      expect(selected).toEqual(["0.05", "0.05"]);
+      expect(focus).toHaveBeenCalledTimes(2);
+      act(() => result.current.onEditorReady(null));
+      act(() => result.current.requestSourceReveal("/title"));
+      const next = documentReducer(parsed, { type: "load", format: "yaml", source: SOURCE,
+        strategyId: "s3", baseRevision: 1, baseSpecHash: "c".repeat(64) });
+      rerender({ state: next });
+      act(() => result.current.onEditorReady(editor));
+      expect(selected).toHaveLength(2);
+      rerender({ state: documentReducer(next, { type: "parsed", version: next.sourceVersion,
+        result: parseSource(SOURCE, "yaml") }) });
+      expect(selected).toEqual(["0.05", "0.05", "0.05"]);
+      expect(focus).toHaveBeenCalledTimes(3);
+    },
+  );
+
   it("restores the same route pointer after a projection without focusing the hidden editor", () => {
     const focus = vi.fn();
     const setSelection = vi.fn();
@@ -335,7 +387,8 @@ describe("Strategy Outline projection", () => {
       loadText: vi.fn(),
       undo: () => false,
       redo: () => false,
-      historyDepth: () => ({ undo: 0, redo: 0 }),
+      subscribeHistory: () => () => {},
+  historyDepth: () => ({ undo: 0, redo: 0 }),
       getHistoryState: () => null,
       restoreHistoryState: vi.fn(),
     };
@@ -415,7 +468,8 @@ describe("Strategy Outline projection", () => {
           loadText: vi.fn(),
           undo: () => false,
           redo: () => false,
-          historyDepth: () => ({ undo: 0, redo: 0 }),
+          subscribeHistory: () => () => {},
+  historyDepth: () => ({ undo: 0, redo: 0 }),
           getHistoryState: () => null,
           restoreHistoryState: vi.fn(),
         }),

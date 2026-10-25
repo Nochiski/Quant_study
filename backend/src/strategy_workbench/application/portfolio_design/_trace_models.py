@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import date
 from typing import ClassVar, TypeAlias
 
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.equity.facade.research_data import CellKind, SecurityRef
+from strategy_workbench.domain.factor.facade.expression import MissingPolicy
 from strategy_workbench.domain.factor.facade.trace import TraceValueStatus
 from strategy_workbench.domain.portfolio.facade.construction import (
     CandidateDecision,
@@ -19,6 +21,7 @@ from strategy_workbench.domain.strategy.facade.provenance import (
     StrategyProvenance,
     StrategySource,
 )
+from strategy_workbench.domain.strategy.facade.specification import ParameterValue
 
 from ._models import PortfolioStartingHolding
 
@@ -40,6 +43,7 @@ class StrategyTraceRequest:
     limit: int = 200
     # preview 와 같은 optional 실행 설정(P2-01). `as_of` 범위 판정과 관측 조회가 이 값을 읽는다.
     environment: RunEnvironment | None = None
+    parameter_values: Mapping[str, ParameterValue] = field(default_factory=dict)
 
     MAX_SECURITY_IDS: ClassVar[int] = 100
     MAX_NODE_IDS: ClassVar[int] = 100
@@ -150,6 +154,21 @@ class StrategyTraceSummary:
 
 
 @dataclass(frozen=True)
+class StrategyFactorPreviewRow:
+    security_id: str
+    value: float
+    security: SecurityRef | None
+
+
+@dataclass(frozen=True)
+class StrategyFactorPreview:
+    valid_count: int
+    missing_count: int
+    missing: MissingPolicy
+    top: tuple[StrategyFactorPreviewRow, ...]
+
+
+@dataclass(frozen=True)
 class StrategyTraceResponse:
     spec_hash: str
     snapshot_id: str
@@ -162,6 +181,17 @@ class StrategyTraceResponse:
     raw: tuple[RawStrategyTraceRow, ...]
     raw_truncated: bool
     target: StrategyTargetTrace | None
+    factor_preview: StrategyFactorPreview
     # `target` 처럼 기준일이 리밸런스 신호일일 때만 있다.
     summary: StrategyTraceSummary | None = None
     warnings: tuple[str, ...] = ()
+    factor_evaluation_version: str | None = None
+    parameter_values: Mapping[str, ParameterValue] = field(
+        default_factory=dict,
+        metadata={
+            "description": (
+                "기본값을 포함한 해소 평가 값. spec_hash/provenance는 문서 의미, "
+                "plan_hash는 계산 구조이며 파라미터 값 변경으로 바꾸지 않는다."
+            )
+        },
+    )

@@ -53,7 +53,9 @@
       "turnover_buffer_count": 0,
       "minimum_trade_weight": 0.0,
       "liquidity_field_id": null,
-      "minimum_liquidity": null
+      "minimum_liquidity": null,
+      "tie_breaker_factor_id": null,
+      "tie_breaker_direction": "high"
     }
   },
   "metrics": [
@@ -206,6 +208,16 @@
       "higher_is_better": true,
       "scope": "full",
       "value": 1.8,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "probabilistic_sharpe",
+      "label": "Probabilistic Sharpe ratio",
+      "category": "risk_adjusted",
+      "unit": "percent",
+      "higher_is_better": true,
+      "scope": "full",
+      "value": 0.9721,
       "sample_count": 820
     },
     {
@@ -405,6 +417,36 @@
     "orders": 6,
     "fills": 5,
     "closed_trades": 4
+  },
+  "validation": {
+    "psr": {
+      "value": 0.9721,
+      "sample_count": 820,
+      "unavailable_reason": null
+    },
+    "current_ledger": {
+      "observed_at": "2026-09-01T09:30:00+00:00",
+      "deflated_sharpe": 0.6143,
+      "unavailable_reason": null,
+      "lineage_id": "strategy-sample",
+      "trial_count": 3,
+      "representative_count": 3,
+      "trial_sharpe_variance": 0.0004,
+      "expected_maximum_sharpe": 0.0172,
+      "session_sharpe": 0.0548,
+      "session_standard_error": 0.0251,
+      "registry_mixed": false,
+      "unknown_registry_count": 0
+    },
+    "selection_snapshots": [
+      {
+        "experiment_id": "experiment-sample",
+        "selected_at": "2026-08-20T14:00:00+00:00",
+        "trial_count": 2,
+        "deflated_sharpe": 0.7012,
+        "ledger_representative_sharpe": 0.0548
+      }
+    ]
   },
   "omitted": {
     "monthly_returns": 4

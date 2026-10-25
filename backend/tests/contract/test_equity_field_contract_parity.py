@@ -4,7 +4,9 @@
 계약(`resolve_factor_fields`·`list_fields`)으로 단위 경고·field_missing·타입 검사를 하므로, 같은
 field_id 의 단위나 값 타입이 두 어댑터에서 다르면 mock 으로 green 인 문서가 실데이터에서만 다르게
 동작한다. 정본은 원장이다. mock 은 원장 스키마를 옮긴 duckdb 선언표(`FIELD_SPECS`)에 단위·값
-타입을 맞추고, 선언표의 값 타입과 mock 의 랙은 원장 `dataset_profile` 선언에 맞춘다(아래 #230 절).
+타입을 맞추고, 선언표의 단위·빈도·값 타입과 mock 의 랙은 원장 `dataset_profile` 선언에 맞춘다.
+단위·빈도의 어휘 차이는 아래 계약 대응표가 소유한다(#375 DR-A-13). 원천이 행을 고르는 필터도
+원장 필드 선언과 원장이 싣는 사건 유형에 대조한다(#583).
 
 대조는 선언표를 직접 읽는다 — 손 픽스처 루트의 `list_fields()` 는 그 루트에 원천 테이블이 있는
 필드만 내므로, 새 `FieldSpec` 이 픽스처보다 먼저 들어오면 대조를 빠져나갈 수 있다.
@@ -12,6 +14,7 @@ field_id 의 단위나 값 타입이 두 어댑터에서 다르면 mock 으로 g
 
 from __future__ import annotations
 
+import re
 from dataclasses import fields
 from pathlib import Path
 from typing import Any
@@ -56,9 +59,19 @@ EXPECTED_SHARED = frozenset(
 )
 
 
+def _ledger_pending() -> frozenset[str]:
+    from tests.equity_fixture import LEDGER_PENDING_FIELDS
+
+    return LEDGER_PENDING_FIELDS
+
+
+# 원장 선언과 대조하는 필드 — 원장 선언이 아직 main 계보에 없는 필드(#608)는 뺀다.
+LEDGER_FIELD_IDS = sorted(set(FIELD_BY_ID) - _ledger_pending())
+
+
 # 필드 계약 판에 닿는 dataclass 와 그 판에서 빠지는 문장 칸.
 _PROSE_BY_TYPE: dict[type, set[str]] = {
-    FieldSpec: {"label", "verdict", "description", "disclosure_basis", "evidence", "lag_basis"},
+    FieldSpec: {"label", "description", "disclosure_basis", "evidence", "lag_basis"},
     SourceSpec: {"lag_basis"},
     DatasetFieldProfile: {
         "label",
@@ -105,6 +118,48 @@ def test_공통_필드_집합이_비어_있지_않다() -> None:
         f"mock·duckdb 공통 필드가 기대 집합보다 작다 — missing={sorted(EXPECTED_SHARED - shared)} "
         f"shared={sorted(shared)}"
     )
+
+
+def test_원장_field_map_필드는_선언표나_미지원표_정확히_한쪽에_있다() -> None:
+    """원장이 field_map 으로 선언한 필드마다 어댑터가 내주거나, 내주지 않는 사유를 적는다(#373).
+
+    선언표 → 원장 방향만 보면 원장에 있는데 배선도 사유도 없는 필드가 조용히 남는다(도메인 리뷰 A
+    DR-A-07 의 세 필드).
+    """
+    ledger = {
+        profile.field_id for profile in _ledger_profiles().values() if profile.scope == "field_map"
+    }
+    declared, unsupported = set(FIELD_BY_ID), set(UNSUPPORTED_FIELDS)
+
+    assert sorted(ledger - declared - unsupported) == []
+    assert sorted(declared & unsupported) == []
+    assert all(reason.strip() for reason in UNSUPPORTED_FIELDS.values())
+
+
+# 사용자 설명에 새면 안 되는 개발 참조 — 이슈·문서 절·단계·결함 id, 백틱, 클래스 이름, 필드 id 가
+# 아닌 밑줄 식별자(표·열·상수 이름). 다른 필드 id(예: price.adj_close)는 사용자가 고르는 이름이다.
+_DEVELOPER_REFERENCE = re.compile(
+    r"#\d|§|\bS\d{2}\b|GAP-|DEFECT-|DESIGN|내부 스코프|`|\b[A-Z][a-z]+[A-Z]|(?<![.\w])[A-Za-z]+_\w"
+)
+# 설명은 뜻과 한계 몇 문장이다. 개발 근거는 `evidence` 나 선언 옆 주석에 둔다.
+_DESCRIPTION_MAX_CHARS = 240
+
+
+def test_필드_설명은_개발_참조_없는_짧은_사용자_문장이다() -> None:
+    """#373 DR-A-07: 계약 인스펙터·편집기 완성·AI `list_equity_fields` 가 설명을 그대로 보인다."""
+    descriptions = {
+        **{f"duckdb {spec.field_id}": spec.description for spec in FIELD_BY_ID.values()},
+        **{f"mock {field_id}": p.description for field_id, p in _mock_profiles().items()},
+    }
+    leaked = {
+        key: found
+        for key, text in descriptions.items()
+        if (found := _DEVELOPER_REFERENCE.findall(text))
+    }
+    too_long = {
+        key: len(text) for key, text in descriptions.items() if len(text) > _DESCRIPTION_MAX_CHARS
+    }
+    assert (leaked, too_long) == ({}, {})
 
 
 def test_mock_필드는_원장이_아는_id_만_쓴다() -> None:
@@ -188,13 +243,71 @@ def test_duckdb_선언표의_원주가_표시는_같은_단위의_실재하는_�
 # (`SourceSpec.frequency`)로 맞춘다. mock 이 대신 서는 것은 그 어댑터이기 때문이다.
 
 
-def _ledger_profiles() -> dict[str, Any]:
-    """원장 빌드가 `dataset_profile` 로 내는 필드 선언(field_id → `FieldProfile`)."""
+def _ledger_fields() -> dict[str, tuple[str, Any]]:
+    """원장 빌드 선언의 원천과 프로필. report 주기 해석에는 원천 맥락도 필요하다."""
     pytest.importorskip("duckdb", reason="원장 선언 모듈이 duckdb 를 import 한다(extra `equity`)")
     from tests.equity_fixture import import_ledger_module
 
     rules_s19: Any = import_ledger_module("equity.rules_s19")
-    return {profile.field_id: profile for _, profile in rules_s19.owned_fields()}
+    return {profile.field_id: (table, profile) for table, profile in rules_s19.owned_fields()}
+
+
+def _ledger_profiles() -> dict[str, Any]:
+    return {field_id: profile for field_id, (_, profile) in _ledger_fields().items()}
+
+
+# 원장 → 워크벤치 계약의 어휘 대응이다. 값의 배율을 바꾸지 않는다. 새 단위·주기는 자동 통과하지
+# 않는다. 특히 빈 단위가 항상 score인 것도, report가 항상 분기 보고인 것도 아니다.
+_LEDGER_UNITS = {
+    "pct": "pct",
+    "배": "배",
+    "KRW": "KRW",
+    "억원": "억원",
+    "원": "KRW",
+    "주": "shares",
+    "명": "count",
+}
+_CONTEXT_UNITS = {("consensus.recommendation", ""): "score"}
+_LEDGER_FREQUENCIES = {"session": "daily", "monthly": "monthly", "event": "event"}
+_CONTEXT_FREQUENCIES = {
+    ("fin_std", "report"): "quarterly",
+    ("dividend_event", "report"): "annual",
+    ("fin_ratio_wise", "report"): "annual",
+}
+
+
+def test_원장_대기_필드는_아직_원장_선언에_없다() -> None:
+    """대기 목록(#608)은 원장 계보가 main 에 합쳐지기 전까지의 한시 예외다.
+
+    원장 선언이 들어오면 이 검사가 실패한다 — 대기 목록을 지워 아래 대조에 다시 넣는다.
+    """
+    pending = _ledger_pending()
+    assert pending <= set(FIELD_BY_ID)
+    assert sorted(pending & set(_ledger_profiles())) == []
+
+
+@pytest.mark.parametrize("field_id", LEDGER_FIELD_IDS)
+def test_지원_필드의_단위가_원장_척도와_같다(field_id: str) -> None:
+    _, ledger = _ledger_fields()[field_id]
+    expected = _LEDGER_UNITS.get(ledger.unit, _CONTEXT_UNITS.get((field_id, ledger.unit)))
+    actual = FIELD_BY_ID[field_id].unit
+    assert expected is not None and actual == expected, (
+        f"원장 단위와 어댑터 계약이 다르다 — field_id={field_id} "
+        f"ledger_unit={ledger.unit!r} expected={expected!r} actual={actual!r}"
+    )
+
+
+@pytest.mark.parametrize("field_id", LEDGER_FIELD_IDS)
+def test_지원_필드의_빈도가_원장_원천의_주기와_같다(field_id: str) -> None:
+    table, ledger = _ledger_fields()[field_id]
+    expected = _LEDGER_FREQUENCIES.get(
+        ledger.frequency, _CONTEXT_FREQUENCIES.get((table, ledger.frequency))
+    )
+    actual = SOURCE_BY_NAME[FIELD_BY_ID[field_id].source].frequency.value
+    assert expected is not None and actual == expected, (
+        f"원장 주기와 어댑터 계약이 다르다 — field_id={field_id} table={table} "
+        f"ledger_frequency={ledger.frequency!r} expected={expected!r} actual={actual!r}"
+    )
 
 
 @pytest.mark.parametrize("field_id", _shared_field_ids())
@@ -259,7 +372,94 @@ def test_원장_뷰의_가림_표시_열을_그_뷰를_읽는_원천이_읽는�
     )
 
 
-@pytest.mark.parametrize("field_id", sorted(FIELD_BY_ID))
+# ── 행 필터 (#583) ────────────────────────────────────────────────────────────
+# 원천의 `row_filter` 가 원장에 없는 값으로 거르면 질의는 오류 없이 행 0 을 읽어 필드가 조용히
+# 비고, 단위·값 타입 대조로는 드러나지 않는다. 원장 선언을 직접 읽어 두 방향에서 본다.
+_EVENT_TYPE_PREDICATE = re.compile(r"\bevent_type\s*(?:=\s*'[^']*'|IN\s*\([^)]*\))", re.IGNORECASE)
+
+
+_TOP_LEVEL_TOKEN = re.compile(r"'|\(|\)|\b(?:AND|OR)\b", re.IGNORECASE)
+
+
+def _top_level_terms(predicate: str) -> tuple[frozenset[str], bool]:
+    """괄호·문자열 밖 최상위 AND 항의 집합과 최상위 OR 유무."""
+    terms: list[str] = []
+    has_or, depth, quoted, start = False, 0, False, 0
+    for match in _TOP_LEVEL_TOKEN.finditer(predicate):
+        token = match.group(0).upper()
+        if token == "'":
+            quoted = not quoted
+        elif quoted:
+            continue
+        elif token == "(":
+            depth += 1
+        elif token == ")":
+            depth -= 1
+        elif depth == 0 and token == "OR":
+            has_or = True
+        elif depth == 0:
+            terms.append(predicate[start : match.start()].strip())
+            start = match.end()
+    terms.append(predicate[start:].strip())
+    return frozenset(term for term in terms if term), has_or
+
+
+def test_원장_필드의_행_필터를_어댑터_원천이_그대로_건다() -> None:
+    """원장 필드 선언 행 필터의 최상위 AND 항은 모두 그 필드 원천 `row_filter` 의 AND 항이다.
+
+    어댑터는 항을 더 이어 좁힐 수 있다(컨센서스 FY1). 어느 쪽이든 최상위 OR 이 있으면 AND 항
+    포함만으로 같은 행을 고른다고 말할 수 없어 실패로 본다(우선순위로 필터가 풀린다, #586 리뷰).
+    원장 필터가 없는 필드는 보지 않는다 — 재무의 `period_frontier` 는 원장 뷰가 만든 열이다.
+    """
+    ledger = _ledger_profiles()
+    expected = {
+        field_id: profile.row_filter
+        for field_id in FIELD_BY_ID
+        if (profile := ledger.get(field_id)) is not None and profile.row_filter
+    }
+    actual = {
+        field_id: SOURCE_BY_NAME[FIELD_BY_ID[field_id].source].row_filter or ""
+        for field_id in expected
+    }
+    drift: dict[str, tuple[str, str]] = {}
+    for field_id, want in expected.items():
+        ledger_terms, ledger_or = _top_level_terms(want)
+        adapter_terms, adapter_or = _top_level_terms(actual[field_id])
+        if ledger_or or adapter_or or not ledger_terms <= adapter_terms:
+            drift[field_id] = (want, actual[field_id])
+
+    assert expected, "원장 행 필터가 있는 지원 필드가 없다 — 대조가 공허하다"
+    assert drift == {}, f"원장 행 필터와 어댑터 원천 필터가 다르다 — (ledger, adapter)={drift}"
+
+
+def test_corp_event_를_거르는_유형은_원장이_싣는_사건_유형이다() -> None:
+    """어댑터 원천과 손 픽스처가 쓰는 `event_type` 은 원장 `corp_event` 가 실제로 싣는 유형이다.
+
+    선언만 되고 행을 만들지 않는 유형(`EVENT_TYPE_VOCAB` 의 나머지)으로 걸러도 필드가 비므로
+    `LOADED_EVENT_TYPES` 와 대조한다. 손 픽스처가 어댑터의 틀린 값을 따라 적으면 어댑터 테스트가
+    그 값으로 통과하므로 픽스처 행도 함께 본다(#583).
+    """
+    pytest.importorskip("duckdb", reason="원장 선언 모듈이 duckdb 를 import 한다(extra `equity`)")
+    from tests.equity_fixture import WB_EVENT_ROWS, import_ledger_module
+
+    rules_s05: Any = import_ledger_module("equity.rules_s05")
+    loaded = set(rules_s05.LOADED_EVENT_TYPES)
+    filtered = {
+        literal
+        for spec in SOURCE_BY_NAME.values()
+        if spec.relation == rules_s05.CORP_EVENT.name and spec.row_filter
+        for predicate in _EVENT_TYPE_PREDICATE.findall(spec.row_filter)
+        for literal in re.findall(r"'([^']*)'", predicate)
+    }
+    written = {row[2] for row in WB_EVENT_ROWS}
+
+    assert filtered, "corp_event 를 event_type 으로 거르는 원천이 없다 — 대조가 공허하다"
+    assert (sorted(filtered - loaded), sorted(written - loaded)) == ([], []), (
+        f"원장이 싣지 않는 event_type — (adapter, fixture) 밖 값, loaded={sorted(loaded)}"
+    )
+
+
+@pytest.mark.parametrize("field_id", LEDGER_FIELD_IDS)
 def test_duckdb_선언표의_값_타입이_원장_선언과_같다(field_id: str) -> None:
     """`FIELD_SPECS` 는 원장 스키마를 옮긴 표다. 값 타입이 원장 `dataset_profile` 과 같아야 한다."""
     ledger = _ledger_profiles().get(field_id)
@@ -269,3 +469,28 @@ def test_duckdb_선언표의_값_타입이_원장_선언과_같다(field_id: str
         f"FIELD_SPECS 값 타입이 원장 dataset_profile 과 다르다 — field_id={field_id} "
         f"expected={ledger.value_type} got={got}"
     )
+
+
+def test_필드_프로파일과_선언표는_같은_팩터_값타입_변환을_쓴다() -> None:
+    from dataclasses import replace
+
+    from strategy_workbench.domain.equity.facade.research_data import FieldValueType
+    from strategy_workbench.domain.factor.facade.expression import NodeValueType, field_metadata
+
+    profile = _mock_profiles()["price.close"]
+    spec = FIELD_BY_ID["price.close"]
+    for value_type in FieldValueType:
+        expected = (
+            NodeValueType.GROUP_SERIES
+            if value_type is FieldValueType.CATEGORY
+            else NodeValueType.NUMERIC_SERIES
+        )
+        for declaration in (
+            replace(profile, value_type=value_type),
+            replace(spec, value_type=value_type),
+        ):
+            metadata = field_metadata(declaration, "price.adj_close")
+            assert metadata.field_id == "price.close"
+            assert metadata.unit == spec.unit
+            assert metadata.value_type is expected
+            assert metadata.adjusted_field_id == "price.adj_close"

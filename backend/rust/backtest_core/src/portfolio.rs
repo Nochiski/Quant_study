@@ -1,3 +1,4 @@
+use crate::power_projection::{project_cash, project_cost, summarize};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -32,7 +33,7 @@ pub(crate) struct Portfolio {
     ledger_slots: HashMap<String, usize>,
     marks: HashMap<String, f64>,
     allow_short: bool,
-    allow_margin: bool,
+    pub(crate) allow_margin: bool,
 }
 
 impl Portfolio {
@@ -75,8 +76,6 @@ impl Portfolio {
     /// `cash + sum(mv)` / `sum(|mv|)`와 같은 결합 순서로 누산한다 (비트 동일성).
     pub(crate) fn snapshot_refs(&self) -> PyResult<SnapshotRefTuple<'_>> {
         let mut positions = Vec::with_capacity(self.ledgers.len());
-        let mut total_value = 0.0_f64;
-        let mut gross = 0.0_f64;
         for (key, ledger) in &self.ledgers {
             let mark = *self.marks.get(key).ok_or_else(|| {
                 PyValueError::new_err(format!("no mark price for held instrument — key={key}"))
@@ -84,8 +83,6 @@ impl Portfolio {
             let qty_f = ledger.quantity as f64;
             let market_value = qty_f * mark;
             let unrealized = (mark - ledger.average_price) * qty_f;
-            total_value += market_value;
-            gross += market_value.abs();
             positions.push((
                 key.as_str(),
                 ledger.quantity,
@@ -95,7 +92,7 @@ impl Portfolio {
                 unrealized,
             ));
         }
-        let equity = self.cash + total_value;
+        let (equity, gross) = summarize(self.cash, positions.iter().map(|row| row.4));
         let gross_exposure = if equity != 0.0 { gross / equity } else { 0.0 };
         Ok((self.cash, positions, equity, gross_exposure))
     }
@@ -166,11 +163,7 @@ impl Portfolio {
                 "negative_position: sell fill exceeds held quantity — key={key} sell={quantity} held={old_quantity} (SHORT_SELLING not declared)"
             )));
         }
-        let new_cash = if buy {
-            self.cash - notional - fee
-        } else {
-            self.cash + notional - fee
-        };
+        let new_cash = project_cash(self.cash, buy, notional, fee, 0.0);
         if new_cash < 0.0 && !self.allow_margin {
             return Err(PyValueError::new_err(format!(
                 "negative_cash: buy fill would make cash negative — key={key} quantity={quantity} price={price} fee={fee} cash={} (MARGIN not declared)",
@@ -220,7 +213,7 @@ impl Portfolio {
                 "cost amount must be > 0 — amount={amount}"
             )));
         }
-        self.cash -= amount;
+        self.cash = project_cost(self.cash, amount);
         Ok(())
     }
 

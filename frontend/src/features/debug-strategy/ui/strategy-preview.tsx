@@ -8,23 +8,31 @@ import type {
 } from "../model/strategy-trace";
 import { useStrategyTrace } from "../model/use-strategy-trace";
 import "./strategy-preview.css";
+import { TraceParameters } from "./trace-parameters";
 
 /** 응답은 trace query cache만 소유한다. 이 패널은 마지막 요청 신원과 날짜 입력만 보관한다. */
 export const StrategyPreview = ({
   context,
   unavailableReason,
+  onExplain,
 }: {
   context: StrategyDebuggerContext | null;
   unavailableReason: StrategyDebuggerUnavailableReason | null;
+  /** 한 종목을 그 기준일로 추적한다(RD-04-C, "왜 골랐나"). 없으면 버튼을 두지 않는다. */
+  onExplain?: (selection: { asOf: string; security: string }) => void;
 }) => {
   const titleId = useId();
   const [asOf, setAsOf] = useState("");
+  const [factorId, setFactorId] = useState("");
+  const selectedFactorId = context?.factors.some((factor) => factor.factorId === factorId)
+    ? factorId
+    : (context?.factors[0]?.factorId ?? "");
   const [requestedOwner, setRequestedOwner] = useState<string | null>(null);
-  const { prepared, state, run } = useStrategyTrace(context, {
+  const { prepared, state, run, cancel } = useStrategyTrace(context, {
     summaryOnly: true,
     asOf,
     security: "",
-    factorId: "",
+    factorId: selectedFactorId,
     nodeId: "",
   });
   const owner = prepared.kind === "ready" ? prepared.ownerKey : null;
@@ -34,6 +42,20 @@ export const StrategyPreview = ({
       ? state.response
       : null;
   const summary = response?.summary;
+  const factors = context?.factors ?? [];
+  const reasonId = `${titleId}-reason`;
+  const dateHintId = `${titleId}-date-hint`;
+  // 새로고침이 꺼진 이유: 미리볼 수 없는 사유(실행 설정 등)나 막힌 입력(기준일·팩터). 꺼진 버튼이 그 문장을 설명으로
+  // 읽어, 비활성인 까닭을 따로 찾지 않아도 된다.
+  const blockedReason =
+    unavailableReason !== null
+      ? t(`debugger.unavailable.${unavailableReason}`)
+      : state.kind === "blocked" && state.reason === "date"
+        ? t("debugger.blocked.date")
+        : state.kind === "blocked" && state.reason === "factor"
+          ? t("debugger.blocked.factor")
+          : null;
+  const refreshDisabled = prepared.kind !== "ready" || state.kind === "loading";
   return (
     <section className="strategy-preview" aria-labelledby={titleId}>
       <header className="strategy-preview__controls">
@@ -42,17 +64,46 @@ export const StrategyPreview = ({
           <Badge tone="warn">{t("strategy.preview.stale")}</Badge>
         ) : null}
         <label>
+          {t("strategy.preview.factor")}
+          <select className="ui-select"
+            value={selectedFactorId}
+            disabled={factors.length === 0}
+            onChange={(event) => setFactorId(event.target.value)}
+          >
+            {/* 팩터가 없으면 빈 선택 상자 대신 까닭을 보인다: 문서를 아직 읽는 중인지, 미리볼 수 없는지, 정말
+                팩터가 없는지. 문맥이 없을 때 "팩터 없음"이라 하면 거짓이 된다(리뷰 7). */}
+            {factors.length === 0 ? (
+              <option value="">
+                {t(
+                  context !== null
+                    ? "strategy.preview.factor.none"
+                    : unavailableReason === "preparing"
+                      ? "strategy.preview.factor.loading"
+                      : "strategy.preview.factor.unavailable",
+                )}
+              </option>
+            ) : null}
+            {factors.map((factor) => (
+              <option key={factor.factorId} value={factor.factorId}>
+                {factor.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
           {t("strategy.preview.date")}
-          <input
+          <input className="ui-input"
             type="date"
             value={asOf}
             min={context?.environment.start}
             max={context?.environment.end}
+            aria-describedby={dateHintId}
             onChange={(event) => setAsOf(event.target.value)}
           />
         </label>
         <Button
-          disabled={prepared.kind !== "ready" || state.kind === "loading"}
+          disabled={refreshDisabled}
+          aria-describedby={refreshDisabled && blockedReason !== null ? reasonId : undefined}
           onClick={() => {
             setRequestedOwner(owner);
             void run();
@@ -60,16 +111,24 @@ export const StrategyPreview = ({
         >
           {t("strategy.preview.refresh")}
         </Button>
+        {state.kind === "loading" ? (
+          <Button onClick={cancel}>{t("strategy.preview.cancel")}</Button>
+        ) : null}
       </header>
-      <p>{t("strategy.preview.description")}</p>
-      {unavailableReason !== null ? (
-        <p>{t(`debugger.unavailable.${unavailableReason}`)}</p>
-      ) : null}
-      {state.kind === "blocked" && state.reason === "date" ? (
-        <p>{t("debugger.blocked.date")}</p>
-      ) : null}
+      <p id={dateHintId} className="strategy-preview__hint">
+        {t("strategy.preview.date.hint")}
+      </p>
+      <p className="strategy-preview__hint">{t("strategy.preview.description")}</p>
+      {blockedReason === null ? null : (
+        <p id={reasonId} className="strategy-preview__reason">
+          {blockedReason}
+        </p>
+      )}
       {state.kind === "loading" ? (
         <p role="status">{t("strategy.preview.loading")}</p>
+      ) : null}
+      {state.kind === "cancelled" ? (
+        <p role="status">{t("debugger.state.cancelled")}</p>
       ) : null}
       {state.kind === "error" ? (
         <FailureNotice message={state.message} reason={state.reason} />
@@ -79,9 +138,49 @@ export const StrategyPreview = ({
       ) : null}
       {response === null ? null : (
         <>
+          <TraceParameters values={response.parameter_values} />
           <p>
             {t("strategy.preview.resolvedDate")}: <time>{response.as_of}</time>
           </p>
+          <dl className="strategy-preview__counts">
+            <div>
+              <dt>{t("strategy.preview.factorValid")}</dt>
+              <dd>{response.factor_preview.valid_count}</dd>
+            </div>
+            <div>
+              <dt>{t("strategy.preview.factorMissing")}</dt>
+              <dd>{response.factor_preview.missing_count}</dd>
+            </div>
+            <div>
+              <dt>{t("strategy.preview.missingPolicy")}</dt>
+              <dd>
+                {t(
+                  `run_environment.field.missing.value.${response.factor_preview.missing}`,
+                )}
+              </dd>
+            </div>
+          </dl>
+          <div className="strategy-preview__table">
+            <table>
+              <caption>{t("strategy.preview.factorTop")}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">{t("strategy.preview.name")}</th>
+                  <th scope="col">{t("strategy.preview.factorValue")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {response.factor_preview.top.map((row) => (
+                  <tr key={row.security_id}>
+                    <td>
+                      {row.security?.name ?? t("strategy.preview.unknownName")}
+                    </td>
+                    <td>{row.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {summary == null ? (
             <p>{t("strategy.preview.noFrame")}</p>
           ) : (
@@ -110,6 +209,12 @@ export const StrategyPreview = ({
                       <th scope="col">{t("strategy.preview.rank")}</th>
                       <th scope="col">{t("strategy.preview.name")}</th>
                       <th scope="col">{t("strategy.preview.score")}</th>
+                      <th scope="col">{t("strategy.preview.weight")}</th>
+                      {onExplain === undefined ? null : (
+                        <th scope="col">
+                          <span className="sr-only">{t("strategy.preview.explain")}</span>
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -120,6 +225,24 @@ export const StrategyPreview = ({
                           {security?.name ?? t("strategy.preview.unknownName")}
                         </td>
                         <td>{position.composite_score}</td>
+                        <td>{`${(position.weight * 100).toFixed(2)}%`}</td>
+                        {onExplain === undefined ? null : (
+                          <td>
+                            <Button
+                              size="small"
+                              tone="ghost"
+                              aria-label={`${security?.name ?? position.security_id} · ${t("strategy.preview.explain")}`}
+                              onClick={() =>
+                                onExplain({
+                                  asOf: response.as_of,
+                                  security: position.security_id,
+                                })
+                              }
+                            >
+                              {t("strategy.preview.explain")}
+                            </Button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

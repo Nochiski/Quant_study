@@ -6,6 +6,9 @@ import type {
   ActivateAssistantProviderData,
   ActivateAssistantProviderErrors,
   ActivateAssistantProviderResponses,
+  AddLibraryFactorVersionData,
+  AddLibraryFactorVersionErrors,
+  AddLibraryFactorVersionResponses,
   CancelAssistantTurnData,
   CancelAssistantTurnErrors,
   CancelAssistantTurnResponses,
@@ -33,6 +36,9 @@ import type {
   CreateExperimentData,
   CreateExperimentErrors,
   CreateExperimentResponses,
+  CreateRobustnessCheckData,
+  CreateRobustnessCheckErrors,
+  CreateRobustnessCheckResponses,
   CreateStrategyData,
   CreateStrategyDocumentData,
   CreateStrategyDocumentErrors,
@@ -42,9 +48,15 @@ import type {
   DeleteAssistantProviderData,
   DeleteAssistantProviderErrors,
   DeleteAssistantProviderResponses,
+  DeleteKiwoomMockConnectionData,
+  DeleteKiwoomMockConnectionErrors,
+  DeleteKiwoomMockConnectionResponses,
   DeleteStrategyDraftData,
   DeleteStrategyDraftErrors,
   DeleteStrategyDraftResponses,
+  DiffStrategyDraftData,
+  DiffStrategyDraftErrors,
+  DiffStrategyDraftResponses,
   DiffStrategyRevisionsData,
   DiffStrategyRevisionsErrors,
   DiffStrategyRevisionsResponses,
@@ -57,29 +69,61 @@ import type {
   GetAssistantSessionData,
   GetAssistantSessionErrors,
   GetAssistantSessionResponses,
+  GetBacktestAccountReportData,
+  GetBacktestAccountReportErrors,
+  GetBacktestAccountReportResponses,
+  GetBacktestFactorRegressionData,
+  GetBacktestFactorRegressionErrors,
+  GetBacktestFactorRegressionResponses,
+  GetBacktestHoldingsData,
+  GetBacktestHoldingsErrors,
+  GetBacktestHoldingsResponses,
   GetBacktestRequestData,
   GetBacktestRequestErrors,
   GetBacktestRequestResponses,
   GetBacktestResultData,
   GetBacktestResultErrors,
   GetBacktestResultResponses,
+  GetBacktestSecurityTradesData,
+  GetBacktestSecurityTradesErrors,
+  GetBacktestSecurityTradesResponses,
+  GetBacktestSessionHoldingsData,
+  GetBacktestSessionHoldingsErrors,
+  GetBacktestSessionHoldingsResponses,
   GetBacktestStatusData,
   GetBacktestStatusErrors,
   GetBacktestStatusResponses,
   GetBacktestSummaryData,
   GetBacktestSummaryErrors,
   GetBacktestSummaryResponses,
+  GetBacktestValidationReportData,
+  GetBacktestValidationReportErrors,
+  GetBacktestValidationReportResponses,
+  GetContinuousAccountData,
+  GetContinuousAccountErrors,
+  GetContinuousAccountResponses,
+  GetCredentialsFileData,
+  GetCredentialsFileResponses,
   GetEquityCatalogData,
   GetEquityCatalogErrors,
   GetEquityCatalogResponses,
+  GetExperimentAuditData,
+  GetExperimentAuditErrors,
+  GetExperimentAuditResponses,
   GetExperimentCapacityData,
   GetExperimentCapacityErrors,
   GetExperimentCapacityResponses,
+  GetExperimentContinuousAccountData,
+  GetExperimentContinuousAccountErrors,
+  GetExperimentContinuousAccountResponses,
   GetExperimentData,
   GetExperimentErrors,
   GetExperimentParameterMapData,
   GetExperimentParameterMapErrors,
   GetExperimentParameterMapResponses,
+  GetExperimentRemainingTimeData,
+  GetExperimentRemainingTimeErrors,
+  GetExperimentRemainingTimeResponses,
   GetExperimentResponses,
   GetExperimentWalkForwardData,
   GetExperimentWalkForwardErrors,
@@ -89,6 +133,11 @@ import type {
   GetFactorCatalogResponses,
   GetHealthData,
   GetHealthResponses,
+  GetKiwoomMockConnectionData,
+  GetKiwoomMockConnectionResponses,
+  GetLibraryFactorData,
+  GetLibraryFactorErrors,
+  GetLibraryFactorResponses,
   GetRunEnvironmentSchemaData,
   GetRunEnvironmentSchemaErrors,
   GetRunEnvironmentSchemaResponses,
@@ -123,18 +172,29 @@ import type {
   ListBacktestsData,
   ListBacktestsErrors,
   ListBacktestsResponses,
+  ListEquityUniversesData,
+  ListEquityUniversesResponses,
   ListExperimentsData,
   ListExperimentsErrors,
   ListExperimentsResponses,
   ListExperimentTrialsData,
   ListExperimentTrialsErrors,
   ListExperimentTrialsResponses,
+  ListLibraryFactorsData,
+  ListLibraryFactorsErrors,
+  ListLibraryFactorsResponses,
+  ListRobustnessChecksData,
+  ListRobustnessChecksErrors,
+  ListRobustnessChecksResponses,
   ListStrategiesData,
   ListStrategiesErrors,
   ListStrategiesResponses,
   ListStrategyRevisionsData,
   ListStrategyRevisionsErrors,
   ListStrategyRevisionsResponses,
+  MatchLibraryFactorsData,
+  MatchLibraryFactorsErrors,
+  MatchLibraryFactorsResponses,
   MergeTrialLineageData,
   MergeTrialLineageErrors,
   MergeTrialLineageResponses,
@@ -156,12 +216,12 @@ import type {
   PreviewExperimentData,
   PreviewExperimentErrors,
   PreviewExperimentResponses,
-  PreviewFactorGraphData,
-  PreviewFactorGraphErrors,
-  PreviewFactorGraphResponses,
   PreviewPortfolioData,
   PreviewPortfolioErrors,
   PreviewPortfolioResponses,
+  PreviewRobustnessCheckData,
+  PreviewRobustnessCheckErrors,
+  PreviewRobustnessCheckResponses,
   RetryExperimentTrialData,
   RetryExperimentTrialErrors,
   RetryExperimentTrialResponses,
@@ -171,12 +231,24 @@ import type {
   ReviseStrategyDocumentResponses,
   ReviseStrategyErrors,
   ReviseStrategyResponses,
+  RunExperimentContinuousAccountData,
+  RunExperimentContinuousAccountErrors,
+  RunExperimentContinuousAccountResponses,
+  SaveKiwoomMockConnectionData,
+  SaveKiwoomMockConnectionErrors,
+  SaveKiwoomMockConnectionResponses,
+  SaveLibraryFactorData,
+  SaveLibraryFactorErrors,
+  SaveLibraryFactorResponses,
   SaveStrategyDraftData,
   SaveStrategyDraftErrors,
   SaveStrategyDraftResponses,
   SelectExperimentTrialData,
   SelectExperimentTrialErrors,
   SelectExperimentTrialResponses,
+  SetLibraryFactorVisibilityData,
+  SetLibraryFactorVisibilityErrors,
+  SetLibraryFactorVisibilityResponses,
   StartAssistantTurnData,
   StartAssistantTurnErrors,
   StartAssistantTurnResponses,
@@ -208,6 +280,8 @@ import type {
   ValidateStrategyData,
   ValidateStrategyErrors,
   ValidateStrategyResponses,
+  VerifyKiwoomMockConnectionData,
+  VerifyKiwoomMockConnectionResponses,
 } from "./types.gen";
 
 export type Options<
@@ -493,6 +567,18 @@ export const getBacktestStatus = <ThrowOnError extends boolean = false>(
   >({ url: "/api/v1/backtests/{run_id}", ...options });
 
 /**
+ * Get Backtest Account Report
+ */
+export const getBacktestAccountReport = <ThrowOnError extends boolean = false>(
+  options: Options<GetBacktestAccountReportData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestAccountReportResponses,
+    GetBacktestAccountReportErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/account-report", ...options });
+
+/**
  * Cancel Backtest
  *
  * 사용자가 run 에서 빠진다. 실험이 써서 계속 돌면 `kept_by_owners` 가 참이다.
@@ -517,6 +603,64 @@ export const streamBacktestEvents = <ThrowOnError extends boolean = false>(
     StreamBacktestEventsErrors,
     ThrowOnError
   >({ url: "/api/v1/backtests/{run_id}/events", ...options });
+
+/**
+ * Get Backtest Factor Regression
+ */
+export const getBacktestFactorRegression = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetBacktestFactorRegressionData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestFactorRegressionResponses,
+    GetBacktestFactorRegressionErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/factor-regression", ...options });
+
+/**
+ * Get Backtest Holdings
+ */
+export const getBacktestHoldings = <ThrowOnError extends boolean = false>(
+  options: Options<GetBacktestHoldingsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestHoldingsResponses,
+    GetBacktestHoldingsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/holdings", ...options });
+
+/**
+ * Get Backtest Security Trades
+ */
+export const getBacktestSecurityTrades = <ThrowOnError extends boolean = false>(
+  options: Options<GetBacktestSecurityTradesData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestSecurityTradesResponses,
+    GetBacktestSecurityTradesErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/backtests/{run_id}/holdings/securities/{security_id}",
+    ...options,
+  });
+
+/**
+ * Get Backtest Session Holdings
+ */
+export const getBacktestSessionHoldings = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetBacktestSessionHoldingsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestSessionHoldingsResponses,
+    GetBacktestSessionHoldingsErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/backtests/{run_id}/holdings/sessions/{session}",
+    ...options,
+  });
 
 /**
  * Get Backtest Request
@@ -545,6 +689,48 @@ export const getBacktestResult = <ThrowOnError extends boolean = false>(
   >({ url: "/api/v1/backtests/{run_id}/result", ...options });
 
 /**
+ * Create Robustness Check
+ *
+ * 결과 실행의 기본 설계로 실험을 만들고 대기열에 넣는다(US-DM-11).
+ */
+export const createRobustnessCheck = <ThrowOnError extends boolean = false>(
+  options: Options<CreateRobustnessCheckData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateRobustnessCheckResponses,
+    CreateRobustnessCheckErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/robustness-check", ...options });
+
+/**
+ * Preview Robustness Check
+ *
+ * 결과 실행의 "튼튼한지 확인하기" 미리 계산 — 기본 설계와 새로 세는 시도 수(US-DM-11).
+ */
+export const previewRobustnessCheck = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewRobustnessCheckData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewRobustnessCheckResponses,
+    PreviewRobustnessCheckErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/robustness-check/preview", ...options });
+
+/**
+ * List Robustness Checks
+ *
+ * 결과 실행에서 "튼튼한지 확인하기"로 만든 실험, 최근에 만든 순. 없으면 빈 목록.
+ */
+export const listRobustnessChecks = <ThrowOnError extends boolean = false>(
+  options: Options<ListRobustnessChecksData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    ListRobustnessChecksResponses,
+    ListRobustnessChecksErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/robustness-checks", ...options });
+
+/**
  * Get Backtest Summary
  *
  * 이력 한 행. 결과 화면이 실행 종류(단일·실험 trial·워크포워드 검증)를 서버 판정으로
@@ -558,6 +744,93 @@ export const getBacktestSummary = <ThrowOnError extends boolean = false>(
     GetBacktestSummaryErrors,
     ThrowOnError
   >({ url: "/api/v1/backtests/{run_id}/summary", ...options });
+
+/**
+ * Get Backtest Validation Report
+ */
+export const getBacktestValidationReport = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetBacktestValidationReportData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestValidationReportResponses,
+    GetBacktestValidationReportErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/validation-report", ...options });
+
+/**
+ * Delete Connection
+ */
+export const deleteKiwoomMockConnection = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<DeleteKiwoomMockConnectionData, ThrowOnError>,
+) =>
+  (options?.client ?? client).delete<
+    DeleteKiwoomMockConnectionResponses,
+    DeleteKiwoomMockConnectionErrors,
+    ThrowOnError
+  >({ url: "/api/v1/broker-connections/kiwoom-mock", ...options });
+
+/**
+ * Get Connection
+ */
+export const getKiwoomMockConnection = <ThrowOnError extends boolean = false>(
+  options?: Options<GetKiwoomMockConnectionData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetKiwoomMockConnectionResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/broker-connections/kiwoom-mock", ...options });
+
+/**
+ * Save Connection
+ */
+export const saveKiwoomMockConnection = <ThrowOnError extends boolean = false>(
+  options: Options<SaveKiwoomMockConnectionData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<
+    SaveKiwoomMockConnectionResponses,
+    SaveKiwoomMockConnectionErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/broker-connections/kiwoom-mock",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Verify Connection
+ *
+ * 토큰 발급과 계좌 대조만 한다. 사용자가 누를 때만 키를 쓴다. 주문하지 않는다.
+ */
+export const verifyKiwoomMockConnection = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<VerifyKiwoomMockConnectionData, ThrowOnError>,
+) =>
+  (options?.client ?? client).post<
+    VerifyKiwoomMockConnectionResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/broker-connections/kiwoom-mock/verify", ...options });
+
+/**
+ * Get
+ */
+export const getContinuousAccount = <ThrowOnError extends boolean = false>(
+  options: Options<GetContinuousAccountData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetContinuousAccountResponses,
+    GetContinuousAccountErrors,
+    ThrowOnError
+  >({ url: "/api/v1/continuous-accounts/{evaluation_id}", ...options });
 
 /**
  * Equity Catalog
@@ -627,6 +900,22 @@ export const previewEquityUniverse = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+/**
+ * Equity Universes
+ *
+ * 연결된 시장 데이터가 실행에 쓸 수 있는 유니버스(id·표시명·설명).
+ *
+ * 실행 설정 드롭다운의 출처다.
+ */
+export const listEquityUniverses = <ThrowOnError extends boolean = false>(
+  options?: Options<ListEquityUniversesData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListEquityUniversesResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/equity/universes", ...options });
 
 /**
  * List Experiments
@@ -739,6 +1028,21 @@ export const getExperiment = <ThrowOnError extends boolean = false>(
   >({ url: "/api/v1/experiments/{experiment_id}", ...options });
 
 /**
+ * Get Experiment Audit
+ *
+ * 실험 생성·조작·trial attempt·실행 시작과 끝·창 선택·후보 선택·취소를 시각 순으로
+ * 보인다(로드맵 M6 감사 기록).
+ */
+export const getExperimentAudit = <ThrowOnError extends boolean = false>(
+  options: Options<GetExperimentAuditData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentAuditResponses,
+    GetExperimentAuditErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/audit", ...options });
+
+/**
  * Cancel Experiment
  */
 export const cancelExperiment = <ThrowOnError extends boolean = false>(
@@ -764,6 +1068,44 @@ export const getExperimentCapacity = <ThrowOnError extends boolean = false>(
     GetExperimentCapacityErrors,
     ThrowOnError
   >({ url: "/api/v1/experiments/{experiment_id}/capacity", ...options });
+
+/**
+ * Latest
+ */
+export const getExperimentContinuousAccount = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetExperimentContinuousAccountData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentContinuousAccountResponses,
+    GetExperimentContinuousAccountErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments/{experiment_id}/continuous-account",
+    ...options,
+  });
+
+/**
+ * Run
+ */
+export const runExperimentContinuousAccount = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<RunExperimentContinuousAccountData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    RunExperimentContinuousAccountResponses,
+    RunExperimentContinuousAccountErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments/{experiment_id}/continuous-account",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
 
 /**
  * Control Experiment
@@ -815,6 +1157,23 @@ export const getExperimentParameterMap = <ThrowOnError extends boolean = false>(
     GetExperimentParameterMapErrors,
     ThrowOnError
   >({ url: "/api/v1/experiments/{experiment_id}/parameter-map", ...options });
+
+/**
+ * Get Experiment Remaining Time
+ *
+ * 남은 실행의 시간 어림(로드맵 M6 ETA). 실험 조회·진행 스트림과 따로 둔다 — 계열 원장을
+ * 읽어 목록·스트림 폴링마다 치르지 않게 한다. 근거가 없으면 null.
+ */
+export const getExperimentRemainingTime = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetExperimentRemainingTimeData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentRemainingTimeResponses,
+    GetExperimentRemainingTimeErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/remaining-time", ...options });
 
 /**
  * Select Experiment Trial
@@ -885,6 +1244,108 @@ export const getExperimentWalkForward = <ThrowOnError extends boolean = false>(
   >({ url: "/api/v1/experiments/{experiment_id}/walk-forward", ...options });
 
 /**
+ * List Factors
+ */
+export const listLibraryFactors = <ThrowOnError extends boolean = false>(
+  options?: Options<ListLibraryFactorsData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListLibraryFactorsResponses,
+    ListLibraryFactorsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/factor-library", ...options });
+
+/**
+ * Save
+ */
+export const saveLibraryFactor = <ThrowOnError extends boolean = false>(
+  options: Options<SaveLibraryFactorData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    SaveLibraryFactorResponses,
+    SaveLibraryFactorErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/factor-library",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Matches
+ */
+export const matchLibraryFactors = <ThrowOnError extends boolean = false>(
+  options: Options<MatchLibraryFactorsData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    MatchLibraryFactorsResponses,
+    MatchLibraryFactorsErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/factor-library/matches",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Get Factor
+ */
+export const getLibraryFactor = <ThrowOnError extends boolean = false>(
+  options: Options<GetLibraryFactorData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetLibraryFactorResponses,
+    GetLibraryFactorErrors,
+    ThrowOnError
+  >({ url: "/api/v1/factor-library/{library_id}", ...options });
+
+/**
+ * Set Visibility
+ */
+export const setLibraryFactorVisibility = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<SetLibraryFactorVisibilityData, ThrowOnError>,
+) =>
+  (options.client ?? client).patch<
+    SetLibraryFactorVisibilityResponses,
+    SetLibraryFactorVisibilityErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/factor-library/{library_id}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Add Version
+ */
+export const addLibraryFactorVersion = <ThrowOnError extends boolean = false>(
+  options: Options<AddLibraryFactorVersionData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    AddLibraryFactorVersionResponses,
+    AddLibraryFactorVersionErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/factor-library/{library_id}/versions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
  * Factor Catalog
  */
 export const getFactorCatalog = <ThrowOnError extends boolean = false>(
@@ -908,25 +1369,6 @@ export const explainFactorGraph = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/api/v1/factors/explain",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  });
-
-/**
- * Preview Factor Graph
- */
-export const previewFactorGraph = <ThrowOnError extends boolean = false>(
-  options: Options<PreviewFactorGraphData, ThrowOnError>,
-) =>
-  (options.client ?? client).post<
-    PreviewFactorGraphResponses,
-    PreviewFactorGraphErrors,
-    ThrowOnError
-  >({
-    url: "/api/v1/factors/preview",
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -996,6 +1438,18 @@ export const getRunEnvironmentSchema = <ThrowOnError extends boolean = false>(
     GetRunEnvironmentSchemaErrors,
     ThrowOnError
   >({ url: "/api/v1/run-environments/schema", ...options });
+
+/**
+ * Get Credentials File
+ */
+export const getCredentialsFile = <ThrowOnError extends boolean = false>(
+  options?: Options<GetCredentialsFileData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetCredentialsFileResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/settings/credentials-file", ...options });
 
 /**
  * List Strategies
@@ -1126,6 +1580,27 @@ export const diffStrategyRevisions = <ThrowOnError extends boolean = false>(
     DiffStrategyRevisionsErrors,
     ThrowOnError
   >({ url: "/api/v1/strategies/{strategy_id}/diff", ...options });
+
+/**
+ * Diff Strategy Draft
+ *
+ * 저장 리비전과 편집 중 원문을 같은 도메인 의미 diff로 비교한다.
+ */
+export const diffStrategyDraft = <ThrowOnError extends boolean = false>(
+  options: Options<DiffStrategyDraftData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    DiffStrategyDraftResponses,
+    DiffStrategyDraftErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategies/{strategy_id}/draft-diff",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
 
 /**
  * List Strategy Revisions

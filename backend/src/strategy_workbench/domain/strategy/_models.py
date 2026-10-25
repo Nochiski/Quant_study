@@ -172,6 +172,9 @@ class PortfolioStep:
         default=None, metadata={**CATALOG_EQUITY_FIELD, "stage": AppliedStage.ELIGIBILITY}
     )
     minimum_liquidity: float | None = None
+    # 보조 팩터는 합성에서 제외하고 주 점수 동점 안에서만 원시 출력으로 정렬한다.
+    tie_breaker_factor_id: str | None = field(default=None, metadata=REFERENCE_FACTOR)
+    tie_breaker_direction: FactorDirection = FactorDirection.HIGH
 
 
 @dataclass(frozen=True)
@@ -260,7 +263,8 @@ def normalized_parameter_value(
 def parameter_value_allowed(parameter: ParameterDefinition, value: ParameterValue) -> bool:
     """값이 파라미터 정의의 타입·범위·선택지 안인가(`normalized_parameter_value` 가 값을 내는가).
 
-    검증기의 기본값 판정, 실험 탐색 값, 실행 요청의 해소 값(검증 랩 V3-02)이 이 술어 하나를 쓴다.
+    검증기의 기본값 판정이 이 술어를 쓴다. 실험 탐색 값과 실행 요청 해소는 같은 owner인
+    `normalized_parameter_value`를 직접 호출해 정규화된 값도 받는다.
     `step` 은 보지 않는다. 간격은 탐색 격자를 펼치는 폭일 뿐이고, 여기서 간격 정렬을 요구하면
     간격에 맞지 않는 기본값을 가진 저장 리비전이 새로 검증 오류가 된다.
     """
@@ -358,5 +362,5 @@ def composite_factors(spec: StrategySpec) -> tuple[FactorSignal, ...]:
 
     역가중 팩터는 `weight` 와 분모 `Σ|weight|` 양쪽에서 빠진다.
     """
-    excluded = inverse_risk_factor_id(spec)
-    return tuple(factor for factor in spec.factors if factor.factor_id != excluded)
+    excluded = {inverse_risk_factor_id(spec), spec.portfolio.tie_breaker_factor_id}
+    return tuple(factor for factor in spec.factors if factor.factor_id not in excluded)

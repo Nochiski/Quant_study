@@ -399,13 +399,13 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 |---|---|
 | `entities/assistant` | 생성 SDK 타입, 프로파일·세션 query, SSE 리더는 **생성 SDK의 SSE 클라이언트**(`shared/api/generated/core/serverSentEvents.gen.ts`: fetch 기반, `id:` 파싱, 재시도 시 `Last-Event-ID` 부착)를 그대로 쓴다. `EventSource`를 쓰지 않는다(재연결 시 같은 URL을 반복해 중복 수신). 리듀서는 이미 반영한 sequence 이하를 무시한다(멱등). 진행 중 턴이 있을 때만 스트림을 열고 종료 상태에서 닫는다. `sseMaxRetryAttempts`를 명시(기본 5)하고, 409 `no_running_turn`은 재시도하지 않고 `GET /sessions/{id}` 이력으로 그 턴의 이벤트를 복구한다(턴 시작 직후 실패해 스트림을 열기 전에 끝난 경우) |
 | `features/configure-ai-providers` | 설정 화면 "AI 연결" 섹션. michelo DB 프로파일 섹션 패턴: 카드 목록(공급자 이름·라벨·모델·꼬리 4자리·활성 배지), 활성 전환, 삭제 확인, 추가 폼(공급자 선택 → 라벨·키·모델·base_url), "연결 테스트" 결과 인라인. 설치 안 된 공급자는 비활성 + 이유 |
-| `features/assist-strategy` | 우측 사이드바 채팅: 메시지 목록(질문은 메시지의 `turn_id`로 턴에 붙인다 — 순서로 짝짓지 않는다), 스트리밍 텍스트, 검색 활동 칩(질의·출처 링크), 검색 상한 안내(칩이 아닌 문장), 도구 활동 접힘, 제안 카드(제목·한 문장·근거·출처·"미리보기"·"문서에 적용"·"적용 후 백테스트"), 취소, 세션 전환, 닫을 때 진행 중 턴 취소 확인. 적용은 `onApplyProposal(proposal)` 콜백으로 밖에 넘긴다(feature가 feature를 import하지 않는다) |
+| `features/assist-strategy` | AI 어시스턴트 채팅(2026-10-24부터 화면 위에 떠 있는 창 안에 그린다, 아래 `widgets/strategy-ide` 행): 메시지 목록(질문은 메시지의 `turn_id`로 턴에 붙인다 — 순서로 짝짓지 않는다), 스트리밍 텍스트, 검색 활동 칩(질의·출처 링크), 검색 상한 안내(칩이 아닌 문장), 도구 활동 접힘, 제안 카드(제목·한 문장·근거·출처·"미리보기"·"문서에 적용"·"적용 후 백테스트"), 취소("중지"), 세션 전환. 창을 접는 손잡이는 창의 최소화 하나이고 최소화는 턴을 끊지 않는다 — 닫을 때의 진행 중 턴 취소 확인은 없앴다(2026-10-24). 적용은 `onApplyProposal(proposal)` 콜백으로 밖에 넘긴다(feature가 feature를 import하지 않는다) |
 | `pages/settings` | `/settings` 라우트. 섹션: AI 연결(위 feature) |
 | `widgets/app-shell` | 내비 하단 "설정" 링크 |
-| `widgets/strategy-ide` | 우측 레일에 `assistant` 슬롯. 계약 인스펙터와 **탭이 아니라 별개 패널**로 공존한다(B-04 결정 2026-09-21: 사용자 요구가 "우측 사이드바 하나"이고, 탭이면 채팅을 보는 동안 계약 인스펙터가 사라진다). 폭·펼침은 기존 `use-panel-layout`을 확장하며(`assistantWidth`·`assistantOpen`) 기본은 접힘이다. 1280px 미만은 기존 drawer 규칙이고, 그 이상이어도 좌우 패널이 편집기 최소 폭(480px)을 남기지 못하면 나중에 연 쪽을 오버레이로 돌린다 |
+| `widgets/strategy-ide` | `assistant` 슬롯을 `shared/ui` `FloatingWindow`(화면 위에 떠 있는 비모달 창)로 그린다(2026-10-24, 이전의 우측·좌측 레일 열을 대체). 펼침의 owner 는 기존 `use-panel-layout`(`assistantOpen`, 사용자가 고른 값만 저장)이고 슬롯은 `{ open }` 을 받아 닫힌 동안 조회를 멈춘다(진행 중 답변은 끝까지). 창 위치·크기는 `entities/assistant` 의 공용 보관함 키로 새 전략 안내의 AI 창과 공유한다. 편집 본문은 AI 에 폭을 내주지 않는다. 767px 이하에서는 하단 시트(폭 100%)로 뜨고 기록이 없으면 접힌 채 시작한다. 계약이 서랍으로 뜨는 화면(좁은 화면·추적 작업공간)에서는 계약 서랍과 AI 창 중 나중에 연 쪽만 남는다. 옛 열 폭 기록(`assistantWidth`)은 무시한다 |
 | `pages/research-strategy-*` | 조합: `onApplyProposal` → **업그레이드 적용과 같은 전체 범위 교체 경로**(`CodeEditorHandle.replaceRange(0, length, source)`; `setText`가 아니라 `replaceRange`인 이유는 history 격리(`isolateHistory`)로 직후 타이핑과 undo가 섞이지 않게 하기 위함, `use-upgrade-document.ts:93-99`와 동일) → compile → 진단. **적용 전 확인**: 제안 카드의 기준 텍스트(턴 시작 시점)와 적용 시점 텍스트가 다르면 바로 덮어쓰지 않고 "문서가 바뀌었습니다" 안내와 함께 "미리보기"·"그래도 덮어쓰기" 두 버튼을 보인다. 덮어쓰기도 같은 `replaceRange` 한 번·undo 한 단계이므로 데이터 손실이 아니다(턴은 수십~수백 초라 기다리며 편집하는 것이 흔하다). "적용 후 백테스트"는 적용 뒤 기존 run-backtest 실행 |
 
-- 사이드바는 그래프·YAML 어느 탭에서도 같은 세션이다. 턴을 시작할 때마다 현재 편집기 텍스트·진단·
+- AI 창은 그래프·YAML 어느 탭에서도 같은 세션이다. 턴을 시작할 때마다 현재 편집기 텍스트·진단·
   실행 설정을 실어 보낸다(서버가 문서를 따로 들지 않는다).
 - 제안 미리보기는 기존 diff 투영(`diff-projection.ts`)으로 현재 문서와의 차이를 보인다.
 - **렌더 안전**: 모델 텍스트·제안 본문은 평문(줄바꿈만)으로 렌더한다. 출처 URL은 `http`·`https`만

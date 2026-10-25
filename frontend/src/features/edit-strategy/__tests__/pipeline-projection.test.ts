@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   messages,
+  t,
   tDescription,
   tName,
   tOptional,
@@ -19,8 +20,10 @@ import { nodeSlotsByKind } from "../model/graph-transactions";
 import {
   cardTemplate,
   projectPipeline,
+  sentenceItems,
   sentencePieces,
   strategySummary,
+  strategySummaryParts,
   unstagedNames,
   type PipelineProjection,
 } from "../model/pipeline-projection";
@@ -112,6 +115,7 @@ describe("projectPipeline", () => {
           ],
           ["/portfolio/turnover_buffer_count"],
           ["/portfolio/minimum_trade_weight"],
+          ["/portfolio/tie_breaker_factor_id", "/portfolio/tie_breaker_direction"],
         ],
       },
       {
@@ -472,5 +476,56 @@ describe("unstagedNames", () => {
     expect(
       unstagedNames(pipelineOf(EMPTY, [], staged as unknown as JsonSchema)),
     ).toEqual(["전략 이름", "전략 설명"]);
+  });
+});
+
+describe("sentenceItems", () => {
+  it("칸 바로 뒤 괄호 조각은 그 칸의 도움말로 묶고, 다른 글자 조각은 그대로 둔다", () => {
+    expect(
+      sentenceItems(
+        sentencePieces(t("strategy.field.eligibility_rule.operator.value.top_percent.card")),
+      ),
+    ).toEqual([
+      { key: "field_id", slider: false, hint: null },
+      { text: " " },
+      { key: "operator", slider: false, hint: null },
+      { text: " 종목만 — 상위 비율 " },
+      { key: "value", slider: false, hint: "0.2가 20%" },
+    ]);
+  });
+
+  it("괄호가 문장 중간에 섞인 조각이나 칸 앞의 괄호는 도움말이 아니다", () => {
+    expect(sentenceItems(sentencePieces("{value} (예) 이상"))).toEqual([
+      { key: "value", slider: false, hint: null },
+      { text: " (예) 이상" },
+    ]);
+    expect(sentenceItems(sentencePieces("(참고) {value}"))).toEqual([
+      { text: "(참고) " },
+      { key: "value", slider: false, hint: null },
+    ]);
+  });
+});
+
+describe("strategySummaryParts", () => {
+  it("한 문장 요약과 같은 조각을 단계별로 나눠 준다 — 확인 단계가 뜻을 다시 조립하지 않는다", () => {
+    const pipeline = pipelineOf(idea("low_pbr_high_roe"));
+    const parts = strategySummaryParts(pipeline, fieldNames);
+    const sentence = strategySummary(pipeline, fieldNames);
+    const fragments = parts.flatMap((stage) => [
+      ...stage.lists.flatMap((list) => list.parts),
+      ...stage.cards,
+    ]);
+    expect(fragments.length).toBeGreaterThan(0);
+    for (const fragment of fragments) expect(sentence).toContain(fragment);
+    expect(parts.map((stage) => stage.stage)).toEqual(pipeline.stages.map((stage) => stage.stage));
+  });
+});
+
+describe("sentenceItems — 그려지지 않는 칸", () => {
+  it("칸이 그려지지 않는 자리의 괄호 조각은 도움말로 묶지 않고 글자로 남긴다(리뷰 8)", () => {
+    expect(sentenceItems(sentencePieces("{value}(0.2가 20%)"), () => false)).toEqual([
+      { key: "value", slider: false, hint: null },
+      { text: "(0.2가 20%)" },
+    ]);
   });
 });

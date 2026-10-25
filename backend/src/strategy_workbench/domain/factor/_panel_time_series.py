@@ -1,0 +1,111 @@
+"""열 평가기의 시계열 창 커널(columnar-tape spec D3, T3-02).
+
+객체 평가기 `_time_series` 와 같은 의미를 종목 우선 정렬 위치 위에서 계산한다. 창 정본은
+`node_read_window` 이고, 창은 종목 안 행 위치 [p − far, p − near] 의 정확히 `window` 칸이다. 시작이
+음수(이력 부족)이거나 창에 숫자가 아닌 칸이 하나라도 있으면 None 이다. 가린 칸이 든 창은 호출자가
+`_masked_in` 으로 None 처리한다(값을 계산해도 그 칸은 쓰지 않는다).
+
+T3-02 가 momentum·delta·min·max 를, T3-05 가 mean·std 를 더했다. mean·std 는 정확 커널
+(`_statistics.py` 의 `window_mean`·`window_pstdev`, T3-03·T3-04)에 같은 창 유효성을 `wanted` 로
+넘긴다 — 원하지 않는 창(이력 부족·숫자가 아닌 칸)은 계산하지 않고, 원하는 창의 원소는 모두 숫자다.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable
+
+import numpy as np
+from numpy.typing import NDArray
+
+from ._history import node_read_window
+from ._nodes import TimeSeriesNode, TimeSeriesOperator
+from ._statistics import window_mean, window_pstdev
+
+# min·max 의 교체 비교. Python `min`/`max` 는 더 작을(클) 때만 바꿔 같으면 앞 원소가 남는다
+# (`min(0.0, -0.0)` 은 0.0). `np.minimum` 은 이 규칙을 지키지 않아 쓰지 않는다.
+_REPLACES = {TimeSeriesOperator.MINIMUM: np.less, TimeSeriesOperator.MAXIMUM: np.greater}
+# `statistics.mean`·`pstdev` 와 비트가 같은 창 커널(spec D3)
+_EXACT_KERNELS = {
+    TimeSeriesOperator.MEAN: window_mean,
+    TimeSeriesOperator.STANDARD_DEVIATION: window_pstdev,
+}
+
+
+def time_series_window(
+    node: TimeSeriesNode,
+    values: NDArray[np.float64],
+    valid: NDArray[np.bool_],
+    *,
+    order: NDArray[np.intp],
+    position: NDArray[np.intp],
+    chunks: Callable[[int], Iterable[slice]],
+    checkpoint: Callable[[], None],
+    advance: Callable[[float], None],
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """행 순서의 입력 열을 받아 행 순서의 (값, 유효) 열을 낸다. `chunks(n)` 은 [0, n) 을 나눈다."""
+    rows = values.shape[0]
+    window = node.window
+    far = node_read_window(node).far
+    # 종목 우선 재배열과 흩뿌리기는 행 순서와 다른 순열이라 4M행 한 번에 60ms 가까이 걸린다.
+    # 청크마다 나눠 checkpoint 간격을 줄인다(spec D7). 원소를 옮기기만 해 값은 그대로다
+    ordered = np.empty(rows, np.float64)
+    ordered_valid = np.empty(rows, bool)
+    for chunk in chunks(rows):
+        ordered[chunk] = values[order[chunk]]
+        ordered_valid[chunk] = valid[order[chunk]]
+    result = np.zeros(rows, np.float64)
+    ok = np.zeros(rows, bool)
+    # 정렬 위치 j(≥ far)의 창은 [j − far, j − far + window). t = j − far 로 센다
+    candidates = rows - far
+    if candidates > 0:
+        numeric = np.concatenate(([0], np.cumsum(ordered_valid, dtype=np.int64)))
+        checkpoint()
+        with np.errstate(all="ignore"):
+            for chunk in chunks(candidates):
+                first = ordered[chunk]
+                target = slice(chunk.start + far, chunk.stop + far)
+                # 시작이 같은 종목 안이고(종목 안 위치 ≥ far) 창 칸이 모두 숫자다
+                ok[target] = (position[order[target]] >= far) & (
+                    numeric[chunk.start + window : chunk.stop + window] - numeric[chunk] == window
+                )
+                if node.operator in _REPLACES:
+                    result[target] = _extremum(
+                        _REPLACES[node.operator], ordered, chunk, window, checkpoint
+                    )
+                elif node.operator in _EXACT_KERNELS:
+                    result[target] = (
+                        _EXACT_KERNELS[node.operator](
+                            ordered, window, starts=chunk, wanted=ok[target], checkpoint=checkpoint
+                        )
+                    ).values
+                else:
+                    last = ordered[chunk.start + window - 1 : chunk.stop + window - 1]
+                    if node.operator is TimeSeriesOperator.MOMENTUM:
+                        # first == 0(−0.0 포함)이면 None. 객체 경로와 같은 순서로 나누고 뺀다
+                        ok[target] &= first != 0
+                        result[target] = last / first - 1
+                    else:
+                        result[target] = last - first
+                advance(chunk.stop / candidates)
+    values_out = np.empty(rows, np.float64)
+    valid_out = np.empty(rows, bool)
+    for chunk in chunks(rows):
+        values_out[order[chunk]] = result[chunk]
+        valid_out[order[chunk]] = ok[chunk]
+    return values_out, valid_out
+
+
+def _extremum(
+    replaces: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    ordered: NDArray[np.float64],
+    chunk: slice,
+    window: int,
+    checkpoint: Callable[[], None],
+) -> NDArray[np.float64]:
+    """오래된 칸부터 누적한다. 새 칸이 엄격히 작을(클) 때만 바꿔 같으면 앞 원소를 유지한다."""
+    acc = ordered[chunk].copy()
+    for offset in range(1, window):
+        checkpoint()
+        item = ordered[chunk.start + offset : chunk.stop + offset]
+        acc = np.where(replaces(item, acc), item, acc)
+    return acc

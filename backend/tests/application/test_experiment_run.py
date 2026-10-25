@@ -14,10 +14,16 @@ from collections.abc import Callable, Collection
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
+from strategy_workbench.adapters.outbound.research_sqlite._schema import (
+    V3_SCHEMA_OBJECTS,
+    V4_SCHEMA_OBJECTS,
+)
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    ResearchStorageError,
     SQLiteExperimentRepository,
 )
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
@@ -31,6 +37,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
 from strategy_workbench.application.experiment_run.facade.ports import (
     AdmittedRun,
     RunSlotUsage,
+    SourceRun,
     TrialResultUnreadableError,
     TrialRunRejectedError,
 )
@@ -60,6 +67,7 @@ from strategy_workbench.domain.backtest.facade.trials import (
     TrialLedger,
     TrialLedgerEntry,
     representative_sharpe,
+    span_days,
     summarize_trial_ledger,
     trial_key,
 )
@@ -69,6 +77,8 @@ from strategy_workbench.domain.experiment.facade.design import (
     ExperimentNotFoundError,
     ExperimentStateError,
     InvalidExperimentSpecError,
+    NoRecommendation,
+    RetentionGap,
     SplitMode,
     SplitSpec,
     WalkForwardGap,
@@ -81,8 +91,15 @@ from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentStatus,
     TrialStatus,
 )
+from strategy_workbench.domain.factor.facade.expression import (
+    BinaryNode,
+    BinaryOperator,
+    FactorGraph,
+    ParameterNode,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
+    FactorSignal,
     FloatParameter,
     ParameterValue,
 )
@@ -90,8 +107,29 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from ..assistant_result_samples import sample_backtest_result
 
 _AT = datetime(2026, 9, 30, tzinfo=UTC)
+_TEMPLATE = StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused").template()
+
+
+def _reading_scale(factor: FactorSignal) -> FactorSignal:
+    """팩터 출력에 배율 `scale` 을 곱한다 — 튼튼한지 확인하기는 출력이 읽는 파라미터만 편다."""
+    graph = factor.graph
+    nodes = (
+        *graph.nodes,
+        ParameterNode(node_id="scale_value", parameter_id="scale", kind="parameter"),
+        BinaryNode(
+            node_id="scaled_output",
+            operator=BinaryOperator.MULTIPLY,
+            left_node_id=graph.output_node_id,
+            right_node_id="scale_value",
+            kind="binary",
+        ),
+    )
+    return replace(factor, graph=FactorGraph(nodes=nodes, output_node_id="scaled_output"))
+
+
 _STRATEGY = replace(
-    StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused").template(),
+    _TEMPLATE,
+    factors=(_reading_scale(_TEMPLATE.factors[0]), *_TEMPLATE.factors[1:]),
     parameters=(
         FloatParameter("scale", 1.0, -1.0, 1.0, kind="float", step=1.0),
         ChoiceParameter("mode", "a", ("a", "b"), kind="choice"),
@@ -142,7 +180,10 @@ class _FakeRuns:
         self.cancelled: list[tuple[str, str]] = []
         self.owners: set[str] = set()
         self.schedules: list[tuple[str, bool, int]] = []
+        self.submitted_controls: list[ExperimentControls] = []
         self.error_codes: dict[str, RunFailureCode] = {}
+        # 실행이 처음 `running` 이 된 시각(감사 기록 테스트가 정한다).
+        self.started_ats: dict[str, datetime] = {}
         # 다음 `admit` 앞에서 한 번 부른다(복구 제출과 겹치는 조작을 재현한다).
         self.before_admit: Callable[[], None] | None = None
         self.ledger_entries: list[TrialLedgerEntry] = []
@@ -152,6 +193,13 @@ class _FakeRuns:
         self.unreadable: set[str] = set()
         # `trial_ledger` 를 읽을 때마다 부른다(락 밖에서 읽는지 본다).
         self.on_ledger: Callable[[], None] | None = None
+        # 결과 실행의 원본 요청과 종류(튼튼한지 확인하기의 기반).
+        self.sources: dict[str, SourceRun] = {}
+        # 접수가 해소해 돌려주는 전략.
+        self.strategy = _STRATEGY
+
+    def source_run(self, run_id: str) -> SourceRun | None:
+        return self.sources.get(run_id)
 
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
         if self.before_admit is not None:
@@ -159,7 +207,7 @@ class _FakeRuns:
             hook()
         resolved = replace(
             request,
-            strategy=_STRATEGY,
+            strategy=self.strategy,
             parameter_values={"scale": 1.0, "mode": "a", **request.parameter_values},
         )
         return AdmittedRun(resolved, summarize_trial_ledger("s-1", (), self.ledger_entries, ()))
@@ -169,8 +217,11 @@ class _FakeRuns:
             self.on_ledger()
         return summarize_trial_ledger("s-1", (), self.ledger_entries, ())
 
-    def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
+    def start(
+        self, request: BacktestRunSpec, *, trial_key: str, owner: str, controls: ExperimentControls
+    ) -> str:
         self.owners.add(owner)
+        self.submitted_controls.append(controls)
         if self.reject:
             raise TrialRunRejectedError(
                 "backtest.run.invalid", "strategy exceeds engine capabilities — core=rust"
@@ -208,6 +259,7 @@ class _FakeRuns:
                 created_at=_AT,
                 updated_at=_AT,
                 error_code=self.error_codes.get(run_id),
+                started_at=self.started_ats.get(run_id),
             )
             for run_id in run_ids
         }
@@ -421,6 +473,8 @@ def test_cancel_requests_cancellation_of_every_submitted_run_once() -> None:
     experiment_id = service.create(_request()).record.experiment_id
 
     first = service.cancel(experiment_id)
+    # 실행 서비스가 취소를 마친 뒤에는 재요청이 그 run들을 다시 건드리지 않는다.
+    runs.run_statuses.update({run_id: RunStatus.CANCELLED for run_id in runs.run_statuses})
     second = service.cancel(experiment_id)
 
     # 실행 서비스에 이 실험이 빠진다고 알린다 — 다른 소유자가 남은 run 은 멈추지 않는다.
@@ -429,6 +483,36 @@ def test_cancel_requests_cancellation_of_every_submitted_run_once() -> None:
     assert first.record.cancelled_at == second.record.cancelled_at == _AT
     with pytest.raises(ExperimentStateError):
         service.retry(experiment_id, 0)
+
+
+def test_cancel_only_contacts_unfinished_runs_outside_the_experiment_lock() -> None:
+    """#384: 끝난 run별 조회를 없애고 느린 취소가 다른 실험의 조작을 막지 않는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    runs.run_statuses.update({"run-0": RunStatus.COMPLETED, "run-1": RunStatus.FAILED})
+    contacted: list[str] = []
+    cancel = runs.cancel
+
+    def observed_cancel(run_id: str, *, owner: str) -> None:
+        acquired: list[bool] = []
+
+        def acquire_from_another_thread() -> None:
+            held = service._lock.acquire(blocking=False)
+            acquired.append(held)
+            if held:
+                service._lock.release()
+
+        worker = Thread(target=acquire_from_another_thread)
+        worker.start()
+        worker.join(timeout=2)
+        assert acquired == [True]
+        contacted.append(run_id)
+        cancel(run_id, owner=owner)
+
+    runs.cancel = observed_cancel
+    service.cancel(experiment_id)
+    assert contacted == ["run-2", "run-3"]
 
 
 def test_only_a_completed_trial_can_be_selected_and_the_record_stays() -> None:
@@ -483,6 +567,19 @@ def test_a_selection_keeps_the_lineage_snapshot_it_was_made_with() -> None:
     assert (selection.trial_count, selection.ledger_representative_sharpe) == (2, 0.04)
     assert selection.deflated_sharpe == pytest.approx(0.96037, abs=1e-5)
     assert service.get(experiment_id).selections == (selection,)
+
+
+def test_run_selections_are_the_selections_of_trials_that_ran_as_that_run() -> None:
+    """US-DM-12: 결과 설명은 그 실행으로 끝난 trial 의 선택 기록만 읽는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    _finish(runs, {f"run-{index}": _result() for index in range(4)})
+    selection = service.select(experiment_id, 2, "학습 샤프가 가장 높다")
+
+    assert service.run_selections(experiment_id, "run-2") == (selection,)
+    assert service.run_selections(experiment_id, "run-0") == ()
+    assert service.run_selections(experiment_id, "run-unknown") == ()
 
 
 def test_a_selection_recorded_before_the_snapshot_reads_without_one(tmp_path: Path) -> None:
@@ -605,6 +702,9 @@ def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(
 
     service.control(experiment_id, priority=3)
     paused = service.control(experiment_id, paused=True)  # 보내지 않은 우선순위는 그대로다
+    for run_id in runs.run_statuses:
+        runs.run_statuses[run_id] = RunStatus.FAILED
+        runs.error_codes[run_id] = "backtest.run.interrupted"
     _service(runs, repository=SQLiteExperimentRepository(path)).recover()
 
     assert (paused.status, paused.trial_counts) == (
@@ -612,12 +712,9 @@ def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(
         {TrialStatus.QUEUED: 4},
     )
     assert paused.record.controls == ExperimentControls(paused=True, priority=3)
-    # 대기열에 알리고, 재시작하면 저장된 조작을 다시 알린다.
-    assert runs.schedules == [
-        (experiment_id, False, 3),
-        (experiment_id, True, 3),
-        (experiment_id, True, 3),
-    ]
+    # 현재 대기열 조작은 바로 알리고, 복구 접수는 저장된 조작을 원자적으로 적용한다.
+    assert runs.schedules == [(experiment_id, False, 3), (experiment_id, True, 3)]
+    assert runs.submitted_controls[-4:] == [ExperimentControls(paused=True, priority=3)] * 4
 
 
 def test_recover_resubmits_unsubmitted_and_interrupted_trials_only(tmp_path: Path) -> None:
@@ -677,7 +774,7 @@ def test_recover_skips_finished_and_unreadable_experiments(tmp_path: Path) -> No
     _finish(runs, {"run-4": _result(), "run-5": _result()})
     # 제출 스레드가 돌기 전에 재시작한 두 실험. 하나는 저장된 설계를 지금 모델로 읽을 수 없다.
     broken = service.create(_request()).record.experiment_id
-    waiting = service.create(_request()).record.experiment_id
+    service.create(_request())
     with sqlite3.connect(path) as connection:
         connection.execute(
             "UPDATE experiments SET design_json = '{}' WHERE experiment_id = ?", (broken,)
@@ -687,9 +784,36 @@ def test_recover_skips_finished_and_unreadable_experiments(tmp_path: Path) -> No
     _service(runs, repository=SQLiteExperimentRepository(path), spawn=pending.append).recover()
 
     assert service.get(finished).status is ExperimentStatus.COMPLETED
-    # 끝난 실험도 조작은 되살린다(#390 리뷰 P3-3) — 제출 스레드만 없다.
-    assert [owner for owner, _paused, _priority in runs.schedules] == [finished, waiting]
+    # 저장 조작은 각 실행 접수에서 복원하므로 끝난 실험의 레인 설정을 다시 쌓지 않는다.
+    assert runs.schedules == []
     assert len(pending) == 1
+
+
+@pytest.mark.parametrize("damaged_design", ["{}", "[]", "null"])
+def test_list_skips_unreadable_records_without_truncating_later_pages(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, damaged_design: str
+) -> None:
+    """#381: 손상 행이 페이지를 막거나 다음 정상 기록을 숨기지 않는다."""
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    service = _service(runs, repository=SQLiteExperimentRepository(path), spawn=lambda _work: None)
+    ids = [service.create(_request()).record.experiment_id for _ in range(6)]
+    with sqlite3.connect(path) as connection:
+        for experiment_id in (ids[0], ids[2], ids[4], ids[5]):
+            connection.execute(
+                "UPDATE experiments SET design_json = ? WHERE experiment_id = ?",
+                (damaged_design, experiment_id),
+            )
+    first = service.list(after=None, limit=1)
+    second = service.list(after=first.next_after, limit=1)
+    assert [item.record.experiment_id for item in first.items] == [ids[3]]
+    assert first.next_after == ids[3]
+    assert [item.record.experiment_id for item in second.items] == [ids[1]]
+    assert second.next_after is None
+    assert all(experiment_id in caplog.text for experiment_id in (ids[0], ids[2], ids[4], ids[5]))
+    # 원장 행을 지우거나 고치지는 않는다. 개별 조회는 명시적 저장 오류를 유지한다.
+    with pytest.raises(ResearchStorageError):
+        service.get(ids[4])
 
 
 def _interrupted_restart(tmp_path: Path) -> tuple[_FakeRuns, Path, str]:
@@ -789,6 +913,100 @@ def test_a_retry_refused_by_the_base_recheck_leaves_no_attempt() -> None:
     assert len(service.trials(experiment_id)[0].attempts) == 1
 
 
+def test_robustness_check_keeps_a_parameter_the_factor_output_never_reads_and_says_so() -> None:
+    """실데이터 확인(2026-10-17) 후속 3: 펴도 칸 점수가 모두 같아 시도 수만 는다."""
+    runs = _FakeRuns()
+    runs.strategy = replace(_STRATEGY, factors=_TEMPLATE.factors)  # scale 을 선언만 한다
+    runs.sources["single-1"] = SourceRun(_BASE, single=True)
+    service = _service(runs)
+
+    preview = service.preview_robustness("single-1")
+
+    assert preview.unread_parameters == ("scale",)
+    assert preview.design.search.axes == ()
+    assert preview.combination_count == 1
+    assert preview.new_trial_count == 1
+    assert preview.design.parameter_values == {"scale": 1.0, "mode": "b"}
+
+
+def test_robustness_check_searches_around_the_run_and_is_found_by_its_run(
+    tmp_path: Path,
+) -> None:
+    """US-DM-11: 결과 실행 하나로 기본 설계의 실험을 만들고, 그 실행으로 다시 찾는다."""
+    runs = _FakeRuns()
+    window = MetricWindow(MetricScope.OUT_OF_SAMPLE, date(2023, 1, 2), date(2023, 6, 30))
+    runs.sources["single-1"] = SourceRun(replace(_BASE, metric_windows=(window,)), single=True)
+    path = tmp_path / "research.sqlite3"
+    service = _service(runs, repository=SQLiteExperimentRepository(path))
+
+    preview = service.preview_robustness("single-1")
+    created = service.create_robustness("single-1")
+
+    # 해소된 값 scale 1.0 주변(±1, 최댓값 1.0 넘는 2.0 은 뺀다). 선택지 mode 는 지금 값(b)에 둔다.
+    assert [(axis.parameter_id, axis.values) for axis in preview.design.search.axes] == [
+        ("scale", (0.0, 1.0))
+    ]
+    assert preview.combination_count == 2
+    assert preview.design.parameter_values["mode"] == "b"
+    # 2021-01-04 ~ 2023-06-30 은 학습 3년 + 검증 1년을 담지 못해 학습 1년·검증 1년이다.
+    assert created.record.split == SplitSpec(
+        mode=SplitMode.ROLLING, train_years=1, test_years=1, embargo_sessions=5
+    )
+    # 지표 창은 분할이 정하므로 기반 요청에서 뺀다. 마지막 검증 창(2023-01-04 ~ 06-30, 177일)은 반년
+    # (182일)이 안 되는 꼬리라 버리고, 기간을 첫 창 검증 끝(2023-01-03)으로 당긴다.
+    assert _BASE.environment is not None
+    assert created.record.run == replace(
+        _BASE, environment=replace(_BASE.environment, end=date(2023, 1, 3))
+    )
+    assert len(created.record.design.windows) == 1
+    assert created.record.source_run_id == "single-1"
+    # 끝나지 않은 확인 실험이 있으면 같은 실행에서 또 만들지 않는다.
+    with pytest.raises(ExperimentStateError) as running:
+        service.create_robustness("single-1")
+    assert running.value.code == "experiment.robustness.running"
+
+    other = service.create(_request())
+    reopened = _service(runs, repository=SQLiteExperimentRepository(path))
+    assert [item.record.experiment_id for item in reopened.robustness_checks("single-1")] == [
+        created.record.experiment_id
+    ]
+    assert reopened.get(other.record.experiment_id).record.source_run_id is None
+    assert reopened.robustness_checks("single-2") == ()
+
+
+def test_robustness_check_refuses_unknown_and_experiment_runs() -> None:
+    runs = _FakeRuns()
+    runs.sources["trial-1"] = SourceRun(_BASE, single=False)
+    service = _service(runs)
+
+    with pytest.raises(ExperimentNotFoundError) as missing:
+        service.preview_robustness("single-2")
+    with pytest.raises(InvalidExperimentSpecError) as trial:
+        service.preview_robustness("trial-1")
+
+    assert missing.value.code == "experiment.robustness.run_not_found"
+    assert trial.value.code == "experiment.robustness.not_single"
+
+
+def _write_legacy_research_file(
+    path: Path, version: int, objects: tuple[tuple[str, str, str], ...]
+) -> None:
+    """현행 fixture의 행만 정확한 옛 DDL에 옮긴다. 후속 판본 객체를 남기지 않는다."""
+    legacy = path.with_suffix(".legacy.sqlite3")
+    with sqlite3.connect(path) as source:
+        application_id = source.execute("PRAGMA application_id").fetchone()[0]
+    with sqlite3.connect(legacy) as connection:
+        connection.execute("ATTACH DATABASE ? AS fixture", (str(path),))
+        for _, _, ddl in objects:
+            connection.execute(ddl)
+        for kind, name, _ in objects:
+            if kind == "table":
+                connection.execute(f'INSERT INTO "{name}" SELECT * FROM fixture."{name}"')
+        connection.execute(f"PRAGMA application_id = {application_id}")
+        connection.execute(f"PRAGMA user_version = {version}")
+    legacy.replace(path)
+
+
 def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path) -> None:
     """#348 리뷰 P3-4: 판본 3 파일(조작 표 없음)을 열면 실험 행은 그대로이고 조작은 기본값이다."""
     runs = _FakeRuns()
@@ -798,10 +1016,7 @@ def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path
         .create(_request())
         .record.experiment_id
     )
-    with sqlite3.connect(path) as connection:
-        connection.execute("DROP TABLE experiment_window_picks")
-        connection.execute("DROP TABLE experiment_controls")
-        connection.execute("PRAGMA user_version = 3")
+    _write_legacy_research_file(path, 3, V3_SCHEMA_OBJECTS)
 
     reopened = _service(runs, repository=SQLiteExperimentRepository(path))
     before = reopened.get(experiment_id)
@@ -934,8 +1149,43 @@ def test_the_stitched_curve_chains_only_test_window_returns() -> None:
     assert report.out_of_sample_sharpe == pytest.approx(mean / deviation)
     # 유지율 = 표본 밖 세션 샤프 ÷ 고른 칸 학습 샤프 평균 (0.2 + 0.3) / 2.
     assert report.retention == pytest.approx(mean / deviation / 0.25)
-    assert report.gap is None
+    assert report.train_sharpe_mean == pytest.approx(0.25)
+    assert (report.gap, report.retention_gap) == (None, None)
     assert service.get(experiment_id).status is ExperimentStatus.COMPLETED
+
+
+def test_a_negative_train_mean_leaves_retention_empty_with_its_reason() -> None:
+    """실데이터 확인(2026-10-17) 후속 2: 곡선·표본 밖 샤프는 났는데 유지율만 빌 때 이유를 싣는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request(split=_BEST)).record.experiment_id
+    # 창 0 은 칸 (0,) -0.1, 창 1 은 칸 (1,) -0.05 를 고른다 — 학습 평균 -0.075.
+    _finish(
+        runs,
+        {
+            "run-0": _result(-0.1),
+            "run-1": _result(-0.3),
+            "run-2": _result(-0.2),
+            "run-3": _result(-0.05),
+        },
+    )
+    service.advance(experiment_id)
+    cash = _BASE.initial_cash
+    _finish(
+        runs,
+        {
+            "run-4": _result(equity=((date(2022, 1, 4), cash), (date(2022, 1, 5), cash * 1.01))),
+            "run-5": _result(equity=((date(2023, 1, 4), cash), (date(2023, 1, 5), cash * 0.99))),
+        },
+    )
+
+    report = service.walk_forward(experiment_id)
+
+    assert report.gap is None
+    assert report.out_of_sample_sharpe is not None
+    assert report.retention is None
+    assert report.train_sharpe_mean == pytest.approx(-0.075)
+    assert report.retention_gap is RetentionGap.NON_POSITIVE_TRAIN_SHARPE
 
 
 def test_a_failed_test_window_empties_the_summary_with_its_reason() -> None:
@@ -1151,8 +1401,7 @@ def test_an_experiment_from_a_version_4_file_keeps_its_old_meaning(tmp_path: Pat
         document = json.loads(stored)
         del document["design"]["measured"]
         connection.execute("UPDATE experiments SET design_json = ?", (json.dumps(document),))
-        connection.execute("DROP TABLE experiment_window_picks")
-        connection.execute("PRAGMA user_version = 4")
+    _write_legacy_research_file(path, 4, V4_SCHEMA_OBJECTS)
     runs.complete_all()
 
     reopened = _service(runs, repository=SQLiteExperimentRepository(path))
@@ -1187,13 +1436,16 @@ def test_the_parameter_map_averages_ledger_train_scores_and_floors_a_bankrupt_ce
     cells = service.parameter_map(experiment_id).cells
 
     # 칸 점수 (0,)=0.3, (2,)=0.2. 파산 칸 (1,) 은 최하 점수 min(0.2, 0) = 0 이라 두 칸의 이웃 평균이
-    # 모두 0 — 동점이면 좌표가 앞선 칸이 추천이다. 민감도: -1×0.8=-0.8 쪽 가장 가까운 격자값 0 은
-    # 파산이라 하락 1.0, 1×0.8=0.8 쪽도 0 이라 1.0. -1×1.2·1×1.2 쪽은 축 끝이다.
+    # 모두 0 — 고원 점수가 0 이하라 추천 칸이 없고(후속 4), 최고 칸 (0,) 은 이웃이 제 점수의
+    # 절반보다 낮아 봉우리다. 민감도: -1×0.8=-0.8 쪽 가장 가까운 격자값 0 은 파산이라 하락 1.0,
+    # 1×0.8=0.8 쪽도 0 이라 1.0. -1×1.2·1×1.2 쪽은 축 끝이다.
+    mapped = service.parameter_map(experiment_id)
+    assert mapped.no_recommendation is NoRecommendation.NON_POSITIVE_SCORE
     assert [
         (cell.grid_index, cell.verdict, cell.score, cell.plateau_score, cell.sensitivity)
         for cell in cells
     ] == [
-        ((0,), CellVerdict.RECOMMENDED, pytest.approx(0.3), 0.0, pytest.approx(1.0)),
+        ((0,), CellVerdict.PEAK, pytest.approx(0.3), 0.0, pytest.approx(1.0)),
         ((1,), CellVerdict.FAILED, None, None, None),
         ((2,), CellVerdict.SCORED, pytest.approx(0.2), 0.0, pytest.approx(1.0)),
     ]
@@ -1388,3 +1640,273 @@ def test_a_capacity_sweep_survives_reopening_the_research_database(tmp_path: Pat
 
     assert reopened.get(created.record.experiment_id).record == created.record
     assert [t.initial_cash for t in created.record.design.trials()] == [1e8, 2e8, 3e8]
+
+
+@pytest.mark.parametrize("reason", ["", " ", "\t\n"])
+def test_internal_selection_rejects_blank_reason_before_reading_the_trial(reason: str) -> None:
+    service = _service(_FakeRuns())
+    with pytest.raises(ValueError, match="non-whitespace"):
+        service.select("not-loaded", 0, reason)
+
+
+def test_cancelled_experiment_does_not_settle_before_validation_runs_stop() -> None:
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request(split=_BEST)).record.experiment_id
+    _finish(runs, {f"run-{index}": _result(0.1) for index in range(4)})
+    service.advance(experiment_id)
+    runs.run_statuses["run-4"] = RunStatus.CANCEL_REQUESTED
+    runs.run_statuses["run-5"] = RunStatus.CANCEL_REQUESTED
+    cancelled = service.cancel(experiment_id)
+    assert cancelled.finished is True
+    assert cancelled.settled is False
+    runs.run_statuses["run-4"] = RunStatus.CANCELLED
+    assert service.get(experiment_id).settled is False
+    runs.run_statuses["run-5"] = RunStatus.CANCELLED
+    assert service.get(experiment_id).settled is True
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_experiment_base_request_uses_the_run_codec_and_reads_old_rows(
+    tmp_path: Path, legacy: bool
+) -> None:
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    repository = SQLiteExperimentRepository(path)
+    service = _service(runs, repository=repository, spawn=lambda _work: None)
+    before = service.create(_request()).record
+    if legacy:
+        with sqlite3.connect(path) as connection:
+            row = connection.execute("SELECT design_json FROM experiments").fetchone()
+            design = json.loads(row[0])
+            # 구판 저장 형식은 run_spec 봉투 없이 요청 dataclass JSON을 직접 넣었다.
+            design["run"] = design["run"]["run_spec"]
+            connection.execute("UPDATE experiments SET design_json = ?", (json.dumps(design),))
+    repository.close()
+    reopened = SQLiteExperimentRepository(path)
+    assert reopened.get(before.experiment_id) == before
+    reopened.close()
+
+
+@pytest.mark.parametrize("failure", ["states", "second_cancel"])
+def test_cancel_retries_unfinished_cleanup_after_a_port_failure(failure: str) -> None:
+    """취소 표식 저장 뒤 조회·일부 취소 실패가 나도 다음 요청은 남은 실행을 정리한다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    states = runs.states
+    cancel = runs.cancel
+    failed = False
+    clock_reads = 0
+
+    def advancing_now() -> datetime:
+        nonlocal clock_reads
+        clock_reads += 1
+        return _AT + timedelta(days=clock_reads)
+
+    service._now = advancing_now
+
+    def failing_states(run_ids: Collection[str]) -> dict[str, BacktestRunState]:
+        nonlocal failed
+        if (
+            failure == "states"
+            and not failed
+            and service._repository.get(experiment_id).cancelled_at is not None
+        ):
+            failed = True
+            raise ResearchStorageError("bulk states unavailable once")
+        return states(run_ids)
+
+    def failing_cancel(run_id: str, *, owner: str) -> None:
+        nonlocal failed
+        if failure == "second_cancel" and run_id == "run-1" and not failed:
+            failed = True
+            raise ResearchStorageError("cancel unavailable once")
+        cancel(run_id, owner=owner)
+        runs.run_statuses[run_id] = RunStatus.CANCELLED
+
+    runs.states = failing_states
+    runs.cancel = failing_cancel
+    with pytest.raises(ResearchStorageError, match="unavailable once"):
+        service.cancel(experiment_id)
+    original_timestamp = service._repository.get(experiment_id).cancelled_at
+    assert original_timestamp is not None
+    after = service.cancel(experiment_id)
+    assert after.record.cancelled_at == original_timestamp == _AT + timedelta(days=1)
+    assert clock_reads == 1
+    assert all(state is RunStatus.CANCELLED for state in runs.run_statuses.values())
+    assert runs.cancelled == [(f"run-{index}", experiment_id) for index in range(4)]
+
+
+def test_the_remaining_time_counts_unfinished_trials_and_unvalidated_windows() -> None:
+    """로드맵 M6 ETA: 끝나지 않은 trial 의 학습 구간과 검증이 끝나지 않은 창의 검증 구간을, 계열의
+    근거 실행(하루 구간에 10초)으로 늘려 더한다. 취소하면 남은 실행이 없다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    assert service.remaining_time(service.create(_request()).record.experiment_id) is None
+
+    runs.ledger_entries.append(
+        TrialLedgerEntry(
+            "timed",
+            "f" * 64,
+            RunStatus.COMPLETED,
+            _AT,
+            _AT + timedelta(seconds=10),
+            started_at=_AT,
+            start=date(2021, 1, 4),
+            end=date(2021, 1, 4),
+        )
+    )
+    record = service.create(_request()).record
+    trials = record.design.trials()
+    windows = record.design.windows
+
+    def seconds(spans: list[int]) -> float:
+        return sum(10.0 * span for span in spans)
+
+    train = [span_days(t.window.train_start, t.window.train_end) for t in trials if t.window]
+    tests = [span_days(w.test_start, w.test_end) for w in windows]
+    first = service.remaining_time(record.experiment_id)
+    assert first is not None and first.sample_count == 1
+    assert first.total_seconds == pytest.approx(seconds(train + tests))
+
+    # 앞 실험의 trial 이 run-0..3 이라 이 실험의 첫 trial 은 run-4 다.
+    runs.run_statuses["run-4"] = RunStatus.COMPLETED
+    after = service.remaining_time(record.experiment_id)
+    assert after is not None
+    assert after.total_seconds == pytest.approx(seconds(train[1:] + tests))
+
+    service.cancel(record.experiment_id)
+    cancelled = service.remaining_time(record.experiment_id)
+    assert cancelled is not None and cancelled.total_seconds == 0
+
+
+def test_a_window_stops_counting_once_its_validation_run_finishes() -> None:
+    """학습이 끝나 고른 창도 검증 실행이 끝나기 전에는 남은 시간에 든다."""
+    runs = _FakeRuns()
+    runs.ledger_entries.append(
+        TrialLedgerEntry(
+            "timed",
+            "f" * 64,
+            RunStatus.COMPLETED,
+            _AT,
+            _AT + timedelta(seconds=10),
+            started_at=_AT,
+            start=date(2021, 1, 4),
+            end=date(2021, 1, 4),
+        )
+    )
+    service = _service(runs)
+    record = service.create(_request()).record
+    windows = record.design.windows
+    _finish(runs, {f"run-{index}": _result(1.0) for index in range(4)})
+    service.advance(record.experiment_id)
+
+    # 학습 trial 은 모두 끝났고, 창마다 검증 실행(run-4·run-5)이 돈다.
+    tests = [span_days(w.test_start, w.test_end) for w in windows]
+    both = service.remaining_time(record.experiment_id)
+    assert both is not None and both.total_seconds == pytest.approx(10.0 * sum(tests))
+
+    runs.run_statuses["run-4"] = RunStatus.COMPLETED
+    one = service.remaining_time(record.experiment_id)
+    assert one is not None and one.total_seconds == pytest.approx(10.0 * tests[1])
+
+    # 재시작으로 중단돼 복구를 기다리는 검증 실행은 아직 남았고, 그냥 실패한 검증 실행은 끝났다.
+    runs.run_statuses["run-5"] = RunStatus.FAILED
+    runs.error_codes["run-5"] = "backtest.run.interrupted"
+    recovering = service.remaining_time(record.experiment_id)
+    assert recovering is not None and recovering.total_seconds == pytest.approx(10.0 * tests[1])
+    runs.error_codes["run-5"] = "backtest.run.internal"
+    done = service.remaining_time(record.experiment_id)
+    assert done is not None and done.total_seconds == 0
+
+
+def test_the_audit_trail_lists_what_happened_to_the_experiment_and_its_trials(
+    tmp_path: Path,
+) -> None:
+    """로드맵 M6 감사 기록: 조작 이력은 다시 연 저장소에도 남고, 나머지는 쌓인 기록에서 읽는다."""
+    path = tmp_path / "research.sqlite3"
+    runs = _FakeRuns()
+    service = _service(runs, repository=SQLiteExperimentRepository(path))
+    experiment_id = service.create(_request()).record.experiment_id
+    service.control(experiment_id, paused=True)
+    service.control(experiment_id, paused=False, priority=3)
+    runs.run_statuses["run-0"] = RunStatus.FAILED
+    runs.error_codes["run-0"] = "backtest.run.internal"
+    service.retry(experiment_id, 0)
+    service.cancel(experiment_id)
+
+    reopened = _service(runs, repository=SQLiteExperimentRepository(path))
+    trail = reopened.audit(experiment_id)
+
+    kinds = [event.kind.value for event in trail]
+    # 모두 같은 시각(`_AT`)이라 기록 종류 순이다. 실패한 실행은 끝, 재시도는 새 attempt 다.
+    assert kinds == [
+        "created",
+        "controls_changed",
+        "controls_changed",
+        "trial_submitted",
+        "run_finished",
+        "trial_submitted",
+        "trial_submitted",
+        "trial_submitted",
+        "trial_submitted",
+        "cancelled",
+    ]
+    changes = [(e.paused, e.priority) for e in trail if e.kind.value == "controls_changed"]
+    assert changes == [(True, 1), (False, 3)]
+    failed = next(e for e in trail if e.kind.value == "run_finished")
+    assert (failed.trial_index, failed.run_id, failed.run_status, failed.code) == (
+        0,
+        "run-0",
+        RunStatus.FAILED,
+        "backtest.run.internal",
+    )
+    retried = [e for e in trail if e.kind.value == "trial_submitted" and e.trial_index == 0]
+    assert [(e.attempt, e.run_id) for e in retried] == [(1, "run-0"), (2, "run-4")]
+
+
+def test_the_audit_trail_is_in_time_order() -> None:
+    """뒤에 바꾼 조작은 먼저 넘긴 attempt 뒤에 온다(기록 종류 순이 아니라 시각 순)."""
+    ticks = iter(_AT + timedelta(seconds=second) for second in range(100))
+    ids = iter(f"exp-{number}" for number in range(10))
+    runs = _FakeRuns()
+    service = ExperimentRunService(
+        SQLiteExperimentRepository(),
+        runs,
+        metric_registry=build_default_metric_registry(),
+        new_id=lambda: next(ids),
+        now=lambda: next(ticks),
+        spawn=lambda work: work(),
+        poll_seconds=None,
+    )
+    experiment_id = service.create(_request()).record.experiment_id
+    service.control(experiment_id, priority=2)
+
+    trail = service.audit(experiment_id)
+
+    assert [event.kind.value for event in trail][-1] == "controls_changed"
+    assert [event.occurred_at for event in trail] == sorted(e.occurred_at for e in trail)
+
+
+def test_the_audit_trail_keeps_causal_order_and_tells_window_outcomes_apart() -> None:
+    """#521 리뷰: 이어 받은 실행의 시작은 넘긴 시각보다 앞서 보이지 않는다. 창 검증 실행의 사건은
+    창에 귀속되고, 바뀌지 않은 조작은 이력이 없다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    service.control(experiment_id, paused=False, priority=1)  # 기본값 그대로
+    runs.started_ats["run-0"] = _AT - timedelta(hours=1)  # 다른 실험이 먼저 돌리던 실행
+    _finish(runs, {f"run-{index}": _result(1.0) for index in range(4)})
+    service.advance(experiment_id)
+    runs.run_statuses["run-4"] = RunStatus.COMPLETED
+
+    trail = service.audit(experiment_id)
+
+    assert all(event.kind.value != "controls_changed" for event in trail)
+    started = next(e for e in trail if e.kind.value == "run_started")
+    assert (started.run_id, started.occurred_at) == ("run-0", _AT)
+    picked = [e for e in trail if e.kind.value == "window_picked"]
+    assert [(e.window_index, e.run_id) for e in picked] == [(0, "run-4"), (1, "run-5")]
+    validation = next(e for e in trail if e.kind.value == "run_finished" and e.run_id == "run-4")
+    assert (validation.window_index, validation.trial_index) == (0, None)

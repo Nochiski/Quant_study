@@ -22,6 +22,7 @@ EG2-P04 모집단이 빈다. 그래서 여기서는 `lag_known=false` 를 실은
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -32,7 +33,7 @@ from conftest import allow_skips, apply_slice_override
 from equity import build, gates, inputs, rules_s19
 from equity.baseline import Baseline, load
 from equity.gates import EquityGateContext
-from equity.model import CELL_KINDS, RULES, VALUE_TYPES
+from equity.model import CELL_KINDS, RULES, VALUE_TYPES, FieldProfile
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -392,12 +393,123 @@ def test_선언은_있는데_값이_없는_필드는_커버율_0_으로_남는�
     두 유형은 **가격 조정 사건이 아니다**(주식수가 안 변한다). `ratio` NULL · `amount_krw` 가
     값을 나르고 `adj_factor` 는 계수 4유형만 읽으므로 조정 축과 격리돼 있다.
     자사주 금액은 원천 채움률이 100%가 아니라(서버 `aqpln_prc_ostk` 94.7%) 커버가 그만큼 낮다.
+    `table_rows` 축의 분모는 창 안 `corp_event` 중 `row_filter`(`treasury_buy`) 행이다(#592) —
+    2026-10-20(#589) 종류별 class-row 로 자사주 행이 32 → 41(우선주 005935 leg 11 추가, 대신증권
+    기타주식만 산 2건 제외)이 되어 분자 = 금액 있는 자사주 행 40(금액 없는 00260657 2023-11-17
+    1건 제외) / 분모 41 = 97.560976%. 손계산 근거 전부는 아래 `ROW_FILTERED_FIELDS` 에 있다.
     """
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT field_id, estimated_coverage_pct FROM dp "
                                 "WHERE table_name = 'corp_event' ORDER BY 1"))
-    assert got == {"event.buyback_amount": 75.609756, "event.capital_raise_amount": 100.0}
+    assert got == {"event.buyback_amount": 97.560976, "event.capital_raise_amount": 100.0}
+    (n_obs, n_den), = _rows(r.out_dir, "SELECT n_observed, n_denominator FROM dp "
+                                       "WHERE field_id = 'event.buyback_amount'")
+    assert (n_obs, n_den) == (40, 41)
     assert r.n_reject == 0
+
+
+# `row_filter` 가 있는 필드 전부(#592 전수 점검, 축 넷 모두) — 절단본 손계산.
+# ① 행 축(`table_rows`) — 분모는 창 안 그 유형 행이다.
+#   corp_event(창 2015-01-23~2026-08-19 안 50행) = treasury_buy 41(금액 40) · capred 5 · split 2 ·
+#     bonus 1 · cb_issue 1(2023-07-18, 금액 있음). rights 는 아직 싣지 않는다(0행).
+#   holder_daily = stg_holder_elestock 4,197행(접수 × 보고자 4,197 키, 증감 수량·비율 전부 있음,
+#     rcept_dt 2024-08-26~2026-08-26) + stg_holder_majorstock 132행(132 키, 지분율 전부 있음,
+#     2024-09-09~2026-08-25). 두 원천은 dedup 하지 않고 `src` 로 나란히 싣는다(`holder_daily.sql`).
+# 분자는 값이 있는 그 유형 행이고, 분모는 창 안 그 유형 행이다. 수정 전 분모는 창 안 전 행이었다
+# — buyback 50 · insider 4,329(elestock 4,197 + majorstock 132) · major_holder 4,323(창 안
+# elestock 4,191 + majorstock 132) — 그래서 major_holder_stake 가 3.05% 로 나왔다.
+# ② 격자 축 — `row_filter` 는 값을 읽을 원천 행만 고르고 분모(격자)를 줄이지 않는다.
+#   grid_session(flow_daily `src = 'kis'`): KIS 행 3,925 = 캘린더 전 29 + 창 2010-01-04~2019-02-12
+#     안 3,896(그중 격자 셀 3,891, 격자 밖 5). 분모 = 그 창의 universe_daily 셀 23,387(15종목).
+#     분모에 원천 필터를 걸면(KIS 행이 있는 격자 셀 3,891) 100% 로 부푼다 — 원천이 격자를 얼마나
+#     덮는지가 사라진다.
+#   grid_security(consensus_daily `metric`): 분모 = 격자 종목 15. 값이 있는 종목은 eps·ni·op 5,
+#     revenue 4(전부 격자 안). 분모를 그 metric 행이 있는 종목(eps·revenue 7)으로 좁히면 부푼다.
+ROW_FILTERED_FIELDS: dict[str, tuple[str, int, int, float, str, str]] = {
+    # field_id: (coverage_basis, n_observed, n_denominator, 커버율 %, coverage_from, coverage_to)
+    "event.buyback_amount": ("table_rows", 40, 41, 97.560976, "2015-01-23", "2026-08-19"),
+    "event.capital_raise_amount": ("table_rows", 1, 1, 100.0, "2023-07-18", "2023-07-18"),
+    "event.insider_net_buy": ("table_rows", 4197, 4197, 100.0, "2024-08-26", "2026-08-26"),
+    "event.insider_stake_change": ("table_rows", 4197, 4197, 100.0, "2024-08-26", "2026-08-26"),
+    "event.major_holder_stake": ("table_rows", 132, 132, 100.0, "2024-09-09", "2026-08-25"),
+    "flow.foreign_net_buy_kis": ("grid_session", 3891, 23387, 16.637448, "2010-01-04",
+                                 "2019-02-12"),
+    "flow.institution_net_buy_kis": ("grid_session", 3891, 23387, 16.637448, "2010-01-04",
+                                     "2019-02-12"),
+    "consensus.eps_dispersion": ("grid_security", 5, 15, 33.333333, "2026-09-01", "2026-09-02"),
+    "consensus.forward_eps": ("grid_security", 5, 15, 33.333333, "2026-04-03", "2026-09-02"),
+    "consensus.forward_ni": ("grid_security", 5, 15, 33.333333, "2026-04-03", "2026-08-04"),
+    "consensus.forward_op": ("grid_security", 5, 15, 33.333333, "2026-04-03", "2026-08-04"),
+    "consensus.forward_sales": ("grid_security", 4, 15, 26.666667, "2026-04-03", "2026-09-02"),
+}
+
+
+def test_row_filter_필드의_분모는_축마다_정한_뜻을_지킨다(built) -> None:
+    """행 축은 그 유형 행만 분모에 넣고, 격자 축은 분모(격자)를 줄이지 않는다(#592·#597 리뷰 P3-1).
+
+    선언 전수와 표를 함께 본다 — `row_filter` 가 있는 필드가 새로 생기면 이 표에 손계산을 더해야
+    통과한다. 창이 값 행에서 잡히는지(분자 필터가 창에도 걸리는지)는
+    `capital_raise_amount`·`major_holder_stake` 의 `coverage_from` 이 본다.
+    """
+    _, r = built
+    declared = {fp.field_id for _, fp in rules_s19.owned_fields() if fp.row_filter}
+    assert declared == set(ROW_FILTERED_FIELDS)
+    ids = ", ".join(f"'{f}'" for f in sorted(declared))
+    got = {str(row[0]): (row[1], row[2], row[3], row[4], str(row[5]), str(row[6]))
+           for row in _rows(r.out_dir, "SELECT field_id, coverage_basis, n_observed, "
+                                       "n_denominator, estimated_coverage_pct, coverage_from, "
+                                       f"coverage_to FROM dp WHERE field_id IN ({ids})")}
+    assert got == ROW_FILTERED_FIELDS
+
+
+def _event_table(rows: list[tuple[str, str, int | None]]) -> duckdb.DuckDBPyConnection:
+    con = duckdb.connect()
+    con.execute("CREATE TABLE ev (available_date DATE, event_type VARCHAR, amount_krw BIGINT)")
+    con.executemany("INSERT INTO ev VALUES (CAST(? AS DATE), ?, ?)", rows)
+    return con
+
+
+def _event_field(row_filter: str) -> FieldProfile:
+    return FieldProfile(
+        field_id="event.synthetic", columns=("amount_krw",), label="합성", unit="KRW",
+        value_type="amount", frequency="event", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="합성", evidence="합성", coverage_axis="table_rows",
+        row_filter=row_filter)
+
+
+CALENDAR = (dt.date(2020, 1, 2), dt.date(2020, 12, 30))
+
+
+def test_합성_사건표_분모는_대상_유형_행이고_다른_유형_수에_흔들리지_않는다() -> None:
+    """손 픽스처 — 자사주 3행(금액 2) 사이에 분할 2행·CB 1행(금액 있음)을 섞는다.
+
+    분모는 자사주 3, 분자는 금액 있는 자사주 2 → 2/3. 분할 행을 늘려도 비율은 같고, CB 의 금액은
+    분자에 들지 않는다(분자 필터를 빼면 3/3, 분모 필터를 빼면 2/6 이 된다).
+    """
+    base = [("2020-03-02", "treasury_buy", 100), ("2020-04-01", "split", None),
+            ("2020-05-04", "cb_issue", 7), ("2020-06-01", "treasury_buy", None),
+            ("2020-07-01", "split", None), ("2020-08-03", "treasury_buy", 300)]
+    fp = _event_field("event_type = 'treasury_buy'")
+    lo, hi, n_obs, n_den = rules_s19.table_rows_coverage(_event_table(base), "ev", fp, CALENDAR)
+    assert (str(lo), str(hi), n_obs, n_den) == ("2020-03-02", "2020-08-03", 2, 3)
+    assert rules_s19._pct(n_obs, n_den) == 66.666667
+    more_splits = [*base, *[("2020-05-11", "split", None)] * 5]
+    assert rules_s19.table_rows_coverage(
+        _event_table(more_splits), "ev", fp, CALENDAR)[2:] == (2, 3)
+
+
+def test_창_안에_대상_유형_행이_없으면_분모_0_커버율_0() -> None:
+    """유형 행이 0 이면 나누지 않는다 — 분자·분모 0, 커버율 0(`_pct`), 창은 테이블 창으로 물러난다.
+
+    EG2 의 재계산 항등(`n_denominator = 0 → 0.0`)과 S20 의 `no_observations`(커버율 0)가 같은 값을
+    읽는다 — "행 0" 표기 규칙이 이 축에서도 그대로다.
+    """
+    con = _event_table([("2020-03-02", "treasury_buy", 100), ("2020-04-01", "split", None)])
+    lo, hi, n_obs, n_den = rules_s19.table_rows_coverage(
+        con, "ev", _event_field("event_type IN ('rights', 'cb_issue')"), CALENDAR)
+    assert (str(lo), str(hi), n_obs, n_den) == ("2020-03-02", "2020-04-01", 0, 0)
+    assert rules_s19._pct(n_obs, n_den) == 0.0
 
 
 def test_GAP02_세_계정은_실재하고_첫_관측일이_기록된다(built) -> None:

@@ -23,8 +23,8 @@ from strategy_workbench.domain.factor.facade.operators import (
 from strategy_workbench.domain.factor.facade.validation import (
     FactorGraphValidation,
     FactorValidationSeverity,
+    missing_field_message,
     node_dependencies,
-    unavailable_field_message,
     validate_factor_graph,
 )
 
@@ -57,7 +57,6 @@ from ._promotion import PROMOTION_NODE_PREFIX, is_reserved_node_id, promotion_no
 
 
 class ValidationKind(StrEnum):
-    SYNTAX = "syntax"
     SEMANTIC = "semantic"
     CAPABILITY = "capability"
 
@@ -168,6 +167,17 @@ def _numeric_leaves(value: object, path: str = "") -> Iterator[tuple[str, float]
             yield from _numeric_leaves(item, child_path)
 
 
+def _plain_number(value: float) -> str:
+    """사용자 문장에 남기는 지금 값의 원문 표기(`.claude/rules/error-messages.md` 예외 절).
+
+    값은 `repr` 그대로 남기되, 정수인 실수(`20.0`)는 문서에 적은 모양(`20`)으로 `.0` 을 뗀다.
+    무한대·NaN·소수는 `repr` 그대로다(`inf`·`nan`·`2.5`).
+    """
+    if math.isfinite(value) and float(value).is_integer():
+        return str(int(value))
+    return repr(value)
+
+
 def _eligibility_rule_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
     """`top_*` 규칙의 `value` 가 cut 크기로 쓸 수 있는 값인지 검사한다 (spec D3 S5).
 
@@ -198,10 +208,13 @@ def _eligibility_rule_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
                 f"known={[member.value for member in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS]}"
             )
         if not satisfied:
+            # 사용자 대면 문장이다. 재현 값(지금 값)은 사람 말로 문장 안에 남기고, 어느 규칙인지는
+            # 진단 pointer(`eligibility.rules.<i>.value`)가 짚으므로 field_id 원문을
+            # 덧붙이지 않는다.
             yield semantic_issue(
                 "strategy.eligibility.rule_value",
                 path,
-                f"{expectation}: got={rule.value!r} field_id={rule.field_id!r}",
+                f"{expectation}. 지금 값은 {_plain_number(rule.value)}입니다.",
             )
 
 
@@ -247,10 +260,10 @@ def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
         "strategy.risk.risk_factor_excluded",
         "risk.risk_factor_id",
         "리스크 팩터는 역가중에만 쓰이고 합성 점수에서는 빠집니다(가중치 무시): "
-        f"risk_factor_id={excluded!r}",
+        f"팩터={next(factor.label for factor in spec.factors if factor.factor_id == excluded)!r}",
         severity=ValidationSeverity.WARNING,
     )
-    if not composite_factors(spec):
+    if not composite_factors(spec) and spec.portfolio.tie_breaker_factor_id is None:
         # 막지 않으면 모든 후보의 합성 점수가 `None` 이 되어 정렬이 `security_id` 사전순으로
         # 떨어진다 — 예외도 진단도 없이 엉뚱한 종목이 선정되는 silent wrong result 다.
         yield semantic_issue(
@@ -258,6 +271,36 @@ def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
             "factors",
             "리스크 팩터를 빼고 나면 점수를 낼 알파 팩터가 없습니다. 알파 팩터를 하나 이상 "
             f"추가하세요: risk_factor_id={excluded!r} factors={factor_ids!r}",
+        )
+
+
+def _tie_breaker_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
+    factor_id = spec.portfolio.tie_breaker_factor_id
+    if factor_id is None:
+        return
+    factor_ids = [factor.factor_id for factor in spec.factors]
+    if factor_id not in factor_ids:
+        yield semantic_issue(
+            "strategy.portfolio.tie_breaker_factor_missing",
+            "portfolio.tie_breaker_factor_id",
+            "동점 해소 팩터가 이 문서의 팩터 목록에 없습니다: "
+            f"factor_id={factor_id!r} factors={factor_ids!r}",
+        )
+        return
+    yield semantic_issue(
+        "strategy.portfolio.tie_breaker_factor_excluded",
+        "portfolio.tie_breaker_factor_id",
+        "동점 해소 팩터는 주 점수가 같은 종목의 순위에만 쓰이고 "
+        "합성 점수에서는 빠집니다(가중치 무시): "
+        f"팩터={next(factor.label for factor in spec.factors if factor.factor_id == factor_id)!r}",
+        severity=ValidationSeverity.WARNING,
+    )
+    if not composite_factors(spec):
+        yield semantic_issue(
+            "strategy.signal.no_alpha_factor",
+            "factors",
+            "보조·역가중 팩터를 빼고 나면 점수를 낼 알파 팩터가 없습니다. 알파 팩터를 하나 이상 "
+            f"추가하세요: tie_breaker_factor_id={factor_id!r} factors={factor_ids!r}",
         )
 
 
@@ -400,15 +443,16 @@ def _field_reference_issues(
     for path, field_id in _equity_field_references(spec):
         metadata = by_id.get(field_id)
         if metadata is None:
-            reason = unavailable.get(field_id)
-            message = (
-                f"연결된 데이터에 없는 필드입니다. 필드 id 를 확인하세요: field_id={field_id!r}"
-                if reason is None
-                else unavailable_field_message(field_id, reason)
+            # 빈 칸·어댑터가 뺀 필드·모르는 필드의 문장은 그래프 안 필드 노드와 같은 helper 가
+            # 고른다. 빈 칸은 재현할 값이 없어 위치 원문(`path`)도 붙이지 않는다.
+            message = missing_field_message(
+                field_id,
+                unavailable.get(field_id),
+                "연결된 데이터에 없는 필드입니다. 필드 id 를 확인하세요",
             )
-            issues.append(
-                semantic_issue("strategy.field.missing", path, f"{message} path={path!r}")
-            )
+            if field_id.strip():
+                message = f"{message} path={path!r}"
+            issues.append(semantic_issue("strategy.field.missing", path, message))
         elif metadata.value_type is not NodeValueType.NUMERIC_SERIES:
             issues.append(
                 semantic_issue(
@@ -642,6 +686,7 @@ def validate_strategy(
             )
         )
     issues.extend(_risk_source_issues(spec))
+    issues.extend(_tie_breaker_issues(spec))
     if spec.risk.sector_neutral and spec.portfolio.side is PortfolioSide.LONG_ONLY:
         issues.append(
             semantic_issue(

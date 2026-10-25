@@ -84,6 +84,21 @@ export type FormField = {
   diagnostics: DocumentDiagnostic[];
 };
 
+/**
+ * 사용자가 값을 채워야 하는 칸인가: 스키마 필수이고, 기본값이 없고(있으면 backend 가 채운다), 지금 설정에서 꺼지지
+ * 않았고(`x-applicable-when` 이 끈 칸은 쓰이지 않는다), 칸이 든 섹션이 문서에 있다 — 문서에 없는 선택 섹션의 필수
+ * 칸은 그 섹션을 쓰기 전까지 채울 일이 없다(섹션 자체가 필수면 backend 진단이 막는다). 안내의 "필수" 표식과 단계
+ * 완료 판정이 같은 술어를 쓴다. `section` 은 칸이 든 object 섹션(루트 `""` 는 늘 있다)이다.
+ */
+export const requiresValue = (
+  field: FormField,
+  section?: { readonly pointer: string; readonly written: boolean },
+): boolean =>
+  field.required &&
+  !field.hasDefault &&
+  field.applicable !== false &&
+  (section === undefined || section.pointer === "" || section.written);
+
 export type FormListItem = {
   pointer: string;
   /** 항목을 한 줄로 부르는 이름(스키마 `x-authoring-identity` 값 → const가 아닌 첫 문자열 값 → 번호). */
@@ -140,15 +155,11 @@ export type FormProjection = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/**
- * Form이 후보 select를 아는 `x-catalog` 카탈로그. `universe`는 schema 1.2에서 전략 문서를 떠나
- * 실행 설정 스키마로 옮겨갔지만(P2-03), 실행 설정 패널이 같은 컨트롤을 쓰므로 남겨 둔다
- * (P3-02).
- */
-export const CATALOGS = ["equity-field", "universe"] as const;
+/** 전략 문서의 runtime schema가 발행하는 선택 카탈로그. */
+export const CATALOGS = ["equity-field"] as const;
 /**
  * `x-catalog` 카탈로그 → 화면이 받은 항목 목록(이름 포함). 목록을 아직 못 받았거나 목록이 없는 카탈로그
- * (universe)는 null. Form select 옵션과 파이프라인 요약의 필드 이름이 같은 목록을 읽는다.
+ * 는 null. Form select 옵션과 파이프라인 요약의 필드 이름이 같은 목록을 읽는다.
  */
 export const catalogProfiles = (
   catalogs: { equityFields: readonly DatasetFieldProfile[] | null },

@@ -1,10 +1,11 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCommittedRef } from "../../../shared/lib/react";
+import type { BacktestRequestOptions as BacktestRunOptions } from "../../../entities/backtest";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import {
   useStartBacktest,
   type BacktestRunSpec,
 } from "../../../entities/backtest";
-import { ApiRequestError, failureReason } from "../../../shared/api";
 import { useNavigate, useRouter } from "../../../shared/lib/router";
 import {
   decideBacktestSource,
@@ -19,24 +20,10 @@ export type RunBacktestStatus =
   | { kind: "idle" }
   | { kind: "starting" }
   | { kind: "accepted"; runId: string }
-  /**
-   * `code`는 backend 거절 detail의 코드(예: `backtest.strategy.requires_upgrade`), 없으면 null.
-   * `detail`은 접힌 진단 상세에 둘 서버 사유다. 화면 본문은 `code`의 번역이 맡는다(이슈 #260).
-   */
-  | {
-      kind: "failed";
-      detail: string | null;
-      code: string | null;
-      /** 거절이 가리킨 요청 본문의 칸(점 경로). 없으면 null. */
-      field: string | null;
-      /** 거절 문장의 자리표시자를 채울 detail 값(`ApiRequestError.values`). */
-      values: Readonly<Record<string, string>>;
-    };
+  /** 거절 원문 객체를 보존하고 표시·교정 소비자가 해당 책임의 공용 함수를 쓴다. */
+  | { kind: "failed"; error: unknown };
 
-export type BacktestRunOptions = Omit<
-  BacktestRunSpec,
-  "strategy" | "strategy_source"
->;
+
 
 type DocumentIdentity = Pick<DocumentState, "documentEpoch" | "sourceVersion">;
 type RunOwner = DocumentIdentity & { optionsKey: string };
@@ -60,13 +47,14 @@ const sameOwner = (left: RunOwner, right: RunOwner): boolean =>
 export const useRunBacktest = (
   state: DocumentState,
   executionPlans: ExecutionPlansState,
-  options: BacktestRunOptions | null = {},
+  options: BacktestRunOptions | null,
+  parameterSourceRunId?: string,
 ) => {
   const navigate = useNavigate();
   const router = useRouter();
   const start = useStartBacktest();
   const [ownedStatus, setOwnedStatus] = useState<OwnedRunStatus | null>(null);
-  const optionsKey = useMemo(() => JSON.stringify(options), [options]);
+  const optionsKey = useMemo(() => JSON.stringify(parameterSourceRunId === undefined ? options : [options, parameterSourceRunId]), [options, parameterSourceRunId]);
   const currentOwner = useMemo<RunOwner>(
     () => ({
       documentEpoch: state.documentEpoch,
@@ -75,15 +63,8 @@ export const useRunBacktest = (
     }),
     [optionsKey, state.documentEpoch, state.sourceVersion],
   );
-  const latestOwner = useRef<RunOwner>(currentOwner);
+  const latestOwner = useCommittedRef(currentOwner);
   const activeRequest = useRef<symbol | null>(null);
-  useLayoutEffect(() => {
-    latestOwner.current = {
-      documentEpoch: state.documentEpoch,
-      sourceVersion: state.sourceVersion,
-      optionsKey,
-    };
-  }, [optionsKey, state.documentEpoch, state.sourceVersion]);
   const decision = useMemo(
     () =>
       gateBacktestSourceWithFactorPlans(
@@ -153,12 +134,7 @@ export const useRunBacktest = (
           ...snapshot,
           status: {
             kind: "failed",
-            detail: failureReason(error),
-            code:
-              error instanceof ApiRequestError ? (error.code ?? null) : null,
-            field:
-              error instanceof ApiRequestError ? (error.field ?? null) : null,
-            values: error instanceof ApiRequestError ? error.values : {},
+            error,
           },
         });
       }
@@ -188,6 +164,7 @@ export const useRunBacktest = (
     isPending,
     mutateAsync,
     navigate,
+    latestOwner,
     optionsKey,
     request,
     router,

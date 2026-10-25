@@ -1,8 +1,9 @@
-import { useId, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
   assistantProvidersQuery,
+  hasActiveAssistantProvider,
   type DocumentRefView,
   type StrategyProposalView,
   type TurnContextPayload,
@@ -10,7 +11,10 @@ import {
 import { t, type MessageKey } from "../../../shared/config";
 import { Link } from "../../../shared/lib/router";
 import { Button, EmptyState } from "../../../shared/ui";
-import { useAssistChat } from "../model/use-assist-chat";
+import {
+  useAssistSidebarState,
+  type AssistSidebarState,
+} from "../model/use-assist-sidebar";
 import { AssistComposer } from "./assist-composer";
 import { AssistTranscript } from "./assist-transcript";
 import "./assist-strategy-sidebar.css";
@@ -30,14 +34,19 @@ export type AssistProposalAction = {
  * 사이드바가 붙은 화면의 종류. 안내 문구만 가른다.
  *
  * `result`는 백테스트 결과 화면이다(결과 설명 spec R1). 그 화면에서 "무엇을 만들고 싶은지 적으세요"는
- * 틀린 안내다. 모드 자체(도구·제안 여부)는 서버가 세션으로 정하므로 여기서 다시 판단하지 않는다.
+ * 틀린 안내다. `guide`는 새 전략 단계별 안내로, 아직 문서가 비어 있어 무슨 전략을 만들지부터 묻는다.
+ * 모드 자체(도구·제안 여부)는 서버가 세션으로 정하므로 여기서 다시 판단하지 않는다.
  */
-export type AssistCopy = "strategy" | "result";
+export type AssistCopy = "strategy" | "guide" | "result";
 
 const COPY = {
   strategy: {
     empty: "assistant.chat.empty.description",
     placeholder: "assistant.chat.input.placeholder",
+  },
+  guide: {
+    empty: "assistant.chat.empty.description.guide",
+    placeholder: "assistant.chat.input.placeholder.guide",
   },
   result: {
     empty: "assistant.chat.empty.description.result",
@@ -58,7 +67,7 @@ const COPY = {
 type AssistScreenProps =
   | {
       /** 안내 문구의 종류. 기본은 전략 화면이다. */
-      copy?: "strategy";
+      copy?: "strategy" | "guide";
       /** 턴 시작 순간의 편집기 텍스트·진단·실행 설정. 서버가 문서를 들지 않으므로 턴마다 싣는다. */
       readContext: () => TurnContextPayload;
     }
@@ -72,32 +81,92 @@ export type AssistStrategySidebarProps = AssistScreenProps & {
   onApplyProposalAndBacktest?: (action: AssistProposalAction) => void;
   /** 사이드바를 닫는 동작. 주면 닫기 버튼이 생긴다. */
   onClose?: () => void;
+  /**
+   * 입력칸 위에 두는 추천 질문. 누르면 입력칸을 그 문장으로 채울 뿐 보내지 않는다 — 사용자가 고쳐 보낼
+   * 수 있어야 한다. 화면이 지금 맥락(안내 단계)에 맞춰 고른다.
+   */
+  suggestions?: readonly string[];
+  /**
+   * 추천 질문이 속한 맥락(안내 단계 id). 바뀌면 고치지 않은 채 남은 앞 맥락의 추천 질문을 입력칸에서 지운다.
+   */
+  suggestionsKey?: string;
+  /**
+   * 붙는 자리. `rail`은 전략 편집기의 세로 레일, `docked`는 고정 높이 칸 안에 들어가는 자리(새 전략 안내의
+   * 오른쪽 탭)로, 대화가 비어 있어도 추천 질문과 입력칸을 칸 바닥에 붙인다.
+   */
+  layout?: "rail" | "docked";
+  /**
+   * 이 사이드바가 지금 보이는가. 접힌 열·숨은 탭 안에 마운트된 채 남는 자리가 넘긴다. 보이는 동안만 대화를
+   * 조회한다. 기본은 보임이다.
+   */
+  visible?: boolean;
+  /**
+   * 위쪽에서 만든 대화·입력칸 상태(`useAssistSidebarState`). 주면 사이드바는 그리기만 한다.
+   */
+  state?: AssistSidebarState;
 };
 
 /**
  * 전략 화면 우측의 AI 채팅 사이드바.
  *
  * 그래프·YAML 어느 탭에서 보든 같은 세션이며, 문서를 바꾸는 것은 제안 카드의 버튼이 부르는 콜백뿐이다
- * (적용 경로는 spec D7에 따라 바깥이 소유한다). 서버 상태는 전부 query cache가 들고, 이 컴포넌트가
- * 소유하는 것은 열린 대화·확인 대화상자 같은 UI 상태다(spec D9).
+ * (적용 경로는 spec D7에 따라 바깥이 소유한다). 서버 상태는 전부 query cache가 들고, 대화·입력칸 상태는
+ * `useAssistSidebarState`가 든다. `state`를 주지 않으면 사이드바가 스스로 만들고, 주면 그 상태를 그린다 —
+ * 같은 문서를 두 자리가 번갈아 보이는 화면이 대화·입력을 잇는 길이다(가이드 재리뷰 4).
  */
-export const AssistStrategySidebar = ({
-  documentRef,
-  readContext,
+export const AssistStrategySidebar = (props: AssistStrategySidebarProps) =>
+  props.state === undefined ? (
+    <OwnedSidebar {...props} />
+  ) : (
+    <SidebarView {...props} state={props.state} />
+  );
+
+const OwnedSidebar = (props: AssistStrategySidebarProps) => {
+  const state = useAssistSidebarState({
+    documentRef: props.documentRef,
+    readContext: props.readContext,
+  });
+  return <SidebarView {...props} state={state} />;
+};
+
+const SidebarView = ({
   copy = "strategy",
   onPreviewProposal,
   onApplyProposal,
   onApplyProposalAndBacktest,
   onClose,
-}: AssistStrategySidebarProps) => {
+  suggestions = [],
+  suggestionsKey,
+  layout = "rail",
+  visible = true,
+  state,
+}: AssistStrategySidebarProps & { state: AssistSidebarState }) => {
+  // 보임 여부를 상태에 알린다. 사라지면 보이지 않는 것이다.
+  const { setVisible } = state;
+  useLayoutEffect(() => {
+    setVisible(visible);
+    return () => setVisible(false);
+  }, [setVisible, visible]);
+  // 추천 질문의 맥락은 그리는 자리가 안다(안내라면 안내가 해석한 지금 단계, 최종 리뷰 4). commit 때 알린다.
+  const { noteSuggestionsKey } = state;
+  useLayoutEffect(() => {
+    noteSuggestionsKey(suggestionsKey);
+  }, [noteSuggestionsKey, suggestionsKey]);
   const confirmTextId = useId();
+  const suggestionsId = useId();
   const providers = useQuery(assistantProvidersQuery());
-  const chat = useAssistChat({ documentRef, readContext });
+  const { chat, draft, setDraft, submitDraft } = state;
   const [closeConfirm, setCloseConfirm] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const pickSuggestion = (suggestion: string) => {
+    state.pickSuggestion(suggestion);
+    inputRef.current?.focus();
+  };
 
   const hasActiveProvider =
-    providers.data?.profiles.some((profile) => profile.active) ?? false;
+    providers.data === undefined ? false : hasActiveAssistantProvider(providers.data);
 
   const proposalAction = (
     proposal: StrategyProposalView,
@@ -155,12 +224,12 @@ export const AssistStrategySidebar = ({
   return (
     // 이름 없는 `<section>`은 landmark로 노출되지 않는다. 패널의 landmark·이름·제목은 이 feature를
     // 꽂는 슬롯이 소유하고 여기서는 그리지 않는다 — 계약은 WORKFLOW B-04 Acceptance에 있다.
-    <section className="assist">
+    <section className={layout === "docked" ? "assist assist--docked" : "assist"}>
       <header className="assist__head">
         <div className="assist__head-actions">
           {chat.sessions.length === 0 ? null : (
             <select
-              className="assist__sessions"
+              className="assist__sessions ui-select"
               aria-label={t("assistant.chat.session")}
               value={chat.sessionId ?? ""}
               onChange={(event) =>
@@ -316,12 +385,39 @@ export const AssistStrategySidebar = ({
           >
             {announcement ?? ""}
           </p>
+          {suggestions.length === 0 ? null : (
+            <div
+              className="assist__suggestions"
+              role="group"
+              aria-labelledby={suggestionsId}
+            >
+              <p className="assist__suggestions-title" id={suggestionsId}>
+                {t("assistant.chat.suggestions")}
+              </p>
+              <div className="assist__suggestion-list">
+                {suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    className="assist__suggestion"
+                    // 답변이 진행 중이거나 질문을 보내는 중이면 넣지 않는다 — 그 사이 넣은 문장은 보낼 수 없다.
+                    disabled={chat.running !== null || chat.busy}
+                    onClick={() => pickSuggestion(suggestion)}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <AssistComposer
-            restore={chat.draftRestore}
+            text={draft}
+            onTextChange={setDraft}
+            inputRef={inputRef}
             running={chat.running !== null}
             busy={chat.busy}
             placeholder={t(COPY[copy].placeholder)}
-            onSend={chat.send}
+            onSubmit={submitDraft}
             onCancel={chat.cancel}
           />
         </>

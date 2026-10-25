@@ -51,6 +51,12 @@ const context = (): StrategyDebuggerContext => ({
 });
 
 const response = (): StrategyTraceResponse => ({
+  factor_preview: {
+    valid_count: 0,
+    missing_count: 0,
+    missing: "drop",
+    top: [],
+  },
   spec_hash: "spec-hash",
   snapshot_id: "snapshot-v1",
   registry_version: "registry-v1",
@@ -135,6 +141,24 @@ const response = (): StrategyTraceResponse => ({
 });
 
 describe("strategy trace request contract", () => {
+  it("선택값을 모든 추적 요청에 그대로 보내고 값·출처 실행별 캐시를 나눈다", () => {
+    const selection = { asOf: "2026-08-31", security: "sec-a", factorId: "momentum", nodeId: "ranked" };
+    const original = context();
+    original.parameterValues = { scale: 0, enabled: false };
+    original.parameterSourceRunId = "run-a";
+    const first = prepareStrategyTrace(original, selection);
+    const changed = prepareStrategyTrace({ ...original, parameterValues: { scale: 1, enabled: false } }, selection);
+    const otherRun = prepareStrategyTrace({ ...original, parameterSourceRunId: "run-b" }, selection);
+    if (first.kind !== "ready" || changed.kind !== "ready" || otherRun.kind !== "ready") throw new Error("추적 준비 실패");
+    for (const request of [...first.linkedRequests, first.selectedRequest]) expect(request.parameter_values).toEqual({ scale: 0, enabled: false });
+    expect(first.ownerKey).not.toBe(changed.ownerKey);
+    expect(first.ownerKey).not.toBe(otherRun.ownerKey);
+    expect(first.expected.planHash).toBe(changed.expected.planHash);
+    const valid = { ...response(), parameter_values: { scale: 0, enabled: false, extra_default: 3 } };
+    expect(responseMatchesStrategyTrace(first, valid)).toBe(true);
+    expect(responseMatchesStrategyTrace(first, { ...valid, parameter_values: { scale: 1, enabled: false } })).toBe(false);
+    expect(responseMatchesStrategyTrace(first, response())).toBe(false);
+  });
   it("normalizes security IDs and builds bounded linked plus selected-node requests", () => {
     expect(parseSecurityIds(" sec-b,sec-a  sec-b\nsec-c ")).toEqual([
       "sec-b",
@@ -499,4 +523,32 @@ describe("strategy trace request contract", () => {
       },
     ]);
   });
+});
+
+it("summary requests keep the selected factor in request and cache identity", () => {
+  const current = context();
+  current.factors.push({
+    ...current.factors[0]!,
+    factorId: "other",
+    expectedPlanHash: "other-plan",
+  });
+  const selection = {
+    summaryOnly: true,
+    asOf: "",
+    security: "",
+    nodeId: "",
+    factorId: "other",
+  };
+  const selected = prepareStrategyTrace(current, selection);
+  expect(selected.kind).toBe("ready");
+  if (selected.kind !== "ready") return;
+  expect(selected.request.factor_id).toBe("other");
+  const first = prepareStrategyTrace(current, {
+    ...selection,
+    factorId: "momentum",
+  });
+  expect(first.kind === "ready" && first.ownerKey).not.toBe(selected.ownerKey);
+  expect(
+    prepareStrategyTrace(current, { ...selection, factorId: "removed" }),
+  ).toEqual({ kind: "blocked", reason: "factor" });
 });

@@ -161,7 +161,7 @@ def test_columnar_feed_matches_the_bar_built_feed() -> None:
         _bar_row(SIGNAL, "000660", 50.0),
         _bar_row(EXECUTION, "000660", 51.0),
     )
-    columnar = _columnar_feed(rows)
+    columnar = _columnar_feed(rows, session_calendar=(SIGNAL, EXECUTION))
     reference = _reference_feed(rows)
 
     assert columnar.sessions == reference.sessions
@@ -173,7 +173,7 @@ def test_columnar_feed_keeps_the_bar_price_validation() -> None:
     """검증은 어댑터가 아니라 feed가 한다 — 메시지도 `Bar` 경로와 같아야 한다."""
     broken = (_bar_row(SIGNAL, "005930", 100.0), _bar_row(EXECUTION, "005930", 0.5))
     with pytest.raises(ValueError) as columnar:
-        _columnar_feed(broken)
+        _columnar_feed(broken, session_calendar=(SIGNAL, EXECUTION))
     with pytest.raises(ValueError) as reference:
         _reference_feed(broken)
     assert str(columnar.value) == str(reference.value)

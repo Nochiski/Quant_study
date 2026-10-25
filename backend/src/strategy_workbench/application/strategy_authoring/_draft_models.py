@@ -46,13 +46,14 @@ class SaveStrategyDraftRequest:
         saved_fields = (self.strategy_id, self.base_revision, self.base_spec_hash)
         if all(value is None for value in saved_fields):
             return
-        if any(value is None for value in saved_fields):
+        if (
+            self.strategy_id is None
+            or self.base_revision is None
+            or self.base_spec_hash is None
+        ):
             raise ValueError(
                 "strategy_id, base_revision and base_spec_hash must be all present or all absent"
             )
-        assert self.strategy_id is not None
-        assert self.base_revision is not None
-        assert self.base_spec_hash is not None
         if not self.strategy_id.strip():
             raise ValueError("strategy_id must be non-blank")
         _exact_positive_int(self.base_revision, "base_revision")

@@ -1,6 +1,10 @@
 """`backtest_core` PyO3 확장 로컬 타입 스텁. 구현은 backend/rust/backtest_core/src/lib.rs."""
 
 __version__: str
+# build.rs가 구운 빌드 입력 지문(backtest_engine.engine.core_source 규칙).
+SOURCE_DIGEST: str
+# build.rs가 구운 cargo 빌드 프로필(release·debug).
+BUILD_PROFILE: str
 
 # Python 정본(`engine/store.RecordKind`, `engine/queue.EventPriority`)과 대조하는 wire 상수.
 # 실행 경로는 읽지 않고 `tests/test_core_parity.py`가 값 일치를 고정한다.
@@ -61,19 +65,49 @@ def quote_numbers(
     held: int,
     fee_rate: float,
     fok: bool,
+    sell_tax_rate: float = 0.0,
+    leverage: float = 1.0,
+    held_mark: float | None = None,
+    valuation: tuple[float, float] | None = None,
+    execution_state: tuple[float, list[float], int, bool] | None = None,
 ) -> tuple[float, int, float, str]: ...
 
 class BuyingPower:
     def __init__(
-        self, equity: float, leverage: float, positions: list[tuple[str, int, float, float]]
+        self,
+        equity: float,
+        leverage: float,
+        positions: list[tuple[str, int, float, float]],
+        cash: float | None = None,
+        allow_margin: bool = False,
     ) -> None: ...
     @property
     def available(self) -> float: ...
+    @property
+    def leverage(self) -> float: ...
+    @property
+    def valuation(self) -> tuple[float, float]: ...
+    def mark_of(self, key: str) -> float | None: ...
     def quantity_of(self, key: str) -> int: ...
-    def consume(self, key: str, side: str, quantity: int, price: float, fee: float) -> None: ...
-    def checkpoint(self) -> tuple[float, float, list[tuple[str, int]], list[tuple[str, float]]]: ...
+    def execution_state(self, key: str) -> tuple[float, list[float], int, bool]: ...
+    def consume(
+        self, key: str, side: str, quantity: int, price: float, fee: float, tax: float = 0.0
+    ) -> None: ...
+    def checkpoint(
+        self,
+    ) -> tuple[
+        float, float, list[tuple[str, int]], list[tuple[str, float]], float, list[tuple[str, float]]
+    ]: ...
     def restore(
-        self, state: tuple[float, float, list[tuple[str, int]], list[tuple[str, float]]]
+        self,
+        state: tuple[
+            float,
+            float,
+            list[tuple[str, int]],
+            list[tuple[str, float]],
+            float,
+            list[tuple[str, float]],
+        ],
     ) -> None: ...
 
 def process_market(
@@ -99,4 +133,4 @@ def process_market(
     fee_rate: float,
     default_participation: str | None,
     slippage: tuple[str, float, float],
-) -> list[tuple[str, str, int, float, float, float, str]]: ...
+) -> list[tuple[str, str, int, float, float, float, str, float, str | None, int | None]]: ...

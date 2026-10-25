@@ -26,7 +26,7 @@
 `application.assistant_chat`이 공급자 프로파일, 채팅 세션·턴, 전략 제안과 백테스트 결과 설명을 맡는다.
 공급자 SDK(`anthropic`, `openai`)는 optional extra `llm`(`uv sync --extra llm`)이며 `adapters/outbound/llm_*`
 밖에서 import하지 않는다(architecture 테스트). extra가 없어도 서버는 뜨고 공급자는 "설치 필요"로 보인다.
-세션 이력은 `assistant_sqlite`, API 키는 `secrets_local`이 저장한다. 계약 정본은
+세션 이력은 `assistant_sqlite`, 공급자 연결과 API 키는 `secrets_local`이 내 문서 `auto_trading/.env`에 저장한다. 계약 정본은
 [AI 어시스턴트 설계 spec](../docs/superpowers/specs/2026-09-20-ai-assistant-design.md)과
 [결과 설명 spec](../docs/superpowers/specs/2026-09-27-ai-backtest-result-explain.md)이다.
 
@@ -61,7 +61,17 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
   discriminated error 계약으로 함께 제공한다. 동시 실행 슬롯 수는 환경 변수
   `STRATEGY_WORKBENCH_RUN_SLOTS`(기본 2)가 정하고, 넘는 run은 `queued`(접수 문장 `Waiting for a free
   run slot`)로 기다린다. 배정 순서(단일 실행 전용 슬롯·실험 라운드로빈)와 같은 입력 잇기·공유 run 취소
-  규칙은 `.claude/rules/strategy-workbench-sot.md` 의 "백테스트 run 접수" 행이 정본이다.
+  규칙은 `.claude/rules/strategy-workbench-sot.md` 의 "백테스트 run 접수" 행이 정본이다. run 계산은
+  기본으로 서버 프로세스의 스레드에서 돌고, `STRATEGY_WORKBENCH_RUN_ISOLATION=process`(opt-in, 기본
+  `thread`)면 run마다 worker 프로세스(`python -m strategy_workbench.bootstrap.run_worker`)에서 돈다 —
+  설계는 `docs/superpowers/specs/2026-10-19-run-worker-process-design.md`. 이 방식에서 취소는 worker
+  종료라 어느 단계에서든 바로 끝나고, worker 가 결과 없이 끝나면 `backtest.run.worker_exited`, 서버와
+  다른 데이터·코드 판본을 읽었으면 `backtest.run.worker_mismatch`(서버를 다시 시작한다)로 끝난다.
+  서버는 부팅을 마친 예비 worker 하나를 늘 띄워 두고 run 에 넘기므로 run 시작에 부팅 시간이 들지
+  않는다(유휴 예비 하나의 비용은 `docs/planning/run-worker-process/BENCHMARK.md` 6절). 이 방식에서는
+  메모리 가드가 run 을 꺼내기 전에 가용 물리 메모리와 도는 run 들의 남은 예약분을 보고, 모자라면 슬롯이
+  비어도 `queued`(상태 문장 `Waiting for free memory`)로 기다리게 한다. 예약치는 run 이 읽을 세션 수와
+  전략 모양(원천 필드 수·팩터 단계 수)으로 어림하고(spec D8), `STRATEGY_WORKBENCH_RUN_MEMORY_RESERVE_GB` 로 run 마다 같은 값으로 고정할 수 있다.
 - `GET /api/v1/backtests`: 실행 이력 목록
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/request`: 서버가 수락한 실행 요청. 감사와 같은 조건 재실행에 쓴다
@@ -116,7 +126,7 @@ use case를 제공한다. outgoing port는 기본 `equity_mock`이, 실데이터
 - `GET /api/v1/factors/catalog`: 50개 versioned 정의 검색·카테고리·구현 상태 필터
 - `POST /api/v1/factors/validate`: cycle/type/unit/min-history/reference/missing-policy 검증
 - `POST /api/v1/factors/explain`: topological PIT plan과 재현성 hash 설명
-- `POST /api/v1/factors/preview`: IC, Rank IC, quantile spread, coverage, turnover, decay
+- 팩터 결과는 `POST /api/v1/strategies/debug/trace`의 `factor_preview`로 조회한다. 기준일 유니버스의 평가값 유효수·결측수·실행 결측 정책·팩터 방향 기준 상위 5개를 제공한다. `/factors/preview`는 폐기했다.
 
 사람이 검토하는 전체 ID/Equity field mapping은 [FACTORS.md](./FACTORS.md)에 있다. 실행 의미의
 SoT는 항상 registry 코드이며 문서 정합성은 테스트로 고정한다.
@@ -179,7 +189,7 @@ backend/
    ├─ domain/analytics/                    # 21개 versioned metric 정의·공식
    ├─ domain/backtest/                     # RunEnvironment, run/manifest/raw artifact 계약
    ├─ domain/assistant/                    # 어시스턴트 순수 값 타입(메시지·이벤트·도구·제안 검증 결과)
-   ├─ domain/experiment/                   # 탐색 그리드·워크포워드 창·trial 상태 전이(검증 랩)
+   ├─ domain/experiment/                   # 탐색 그리드·워크포워드 창·trial 상태 파생·검증 통계(검증 랩)
    ├─ application/equity_workspace/        # 검색 catalog·universe/panel PIT preview
    │  ├─ ports/outgoing/equity_data.py     # EquityDataPort
    │  └─ facade/{ports,workspace}.py
@@ -189,6 +199,7 @@ backend/
    ├─ application/factor_research/         # 팩터 catalog·validate·explain·preview
    ├─ application/portfolio_design/        # portfolio preview·trace use case와 outgoing ports
    ├─ application/backtest_run/            # compile/run/status/result/cancel orchestration
+   ├─ application/experiment_run/          # 실험 설계·제출·취소·워크포워드·검증 통계 orchestration
    ├─ application/assistant_chat/          # 공급자 프로파일·세션·턴·결과 설명
    ├─ adapters/inbound/http_api/           # FastAPI/OpenAPI wire adapter
    ├─ adapters/outbound/equity_mock/       # 결정적 in-memory Equity v0.2 mock
@@ -197,11 +208,13 @@ backend/
    ├─ adapters/outbound/document_codec/    # YAML/JSON 원문 파싱과 업그레이드 원문 재작성
    ├─ adapters/outbound/strategy_memory/   # contract reference/test adapter
    ├─ adapters/outbound/strategy_sqlite/   # durable immutable strategy revisions
+   ├─ adapters/outbound/research_sqlite/    # 실행·시도 원장·실험 기록(전략 문서 DB와 분리)
+   ├─ adapters/outbound/sqlite_store/       # SQLite 연결·트랜잭션·시각 직렬화 기반
    ├─ adapters/outbound/engine_portfolio/  # capability 협상과 target action 변환
    ├─ adapters/outbound/backtest_engine/   # TargetTape → Rust/Python engine
    ├─ adapters/outbound/artifact_local/    # atomic local result commit
    ├─ adapters/outbound/assistant_sqlite/  # 어시스턴트 세션·프로파일 저장
-   ├─ adapters/outbound/secrets_local/     # 공급자 API 키 로컬 저장
+   ├─ adapters/outbound/secrets_local/     # 공급자·키움 연결 로컬 저장(내 문서 auto_trading/.env)
    ├─ adapters/outbound/llm_anthropic/ · llm_openai/  # 공급자 SDK adapter(extra `llm`)
    ├─ adapters/outbound/llm_scripted/      # e2e용 대본 공급자
    └─ bootstrap/                           # adapter 조립
@@ -221,8 +234,8 @@ uv run server
 uv run python scripts/export_openapi.py openapi.json
 ```
 
-extra 목록과 ruff 대상은 CI(`.github/workflows/ci.yml` backend job)와 같다. CI의 `backend-no-extras` job은
-extra 없이 어시스턴트 계약 테스트와 architecture 테스트를 따로 돌린다. `database/tests`는 저장소 루트에서
+extra 목록과 ruff 대상은 CI(`.github/workflows/ci.yml` backend job)와 같다. 같은 job의 마지막 단계
+(`Assistant contract tests without extras`)는 extra를 지운 뒤 어시스턴트 계약 테스트와 architecture 테스트를 따로 돌린다. `database/tests`는 저장소 루트에서
 `uv run --project backend pytest database/tests -q`로 돈다.
 
 `uv run server`의 전략 revision 저장소는 기본적으로 `.local/strategy-revisions.sqlite3`이며
@@ -242,14 +255,17 @@ extra 없이 어시스턴트 계약 테스트와 architecture 테스트를 따�
 | 변수 | 기본값 | 뜻 |
 |---|---|---|
 | `STRATEGY_WORKBENCH_DB_PATH` | `.local/strategy-revisions.sqlite3` | 전략 revision·초안 저장소 |
-| `STRATEGY_WORKBENCH_RESEARCH_DB_PATH` | `.local/research.sqlite3` | 백테스트 실행 기록(목록·상태·요청). 재시작 때 끝나지 않은 run 은 `backtest.run.interrupted` 로 닫는다 |
+| `STRATEGY_WORKBENCH_RESEARCH_DB_PATH` | `.local/research.sqlite3` | 백테스트 실행 기록(목록·상태·요청), 시도 원장·계열 합치기·봉인 차단 기록. 재시작 때 끝나지 않은 run 은 `backtest.run.interrupted` 로 닫는다 |
+| `STRATEGY_WORKBENCH_ARTIFACT_ROOT` | `.local/backtest-runs` | 연구 DB와 짝을 이루는 실행 결과 루트. 프로세스마다 분리하며 E2E는 격리 런타임 아래 경로를 주입한다 |
 | `STRATEGY_WORKBENCH_ALLOWED_ORIGINS` | `http://localhost:5173` | CORS 허용 origin(쉼표로 구분) |
 | `STRATEGY_WORKBENCH_EQUITY_ADAPTER` | `mock` | `mock` 또는 `duckdb` |
 | `STRATEGY_WORKBENCH_EQUITY_ROOT` | 없음 | duckdb adapter가 읽을 equity 층 루트. `duckdb`면 필수 |
-| `STRATEGY_WORKBENCH_ASSISTANT_DB_PATH` | `.local/assistant.sqlite3` | 어시스턴트 프로파일·세션 저장소 |
-| `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH` | OS 기본 사용자 설정 위치 | 공급자 API 키 파일 |
+| `STRATEGY_WORKBENCH_ASSISTANT_DB_PATH` | `.local/assistant.sqlite3` | 어시스턴트 세션 저장소(예전 프로파일 표는 시작할 때 `.env`로 옮긴다) |
+| `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH` | OS 기본 사용자 설정 위치 | 예전 비밀 파일(`secrets.json`). 서버·S07 명령줄이 열 때 여기 남은 공급자·키움 모의 키를 아래 `.env`로 옮긴다 |
+| `STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH` | 내 문서 `auto_trading/.env` | AI 공급자 연결·API 키와 키움 모의 앱 키·시크릿·계좌번호(`STRATEGY_WORKBENCH_KIWOOM_MOCK_*`) 저장 파일. OS "문서" 폴더(윈도우 알려진 폴더, 리눅스 XDG)를 쓰고 다른 도구의 줄은 건드리지 않는다. 테스트·e2e는 반드시 임시 경로로 바꾼다 |
 | `STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL` | 꺼짐 | 정확히 `1`일 때만 로컬 프록시용 비보안 base URL 허용 |
 | `STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER` | 꺼짐 | 정확히 `1`일 때만 공급자를 대본 adapter(`llm_scripted`)로 바꾼다. 브라우저 e2e 전용 |
+| `STRATEGY_WORKBENCH_BROKER_FAKE_PROBE` | 꺼짐 | 정확히 `1`일 때만 키움 모의 "연결 확인"을 대본 probe로 바꾼다(키움을 부르지 않는다). 브라우저 e2e 전용 |
 
 Equity HTTP 계약은 다음 네 경로로 분리한다. mock과 duckdb adapter가 같은 계약을 따른다.
 

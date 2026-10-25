@@ -4,10 +4,20 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
+from threading import Event
 from typing import cast
 
-from strategy_workbench.adapters.inbound.http_api._experiment_routes import _progress_stream
+import pytest
+from fastapi.testclient import TestClient
+
+from strategy_workbench.adapters.inbound.http_api._experiment_routes import (
+    _ExperimentStreamHub,
+    _progress_stream,
+)
+from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
 from strategy_workbench.application.experiment_run.facade.experiments import ExperimentRunService
+from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.experiment.facade.trial import ExperimentStatus, TrialStatus
 
 
@@ -15,6 +25,7 @@ from strategy_workbench.domain.experiment.facade.trial import ExperimentStatus, 
 class _Snapshot:
     status: ExperimentStatus
     trial_counts: dict[TrialStatus, int]
+    settled: bool = False
 
 
 class _Experiments:
@@ -30,7 +41,7 @@ class _Experiments:
 def test_the_stream_sends_changes_keeps_alive_and_closes_after_the_final_counts() -> None:
     running = _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1, TrialStatus.QUEUED: 1})
     cancelled_running = _Snapshot(ExperimentStatus.CANCELLED, {TrialStatus.RUNNING: 1})
-    cancelled = _Snapshot(ExperimentStatus.CANCELLED, {TrialStatus.CANCELLED: 2})
+    cancelled = _Snapshot(ExperimentStatus.CANCELLED, {TrialStatus.CANCELLED: 2}, settled=True)
     experiments = cast(
         ExperimentRunService, _Experiments(running, running, cancelled_running, cancelled)
     )
@@ -52,3 +63,382 @@ def test_the_stream_sends_changes_keeps_alive_and_closes_after_the_final_counts(
         "keepalive",
         'data: {"status":"cancelled","trial_counts":{"cancelled":2}}',
     ]
+
+
+def test_cancelled_stream_waits_for_validation_runs_even_if_trial_counts_are_final() -> None:
+    trials = {TrialStatus.COMPLETED: 2}
+    experiments = cast(
+        ExperimentRunService,
+        _Experiments(
+            _Snapshot(ExperimentStatus.CANCELLED, trials, settled=False),
+            _Snapshot(ExperimentStatus.CANCELLED, trials, settled=True),
+        ),
+    )
+
+    async def collect() -> list[str]:
+        return [
+            frame
+            async for frame in _progress_stream(
+                experiments, "e", poll_seconds=0, keepalive_seconds=0
+            )
+        ]
+
+    frames = asyncio.run(collect())
+    assert len(frames) == 2
+    assert frames[-1].startswith(":")
+
+
+def test_simultaneous_subscribers_share_one_computation_and_release_the_producer() -> None:
+    class CountingExperiments(_Experiments):
+        calls = 0
+
+        def get(self, experiment_id: str) -> _Snapshot:
+            self.calls += 1
+            return super().get(experiment_id)
+
+    source = CountingExperiments(
+        _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1}),
+        _Snapshot(ExperimentStatus.COMPLETED, {TrialStatus.COMPLETED: 1}, settled=True),
+    )
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, source), poll_seconds=0)
+
+    async def collect() -> list[list[str]]:
+        async def subscriber() -> list[str]:
+            return [frame async for frame in hub.stream("same-experiment")]
+
+        return list(await asyncio.gather(subscriber(), subscriber()))
+
+    first, second = asyncio.run(collect())
+    assert first == second
+    assert '"completed"' in first[-1]
+    assert source.calls == 2
+    assert hub._streams == {}
+
+
+def test_disconnect_keeps_other_subscribers_and_last_disconnect_stops_computing() -> None:
+    class RunningExperiments:
+        def get(self, experiment_id: str) -> _Snapshot:
+            return _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1})
+
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, RunningExperiments()))
+
+    async def exercise() -> None:
+        first, second = hub.stream("same"), hub.stream("same")
+        assert await anext(first) == await anext(second)
+        shared = hub._streams["same"]
+        await first.aclose()
+        assert shared.subscribers == 1 and not shared.done
+        await second.aclose()
+        assert shared.producer is not None and shared.producer.done()
+        assert not hub._streams
+
+    asyncio.run(exercise())
+
+
+def test_producer_failure_reaches_every_subscriber_and_does_not_leave_cached_state() -> None:
+    class BrokenExperiments:
+        calls = 0
+
+        def get(self, experiment_id: str) -> _Snapshot:
+            self.calls += 1
+            raise RuntimeError("research read failed")
+
+    source = BrokenExperiments()
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, source))
+
+    async def collect() -> list[object]:
+        async def subscriber() -> list[str]:
+            return [frame async for frame in hub.stream("same")]
+
+        return list(await asyncio.gather(subscriber(), subscriber(), return_exceptions=True))
+
+    failures = asyncio.run(collect())
+    assert len(failures) == 2 and all(isinstance(error, RuntimeError) for error in failures)
+    assert source.calls == 1
+    assert not hub._streams
+
+
+def test_shutdown_releases_tasks_and_the_same_hub_can_serve_a_new_event_loop() -> None:
+    class RunningExperiments:
+        def get(self, experiment_id: str) -> _Snapshot:
+            return _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1})
+
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, RunningExperiments()))
+
+    async def lifecycle() -> None:
+        stream = hub.stream("same")
+        assert '"running"' in await anext(stream)
+        producer = hub._streams["same"].producer
+        await hub.close()
+        assert not hub._streams and producer is not None and producer.done()
+        assert [frame async for frame in stream] == []
+
+    asyncio.run(lifecycle())
+    asyncio.run(lifecycle())
+
+
+def test_a_new_subscriber_after_completion_does_not_reuse_a_slow_clients_old_result() -> None:
+    source = _Experiments(
+        _Snapshot(ExperimentStatus.COMPLETED, {TrialStatus.COMPLETED: 1}, settled=True),
+        _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1}),
+    )
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, source))
+
+    async def exercise() -> None:
+        old = hub.stream("retried")
+        assert '"completed"' in await anext(old)
+        fresh = hub.stream("retried")
+        assert '"running"' in await anext(fresh)
+        new_shared = hub._streams["retried"]
+        await old.aclose()
+        assert hub._streams["retried"] is new_shared
+        await fresh.aclose()
+        assert not hub._streams
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("during_read", [False, True])
+def test_shutdown_wakes_subscribers_even_before_the_producer_starts(during_read: bool) -> None:
+    entered, release = Event(), Event()
+
+    class BlockingExperiments:
+        def get(self, experiment_id: str) -> _Snapshot:
+            entered.set()
+            release.wait()
+            return _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1})
+
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, BlockingExperiments()))
+
+    async def exercise() -> None:
+        stream = hub.stream("shutting-down")
+        first = asyncio.create_task(anext(stream))
+        # 구독이 생산자를 등록했지만 생산자가 아직 실행되지 않은 정확한 경계다.
+        await asyncio.sleep(0)
+        shared = hub._streams["shutting-down"]
+        try:
+            if during_read:
+                assert await asyncio.to_thread(entered.wait, 1)
+            else:
+                assert not entered.is_set()
+            if during_read:
+                closing = asyncio.create_task(hub.close())
+                await asyncio.sleep(0)
+                assert not closing.done()
+                release.set()
+                await closing
+            else:
+                await hub.close()
+            assert shared.producer is not None and shared.producer.done()
+            assert shared.done
+            with pytest.raises(StopAsyncIteration):
+                await asyncio.wait_for(first, timeout=1)
+            assert shared.subscribers == 0
+            assert not hub._streams
+        finally:
+            release.set()
+            if not first.done():
+                first.cancel()
+            await asyncio.gather(first, return_exceptions=True)
+            await stream.aclose()
+            await hub.close()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("reconnect", [False, True])
+def test_disconnect_reconnect_shares_the_worker_and_shutdown_drains_it(reconnect: bool) -> None:
+    entered, release = Event(), Event()
+
+    class BlockingExperiments:
+        calls = 0
+        active = 0
+
+        def get(self, experiment_id: str) -> _Snapshot:
+            self.calls += 1
+            self.active += 1
+            entered.set()
+            try:
+                release.wait()
+                return _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1})
+            finally:
+                self.active -= 1
+
+    source = BlockingExperiments()
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, source))
+
+    async def exercise() -> None:
+        old = hub.stream("same")
+        first = asyncio.create_task(anext(old))
+        fresh = hub.stream("same")
+        second: asyncio.Task[str] | None = None
+        closing: asyncio.Task[None] | None = None
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            first.cancel()
+            await asyncio.gather(first, return_exceptions=True)
+            assert source.active == 1
+            if reconnect:
+                second = asyncio.create_task(anext(fresh))
+            # 재접속 생산자가 실행될 기회를 준 뒤에도 실제 조회는 하나여야 한다.
+            for _ in range(20):
+                await asyncio.sleep(0.001)
+            assert source.calls == 1
+            assert source.active == 1
+            closing = asyncio.create_task(hub.close())
+            await asyncio.sleep(0.02)
+            assert not closing.done()
+            release.set()
+            await asyncio.wait_for(closing, 1)
+            assert source.active == 0
+            assert not hub._streams
+            assert not hub._reads
+            if second is not None:
+                with pytest.raises(StopAsyncIteration):
+                    await asyncio.wait_for(second, 1)
+        finally:
+            release.set()
+            for pending in (first, second):
+                if pending is not None:
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+            if closing is not None:
+                await closing
+            await old.aclose()
+            await fresh.aclose()
+            await hub.close()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("concurrent_close", [False, True])
+def test_cancelled_shutdown_still_owns_and_drains_the_worker(concurrent_close: bool) -> None:
+    entered, release = Event(), Event()
+
+    class BlockingExperiments:
+        calls = 0
+        active = 0
+
+        def get(self, experiment_id: str) -> _Snapshot:
+            self.calls += 1
+            self.active += 1
+            entered.set()
+            try:
+                release.wait()
+                return _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1})
+            finally:
+                self.active -= 1
+
+    source = BlockingExperiments()
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, source))
+
+    async def exercise() -> None:
+        stream = hub.stream("same")
+        first = asyncio.create_task(anext(stream))
+        closers: list[asyncio.Task[None]] = []
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            closers.append(asyncio.create_task(hub.close()))
+            if concurrent_close:
+                closers.append(asyncio.create_task(hub.close()))
+            await asyncio.sleep(0.02)
+            closers[0].cancel()
+            await asyncio.sleep(0.02)
+            # 종료 요청자 취소도 저장소 수명을 앞당기지 못한다. 재접속은 종료 중 거절한다.
+            assert not closers[0].done()
+            assert hub._closing
+            assert len(hub._reads) == 1
+            assert source.active == 1
+            assert [frame async for frame in hub.stream("same")] == []
+            assert source.calls == 1
+            release.set()
+            outcomes = await asyncio.wait_for(
+                asyncio.gather(*closers, return_exceptions=True), 1
+            )
+            assert isinstance(outcomes[0], asyncio.CancelledError)
+            if concurrent_close:
+                assert outcomes[1] is None
+            assert source.active == 0
+            assert not hub._reads and not hub._streams and not hub._closing
+            with pytest.raises(StopAsyncIteration):
+                await first
+        finally:
+            release.set()
+            await asyncio.gather(*closers, return_exceptions=True)
+            first.cancel()
+            await asyncio.gather(first, return_exceptions=True)
+            await stream.aclose()
+            await hub.close()
+
+    asyncio.run(exercise())
+
+
+def test_http_lifespan_shutdown_closes_the_experiment_streams(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """앱 lifespan 이 끝날 때 run 전송을 정리한 다음 실험 진행 스트림 회수를 마친다
+    (#581 리뷰 nit)."""
+    calls: list[str] = []
+
+    async def close(self: _ExperimentStreamHub) -> None:
+        calls.append("streams")
+
+    monkeypatch.setattr(_ExperimentStreamHub, "close", close)
+    monkeypatch.setattr(BacktestRunService, "shutdown", lambda self: calls.append("runs"))
+
+    with TestClient(build_http_app(artifact_root=tmp_path / "artifacts")):
+        assert calls == []
+
+    assert calls == ["runs", "streams"]
+
+
+def test_http_lifespan_cleans_up_even_when_the_server_leaves_with_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """lifespan 이 예외로 빠져도 run 전송·예비 정리와 실험 스트림 회수를 한다(#591 리뷰 P3-3)."""
+    calls: list[str] = []
+
+    async def close(self: _ExperimentStreamHub) -> None:
+        calls.append("streams")
+
+    monkeypatch.setattr(_ExperimentStreamHub, "close", close)
+    monkeypatch.setattr(BacktestRunService, "shutdown", lambda self: calls.append("runs"))
+    app = build_http_app(artifact_root=tmp_path / "artifacts")
+
+    async def serve_and_fail() -> None:
+        async with app.router.lifespan_context(app):
+            raise RuntimeError("server stopped by an error")
+
+    with pytest.raises(RuntimeError, match="server stopped by an error"):
+        asyncio.run(serve_and_fail())
+    assert calls == ["runs", "streams"]
+
+
+@pytest.mark.parametrize("server_error", [False, True])
+def test_a_failed_cleanup_does_not_skip_the_rest_or_hide_the_server_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server_error: bool
+) -> None:
+    """run 전송 정리가 실패해도 스트림 회수는 돈다. 서버를 멈춘 예외가 있으면 그 예외가 그대로
+    올라가고, 정상 종료면 정리 실패가 올라간다(#591 2차 리뷰 nit)."""
+    calls: list[str] = []
+
+    async def close(self: _ExperimentStreamHub) -> None:
+        calls.append("streams")
+
+    def shutdown(self: BacktestRunService) -> None:
+        calls.append("runs")
+        raise OSError("worker cleanup failed")
+
+    monkeypatch.setattr(_ExperimentStreamHub, "close", close)
+    monkeypatch.setattr(BacktestRunService, "shutdown", shutdown)
+    app = build_http_app(artifact_root=tmp_path / "artifacts")
+
+    async def serve() -> None:
+        async with app.router.lifespan_context(app):
+            if server_error:
+                raise RuntimeError("server stopped by an error")
+
+    expected = (RuntimeError, "server stopped") if server_error else (OSError, "cleanup failed")
+    with pytest.raises(expected[0], match=expected[1]):
+        asyncio.run(serve())
+    assert calls == ["runs", "streams"]

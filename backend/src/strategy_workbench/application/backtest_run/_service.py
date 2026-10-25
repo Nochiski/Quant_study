@@ -1,36 +1,57 @@
 from __future__ import annotations
 
 import logging
-import re
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, fields, replace
-from datetime import UTC, datetime
-from threading import Event, RLock, Thread
+from datetime import UTC, date, datetime
+from threading import Event, Lock, RLock, Thread
+from typing import TypeVar
 
 from strategy_workbench.application.portfolio_design.facade.design import (
-    EngineCompatibility,
-    IncompatiblePortfolioRequestError,
     InvalidPortfolioRequestError,
     PortfolioDesignService,
-    PortfolioPipelineCancelledError,
-    PortfolioPipelineOptions,
+    PortfolioPipelineResult,
     PortfolioPreviewRequest,
-    RawObservationContractError,
+    PortfolioSnapshotMismatchError,
     RawObservationUnavailableError,
 )
+from strategy_workbench.application.portfolio_design.facade.ports import SecurityDirectoryPort
 from strategy_workbench.application.strategy_design.facade.ports import (
     Page,
     PageRequest,
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
+from strategy_workbench.domain.analytics.facade.factor_regression import (
+    FactorRegressionUnavailableReason,
+    FactorReturnSeries,
+    factor_return_series,
+    regress_on_factor_returns,
+    unavailable_factor_regression,
+)
+from strategy_workbench.domain.analytics.facade.metrics import MetricScope
+from strategy_workbench.domain.backtest.facade.account_report import (
+    AccountReport,
+    project_account_report,
+)
 from strategy_workbench.domain.backtest.facade.environment import (
     MissingRunEnvironmentError,
     ResearchWindowViolationError,
     RunEnvironment,
-    cost_history_sessions,
+    environment_hash,
     require_environment,
+)
+from strategy_workbench.domain.backtest.facade.holdings import (
+    HoldingsOverview,
+    SecurityName,
+    SecurityTradesReport,
+    SessionHoldingsReport,
+    project_holdings_overview,
+    project_security_trades,
+    project_session_holdings,
+    result_security_ids,
+    session_security_ids,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     AdmissionRejectionCode,
@@ -39,16 +60,17 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     BacktestRunState,
     BacktestStartResponse,
-    DataWarning,
     InlineDraft,
+    ResolvedBacktestRunSpec,
     RunFailureCode,
+    RunManifest,
     RunProgressEvent,
     RunStage,
     RunStatus,
     SavedRevisionReference,
     StrategyProvenance,
+    StrategySource,
     StrategySourceKind,
-    WarningSeverity,
     run_input_key,
 )
 from strategy_workbench.domain.backtest.facade.trials import (
@@ -56,9 +78,18 @@ from strategy_workbench.domain.backtest.facade.trials import (
     TrialLedger,
     TrialPreview,
     preview_trial,
-    representative_sharpe,
     summarize_trial_ledger,
     trial_key,
+)
+from strategy_workbench.domain.experiment.facade.statistics import (
+    alpha_t_threshold,
+    run_deflated_sharpe_evidence,
+)
+from strategy_workbench.domain.factor.facade.expression import MissingPolicy
+from strategy_workbench.domain.factor.facade.planning import FACTOR_EVALUATION_VERSION
+from strategy_workbench.domain.factor.facade.registry import (
+    FactorRegistry,
+    build_default_factor_registry,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     InvalidParameterValueError,
@@ -67,33 +98,45 @@ from strategy_workbench.domain.strategy.facade.specification import (
     strategy_spec_hash,
 )
 
-from ._gc_policy import full_collections_suspended
-from ._scheduler import RunQueue, experiment_slots
-from .ports.outgoing.artifact_store import BacktestArtifactStorePort
-from .ports.outgoing.backtest_data import (
-    BacktestDataNotReadyError,
-    BacktestDataPort,
-    BacktestDataQuery,
-    BacktestDataUnavailableError,
+from ._computation import (
+    InvalidBacktestRunError,
+    RunComputation,
+    _describe_engine_issues,
+    _describe_failure,
+    _failure_code,
 )
-from .ports.outgoing.backtest_executor import (
-    BacktestExecutionRequest,
-    BacktestExecutorPort,
-    EquityWipedOutError,
-    RunCancelledError,
+from ._factor_regression import (
+    MOMENTUM_FACTOR_ID,
+    VALUE_FACTOR_ID,
+    RunFactorRegression,
+    factor_periods,
+    factor_regression_spec,
+    strategy_period_returns,
+)
+from ._memory_guard import (
+    RunShape,
+    estimated_sessions,
+    gb_bytes,
+    memory_verdict,
+    run_reserve_bytes,
+)
+from ._scheduler import RunLaneControls, RunQueue, experiment_slots
+from ._validation_report import RunValidationReport
+from .ports.outgoing.artifact_store import BacktestArtifactStorePort
+from .ports.outgoing.backtest_data import BacktestDataPort
+from .ports.outgoing.backtest_executor import BacktestExecutorPort, RunCancelledError
+from .ports.outgoing.run_execution import (
+    RunCommitted,
+    RunExecutionPort,
+    RunFailed,
+    RunHandle,
+    RunJob,
+    RunOutcome,
 )
 from .ports.outgoing.run_repository import BacktestRunRepositoryPort, BacktestRunSummary, RunKind
 
 logger = logging.getLogger(__name__)
 
-# 실행 진행 막대에서 단계가 차지하는 구간. 실데이터 실측에서 tape 단계가 실행 시간의 96~97% 를
-# 쓰므로(이슈 #162, 6개월·9.5년 구간) 막대 대부분을 tape 에 주고 나머지 단계를 그 뒤에 둔다.
-_TAPE_PROGRESS_START = 0.02
-_TAPE_PROGRESS_END = 0.8
-_DATA_PROGRESS = 0.82
-_ENGINE_PROGRESS_START = 0.84
-_ENGINE_PROGRESS_END = 0.92
-_ARTIFACT_PROGRESS = 0.93
 # run 하나가 메모리에 들고 있는 진행 이벤트 수의 상한(검증 랩 spec D3). 이벤트는 저장하지 않으므로
 # SSE 재생이 이만큼 뒤처진 구독자는 앞 이벤트를 건너뛴다 — 상태는 폴링·목록이 저장소에서 읽는다.
 _EVENT_RING_SIZE = 256
@@ -105,65 +148,10 @@ _MIN_TAPE_PROGRESS_STEP = 0.01
 # 덮어쓴다). 실데이터 긴 구간 run 한 건이 CPU 수백 초·RSS 약 5GB 를 쓰므로(#158·#161) 넘는 run 은
 # 스레드 없이 `queued` 로 기다린다. 배정 순서는 `_scheduler.py` 가 정한다.
 DEFAULT_RUN_SLOTS = 2
-
-# run `error` 문자열에서 서버 절대 경로를 가린다. 서버 경로를 담을 수 있는 서드파티 원문(파일·DB
-# 입출력 예외)이 응답으로 나가는 곳은 run `error` 하나다 — 우리가 쓰는 문장(어댑터 detail 등)은
-# 처음부터 경로 없이 쓰지만(#163), duckdb·`OSError` 원문은 `C:\...`·`/home/...`·`\\server\share` 를
-# 담아 화면(role=alert)에 서버 레이아웃·계정명·호스트명을 흘린다. 원문은 서버 로그에. 규칙(오탐·
-# 미탐을 모두 줄이는 쪽으로):
-#   - `root=`·`path=`·`file=`·`dir=`·`manifest=`(접미형 `equity_root=` 포함) 값은 모양과 무관하게
-#     전부 가린다(컨테이너 `/app`, MSYS `/c/Users`, 임의 루트 포함).
-#   - 드라이브(`C:\`)·UNC(`\\host\share`)·`file://` 은 어디 있든 가린다(모양만으로 경로). 따옴표로
-#     감싼 드라이브·UNC 경로는 여는 따옴표와 같은 종류의 닫는 따옴표까지 가린다 — 공백이 든 경로
-#     (`C:\Users\John Smith\…`)나 다른 따옴표가 든 계정명(`"C:\Users\O'Brien\…"`)이 중간에 끊겨
-#     계정명이 새지 않게 한다(#318).
-#   - 키 없는 POSIX 문자열은 (a) 확장자 있는 파일(`/x/y/z.parquet`)과 (b) 계정명·서버 레이아웃을
-#     담는 루트(`/home`·`/Users`·`/tmp` 등) 아래 디렉터리만 가린다 — 서드파티 예외(`OSError`,
-#     duckdb)가 싣는 `'/home/<user>/...'` 를 잡되, `/data/universe_id` 같은 JSON Pointer 진단
-#     경로와 `/s` 단위 표기는 파일 경로가 아니다.
-#   - `https://` 등 다른 URL 은 그대로 둔다. 값 끝의 문장부호(`,`·`.`)는 경로에 넣지 않는다.
-_PATH_CHARS = r"[^\s'\"`()<>]"
-_POSIX_ROOTS = r"(?:home|Users|root|tmp|var|srv|opt|mnt|app|workspace|Library|private|Volumes)"
-_ABSOLUTE_PATH = re.compile(
-    r"(?P<url>\b(?!file://)[A-Za-z][A-Za-z0-9+.\-]*://" + _PATH_CHARS + r"*)"
-    r"|(?P<key>\b\w*(?:root|path|file|dir|directory|manifest)=)(?P<value>" + _PATH_CHARS + r"+)"
-    r"|(?P<path>"
-    r"(?<=\")(?:[A-Za-z]:[\\/]|\\\\)[^\"\r\n]*(?=\")"
-    r"|(?<=')(?:[A-Za-z]:[\\/]|\\\\)[^'\r\n]*(?=')"
-    r"|\bfile://" + _PATH_CHARS + r"*"
-    r"|\\\\" + _PATH_CHARS + r"+"
-    r"|(?<!\w)[A-Za-z]:[\\/]" + _PATH_CHARS + r"*"
-    r"|(?<![\w.:])/(?:[\w.\-~%+]+/)+[\w\-~%+]+\.\w+"
-    r"|(?<![\w.:])/" + _POSIX_ROOTS + r"(?:/[\w.\-~%+]*)+"
-    r")",
-    re.IGNORECASE,
-)
-_TRAILING_PUNCTUATION = ",.;:"
-
-
-def _mask_paths(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
-        whole = match.group(0)
-        if match.group("url") is not None:
-            return whole
-        kept = whole.rstrip(_TRAILING_PUNCTUATION)
-        trailing = whole[len(kept) :]
-        if match.group("key") is not None:
-            return match.group("key") + "<path>" + trailing
-        return "<path>" + trailing
-
-    return _ABSOLUTE_PATH.sub(replace, text)
-
-
-class InvalidBacktestRunError(ValueError):
-    pass
-
-
-class NoPositionsError(RuntimeError):
-    """tape 가 한 번도 종목을 고르지 않았다 — 기간 안에 리밸런싱일이 없거나 선정이 비었다(#360).
-
-    요청이 틀린 것도 서버 오류도 아니라 이 설정의 결과라 전용 실패 코드로 끝난다.
-    """
+# 대기 run 의 상태 설명. 상태는 둘 다 `queued` 다. 메모리 쪽은 메모리 가드가 슬롯이 비었는데도
+# 대기시킨 run 이다(spec D8). 사유가 바뀌면 배정이 문장을 고친다(`_dispatch`).
+_SLOT_WAIT_MESSAGE = "Waiting for a free run slot"
+_MEMORY_WAIT_MESSAGE = "Waiting for free memory"
 
 
 class BacktestParameterValueError(InvalidBacktestRunError):
@@ -197,15 +185,61 @@ class StrategyRevisionRequiresUpgradeError(RuntimeError):
 
 @dataclass(frozen=True)
 class RunAdmission:
-    """접수 판정을 통과한 요청. `spec` 은 전략·실행 설정·파라미터 값을 해소한 실행 spec 이다."""
+    """접수 판정 결과. `resolved`는 실행 입력이고 `spec`은 연구 저장 경계의 기존 JSON 투영이다."""
 
-    spec: BacktestRunSpec
+    resolved: ResolvedBacktestRunSpec
     provenance: StrategyProvenance
     lineage_id: str | None
+    strategy_source: StrategySource | None
+    lineage_strategy_id: str | None
+    # 메모리 예약치의 입력(세션 수 어림·필드 수·팩터 단계 수, run-worker spec D8). 데이터를 읽지
+    # 않고 preflight 로 정한다.
+    memory_shape: RunShape
+
+    @property
+    def spec(self) -> BacktestRunSpec:
+        # 연구 저장 계약은 기존 wire를 유지한다. 실행 경로는 resolved만 읽는다.
+        return self.resolved.to_wire(
+            strategy_source=self.strategy_source, lineage_strategy_id=self.lineage_strategy_id
+        )
 
 
 class BacktestResultNotReadyError(RuntimeError):
     pass
+
+
+# 팩터 수익률 캐시 키: (회귀 실행 설정 해시, 데이터 판, 레지스트리 판본, 평가 규칙 판본).
+_FactorReturnsKey = tuple[str, str, str, str]
+# 계산해 두는 키 수(결과와 오래가는 실패 모두). 한 키는 구간 수(5년 약 1200) × 숫자 일곱이라 작다 —
+# 실행 설정을 바꿔 가며 여러 결과를 함께 열어도 끝난 계산이 읽히기 전에 밀려나지 않을 만큼 둔다.
+_FACTOR_RETURNS_KEPT = 32
+
+
+@dataclass(frozen=True)
+class _FactorReturns:
+    series: FactorReturnSeries
+    # 단면을 계산한 평가 계획의 판본(응답 `factor_evaluation_version`).
+    evaluation_version: str | None
+
+
+@dataclass(frozen=True)
+class _FactorMiss:
+    """팩터 단면을 얻지 못한 사유. `lasting` 이면 이 프로세스에서 다시 계산해도 같다."""
+
+    reason: FactorRegressionUnavailableReason
+    lasting: bool
+
+
+_Cached = TypeVar("_Cached")
+
+
+def _keep_latest(entries: OrderedDict[_FactorReturnsKey, _Cached]) -> None:
+    while len(entries) > _FACTOR_RETURNS_KEPT:
+        entries.popitem(last=False)
+
+
+def _start_daemon(job: Callable[[], None]) -> None:
+    Thread(target=job, name="factor-returns", daemon=True).start()
 
 
 # 이 프로세스가 접수한 run 의 메모리 사본. 목록·상태·요청의 정본은 저장소, 결과의 정본은 산출물
@@ -216,7 +250,9 @@ class _RunRecord:
     state: BacktestRunState
     # 실행할 spec — `strategy` 를 해소하고 실행 설정을 박은 것. 다시 제출할 수 있는 원본 요청은
     # 저장소가 가진다.
-    spec: BacktestRunSpec
+    spec: ResolvedBacktestRunSpec
+    strategy_source: StrategySource | None
+    lineage_strategy_id: str | None
     provenance: StrategyProvenance
     events: deque[RunProgressEvent]
     cancellation: Event
@@ -227,6 +263,41 @@ class _RunRecord:
     owners: set[str | None]
     # 실험 몫 슬롯을 쓰고 있는가(띄울 때 정한다).
     experiment_slot: bool = False
+    # 전송이 돌려준 손잡이(띄운 뒤에만 있다). 취소를 전송에 알린다.
+    handle: RunHandle | None = None
+    # 메모리 가드가 이 run 몫으로 잡는 바이트와 그 근거(spec D8, 접수 때 정한다).
+    reserve_bytes: int = 0
+    memory_shape: RunShape | None = None
+
+
+class _RunListener:
+    """run 하나의 진행·종결을 서비스 상태 기계로 옮긴다(`RunListener` 구현)."""
+
+    def __init__(self, service: BacktestRunService, record: _RunRecord) -> None:
+        self._service = service
+        self._record = record
+        # 마지막으로 남긴 tape 진행(작업 설명, 막대 위치). 한 run 의 진행은 전송의 한 스레드만
+        # 부르므로 잠금 없이 이 객체가 소유한다.
+        self._last_tape: tuple[str, float] | None = None
+
+    def on_progress(self, stage: RunStage, fraction: float, message: str) -> None:
+        # tape 는 작업 설명이 바뀌면 항상 남기고, 같은 설명 안에서는 `_MIN_TAPE_PROGRESS_STEP`
+        # 이상 오를 때만 남긴다(spec D3 — 이 규칙은 부모가 소유한다).
+        if stage == "tape":
+            last = self._last_tape
+            if (
+                last is not None
+                and message == last[0]
+                and fraction - last[1] < _MIN_TAPE_PROGRESS_STEP
+            ):
+                return
+            self._service._update(self._record, RunStatus.RUNNING, fraction, stage, message)
+            self._last_tape = (message, fraction)
+            return
+        self._service._update(self._record, RunStatus.RUNNING, fraction, stage, message)
+
+    def on_finished(self, outcome: RunOutcome) -> None:
+        self._service._finish(self._record, outcome)
 
 
 class BacktestRunService:
@@ -240,20 +311,47 @@ class BacktestRunService:
         *,
         run_repository: BacktestRunRepositoryPort,
         new_id: Callable[[], str],
+        run_execution: Callable[[RunComputation], RunExecutionPort],
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         run_slots: int = DEFAULT_RUN_SLOTS,
+        memory_reserve_gb: float | None = None,
+        factor_registry: FactorRegistry | None = None,
+        background: Callable[[Callable[[], None]], None] | None = None,
+        security_directory: SecurityDirectoryPort | None = None,
     ) -> None:
+        """`run_execution` 은 run 계산을 돌릴 전송을 만든다(spec D10).
+
+        서비스가 자기 포트로 만든 계산(`RunComputation`)을 받는다. 같은 프로세스의 전송은 그 계산을
+        부르고, 다른 프로세스의 전송은 자기 쪽에서 같은 계산을 다시 조립한다. 어느 전송을 쓸지는
+        composition root 가 정한다.
+
+        `memory_reserve_gb` 는 메모리 가드가 run 마다 잡는 예약치를 추정식 대신 고정한다(spec D8).
+        """
         if run_slots < 1:
             raise ValueError(f"run_slots must be at least 1 — run_slots={run_slots!r}")
+        if memory_reserve_gb is not None and not 0 < memory_reserve_gb < float("inf"):
+            raise ValueError(
+                "memory_reserve_gb must be a positive number of GB — "
+                f"memory_reserve_gb={memory_reserve_gb!r}"
+            )
+        self._fixed_reserve_bytes = (
+            None if memory_reserve_gb is None else gb_bytes(memory_reserve_gb)
+        )
         self._portfolio_design = portfolio_design
         self._strategy_repository = strategy_repository
-        self._data_source = data_source
-        self._executor = executor
         self._artifact_store = artifact_store
+        self._run_execution = run_execution(
+            RunComputation(portfolio_design, data_source, executor, artifact_store)
+        )
         self._repository = run_repository
         self._new_id = new_id
         self._now = now
         self._run_slots = run_slots
+        # 팩터 회귀가 모멘텀·가치 기본 graph 를 읽는다(V4-05). 레지스트리는 순수 값이라 주입이
+        # 없으면 기본 레지스트리를 만든다.
+        self._factor_registry = factor_registry or build_default_factor_registry()
+        # 보유·매매 화면의 종목 이름. 없으면(테스트 조립) 이름 칸이 비고 id 만 보인다.
+        self._security_directory = security_directory
         self._records: dict[str, _RunRecord] = {}
         # 끝난 run 은 최근 것만 메모리에 둔다(끝난 순). 상태·요청·결과의 정본은 저장소·산출물이다.
         self._finished: deque[str] = deque()
@@ -261,6 +359,21 @@ class BacktestRunService:
         self._running = 0
         self._running_experiments = 0
         self._lock = RLock()
+        self._factor_regression_lock = Lock()
+        # 팩터 수익률은 전략과 무관해 키(`_factor_returns_key`)마다 한 번 계산해 둔다. 최근 것만
+        # 둔다. 값은 계산한 팩터 수익률이거나, 이 프로세스에서 다시 계산해도 같은 사유(데이터 판이
+        # 다르다)다.
+        self._factor_cache: OrderedDict[
+            _FactorReturnsKey, _FactorReturns | FactorRegressionUnavailableReason
+        ] = OrderedDict()
+        # 활성 키는 최대 하나다. 다른 키의 요청을 대기 스레드나 내부 큐로 쌓지 않는다.
+        self._factor_jobs: set[_FactorReturnsKey] = set()
+        # 한 번 알리고 잊는 일시 실패(원천 부재·조회 중 판 경합·예상 밖 오류).
+        self._factor_failures: OrderedDict[_FactorReturnsKey, FactorRegressionUnavailableReason] = (
+            OrderedDict()
+        )
+        # 무거운 계산을 거는 곳. 기본은 데몬 스레드이고, 테스트는 그 자리에서 돌리는 함수를 준다.
+        self._background = background or _start_daemon
         self._close_interrupted_runs()
 
     def slot_usage(self) -> tuple[int, int]:
@@ -282,6 +395,7 @@ class BacktestRunService:
         *,
         owner: str | None = None,
         trial_key_override: str | None = None,
+        lane_controls: RunLaneControls | None = None,
     ) -> BacktestStartResponse:
         """실행 요청을 받아 즉시 `QUEUED` 로 접수한다.
 
@@ -299,7 +413,7 @@ class BacktestRunService:
         `queued` 로 기다리게 한다(이슈 #161).
         """
         admission = self._admit(request, record_blocked=True)
-        spec, provenance = admission.spec, admission.provenance
+        spec, provenance = admission.resolved, admission.provenance
         with self._lock:
             # 같은 입력(실행 지문의 요청 칸 `run_input_key`·provenance)·같은 계열·같은 시도 키로
             # 도는 run 이 있으면 그 run 을 돌려준다. 재클릭·새로고침 뒤 재시작·프록시 재시도·실험
@@ -315,6 +429,7 @@ class BacktestRunService:
                     and existing.join_key == join_key
                     and existing.provenance == provenance
                 ):
+                    self._apply_lane_controls(owner, lane_controls)
                     existing.owners.add(owner)
                     # 사용자가 이었으면 단일 실행 레인, 아니면 멈추지 않은 실험 레인으로 옮긴다.
                     self._relane(existing)
@@ -325,7 +440,7 @@ class BacktestRunService:
             slot_free = self._running < self._run_slots and (
                 owner is None or self._running_experiments < experiment_slots(self._run_slots)
             )
-            message = "Run accepted" if slot_free else "Waiting for a free run slot"
+            message = "Run accepted" if slot_free else _SLOT_WAIT_MESSAGE
             record = _RunRecord(
                 state=BacktestRunState(
                     run_id=run_id,
@@ -337,11 +452,20 @@ class BacktestRunService:
                     updated_at=created,
                 ),
                 spec=spec,
+                strategy_source=admission.strategy_source,
+                lineage_strategy_id=admission.lineage_strategy_id,
                 provenance=provenance,
                 events=deque(maxlen=_EVENT_RING_SIZE),
                 cancellation=Event(),
                 join_key=join_key,
                 owners={owner},
+            )
+            # 예약치는 접수 때 데이터를 읽지 않고 정한다(spec D8). 고정값 설정이 있으면 그 값이다.
+            record.memory_shape = admission.memory_shape
+            record.reserve_bytes = (
+                self._fixed_reserve_bytes
+                if self._fixed_reserve_bytes is not None
+                else run_reserve_bytes(admission.memory_shape)
             )
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
             # 저장이 실패하면 접수하지 않는다 — 기록 없는 run 이 돌면 재시작 뒤 흔적이 없다.
@@ -356,16 +480,15 @@ class BacktestRunService:
             # 응답은 접수 시점 상태다. 스레드를 띄운 뒤 record.state 를 읽으면 이미 tape 단계로
             # 바뀌어 있을 수 있어 202 본문의 status 가 비결정이 된다.
             accepted = record.state
+            self._apply_lane_controls(owner, lane_controls)
             self._waiting.push(record, self._lane(record))
             self._dispatch()
         return BacktestStartResponse(accepted)
 
     def _admit(self, request: BacktestRunSpec, *, record_blocked: bool) -> RunAdmission:
         """요청을 실행할 spec 으로 해소하고 접수 판정을 모두 한다. 데이터는 읽지 않는다."""
-        spec, provenance = self._resolve(request)
-        strategy = spec.strategy
-        if strategy is None:  # pragma: no cover - _resolve always fills it
-            raise InvalidBacktestRunError("resolved run spec has no strategy")
+        strategy, provenance = self._resolve(request)
+        spec = replace(request, strategy=strategy)
         lineage_id = self._lineage(request, provenance)
         # 실행 설정을 **preflight 앞에서** 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·
         # tape·데이터 조회와 preflight 가 모두 같은 객체를 읽어야 명시 `environment` 가 조용히
@@ -376,9 +499,10 @@ class BacktestRunService:
         )
         spec = replace(spec, environment=environment)
         # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
-        engine = self._portfolio_design.preflight(
+        preflight = self._portfolio_design.preflight(
             PortfolioPreviewRequest(strategy, environment=environment)
         )
+        engine = preflight.engine
         if not engine.compatible:
             raise InvalidBacktestRunError(
                 "strategy exceeds engine capabilities — " + _describe_engine_issues(engine)
@@ -420,7 +544,22 @@ class BacktestRunService:
                 f"strategy_id={provenance.strategy_id!r} revision={provenance.revision!r} "
                 f"stored={provenance.spec_hash!r} executed={executed_hash!r}"
             )
-        return RunAdmission(spec, provenance, lineage_id)
+        return RunAdmission(
+            ResolvedBacktestRunSpec.from_request(
+                spec, strategy=strategy, environment=environment, parameter_values=parameter_values
+            ),
+            provenance,
+            lineage_id,
+            request.strategy_source,
+            request.lineage_strategy_id,
+            RunShape(
+                sessions=estimated_sessions(
+                    environment.start, environment.end, preflight.history_sessions
+                ),
+                fields=preflight.field_count,
+                factor_steps=preflight.factor_steps,
+            ),
+        )
 
     def preview_trial(self, request: BacktestRunSpec) -> TrialPreview:
         """실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2).
@@ -428,10 +567,8 @@ class BacktestRunService:
         `start` 와 같은 해소·계열·실행 설정 판정을 타서 같은 시도 키를 낸다. 봉인 겹침은 같은 422 로
         거절하되 실행 요청이 아니므로 봉인 원장에 남기지 않는다. 전략 검증(preflight)은 하지 않는다.
         """
-        spec, provenance = self._resolve(request)
-        strategy = spec.strategy
-        if strategy is None:  # pragma: no cover - _resolve always fills it
-            raise InvalidBacktestRunError("resolved run spec has no strategy")
+        strategy, provenance = self._resolve(request)
+        spec = replace(request, strategy=strategy)
         lineage_id = self._lineage(request, provenance)
         environment = self._pin_environment(spec, strategy, lineage_id, record_blocked=False)
         try:
@@ -473,6 +610,9 @@ class BacktestRunService:
         도는 run 은 끝까지 돈다. `RunStatus` 는 바뀌지 않고 멈춘 run 은 `queued` 로 남는다(spec D6).
         """
         with self._lock:
+            if not self._owner_active(owner):
+                self._waiting.forget(owner)
+                return
             self._waiting.configure(owner, paused=paused, weight=weight)
             for record in self._records.values():
                 if owner in record.owners and len(record.owners) > 1:
@@ -547,6 +687,244 @@ class BacktestRunService:
             )
         return self._artifact_store.load(run_id, sha256=state.artifact_sha256)
 
+    def account_report(self, run_id: str) -> AccountReport:
+        """검증해 읽은 완료 결과를 초기자본 기준 계좌 평가손익으로 투영한다."""
+        return project_account_report(self.result(run_id))
+
+    def holdings_overview(self, run_id: str) -> HoldingsOverview:
+        """검증해 읽은 완료 결과의 매매한 세션과 종목별 보유 구간(계좌 보고서와 같은 읽기 경로)."""
+        result = self.result(run_id)
+        return project_holdings_overview(result, self._security_names(result_security_ids(result)))
+
+    def session_holdings(self, run_id: str, session: date) -> SessionHoldingsReport:
+        """한 세션 끝 보유와 그 세션 매매. 계좌 기록이 없는 날은 보고서의 사유로 답한다."""
+        result = self.result(run_id)
+        return project_session_holdings(
+            result, session, self._security_names(session_security_ids(result, session))
+        )
+
+    def security_trades(self, run_id: str, security_id: str) -> SecurityTradesReport:
+        """한 종목의 매매한 세션별 체결."""
+        return project_security_trades(
+            self.result(run_id), security_id, self._security_names((security_id,))
+        )
+
+    def _security_names(self, security_ids: Collection[str]) -> dict[str, SecurityName]:
+        if self._security_directory is None or not security_ids:
+            return {}
+        return {
+            item.security_id: SecurityName(ticker=item.ticker, name=item.name)
+            for item in self._security_directory.describe_securities(security_ids)
+        }
+
+    def validation_report(self, run_id: str) -> RunValidationReport:
+        """검증된 완료 결과와 현재 계열 원장의 통계를 읽는다. 실행·선택 기록은 쓰지 않는다."""
+        result = self.result(run_id)
+        manifest = result.manifest
+        # 완료 결과의 검증된 출처를 쓴다. 은퇴한 리비전을 실행 가능 여부로 다시 해소하지 않는다.
+        provenance = (
+            manifest.strategy_provenance
+            if manifest.strategy_provenance.kind is StrategySourceKind.SAVED_REVISION
+            else None
+        )
+        lineage_id = self._lineage(manifest.run_spec, provenance)
+        ledger = None if lineage_id is None else self.trial_ledger(lineage_id)
+        return RunValidationReport(
+            run_id=manifest.run_id,
+            run_fingerprint=manifest.run_fingerprint,
+            metric_registry_version=manifest.metric_registry_version,
+            observed_at=self._now(),
+            psr=next(
+                (
+                    m
+                    for m in result.metrics
+                    if m.scope is MetricScope.FULL and m.metric_id == "probabilistic_sharpe"
+                ),
+                None,
+            ),
+            dsr=run_deflated_sharpe_evidence(result, ledger),
+        )
+
+    def factor_regression(self, run_id: str) -> RunFactorRegression:
+        """검증된 완료 결과의 세션 초과수익을 시장·규모·가치·모멘텀에 회귀한다(V4-05).
+
+        팩터 단면은 run 의 실행 설정으로 기존 포트폴리오 파이프라인을 다시 돌려 읽는다. 결측 정책은
+        채우지 않는 `drop` 으로 바꾼다 — 채운 팩터 값으로 정렬하면 없는 신호가 포트폴리오에 든다.
+        지금 데이터 판이 run 의 판과 다르면 회귀하지 않는다(다른 데이터로 잰 노출을 그 run 의 것으로
+        보이지 않는다). 실행·선택 기록은 쓰지 않는다.
+
+        팩터 수익률은 전략과 무관해 실행 설정·데이터 판·레지스트리·평가 판본
+        (`_factor_returns_key`)마다 한 번 계산해 두고 회귀만 매번 한다. 아직 없으면 뒤에서 계산을
+        걸고 `computing` 으로 돌려준다 — 실원장 5년 유니버스 단면에 약 2분이 걸려 조회를 붙잡지
+        않는다(실데이터 확인 2026-10-17 후속 1).
+        """
+        result = self.result(run_id)
+        manifest = result.manifest
+        strategy = strategy_period_returns(result)
+        days = manifest.run_spec.annualization_days
+        returns = self._factor_returns(manifest)
+        if isinstance(returns, FactorRegressionUnavailableReason):
+            report = unavailable_factor_regression(
+                returns, strategy_period_count=len(strategy), annualization_days=days
+            )
+            evaluation_version = None
+        else:
+            report = regress_on_factor_returns(strategy, returns.series, annualization_days=days)
+            evaluation_version = returns.evaluation_version
+        lineage_id = self._lineage(
+            manifest.run_spec,
+            manifest.strategy_provenance
+            if manifest.strategy_provenance.kind is StrategySourceKind.SAVED_REVISION
+            else None,
+        )
+        trial_count = None if lineage_id is None else self.trial_ledger(lineage_id).trial_count
+        return RunFactorRegression(
+            run_id=manifest.run_id,
+            run_fingerprint=manifest.run_fingerprint,
+            data_snapshot_id=manifest.data_snapshot_id,
+            momentum_factor_id=MOMENTUM_FACTOR_ID,
+            value_factor_id=VALUE_FACTOR_ID,
+            factor_registry_version=self._factor_registry.version,
+            factor_evaluation_version=evaluation_version,
+            trial_count=trial_count,
+            alpha_t_threshold=None if trial_count is None else alpha_t_threshold(trial_count),
+            report=report,
+        )
+
+    def _factor_returns_key(self, manifest: RunManifest) -> _FactorReturnsKey:
+        """팩터 수익률을 가르는 입력 전부.
+
+        회귀가 쓰는 실행 설정(결측 정책 `drop`), run 의 데이터 판, 레지스트리 판본(기본 graph),
+        평가 규칙 판본이다. 전략·실행 옵션은 들지 않는다.
+        """
+        return (
+            environment_hash(replace(manifest.environment, missing=MissingPolicy.DROP)),
+            manifest.data_snapshot_id,
+            self._factor_registry.version,
+            FACTOR_EVALUATION_VERSION,
+        )
+
+    def _factor_returns(
+        self, manifest: RunManifest
+    ) -> _FactorReturns | FactorRegressionUnavailableReason:
+        """계산해 둔 팩터 수익률. 없으면 뒤에서 계산을 걸고(같은 키는 한 번) `COMPUTING`.
+
+        데이터 판은 프로세스 안에서 고정이라(SoT "백테스트 run 접수" 행) 계산해 둔 값은 늘 지금
+        판과 같은 판의 것이고, 판이 달라 회귀하지 않는다는 답도 다시 계산하지 않고 그대로 둔다.
+        일시 실패(원천 부재·조회 중 판 경합·예상 밖 오류)는 사유를 한 번 돌려주고 잊는다 — 다음
+        조회가 다시 계산한다.
+        활성 계산이 있으면 다른 키도 `COMPUTING`만 답하며, 완료 후 다음 조회에서 접수한다.
+        """
+        key = self._factor_returns_key(manifest)
+        with self._lock:
+            settled = self._settled_factor_returns(key)
+            if settled is not None:
+                return settled
+            # 활성 계산 하나만 접수한다. 다른 키를 기다리는 daemon도 만들지 않는다.
+            # 자리가 비면 다음 명시 조회가 그 키를 접수한다.
+            if self._factor_jobs:
+                return FactorRegressionUnavailableReason.COMPUTING
+            self._factor_jobs.add(key)
+        try:
+            self._background(lambda: self._compute_factor_returns(key, manifest))
+        except BaseException:
+            # 계산을 걸지 못했다 — 키를 남기면 그 키는 재시작까지 "계산 중"만 답한다.
+            with self._lock:
+                self._factor_jobs.discard(key)
+            raise
+        with self._lock:
+            # 그 자리에서 도는 실행자(테스트)면 이미 끝났다.
+            return self._settled_factor_returns(key) or FactorRegressionUnavailableReason.COMPUTING
+
+    def _settled_factor_returns(
+        self, key: _FactorReturnsKey
+    ) -> _FactorReturns | FactorRegressionUnavailableReason | None:
+        cached = self._factor_cache.get(key)
+        if cached is not None:
+            self._factor_cache.move_to_end(key)
+            return cached
+        return self._factor_failures.pop(key, None)
+
+    def _compute_factor_returns(self, key: _FactorReturnsKey, manifest: RunManifest) -> None:
+        outcome: _FactorReturns | _FactorMiss
+        try:
+            pipeline = self._factor_pipeline(manifest)
+            outcome = (
+                pipeline
+                if isinstance(pipeline, _FactorMiss)
+                else _FactorReturns(
+                    factor_return_series(factor_periods(pipeline.observations)),
+                    pipeline.preview.tape.factor_evaluation_version,
+                )
+            )
+        except Exception:
+            logger.exception(
+                "factor returns computation failed — run_id=%s environment=%s snapshot=%s",
+                manifest.run_id,
+                manifest.environment_hash,
+                manifest.data_snapshot_id,
+            )
+            outcome = _FactorMiss(FactorRegressionUnavailableReason.COMPUTATION_FAILED, False)
+        with self._lock:
+            self._factor_jobs.discard(key)
+            if isinstance(outcome, _FactorMiss) and not outcome.lasting:
+                self._factor_failures[key] = outcome.reason
+                _keep_latest(self._factor_failures)
+                return
+            self._factor_cache[key] = (
+                outcome.reason if isinstance(outcome, _FactorMiss) else outcome
+            )
+            _keep_latest(self._factor_cache)
+
+    def _factor_pipeline(self, manifest: RunManifest) -> PortfolioPipelineResult | _FactorMiss:
+        """run 의 실행 설정으로 팩터 단면을 읽는다. 데이터가 없거나 판이 다르면 그 사유.
+
+        유니버스 전체를 읽는 무거운 조회라 한 번에 하나만 돈다 — 화면을 여러 번 열어도 메모리·
+        CPU 가 요청 수만큼 늘어 도는 백테스트와 다투지 않게 한다(V4-05 리뷰 P2-1).
+        """
+        try:
+            with self._factor_regression_lock:
+                pipeline = self._portfolio_design.run_pipeline(
+                    PortfolioPreviewRequest(
+                        factor_regression_spec(self._factor_registry),
+                        environment=replace(manifest.environment, missing=MissingPolicy.DROP),
+                    )
+                )
+        except RawObservationUnavailableError as error:
+            logger.warning(
+                "factor regression inputs unavailable — run_id=%s environment=%s: %s",
+                manifest.run_id,
+                manifest.environment_hash,
+                error,
+            )
+            return _FactorMiss(FactorRegressionUnavailableReason.DATA_UNAVAILABLE, False)
+        except PortfolioSnapshotMismatchError as error:
+            # 원천과 팩터 메타데이터가 서로 다른 판을 답했다 — 조회 중 데이터가 바뀐 경합이다.
+            logger.warning(
+                "factor regression skipped — snapshot moved during the read: run_id=%s: %s",
+                manifest.run_id,
+                error,
+            )
+            return _FactorMiss(FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED, False)
+        if pipeline.data_snapshot_id != manifest.data_snapshot_id:
+            logger.warning(
+                "factor regression skipped — data snapshot changed: run_id=%s run=%s current=%s",
+                manifest.run_id,
+                manifest.data_snapshot_id,
+                pipeline.data_snapshot_id,
+            )
+            # 판은 프로세스 안에서 고정이라 다시 읽어도 같다 — 약 2분 계산을 되풀이하지 않는다.
+            return _FactorMiss(FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED, True)
+        return pipeline
+
+    def shutdown(self) -> None:
+        """서버가 끝날 때 전송이 띄운 것을 정리한다(run-worker spec D5).
+
+        도는 run 을 종결로 바꾸지 않는다 — 기록은 `queued`·`running` 으로 남고 다음 부팅이
+        `interrupted` 로 닫는다(`_close_interrupted_runs`).
+        """
+        self._run_execution.shutdown()
+
     def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestCancelResult:
         """`owner`(없으면 사용자)가 이 run 에서 빠진다. 남은 소유자가 없을 때만 run 을 취소한다.
 
@@ -559,11 +937,12 @@ class BacktestRunService:
                 # 이 프로세스가 돌리지 않은 run 은 재시작 때 이미 종결됐다.
                 return _cancel_result(self.state(run_id), kept_by_owners=False)
             record.owners.discard(owner)
-            if record.state.status in _SETTLED:
+            if record.state.status.is_terminal:
                 return _cancel_result(record.state, kept_by_owners=False)
             if record.owners:
                 self._relane(record)
                 self._dispatch()
+                self._release_idle_owner(owner)
                 return _cancel_result(record.state, kept_by_owners=True)
             record.cancellation.set()
             if record in self._waiting:
@@ -573,7 +952,13 @@ class BacktestRunService:
                 self._emit(
                     record, RunStatus.CANCELLED, record.state.progress, "cancelled", "Run cancelled"
                 )
+                # 메모리 가드가 붙잡던 run 이었으면 뒤의 run 을 다시 판정하고, 미룬 예비 채우기를
+                # 푼다(spec D8).
+                self._dispatch()
             else:
+                if record.handle is not None:
+                    # 도는 계산에 알린다. 막히지 않고, 멈춘 결과는 전송이 종결로 알린다.
+                    record.handle.cancel()
                 self._emit(
                     record,
                     RunStatus.CANCEL_REQUESTED,
@@ -581,6 +966,7 @@ class BacktestRunService:
                     "cancellation",
                     "Cancellation requested",
                 )
+            self._release_idle_owner(owner)
             return _cancel_result(record.state, kept_by_owners=False)
 
     def _lane(self, record: _RunRecord) -> str | None:
@@ -634,16 +1020,17 @@ class BacktestRunService:
                 state.stage,
             )
 
-    def _resolve(
-        self, request: BacktestRunSpec
-    ) -> tuple[BacktestRunSpec, StrategyProvenance | None]:
-        """Turn the request into a run spec whose `strategy` is the exact spec to execute."""
+    def _resolve(self, request: BacktestRunSpec) -> tuple[StrategySpec, StrategyProvenance | None]:
+        """요청 출처를 실행할 전략과 provenance로 해소한다."""
         source = request.strategy_source
-        if request.strategy is None and source is None:
-            raise InvalidBacktestRunError(
-                "run request must name its strategy — neither strategy nor strategy_source given"
-            )
-        if request.strategy is not None and source is not None:
+        if source is None:
+            if request.strategy is None:
+                raise InvalidBacktestRunError(
+                    "run request must name its strategy — "
+                    "neither strategy nor strategy_source given"
+                )
+            return request.strategy, None
+        if request.strategy is not None:
             raise InvalidBacktestRunError(
                 "run request must name its strategy once — both strategy and strategy_source given"
             )
@@ -676,16 +1063,9 @@ class BacktestRunService:
                 revision=record.revision,
                 source_hash=record.source.source_hash if record.source else None,
             )
-            return replace(request, strategy=record.spec), provenance
-        if isinstance(source, InlineDraft):
-            strategy = source.spec
-        else:
-            if request.strategy is None:  # pragma: no cover - dataclass invariant
-                raise InvalidBacktestRunError("run spec has neither strategy nor strategy_source")
-            strategy = request.strategy
-        # inline draft 의 provenance 는 start() 가 strategy_spec_hash(spec) 으로 만든다 —
-        # TargetTape 와 같은 함수라 tape 없이 확정할 수 있고(#158), tape 단계가 다시 대조한다.
-        return replace(request, strategy=strategy), None
+            return record.spec, provenance
+        # 인라인 출처의 provenance는 접수가 동일 strategy_spec_hash로 확정한다.
+        return source.spec, None
 
     def _lineage(
         self, request: BacktestRunSpec, provenance: StrategyProvenance | None
@@ -740,9 +1120,10 @@ class BacktestRunService:
     ) -> None:
         # 기록이 실패해도 거절은 그대로 돌려준다 — 막는 것이 먼저다.
         try:
+            self._portfolio_design.validate_trial_strategy(strategy, missing=environment.missing)
             key = trial_key(spec)
-        except InvalidParameterValueError:
-            # 파라미터 값을 해소할 수 없는 요청은 전략이 확정되기 전의 거절이라 남기지 않는다.
+        except (InvalidPortfolioRequestError, InvalidParameterValueError):
+            # 전략·팩터 플랜·파라미터가 확정되지 않은 요청은 봉인 감사 기록에 남기지 않는다.
             return
         try:
             self._repository.record_blocked_attempt(
@@ -761,37 +1142,55 @@ class BacktestRunService:
                 environment.start,
             )
 
-    def _record_trial_result(self, run_id: str, result: BacktestRunResult) -> None:
-        # 실패해도 run 은 끝까지 간다. 대표 샤프가 빈 시도로 보이고 원인은 로그에 남는다.
+    def _record_completion(self, completed: BacktestRunState, committed: RunCommitted) -> None:
+        """완료 전이와 대표 샤프·머리 지표를 한 트랜잭션에 적는다. 실패하면 원인을 남기고 올려
+        완료를 막는다(#381)."""
         try:
             self._repository.record_trial_result(
-                run_id,
-                session_sharpe=representative_sharpe(result),
-                metric_registry_version=result.manifest.metric_registry_version,
+                completed,
+                session_sharpe=committed.session_sharpe,
+                metric_registry_version=committed.metric_registry_version,
+                headline=committed.headline,
             )
         except Exception:
-            logger.exception("trial result could not be recorded — run_id=%s", run_id)
+            logger.exception(
+                "run completion and trial result could not be recorded — run_id=%s",
+                completed.run_id,
+            )
+            raise
 
     def _dispatch(self) -> None:
-        """자리가 비는 만큼 대기열 앞의 run 을 스레드로 띄운다. `self._lock` 안에서 부른다.
+        """자리가 비는 만큼 대기열 앞의 run 을 전송으로 띄운다. `self._lock` 안에서 부른다.
 
         대기 run 에는 스레드가 없다 — run 마다 스레드를 먼저 띄워 두면 스레드 수가 상한 없이 는다
         (#161).
+
+        꺼내기 전에 메모리 가드를 판정한다(spec D8). 모자라면 슬롯이 비어도 그 run 을 대기열 앞에
+        두고 멈춘다 — 뒤의 작은 run 이 앞지르지 않는다. 판정 결과는 전송에 알려, 대기시키는 동안
+        예비 worker 를 다시 채우지 않게 한다(#591 리뷰).
         """
 
+        held: _RunRecord | None = None
         while self._running < self._run_slots:
-            record = self._waiting.pop(
-                experiments=self._running_experiments < experiment_slots(self._run_slots)
-            )
+            experiments = self._running_experiments < experiment_slots(self._run_slots)
+            record = self._waiting.peek(experiments=experiments)
             if record is None:
-                return
+                break
+            if not self._memory_admits(record):
+                held = record
+                break
+            self._waiting.pop(experiments=experiments)
             try:
-                Thread(
-                    target=self._run,
-                    args=(record,),
-                    name=f"backtest-{record.state.run_id}",
-                    daemon=True,
-                ).start()
+                record.handle = self._run_execution.start(
+                    RunJob(
+                        run_id=record.state.run_id,
+                        spec=record.spec,
+                        provenance=record.provenance,
+                        strategy_source=record.strategy_source,
+                        lineage_strategy_id=record.lineage_strategy_id,
+                    ),
+                    _RunListener(self, record),
+                )
             except (RuntimeError, MemoryError) as error:
                 # 스레드 상한(RuntimeError)·메모리 압박(MemoryError)으로 기동에 실패하면 레코드가
                 # `queued` 로 영구 고착한다(관측자 없음). `failed` 로 종결해 폴링·목록·취소가 막다른
@@ -809,225 +1208,165 @@ class BacktestRunService:
                 record.experiment_slot = None not in record.owners
                 self._running += 1
                 self._running_experiments += record.experiment_slot
+                shape = record.memory_shape
+                logger.info(
+                    "backtest run dispatched — run_id=%s reserve_bytes=%s estimated_sessions=%s "
+                    "fields=%s factor_steps=%s",
+                    record.state.run_id,
+                    record.reserve_bytes,
+                    None if shape is None else shape.sessions,
+                    None if shape is None else shape.fields,
+                    None if shape is None else shape.factor_steps,
+                )
+        # 메모리를 기다린다고 적힌 대기 run 가운데 지금 가드가 붙잡은 run 이 아닌 것은 슬롯·차례를
+        # 기다린다(앞에 단일 실행이 끼었거나 슬롯이 찼다). 문장이 실제 사유를 따라가게 고친다.
+        for item in self._records.values():
+            if (
+                item is not held
+                and item.state.status is RunStatus.QUEUED
+                and item.state.message == _MEMORY_WAIT_MESSAGE
+            ):
+                self._emit(
+                    item, RunStatus.QUEUED, item.state.progress, "queued", _SLOT_WAIT_MESSAGE
+                )
+        self._run_execution.set_memory_hold(held is not None)
 
-    def _run(self, record: _RunRecord) -> None:
-        """run 스레드 본문. 전체 수집(2세대)을 run 이 끝날 때까지 미룬다(이슈 #196).
+    def _memory_admits(self, record: _RunRecord) -> bool:
+        """메모리 가드: 대기열 앞의 `record` 를 지금 띄워도 되는가(spec D8). 잠금 안에서 부른다.
 
-        tape 단계가 만드는 수백만 개의 오래 사는 객체 때문에 전체 수집이 매번 수 초씩 GIL 을 쥐고
-        다른 HTTP 요청까지 세웠다. 범위와 복원 규칙은 `_gc_policy` 가 소유한다. 끝나면 자리를
-        내놓고 대기열의 다음 run 을 띄운다(#161).
+        도는 run 이 없으면 가드를 쓰지 않는다 — 기계 메모리보다 큰 어림의 run 도 혼자서는
+        돈다(굶주림 없음). 전송이 run 마다 메모리를 잴 수 없으면(스레드) 쓰지 않는다.
         """
+        running = [
+            (item.state.run_id, item.reserve_bytes)
+            for item in self._records.values()
+            if item.handle is not None and not item.state.status.is_terminal
+        ]
+        if not running:
+            return True
+        memory = self._run_execution.memory()
+        if memory is None:
+            return True
+        verdict = memory_verdict(memory, running, record.reserve_bytes)
+        if verdict.admitted:
+            return True
+        if record.state.message != _MEMORY_WAIT_MESSAGE:
+            # 처음 대기시킬 때만 남긴다. 상태는 `queued` 그대로라 저장하지 않는다.
+            logger.info(
+                "backtest run waits for memory — run_id=%s reserve_bytes=%s available_bytes=%s "
+                "overhead_bytes=%s running_remaining_bytes=%s running_runs=%s",
+                record.state.run_id,
+                verdict.reserve_bytes,
+                verdict.available_bytes,
+                verdict.overhead_bytes,
+                verdict.running_remaining_bytes,
+                len(running),
+            )
+            self._emit(
+                record, RunStatus.QUEUED, record.state.progress, "queued", _MEMORY_WAIT_MESSAGE
+            )
+        return False
+
+    def _finish(self, record: _RunRecord, outcome: RunOutcome) -> None:
+        """전송이 알린 종결을 상태로 옮기고 자리를 내놓는다. 끝나면 대기열의 다음 run 을 띄운다
+        (#161). 전송의 감독 스레드에서, 잠금 밖에서 불린다."""
 
         try:
-            with full_collections_suspended():
-                self._execute(record)
+            self._settle(record, outcome)
         finally:
             with self._lock:
                 self._running -= 1
                 self._running_experiments -= record.experiment_slot
                 self._dispatch()
 
-    def _execute(self, record: _RunRecord) -> None:
-        run_id = record.state.run_id
-        spec = record.spec
-        provenance = record.provenance
-        strategy = spec.strategy
-        if strategy is None:  # pragma: no cover - resolved before the thread starts
-            raise InvalidBacktestRunError("resolved run spec has no strategy")
-        environment = spec.environment
-        if environment is None:  # pragma: no cover - start() pins it before the thread starts
-            raise InvalidBacktestRunError(
-                f"resolved run spec has no run environment — run_id={run_id}"
-            )
-        try:
-            # tape 단계: 원시 관측 로딩 + 팩터 평가 + TargetTape 컴파일. 실데이터에서 실행 시간의
-            # 대부분을 차지하므로 취소 콜백을 파이프라인 checkpoint 에 그대로 건다.
-            self._update(
-                record, RunStatus.RUNNING, _TAPE_PROGRESS_START, "tape", "Compiling target tape"
-            )
-            # 데이터 포트의 준비(원장 카탈로그 등, #369)와 벤치마크 id(#361)는 tape 앞에서 한 번의
-            # 조회로 확인한다 — tape 계산을 다 쓴 뒤 알리지 않는다. 벤치마크가 없으면 종목 없는
-            # 질의다. 접수는 여전히 데이터를 읽지 않는다(#158).
-            self._data_source.load_backtest_dataset(
-                BacktestDataQuery(
-                    environment.start, environment.end, (), spec.benchmark_security_id
-                )
-            )
+    def _settle(self, record: _RunRecord, outcome: RunOutcome) -> None:
+        if isinstance(outcome, RunFailed):
+            self._fail(record, outcome.error_code, outcome.error, outcome.exception)
+            return
+        if isinstance(outcome, RunCommitted):
             try:
-                # require_engine_compatible 은 start() 의 preflight 판정을 되풀이하는 심층 방어다 —
-                # 같은 순수 판정이라 정상 경로에서는 발동하지 않는다.
-                preview = self._portfolio_design.run_pipeline(
-                    PortfolioPreviewRequest(strategy, environment=environment),
-                    options=PortfolioPipelineOptions(
-                        require_engine_compatible=True, parameter_values=spec.parameter_values
-                    ),
-                    cancelled=record.cancellation.is_set,
-                    progress=self._tape_progress(record),
-                ).preview
-            except PortfolioPipelineCancelledError as error:
-                raise RunCancelledError("run cancelled while compiling target tape") from error
-            tape = preview.tape
-            if tape.strategy_hash != provenance.spec_hash:
-                raise RuntimeError(
-                    "compiled TargetTape hash differs from the accepted strategy provenance — "
-                    f"run_id={run_id} provenance={provenance.spec_hash!r} "
-                    f"tape={tape.strategy_hash!r}"
-                )
-            self._raise_if_cancelled(record)
-            self._update(record, RunStatus.RUNNING, _DATA_PROGRESS, "data", "Loading market data")
-            security_ids = tuple(
-                sorted({target.security_id for frame in tape.frames for target in frame.targets})
-            )
-            if not security_ids:
-                raise NoPositionsError(
-                    "target tape selected no position in any rebalance frame — "
-                    f"frames={len(tape.frames)} start={environment.start} "
-                    f"end={environment.end} rebalance={strategy.portfolio.rebalance.value}"
-                )
-            dataset = self._data_source.load_backtest_dataset(
-                BacktestDataQuery(
-                    start=environment.start,
-                    end=environment.end,
-                    security_ids=security_ids,
-                    benchmark_security_id=spec.benchmark_security_id,
-                    history_sessions_before_start=cost_history_sessions(environment),
-                )
-            )
-            # The preview's caveats travel with the data they describe, so the manifest records
-            # every warning the run was built on, not just the market-data ones.
-            # tape 컴파일 경고는 컴파일러 코드를 그대로 쓴다(이슈 #203). 원시 관측 코드로 묶으면
-            # 결과 화면에서 출처가 틀린다.
-            dataset = replace(
-                dataset,
-                warnings=(
-                    *_as_data_warnings(preview.warnings),
-                    *(
-                        DataWarning(
-                            code=item.code.value,
-                            message=item.message,
-                            severity=WarningSeverity.WARNING,
-                        )
-                        for item in preview.tape.warnings
-                    ),
-                    *dataset.warnings,
-                ),
-            )
-            self._raise_if_cancelled(record)
-            self._update(
-                record,
-                RunStatus.RUNNING,
-                _ENGINE_PROGRESS_START,
-                "engine",
-                "Running backtest engine",
-            )
-            result = self._executor.execute(
-                BacktestExecutionRequest(run_id, spec, tape, dataset, provenance),
-                # 실행기는 자기 작업 안의 비율(0~1)과 설명만 보고한다. run 막대의 engine 구간으로
-                # 옮기고 단계는 `engine` 하나로 둔다 — 단계 어휘는 `RunStage` 가 소유한다(DR-B-03).
-                progress=lambda value, message: self._update(
-                    record,
-                    RunStatus.RUNNING,
-                    _ENGINE_PROGRESS_START
-                    + min(max(value, 0.0), 1.0) * (_ENGINE_PROGRESS_END - _ENGINE_PROGRESS_START),
-                    "engine",
-                    message,
-                ),
-                cancelled=record.cancellation.is_set,
-            )
-            self._raise_if_cancelled(record)
-            self._update(
-                record, RunStatus.RUNNING, _ARTIFACT_PROGRESS, "artifact", "Committing artifacts"
-            )
-            commit = self._artifact_store.commit(result)
-            self._record_trial_result(run_id, result)
-            cancelled_after_commit = False
-            with self._lock:
-                # Completion and cancel acceptance linearize on the same lock. If cancel acquired
-                # it first, the committed bundle is compensation-cleaned and never becomes
-                # observable through state/result. If completion acquired it first, cancel sees a
-                # terminal run and is not accepted.
-                if record.cancellation.is_set():
-                    cancelled_after_commit = True
-                else:
-                    record.state = replace(record.state, artifact_sha256=commit.sha256)
-                    try:
-                        self._emit(
-                            record,
-                            RunStatus.COMPLETED,
-                            1.0,
-                            "completed",
-                            "Run completed",
-                            durable=True,
-                        )
-                    except Exception:
-                        # 저장하지 못한 완료는 보이지 않는다 — 보이면 사용자가 본 결과를 원장이
-                        # 세지 않는다(N 과소, #381). 실행은 아래 실패 분기로 끝난다.
-                        record.state = replace(record.state, artifact_sha256=None)
-                        self._artifact_store.discard(run_id)
-                        raise
-            if cancelled_after_commit:
-                self._artifact_store.discard(run_id)
-                raise RunCancelledError("run cancelled during artifact commit")
-        except RunCancelledError:
-            self._update(
-                record, RunStatus.CANCELLED, record.state.progress, "cancelled", "Run cancelled"
-            )
-        except BaseException as error:
-            # 실패 사유 원문(절대 경로 포함)과 stack trace 는 서버 로그에만 남기고 상태에는 가린
-            # 문자열을 싣는다. 어댑터 계약 위반은 사용자 오류가 아니라 어댑터 버그라 로그로 반드시
-            # 드러나야 한다 — 이 로그가 유일한 진단 채널이다(HTTP 500 이 없다).
-            with self._lock:
-                failed_stage = record.state.stage
-            logger.exception(
-                "backtest run failed — run_id=%s stage=%s error_code=%s",
-                run_id,
-                failed_stage,
-                _failure_code(error),
-            )
-            with self._lock:
-                # 취소와 겹쳐도 실패 사유는 버리지 않는다 — "내가 취소했다" 와 "데이터가 없었다" 를
-                # 화면에서 구분할 수 있어야 한다.
-                record.state = replace(
-                    record.state,
-                    error=_describe_failure(error),
-                    error_code=_failure_code(error),
-                )
-                if record.cancellation.is_set():
-                    self._emit(
-                        record,
-                        RunStatus.CANCELLED,
-                        record.state.progress,
-                        "cancelled",
-                        "Run cancelled",
-                    )
-                else:
-                    self._emit(
-                        record,
-                        RunStatus.FAILED,
-                        record.state.progress,
-                        "failed",
-                        "Run failed",
-                    )
-
-    def _tape_progress(self, record: _RunRecord) -> Callable[[float, str], None]:
-        """파이프라인 진행(0~1)을 run 막대의 tape 구간으로 옮기고 이벤트 빈도를 묶는 콜백.
-
-        작업 설명이 바뀌면 항상 남기고, 같은 설명 안에서는 `_MIN_TAPE_PROGRESS_STEP` 이상 오를 때만
-        남긴다. run 스레드에서만 불리므로 마지막 보고값은 잠금 없이 이 클로저가 소유한다.
-        """
-
-        last_value = _TAPE_PROGRESS_START
-        last_message: str | None = None
-
-        def report(fraction: float, message: str) -> None:
-            nonlocal last_value, last_message
-            value = _TAPE_PROGRESS_START + fraction * (_TAPE_PROGRESS_END - _TAPE_PROGRESS_START)
-            if message == last_message and value - last_value < _MIN_TAPE_PROGRESS_STEP:
+                self._complete(record, outcome)
                 return
-            self._update(record, RunStatus.RUNNING, value, "tape", message)
-            last_value, last_message = value, message
+            except RunCancelledError:
+                pass
+            except BaseException as error:
+                self._fail(record, _failure_code(error), _describe_failure(error), error)
+                return
+        self._update(
+            record, RunStatus.CANCELLED, record.state.progress, "cancelled", "Run cancelled"
+        )
 
-        return report
+    def _complete(self, record: _RunRecord, committed: RunCommitted) -> None:
+        """커밋한 결과를 완료로 보인다. 취소가 먼저 이겼으면 결과를 지우고 `RunCancelledError`.
+
+        완료와 취소 접수는 같은 잠금에서 선형화한다. 취소가 먼저 잡았으면 커밋한 묶음을 지우고
+        아무것도 적지 않는다. 완료가 먼저 잡았으면 완료 전이·대표 샤프·머리 지표를 한 트랜잭션에
+        적고, 뒤의 취소는 끝난 run 을 보고 받아들여지지 않는다. 승패가 정해지기 전에 원장·머리
+        지표를 적지 않는다 — 적으면 취소된 run 에 샤프·머리 지표가 남는다(#581 리뷰).
+        """
+        run_id = record.state.run_id
+        with self._lock:
+            cancelled_after_commit = record.cancellation.is_set()
+            if not cancelled_after_commit:
+                record.state = replace(record.state, artifact_sha256=committed.sha256)
+                try:
+                    self._emit(
+                        record,
+                        RunStatus.COMPLETED,
+                        1.0,
+                        "completed",
+                        "Run completed",
+                        completion=committed,
+                    )
+                except Exception:
+                    # 저장하지 못한 완료는 보이지 않는다 — 보이면 사용자가 본 결과를 원장이
+                    # 세지 않는다(N 과소, #381). 실행은 실패 분기로 끝난다.
+                    record.state = replace(record.state, artifact_sha256=None)
+                    self._artifact_store.discard(run_id)
+                    raise
+        if cancelled_after_commit:
+            self._artifact_store.discard(run_id)
+            raise RunCancelledError("run cancelled during artifact commit")
+
+    def _fail(
+        self,
+        record: _RunRecord,
+        error_code: RunFailureCode,
+        error: str,
+        exception: BaseException | None,
+    ) -> None:
+        # 실패 사유 원문(절대 경로 포함)과 stack trace 는 서버 로그에만 남기고 상태에는 가린
+        # 문자열을 싣는다. 어댑터 계약 위반은 사용자 오류가 아니라 어댑터 버그라 로그로 반드시
+        # 드러나야 한다 — 이 로그가 유일한 진단 채널이다(HTTP 500 이 없다).
+        with self._lock:
+            failed_stage = record.state.stage
+        logger.error(
+            "backtest run failed — run_id=%s stage=%s error_code=%s",
+            record.state.run_id,
+            failed_stage,
+            error_code,
+            exc_info=exception,
+        )
+        with self._lock:
+            # 취소와 겹쳐도 실패 사유는 버리지 않는다 — "내가 취소했다" 와 "데이터가 없었다" 를
+            # 화면에서 구분할 수 있어야 한다.
+            record.state = replace(record.state, error=error, error_code=error_code)
+            if record.cancellation.is_set():
+                self._emit(
+                    record,
+                    RunStatus.CANCELLED,
+                    record.state.progress,
+                    "cancelled",
+                    "Run cancelled",
+                )
+            else:
+                self._emit(
+                    record,
+                    RunStatus.FAILED,
+                    record.state.progress,
+                    "failed",
+                    "Run failed",
+                )
 
     def _update(
         self,
@@ -1050,10 +1389,14 @@ class BacktestRunService:
         stage: RunStage,
         message: str,
         *,
-        durable: bool = False,
+        completion: RunCommitted | None = None,
     ) -> None:
-        """상태를 바꾸고 이벤트를 남긴다. `durable` 이면 저장이 먼저이고 실패하면 올린다(메모리
-        상태도 바꾸지 않는다). 아니면 상태가 바뀔 때만 저장하고 저장 실패는 삼킨다(`_persist`)."""
+        """상태를 바꾸고 이벤트를 남긴다.
+
+        `completion` 이 있으면(완료 전이) 대표 샤프·머리 지표와 함께 저장이 먼저이고 실패하면
+        올린다(메모리 상태도 바꾸지 않는다). 아니면 상태가 바뀔 때만 저장하고 저장 실패는
+        삼킨다(`_persist`).
+        """
         occurred_at = self._now()
         previous = record.state.status
         state = replace(
@@ -1063,9 +1406,12 @@ class BacktestRunService:
             stage=stage,
             message=message,
             updated_at=occurred_at,
+            started_at=record.state.started_at
+            or (occurred_at if status is RunStatus.RUNNING else None),
         )
-        if durable:
-            self._repository.update(state)
+        durable = completion is not None
+        if completion is not None:
+            self._record_completion(state, completion)
         record.state = state
         record.events.append(
             RunProgressEvent(
@@ -1084,8 +1430,25 @@ class BacktestRunService:
             saved = self._persist(record.state)
         # 종결이 저장된 run 만 사본을 버린다 — 저장하지 못한 run 의 사본을 버리면 저장소의 옛
         # 상태(`queued`·`running`)로 되돌아가 끝난 run 이 다시 도는 것처럼 보인다.
-        if status in _SETTLED and saved:
-            self._retire(record)
+        if status.is_terminal:
+            for owner in record.owners:
+                self._release_idle_owner(owner)
+            if saved:
+                self._retire(record)
+
+    def _apply_lane_controls(self, owner: str | None, controls: RunLaneControls | None) -> None:
+        if owner is not None and controls is not None:
+            self._waiting.configure(owner, paused=controls.paused, weight=controls.weight)
+
+    def _owner_active(self, owner: str) -> bool:
+        return any(
+            owner in record.owners and not record.state.status.is_terminal
+            for record in self._records.values()
+        )
+
+    def _release_idle_owner(self, owner: str | None) -> None:
+        if owner is not None and not self._owner_active(owner):
+            self._waiting.forget(owner)
 
     def _retire(self, record: _RunRecord) -> None:
         """끝난 run 을 최근 목록에 넣고, 넘친 오래된 끝난 run 의 메모리 사본을 버린다(#332)."""
@@ -1098,7 +1461,7 @@ class BacktestRunService:
 
         run 스레드의 실패 분기가 다시 저장하다 터지면 레코드가 비종결로 굳는다. 이 프로세스에서는
         메모리 상태가 계속 맞고(저장하지 못한 종결 run 은 사본을 버리지 않는다), 저장되지 않은
-        전이는 재시작 때 `interrupted` 로 닫힌다. 완료는 여기로 오지 않는다(`_emit(durable=True)`).
+        전이는 재시작 때 `interrupted` 로 닫힌다. 완료는 여기로 오지 않는다(`_emit(completion=…)`).
         """
         try:
             self._repository.update(state)
@@ -1112,15 +1475,9 @@ class BacktestRunService:
             return False
         return True
 
-    @staticmethod
-    def _raise_if_cancelled(record: _RunRecord) -> None:
-        if record.cancellation.is_set():
-            raise RunCancelledError("run cancelled")
 
-
-# 끝난 run 상태 집합과, 메모리에 사본을 남기는 최근 끝난 run 수. 이보다 오래 끝난 run 은
+# 메모리에 사본을 남기는 최근 끝난 run 수. 이보다 오래 끝난 run 은
 # 저장소에서 읽고 진행 이벤트는 비어 있다.
-_SETTLED = (RunStatus.COMPLETED, RunStatus.CANCELLED, RunStatus.FAILED)
 _FINISHED_RECORDS_KEPT = 256
 
 
@@ -1138,6 +1495,7 @@ _REJECTION_CODES: tuple[tuple[type[Exception], AdmissionRejectionCode], ...] = (
     (MissingRunEnvironmentError, "backtest.run.environment_required"),
     (ResearchWindowViolationError, "backtest.run.research_window_violation"),
     (BacktestParameterValueError, "backtest.run.parameter_invalid"),
+    (InvalidParameterValueError, "backtest.run.parameter_invalid"),
     (InvalidBacktestRunError, "backtest.run.invalid"),
     (StrategyReferenceNotFoundError, "backtest.strategy.not_found"),
     (StaleStrategyReferenceError, "backtest.strategy.stale"),
@@ -1149,66 +1507,3 @@ _REJECTION_CODES: tuple[tuple[type[Exception], AdmissionRejectionCode], ...] = (
 def rejection_code(error: BaseException) -> AdmissionRejectionCode | None:
     """실행 접수 거절이면 그 코드, 아니면 None(예상 밖 오류)."""
     return next((code for kind, code in _REJECTION_CODES if isinstance(error, kind)), None)
-
-
-def _failure_code(error: BaseException) -> RunFailureCode:
-    """run `error_code`. 어휘 SoT 는 `RunFailureCode`(프론트 번역 키 `backtest.run.error.*`)."""
-
-    if isinstance(error, InvalidPortfolioRequestError):
-        return "portfolio.strategy.invalid"
-    if isinstance(error, RawObservationUnavailableError):
-        return "portfolio.data.unavailable"
-    if isinstance(error, RawObservationContractError):
-        return "portfolio.raw_observation.invalid"
-    if isinstance(error, (InvalidBacktestRunError, IncompatiblePortfolioRequestError)):
-        return "backtest.run.invalid"
-    if isinstance(error, EquityWipedOutError):
-        return "backtest.run.equity_wiped_out"
-    if isinstance(error, BacktestDataNotReadyError):
-        return "backtest.run.data_not_ready"
-    if isinstance(error, NoPositionsError):
-        return "backtest.run.no_positions"
-    if isinstance(error, BacktestDataUnavailableError):
-        return "backtest.run.benchmark_unknown"
-    return "backtest.run.internal"
-
-
-def _describe_failure(error: BaseException) -> str:
-    """run 상태의 `error` 문자열(화면 노출용).
-
-    검증 실패는 issue 코드·경로를, 엔진 비호환은 부족한 능력을 실어야 화면에서 원인을 알 수 있다.
-    서버 절대 경로는 가린다 — 원문은 `_execute` 가 로그로 남긴다.
-    """
-
-    text = f"{type(error).__name__}: {error}"
-    if isinstance(error, InvalidPortfolioRequestError):
-        issues = "; ".join(
-            f"{issue.code}@{issue.path}: {issue.message}" for issue in error.validation.issues
-        )
-        text = f"{text} — {issues}" if issues else text
-    elif isinstance(error, IncompatiblePortfolioRequestError):
-        text = f"{text} — {_describe_engine_issues(error.compatibility)}"
-    return _mask_paths(text)
-
-
-def _describe_engine_issues(engine: EngineCompatibility) -> str:
-    return (
-        "; ".join(
-            f"{issue.category}.{issue.name}={issue.support}"
-            + (f" ({issue.reason})" if issue.reason else "")
-            for issue in engine.issues
-        )
-        or "no issues reported"
-    )
-
-
-def _as_data_warnings(messages: tuple[str, ...]) -> tuple[DataWarning, ...]:
-    """Raw observation warnings as manifest rows, under one code so their origin stays readable."""
-    return tuple(
-        DataWarning(
-            code="portfolio.raw_observation",
-            message=message,
-            severity=WarningSeverity.WARNING,
-        )
-        for message in messages
-    )

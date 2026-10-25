@@ -81,6 +81,7 @@ const explanation = (): FactorExplanation => ({
   plan: {
     missing_policy: "drop",
     registry_version: "factor-registry-v7",
+    evaluation_version: "factor-evaluation-v1",
     graph_hash: "g".repeat(64),
     plan_hash: "p".repeat(64),
     output_node_id: "signal",
@@ -467,11 +468,38 @@ describe("FactorGraphPanel", () => {
     const badges = screen.getAllByText("factor.graph.cycle");
     expect(badges).toHaveLength(2);
     for (const badge of badges) {
-      const row = badge.closest("li");
+      const row = badge.closest("tr");
       expect(
         within(row as HTMLElement).getByText(/cycle=close → positive → close/),
       ).toBeInTheDocument();
     }
+  });
+
+  it("첫 실행 계획 응답이 클릭 사이에 와도 원문 열기와 포커스를 보존한다 (#324)", async () => {
+    const onOpenSource = vi.fn();
+    const transactions: SourceTransactions = {
+      apply: vi.fn(() => true), run: vi.fn(() => true), feedback: { status: "idle" },
+      feedbackFor: () => ({ status: "idle" }),
+      enabled: true, disabled: null, settling: false,
+    };
+    const editing = {
+      tree: { factors: [{ factor_id: "conditional-value", direction: "high", graph }] },
+      transactions, catalogs: { equityFields: null }, onOpenSource, documentKey: 1,
+    };
+    const view = (state: ExecutionPlansState) => <FactorGraphPanel state={state} schema={SCHEMA}
+      diagnostics={[]} onSelectPointer={vi.fn()} onOpenSource={onOpenSource} editing={editing} />;
+    const { rerender } = render(view({ status: "loading" }));
+    const user = userEvent.setup();
+    const button = screen.getAllByRole("button", { name: "소스에서 열기" })[1]!;
+    await user.pointer({ target: button, keys: "[MouseLeft>]" });
+    expect(button).toHaveFocus();
+    // 실제 HTTP 응답이 mousedown과 mouseup 사이에 도착하는 순서를 결정적으로 만든다.
+    rerender(view(readyState()));
+    const currentButton = screen.getAllByRole("button", { name: "소스에서 열기" })[1]!;
+    await user.pointer({ target: currentButton, keys: "[/MouseLeft]" });
+    expect(onOpenSource).toHaveBeenCalledOnce();
+    expect(onOpenSource).toHaveBeenCalledWith("/factors/0/graph/nodes/1");
+    expect(currentButton).toHaveFocus();
   });
 
   it("keeps the last plan projection with a recomputing badge while the plan reloads (OBS-132-05)", () => {
@@ -480,13 +508,15 @@ describe("FactorGraphPanel", () => {
       run: vi.fn(() => true),
       feedback: { status: "idle" },
       feedbackFor: () => ({ status: "idle" }),
-      onEditorReady: vi.fn(),
+
       enabled: true,
       disabled: null,
       settling: false,
     };
     const editing = {
-      tree: { factors: [{ factor_id: "f", direction: "high", graph }] },
+      tree: {
+        factors: [{ factor_id: "conditional-value", direction: "high", graph }],
+      },
       transactions,
       catalogs: { equityFields: null },
     };
@@ -502,9 +532,11 @@ describe("FactorGraphPanel", () => {
     );
     const { rerender } = render(view(readyState()));
     expect(screen.queryByText("재계산 중")).toBeNull();
+    expect(document.querySelectorAll(".node-canvas__metadata").length).toBe(5);
     // 편집 확정 뒤 실제 경로: 이전 compile의 spec이 남아 blocked(stale) → blocked(pending) → loading → ready.
     // 그동안 직전 투영이 남는다(reducer 실측: stale 판정이 pending보다 먼저다 — 4차 리뷰).
     rerender(view({ status: "blocked", reason: "stale" }));
+    expect(document.querySelectorAll(".node-canvas__metadata").length).toBe(0);
     expect(screen.getByText("재계산 중")).toBeInTheDocument();
     rerender(view({ status: "blocked", reason: "pending" }));
     expect(screen.getByText("재계산 중")).toBeInTheDocument();
@@ -517,7 +549,8 @@ describe("FactorGraphPanel", () => {
     // 다른 문서로 가면(문서 키 변경) 직전 투영을 쓰지 않는다.
     rerender(view({ status: "loading" }, 2));
     expect(screen.queryByText("재계산 중")).toBeNull();
-    expect(document.querySelector('[data-node-id="signal"]')).toBeNull();
+    expect(document.querySelector(".node-canvas__metadata")).toBeNull();
+    expect(document.querySelector('[data-node-id="signal"]')).not.toBeNull();
   });
 
   it("renders conditional branches, group details, provenance and exact selection actions", async () => {
@@ -654,10 +687,10 @@ describe("FactorGraphPanel", () => {
       />,
     );
 
-    const unplanned = screen.getByRole("region", {
-      name: "실행 계획에 포함되지 않은 정의",
-    });
-    const orphan = within(unplanned).getByRole("listitem");
+    const orphan = document.querySelector(
+      '[data-node-id="orphan"]',
+    ) as HTMLElement;
+    expect(orphan.tagName).toBe("TR");
     expect(orphan).toHaveAttribute("data-node-id", "orphan");
     expect(within(orphan).getByText("미실행")).toBeInTheDocument();
     expect(within(orphan).getByText("price.open")).toBeInTheDocument();

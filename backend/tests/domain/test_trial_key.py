@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import MISSING, dataclass, fields, replace
+from dataclasses import MISSING, dataclass, field, fields, replace
 from datetime import date
 from typing import Any
 
@@ -39,6 +39,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     FactorGraph,
     FieldNode,
     MissingPolicy,
+    ParameterNode,
     TimeSeriesNode,
     TimeSeriesOperator,
 )
@@ -52,6 +53,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
     WeightingMethod,
+    read_parameter_ids,
     strategy_semantic_hash,
     strategy_spec_hash,
 )
@@ -389,3 +391,61 @@ def test_adding_a_field_at_its_default_keeps_every_existing_key(
     assert trial_key(
         replace(_BASE, environment=replace(widened, future_cost_bps=0.5))
     ) != trial_key(_BASE)
+
+
+@dataclass(frozen=True)
+class _StrategyWithAnotherFactorReference(StrategySpec):
+    another_factor: str | None = field(default=None, metadata={"reference": "factor"})
+
+
+def test_new_metadata_factor_references_follow_renaming_without_hash_code_changes() -> None:
+    def extended(spec: StrategySpec, target: str) -> StrategySpec:
+        return _StrategyWithAnotherFactorReference(
+            **{item.name: getattr(spec, item.name) for item in fields(spec)},
+            another_factor=target,
+        )
+
+    first = _risk_weighted()
+    renamed = _risk_weighted("alpha", "inverse_risk")
+    assert strategy_semantic_hash(extended(first, first.factors[0].factor_id)) == (
+        strategy_semantic_hash(extended(renamed, renamed.factors[0].factor_id))
+    )
+    assert strategy_semantic_hash(extended(first, first.factors[0].factor_id)) != (
+        strategy_semantic_hash(extended(first, first.factors[1].factor_id))
+    )
+
+
+def test_only_parameters_a_node_reaching_the_output_reads_count_as_read() -> None:
+    """튼튼한지 확인하기가 펴는 축(실데이터 확인 2026-10-17 후속 3): 출력에 닿는 노드만 읽는다.
+
+    `scale` 은 출력이 읽고, `dead` 는 출력에 닿지 않는 노드만 읽고, `idle` 은 선언만 했다.
+    """
+    graph = FactorGraph(
+        nodes=(
+            FieldNode(node_id="close", field_id="price.close", kind="field"),
+            ParameterNode(node_id="w", parameter_id="scale", kind="parameter"),
+            ParameterNode(node_id="orphan", parameter_id="dead", kind="parameter"),
+            BinaryNode(
+                node_id="out",
+                operator=BinaryOperator.MULTIPLY,
+                left_node_id="close",
+                right_node_id="w",
+                kind="binary",
+            ),
+        ),
+        output_node_id="out",
+    )
+    strategy = StrategySpec(
+        identity=StrategyIdentity(strategy_id="s", revision=1),
+        title="손 예시",
+        factors=(
+            FactorSignal(
+                factor_id="scaled", label="배율", direction=FactorDirection.HIGH, graph=graph
+            ),
+        ),
+        parameters=tuple(
+            FloatParameter(name, 1.0, 0.0, 2.0, kind="float") for name in ("scale", "dead", "idle")
+        ),
+    )
+
+    assert read_parameter_ids(strategy) == {"scale"}

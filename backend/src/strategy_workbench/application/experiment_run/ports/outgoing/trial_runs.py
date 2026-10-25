@@ -19,6 +19,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunState,
 )
 from strategy_workbench.domain.backtest.facade.trials import TrialLedger
+from strategy_workbench.domain.experiment.facade.trial import ExperimentControls
 
 
 class TrialRunRejectedError(RuntimeError):
@@ -54,6 +55,18 @@ class AdmittedRun:
     ledger: TrialLedger
 
 
+@dataclass(frozen=True)
+class SourceRun:
+    """결과 실행 하나의 원본 요청과 종류.
+
+    실험 trial·검증 실행은 요청이 창 구간·칸 값으로 좁혀져 있다.
+    """
+
+    request: BacktestRunSpec
+    # 사용자가 직접 돌린 단일 실행인가(실행 종류는 실행 서비스가 판정한다).
+    single: bool
+
+
 class TrialRunPort(Protocol):
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
         """실행 시작과 같은 판정(preflight 포함)으로 검사하되 접수하지 않는다. 실행 요청이 아니므로
@@ -64,15 +77,23 @@ class TrialRunPort(Protocol):
         """
         ...
 
-    def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
+    def start(
+        self, request: BacktestRunSpec, *, trial_key: str, owner: str, controls: ExperimentControls
+    ) -> str:
         """실행을 접수하고 run_id 를 돌려준다. `trial_key` 로 계열 원장에 적는다.
 
+        `controls`는 저장된 현재 조작이며 접수와 함께 원자적으로 적용한다. 빈 레인의 메모리
+        설정을 오래 보존하지 않아도 이후 학습·검증·재시도가 같은 조작을 따른다.
         `owner` 는 실험 id 다. 실행 서비스가 대기 순서를 실험끼리 번갈아 정하고, 같은 입력을 이은
         run 은 소유자가 모두 취소해야 멈춘다.
 
         Raises:
             TrialRunRejectedError: 실행 서비스가 요청을 접수하지 않았다.
         """
+        ...
+
+    def source_run(self, run_id: str) -> SourceRun | None:
+        """튼튼한지 확인하기의 기반 실행(US-DM-11) — 원본 요청과 단일 실행인지. 모르면 None."""
         ...
 
     def result(self, run_id: str) -> BacktestRunResult:

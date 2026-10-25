@@ -55,6 +55,22 @@
   .pipeline__stages {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+
+  /* 데이터 → 비중을 한 방향으로 읽게 열 사이에 화살표를 둔다(RD-04-B). 장식이라 낭독하지 않는다. */
+  .pipeline__stage--flows {
+    position: relative;
+  }
+
+  .pipeline__stage--flows::after {
+    content: "→" / "";
+    position: absolute;
+    top: var(--space-4);
+    right: calc(var(--space-3) * -1);
+    z-index: 1;
+    transform: translateX(50%);
+    color: var(--text-muted);
+    font-weight: var(--font-weight-heading);
+  }
 }
 
 /* 열 폭보다 긴 컨트롤이 옆 열 밑으로 넘치지 않게 한다(grid 항목의 기본 최소 폭은 내용 폭이다). */
@@ -134,9 +150,11 @@
 /* 선언은 Form 컨트롤 규칙(`strategy-form-panel.css`)과 같고, 문장 안이라 크기만 줄인다. */
 .pipeline__field input,
 .pipeline__field select {
+  --control-size: var(--control-height-compact);
   min-width: 0;
   max-width: min(14rem, 100%);
-  padding: 0 var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-size-label);
 }
 
 .pipeline__field input[type="number"] {
@@ -157,4 +175,148 @@
 
 .pipeline__actions:empty {
   display: none;
+}
+
+.pipeline__properties {
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+}
+
+.pipeline__identity {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+/* 같은 문서·선정 결과를 비교하되, 팩터 상세 편집기는 URL의 별도 주 작업으로 연다. */
+.pipeline-comparison {
+  --pipeline-navigation-height: calc(
+    var(--control-height-compact) + var(--space-4)
+  );
+  container: pipeline-comparison / inline-size;
+  min-width: 0;
+}
+.pipeline-comparison__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.pipeline-comparison__result {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+}
+.pipeline-comparison__result .strategy-preview {
+  border-top: 0;
+}
+.graph-authoring {
+  container: graph-authoring / inline-size;
+  flex: none;
+  min-width: 0;
+}
+.graph-authoring .factor-graph__state {
+  min-height: 0;
+}
+.graph-authoring__navigation {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding-block: var(--space-2);
+  margin-bottom: var(--space-3);
+  background: var(--surface-panel);
+}
+.graph-authoring .factor-graph__toolbar {
+  position: sticky;
+  top: calc(var(--control-height) + var(--space-4));
+  z-index: 4;
+  background: var(--surface-panel);
+}
+/* 좁은 작업 영역에서 큰 팩터 도구 모음이 캔버스를 덮지 않도록 복귀 입구만 고정한다. */
+@container graph-authoring (max-width: 859px) {
+  .graph-authoring__navigation {
+    padding-block: var(--space-1);
+    margin-bottom: var(--space-2);
+  }
+  .graph-authoring .factor-graph__toolbar {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+  .graph-authoring .factor-graph__toolbar label {
+    width: 100%;
+    min-width: 0;
+  }
+  .graph-authoring .factor-graph__toolbar > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+@container pipeline-comparison (min-width: 1060px) {
+  .pipeline-comparison__body {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  }
+  .pipeline-comparison__result {
+    position: sticky;
+    top: 0;
+  }
+}
+
+.pipeline-comparison__navigation {
+  --control-size: var(--control-height-compact);
+  --control-font-size: var(--text-size-label);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+  margin-bottom: var(--space-3);
+  background: var(--surface-panel);
+  border-bottom: 1px solid var(--border);
+}
+.pipeline-comparison__navigation > a {
+  min-width: 0;
+  padding: var(--space-1) var(--space-3);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.pipeline-comparison__body > [id] {
+  min-width: 0;
+  scroll-margin-top: calc(var(--pipeline-navigation-height) + var(--space-3));
+}
+@container pipeline-comparison (min-width: 1060px) {
+  .pipeline-comparison__result {
+    top: calc(var(--pipeline-navigation-height) + var(--space-3));
+  }
+}
+
+@container pipeline-comparison (max-width: 479px) {
+  .pipeline-comparison__body {
+    --pipeline-navigation-height: calc(
+      var(--control-height-compact) * 2 + var(--space-2) + var(--space-4)
+    );
+  }
+  .pipeline-comparison__navigation > a {
+    width: 100%;
+  }
+}
+
+/* 칸 바로 뒤 괄호 도움말("0.2가 20%"). 캔버스 문장 줄에서는 칸 옆에 작게 붙는다 — 안내 카드는 입력칸 아래로 둔다. */
+.pipeline__field-help {
+  margin-left: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+/* 문장 안 select 는 여백을 줄이되 화살표 자리(`.ui-select`)는 남긴다 — 줄이면 긴 선택값 끝이 화살표 밑에 깔린다. */
+.pipeline__field select.ui-select:not([multiple]):not([size]) {
+  padding-inline-end: var(--space-6);
 }

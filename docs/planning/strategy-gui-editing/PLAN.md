@@ -88,7 +88,7 @@ progress_percent: 100
 
 | 항목 | 값 |
 |---|---|
-| PR | `P5-03` |
+| PR | 없음 — initiative 완료(2026-09-18). 아래는 마지막 Packet `P5-03`의 기록이다 |
 | Intent | Phase 5·initiative 마감: Graph → Form 왕복("Form에서 열기"), Graph 편집 e2e(노드 추가 → field_id → 재연결 → 검증 통과 → plan 투영 → 저장), 트랜잭션 잠금을 parse 실패로 좁힘(디바운스 구간 잠금 해소, 리뷰 132-03), route 테스트 de-flake(timeout 15s·reveal 대기), ADR D5 개정·로드맵 M8 주석·매뉴얼 8절·README 2·SoT "전략 의미" 행 |
 | Acceptance | WORKFLOW P5-03(+구현 결정) |
 | Non-goals | DAG 카드 안 편집 컨트롤 병합, `node_id` 중복 방지·참조 갱신 rename, 항목 안 배열 편집, 표현식 DSL |

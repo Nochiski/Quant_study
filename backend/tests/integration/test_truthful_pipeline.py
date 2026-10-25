@@ -33,6 +33,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
 )
+from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -89,7 +90,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     TimeSeriesOperator,
 )
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
-from strategy_workbench.domain.factor.facade.trace import trace_factor_graph
+from strategy_workbench.domain.factor.facade.trace import evaluate_factor_graph_with_trace
 from strategy_workbench.domain.portfolio.facade.construction import ExclusionReason
 from strategy_workbench.domain.strategy.facade.provenance import InlineDraft
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -213,7 +214,7 @@ def test_explain_and_portfolio_compile_identical_plans_from_one_metadata_contrac
     adapter = MockEquityDataAdapter.demo()
     registry = build_default_factor_registry()
     spec = _spec()
-    research = FactorResearchService(registry, adapter, adapter)
+    research = FactorResearchService(registry, adapter)
     result = _service(adapter, metadata=adapter, registry_version=registry.version).run_pipeline(
         PortfolioPreviewRequest(spec, environment=_environment())
     )
@@ -497,6 +498,7 @@ def test_unused_by_factor_non_finite_raw_field_fails_preview_trace_and_the_backt
         LocalArtifactStore(tmp_path),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "raw-contract-run",
+        run_execution=ThreadRunExecution,
     )
     # 시작 요청은 데이터를 읽지 않으므로 접수되고, 계약 위반은 tape 단계에서 run 을 실패시킨다.
     accepted = backtests.start(
@@ -606,6 +608,7 @@ def test_legacy_raw_port_keeps_preview_and_backtest_compatible(tmp_path: Path) -
         LocalArtifactStore(tmp_path),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "legacy-port-run",
+        run_execution=ThreadRunExecution,
     )
 
     accepted = backtests.start(
@@ -634,6 +637,7 @@ def test_metadata_raw_snapshot_mismatch_blocks_portfolio_and_backtest(tmp_path: 
         LocalArtifactStore(tmp_path),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "must-not-complete",
+        run_execution=ThreadRunExecution,
     )
     # 스냅샷 대조는 원시 관측을 읽은 뒤에만 가능하므로 tape 단계에서 run 을 실패시킨다(#158).
     accepted = backtests.start(
@@ -708,7 +712,9 @@ def test_graph_evaluation_matches_a_direct_evaluation_over_raw_pit_fields() -> N
     ).values
     pipeline = next(r for r in result.factor_evaluations if r.factor_id == "momentum_3").values
     assert direct == pipeline
-    trace = trace_factor_graph(momentum.graph, observations=observations, missing=missing)
+    trace = evaluate_factor_graph_with_trace(
+        momentum.graph, observations=observations, missing=missing
+    )[1]
     traced = {(v.as_of, v.security_id): v.value for v in trace.nodes[-1].values}
     assert all(traced[(v.as_of, v.security_id)] == v.value for v in pipeline)
 
@@ -1153,6 +1159,7 @@ def test_unknown_sectors_keep_the_full_book_and_warn_in_preview_trace_and_run(
         LocalArtifactStore(tmp_path),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "unknown-sector-run",
+        run_execution=ThreadRunExecution,
     )
     accepted = backtests.start(
         BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON, environment=_environment())

@@ -22,7 +22,6 @@ from backtest_engine import BacktestEngine, BacktestResult, RunConfig
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.core import (
     PortfolioLedger,
-    core_available,
     make_persistent_runtime,
     make_portfolio,
     make_pricing,
@@ -51,6 +50,7 @@ from backtest_engine.types.actions import (
     GroupPolicy,
     LiquidatePosition,
     LiquidationPersistence,
+    NotionalDelta,
     QuantityDelta,
     QuantityTarget,
     ReplaceOrder,
@@ -73,7 +73,7 @@ from backtest_engine.types.events import (
     StrategyEvent,
     TargetRounding,
 )
-from backtest_engine.types.instruments import InstrumentId
+from backtest_engine.types.instruments import InstrumentId, Money
 from backtest_engine.types.market import Bar, MarketSnapshot, PriceField
 from backtest_engine.types.orders import (
     LimitOrderRequest,
@@ -94,6 +94,7 @@ from backtest_engine.types.requirements import (
 from backtest_engine.types.strategy import Strategy, StrategyContext
 from tests import test_basket, test_corporate_action_engine, test_margin, test_short_selling
 from tests.conftest import day, make_bar, make_instrument, make_ohlc, make_snapshot
+from tests.rust_core_guard import RUST_CORE
 from tests.test_broker import RULE_TABLE
 from tests.test_engine_golden import (
     GOLDEN_BARS,
@@ -104,16 +105,15 @@ from tests.test_engine_golden import (
 )
 
 INSTRUMENT = make_instrument()
-RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core 확장 없음")
 # rust_legacy(= backtest_core.Portfolio 단독 어댑터)를 직접 쓰는 테스트용.
 # deprecation 경고는 의도된 것이라 무시한다.
 LEGACY_DEPRECATION = pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning")
 RUST_ENGINE_CORES = [
-    pytest.param("rust", marks=RUST_ONLY, id="rust"),
-    pytest.param("rust_persistent", marks=RUST_ONLY, id="rust_persistent"),
+    pytest.param("rust", marks=RUST_CORE, id="rust"),
+    pytest.param("rust_persistent", marks=RUST_CORE, id="rust_persistent"),
     pytest.param(
         "rust_legacy",
-        marks=[RUST_ONLY, LEGACY_DEPRECATION],
+        marks=[RUST_CORE, LEGACY_DEPRECATION],
         id="rust_legacy",
     ),
 ]
@@ -123,7 +123,7 @@ STANDALONE_PORTFOLIO_CORES = [
     "python",
     pytest.param(
         "rust_legacy",
-        marks=[RUST_ONLY, LEGACY_DEPRECATION],
+        marks=[RUST_CORE, LEGACY_DEPRECATION],
         id="rust_legacy",
     ),
 ]
@@ -137,7 +137,7 @@ def core(request: pytest.FixtureRequest) -> str:
 # --- execution_price ------------------------------------------------------------
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_rule_table_identical_across_cores() -> None:
     python, rust = make_pricing("python"), make_pricing("rust")
     bar = make_ohlc(day(2), INSTRUMENT, 100.0, 110.0, 90.0, 105.0)
@@ -147,7 +147,7 @@ def test_rule_table_identical_across_cores() -> None:
         ), _name
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_floor_delta_shares_identical() -> None:
     import backtest_core
 
@@ -157,7 +157,7 @@ def test_floor_delta_shares_identical() -> None:
         )
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_record_kind_codes_match_python_store() -> None:
     """레코드 kind 코드의 정본은 Python `RecordKind`가 멤버마다 박아 둔 리터럴이다.
     Rust 상수가 어긋나면 payload가 엉뚱한 kind로 materialize돼 결과가 조용히 틀어진다."""
@@ -168,7 +168,7 @@ def test_record_kind_codes_match_python_store() -> None:
     assert backtest_core.RECORD_KIND_CODES == {kind.value: kind.code for kind in RecordKind}
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_event_priorities_match_python_queue() -> None:
     """같은 세션 안의 처리 순서를 정하는 우선순위 값의 정본은 Python `EventPriority`다.
     Rust 상수가 어긋나면 이벤트 드레인 순서가 python core와 달라진다."""
@@ -181,7 +181,7 @@ def test_event_priorities_match_python_queue() -> None:
     }
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_row_index_bytes_match_bench_fallback() -> None:
     """행 조회표 표현 선택(Dense / Sparse)에 쓰는 바이트 상수의 정본은 Rust `feed.rs`다.
     벤치는 확장이 없는 환경을 위해 같은 리터럴을 폴백으로 들고 있으므로 둘이 어긋나면
@@ -282,7 +282,7 @@ def scenario(portfolio: PortfolioLedger) -> list[tuple[object, ...]]:
     return trace
 
 
-@RUST_ONLY
+@RUST_CORE
 @LEGACY_DEPRECATION
 def test_portfolio_scenario_identical_across_cores() -> None:
     """포트폴리오 단독 회계의 parity oracle. 엔진 코어 parity는 trace 비교 테스트가 덮는다."""
@@ -305,7 +305,7 @@ def test_unavailable_core_is_an_error_not_a_fallback() -> None:
         make_portfolio("nope", 1.0)
 
 
-@RUST_ONLY
+@RUST_CORE
 @pytest.mark.parametrize("core_name", ["rust", "rust_persistent"])
 def test_persistent_core_has_no_standalone_portfolio(core_name: str) -> None:
     """persistent 코어는 PersistentEngine이 원장을 소유한다 — 단독 어댑터를 주면 안 된다."""
@@ -479,6 +479,18 @@ ENGINE_SCENARIOS = {
         ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
         DataFeed(GOLDEN_BARS),
     ),
+    "leveraged_short_tax_budget": lambda core: _leveraged_tax_scenario(core),
+    "short_tax_budget": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="tax-budget",
+            initial_cash=1000.0,
+            fee_bps=0.0,
+            sell_tax_schedule=((date(2026, 8, 1), 1000.0),),
+        ),
+        test_short_selling.ShortStrategy((test_short_selling.target(-100),)),
+        DataFeed(test_short_selling.BARS),
+    ),
     "short_sell_tax": lambda core: _engine_scenario(
         core,
         RunConfig(
@@ -516,6 +528,36 @@ ENGINE_SCENARIOS = {
         RunConfig(run_id="si", initial_cash=100_000.0, fee_bps=10.0),
         ScriptedStrategy(script=(GTC_TARGET_70PCT, None, None, liquidate())),
         DataFeed(IMPACT_BARS),
+        max_participation=0.1,
+        slippage=SqrtImpactSlippage(0.99),
+    ),
+    "combined_costs": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="combined",
+            initial_cash=100_000.0,
+            fee_bps=10.0,
+            sell_tax_schedule=_SELL_TAX_SCHEDULE,
+        ),
+        ScriptedStrategy(script=(GTC_TARGET_70PCT, None, None, liquidate())),
+        DataFeed(IMPACT_BARS),
+        max_participation=0.1,
+        slippage=SqrtImpactSlippage(0.99),
+    ),
+    "basket_sqrt": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="basket-sqrt", initial_cash=100_000.0, sell_tax_schedule=_SELL_TAX_SCHEDULE
+        ),
+        test_basket.BasketStrategy(
+            (test_basket.hold_b(10), test_basket.pair(test_basket.GroupPolicy.PROPORTIONAL))
+        ),
+        DataFeed(
+            tuple(
+                replace(bar, impact_scale=0.002, liquidity_volume=bar.volume)
+                for bar in test_basket.BARS
+            )
+        ),
         max_participation=0.1,
         slippage=SqrtImpactSlippage(0.99),
     ),
@@ -573,7 +615,7 @@ def test_target_roundings_record_each_notional_to_share_conversion(core: str) ->
     ]
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_multi_instrument_equity_is_bit_identical_in_insertion_order() -> None:
     """DEFECT-601/602: 포지션 2개 이상에서 합산 결합 순서와 삽입 순서가 Python과 같아야 한다."""
     a, b, c = make_instrument("005930"), make_instrument("000660"), make_instrument("247540")
@@ -616,7 +658,7 @@ def test_multi_instrument_equity_is_bit_identical_in_insertion_order() -> None:
     assert python == rust
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_instruments_differing_only_in_currency_are_distinct_positions() -> None:
     """DEFECT-603: venue:symbol만으로 키를 만들면 통화가 다른 종목이 합쳐진다."""
     from backtest_engine.types.instruments import AssetClass, InstrumentId
@@ -649,7 +691,7 @@ def test_instruments_differing_only_in_currency_are_distinct_positions() -> None
 # --- 6b: 견적 산술 · 매수 여력 -------------------------------------------------------
 
 
-@RUST_ONLY
+@RUST_CORE
 @pytest.mark.parametrize("participation", [None, 0.7, 0.07, 0.29, 1.0])
 @pytest.mark.parametrize("buying_power", [0.0, 500.0, 6_499.0, 1e9])
 @pytest.mark.parametrize("held", [-30, 0, 5, 100])
@@ -678,7 +720,7 @@ def test_quote_numbers_identical_across_cores(
                 assert python.quote_numbers(*args) == rust.quote_numbers(*args), args
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_buying_power_identical_across_cores() -> None:
     from backtest_engine.engine.core import make_buying_power
     from backtest_engine.types.portfolio import PortfolioSnapshot, Position
@@ -855,7 +897,7 @@ def test_trace_serialization_is_byte_stable(core_name: str) -> None:
     )
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_persistent_basic_targets_bypass_python_router(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -984,7 +1026,7 @@ class _RandomActionStrategy:
         return StrategyDecision.of(ctx.now, action, f"random_phase_{phase}")
 
 
-@RUST_ONLY
+@RUST_CORE
 @pytest.mark.parametrize("seed", range(10))
 def test_all_actions_randomized_trace_matches_persistent_rust(seed: int) -> None:
     first, second = make_instrument("RND-A"), make_instrument("RND-B")
@@ -1015,7 +1057,7 @@ def test_all_actions_randomized_trace_matches_persistent_rust(seed: int) -> None
     )
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_promoted_rust_makes_no_per_session_ffi(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1107,7 +1149,7 @@ def test_promoted_rust_makes_no_per_session_ffi(
     assert proxies[0].inner.lifecycle_state() == "finished"
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_failed_materialization_poisons_the_kind_instead_of_shortening_the_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1153,7 +1195,7 @@ def test_failed_materialization_poisons_the_kind_instead_of_shortening_the_resul
     assert len(result.fills) == 2
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_rust_panic_becomes_engine_error_and_poisons_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1190,7 +1232,7 @@ def test_rust_panic_becomes_engine_error_and_poisons_runtime(
     assert [record.kind for record in engine.event_store.records] == [RecordKind.MARKET]
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_legacy_rust_core_is_explicitly_deprecated() -> None:
     engine = BacktestEngine(
         RunConfig(run_id="legacy-rust", initial_cash=100_000.0), core="rust_legacy"
@@ -1203,7 +1245,7 @@ def test_legacy_rust_core_is_explicitly_deprecated() -> None:
     assert len(result.snapshots) == len(DataFeed(GOLDEN_BARS))
 
 
-@pytest.mark.parametrize("core_name", ["python", pytest.param("rust", marks=RUST_ONLY)])
+@pytest.mark.parametrize("core_name", ["python", pytest.param("rust", marks=RUST_CORE)])
 def test_empty_feed_finishes_identically_with_an_empty_result(core_name: str) -> None:
     engine = BacktestEngine(RunConfig(run_id="empty-feed", initial_cash=100_000.0), core=core_name)
     result = engine.run(ScriptedStrategy(script=()), DataFeed(()))
@@ -1211,7 +1253,7 @@ def test_empty_feed_finishes_identically_with_an_empty_result(core_name: str) ->
     assert engine.event_store.records == ()
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_persistent_callback_tokens_reject_stale_and_double_submit() -> None:
     from backtest_engine.engine.wire import decision_to_wire
 
@@ -1255,7 +1297,7 @@ def test_persistent_callback_tokens_reject_stale_and_double_submit() -> None:
     assert kinds == [0, 5, 1]  # MARKET, SNAPSHOT, DECISION
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_persistent_strategy_exception_poison_runtime_and_preserves_partial_trace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1302,7 +1344,7 @@ def test_persistent_strategy_exception_poison_runtime_and_preserves_partial_trac
     ]
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_persistent_finish_keeps_order_fill_results_lazy_and_compact_traceable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1389,7 +1431,7 @@ class _FaultStrategy:
         return self._decision
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_persistent_router_error_type_order_and_trace_match_python() -> None:
     negative_target = SetPositionTarget(
         WeightTarget(INSTRUMENT, -0.25), ExecutionPolicy.market_next_open()
@@ -1465,7 +1507,7 @@ def test_month_end_schedule_is_rejected_before_any_core_runs(core: str) -> None:
         engine.run(_MonthEndStrategy(), DataFeed(bars))
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_persistent_retained_context_history_keeps_end_and_nan_alignment() -> None:
     import numpy as np
 
@@ -1857,7 +1899,7 @@ def test_result_tables_identical_across_cores(name: str, rust_core: str) -> None
     assert _result_tables(python_engine) == _result_tables(rust_engine)
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_result_tables_are_a_non_destructive_query() -> None:
     """테이블 조회는 Rust payload를 해제하지 않는다 — 공개 객체 경로가 그대로 남는다."""
     engine = BacktestEngine(RunConfig(run_id="tables-live", initial_cash=100_000.0), core="rust")
@@ -1875,7 +1917,7 @@ def test_result_tables_are_a_non_destructive_query() -> None:
     assert engine.event_store.result_tables() is tables
 
 
-@RUST_ONLY
+@RUST_CORE
 def test_result_tables_refuse_kinds_that_were_already_materialized() -> None:
     """공개 객체로 먼저 넘겨 해제한 kind는 테이블에서 조용히 빠지는 대신 오류가 된다."""
     engine = BacktestEngine(RunConfig(run_id="tables-drained", initial_cash=100_000.0), core="rust")
@@ -1938,3 +1980,244 @@ def test_result_tables_match_across_cores_on_a_partial_trace(rust_core: str) -> 
     assert tables.sessions == (day(1), day(2))
     assert tables.instruments == (_PARTIAL_A,)
     assert _result_tables(python_engine) == _result_tables(rust_engine)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("notional", ["450", "-450", "99", "-99"])
+def test_notional_adjustments_floor_absolute_shares_before_applying_direction(
+    core: str, notional: str
+) -> None:
+    """금액 조정도 목표 수량과 같은 내림 규칙을 쓴다. 음수는 floor(-4.5)가 아닌 -4주다(#417)."""
+    instrument = make_instrument()
+    actions: tuple[StrategyAction | None, ...] = (
+        SetPositionTarget(
+            QuantityTarget(instrument, Decimal(10)), ExecutionPolicy.market_next_open()
+        ),
+        AdjustPosition(
+            instrument,
+            NotionalDelta(Money(Decimal(notional), "KRW")),
+            ExecutionPolicy.market_next_open(),
+        ),
+    )
+    _engine, result = _engine_scenario(
+        core,
+        RunConfig(run_id="adjust-floor", initial_cash=10_000, fee_bps=0),
+        ScriptedStrategy(
+            actions,
+            declared_actions=frozenset(
+                {
+                    ActionKind.NO_ACTION,
+                    ActionKind.SET_POSITION_TARGET,
+                    ActionKind.ADJUST_POSITION,
+                }
+            ),
+        ),
+        DataFeed(tuple(make_bar(day(i), instrument, 100, 100) for i in (1, 2, 3))),
+    )
+    expected = 4 if abs(Decimal(notional)) >= 100 else 0
+    assert [fill.quantity for fill in result.fills] == (
+        [Decimal(10), Decimal(expected)] if expected else [Decimal(10)]
+    )
+    if expected:
+        assert result.fills[-1].side is (Side.BUY if Decimal(notional) > 0 else Side.SELL)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("scenario", ["combined_costs", "basket_sqrt"])
+def test_combined_cost_scenarios_exercise_tax_impact_and_explicit_volume(
+    core: str, scenario: str
+) -> None:
+    """세금·충격·참여 기준과 바스켓이 실제 체결 경로에서 함께 켜진다(#341)."""
+    engine, result = ENGINE_SCENARIOS[scenario](core)
+    # Rust 지연 체결 배열은 첫 접근에 payload를 인계한다. 비파괴 조회표를 먼저 얻는다.
+    tables = engine.event_store.result_tables()
+    assert any(fill.slippage_per_share != 0 for fill in result.fills)
+    assert any(fill.side is Side.SELL for fill in result.fills)
+    assert all(fill.cap_volume in (60, 1000, 3_000) for fill in result.fills)
+    assert any(row[1] == "sell_tax" and row[3] > 0 for row in tables.costs)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_basket_rescaling_preserves_the_quoted_impact_quantity(core: str) -> None:
+    """B의 캡6주가 A도6주로 줄이지만 A충격의 Q는 캡후견적10주다(#341)."""
+    import math
+
+    _engine, result = ENGINE_SCENARIOS["basket_sqrt"](core)
+    fills = [fill for fill in result.fills if fill.ts == day(3)]
+    assert [(fill.instrument.symbol, fill.quantity) for fill in fills] == [
+        ("000660", Decimal(6)),
+        ("005930", Decimal(6)),
+    ]
+    assert fills[0].slippage_per_share == pytest.approx(60 * 0.002 * math.sqrt(6))
+    assert fills[1].slippage_per_share == pytest.approx(100 * 0.002 * math.sqrt(10))
+    assert fills[1].slippage_per_share != pytest.approx(100 * 0.002 * math.sqrt(6))
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("held, expected", [(0, 9), (5, 18)])
+def test_short_entry_affordability_includes_tax_and_closing_costs(
+    core: str, held: int, expected: int
+) -> None:
+    """가격100·여력1000·세율10%: 신규숏9주, 보유5청산후여력1450에서신규숏13주다."""
+    from backtest_engine.engine.broker import PythonQuoteCore
+    from backtest_engine.engine.core import RustQuoteCore
+
+    quote_core = PythonQuoteCore() if core == "python" else RustQuoteCore()
+    quote = quote_core.quote_numbers(
+        Side.SELL,
+        100.0,
+        Decimal(100),
+        10000,
+        None,
+        0.0,
+        None,
+        1000.0,
+        Decimal(held),
+        0.0,
+        False,
+        0.1,
+    )
+    assert quote.quantity == Decimal(expected)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_short_tax_budget_reaches_every_engine_path(core: str) -> None:
+    """1000원 여력·100원 시가·10% 세금이면 10주가 아닌 9주만 열 수 있다."""
+    _engine, result = ENGINE_SCENARIOS["short_tax_budget"](core)
+    assert [fill.quantity for fill in result.fills] == [Decimal(9)]
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL])
+@pytest.mark.parametrize("held", [-5, 0, 5])
+@pytest.mark.parametrize("leverage", [1.0, 2.0, 3.0])
+@pytest.mark.parametrize("mark", [80.0, 100.0, 120.0])
+@pytest.mark.parametrize("fee_rate", [0.0, 0.05])
+def test_quote_budget_matches_actual_equity_and_exposure_after_costs(
+    core: str, side: Side, held: int, leverage: float, mark: float, fee_rate: float
+) -> None:
+    from backtest_engine.engine.broker import PythonQuoteCore
+    from backtest_engine.engine.core import RustQuoteCore, make_buying_power
+    from backtest_engine.types.portfolio import PortfolioSnapshot, Position
+
+    instrument = make_instrument()
+    snapshot = PortfolioSnapshot(
+        day(1),
+        1000.0 - held * mark,
+        (Position(instrument, Decimal(held), mark, mark, held * mark, 0.0),),
+        1000.0,
+        abs(held * mark) / 1000,
+    )
+    power = make_buying_power(core, snapshot, leverage)
+    quote_core = PythonQuoteCore() if core == "python" else RustQuoteCore()
+    rate = fee_rate + (0.1 if side is Side.SELL else 0.0)
+    sign = 1 if side is Side.BUY else -1
+
+    # 견적 공식을 재구현하지 않고 현금+보유 평가와 총노출로 모든 정수 후보를 판정한다.
+    def remaining_power(quantity: int) -> float:
+        cash = snapshot.cash - sign * quantity * 100 - quantity * 100 * rate
+        position = held + sign * quantity
+        return leverage * (cash + position * 100) - abs(position * 100)
+
+    expected = max(q for q in range(101) if remaining_power(q) >= 0)
+    quote = quote_core.quote_numbers(
+        side,
+        100,
+        Decimal(100),
+        10000,
+        None,
+        0,
+        None,
+        power.available,
+        Decimal(held),
+        fee_rate,
+        False,
+        0.1,
+        power.leverage,
+        power.mark_of(instrument),
+    )
+    assert quote.quantity == Decimal(expected)
+    power.consume_quantity(instrument, side, quote.quantity, quote.price, expected * 100 * rate)
+    assert power.available >= 0
+    assert remaining_power(expected + 1) < 0
+
+
+class _LeveragedShortStrategy(test_short_selling.ShortStrategy):
+    def requirements(self) -> StrategyRequirements:
+        return replace(
+            super().requirements(),
+            features=frozenset(
+                {EngineFeature.SHORT_SELLING, EngineFeature.MARGIN, EngineFeature.PARTIAL_FILL}
+            ),
+        )
+
+
+class _LeveragedBasketStrategy(test_basket.BasketStrategy):
+    def requirements(self) -> StrategyRequirements:
+        return replace(
+            super().requirements(),
+            features=super().requirements().features
+            | {EngineFeature.SHORT_SELLING, EngineFeature.MARGIN},
+        )
+
+
+def _leveraged_tax_scenario(core: str) -> tuple[BacktestEngine, BacktestResult]:
+    instrument = make_instrument()
+    return _engine_scenario(
+        core,
+        RunConfig(
+            run_id="leveraged-tax",
+            initial_cash=1000.0,
+            fee_bps=0.0,
+            max_gross_leverage=2.0,
+            sell_tax_schedule=((date(2026, 8, 1), 1000.0),),
+        ),
+        _LeveragedShortStrategy((test_short_selling.target(-100), test_short_selling.target(100))),
+        DataFeed(tuple(make_bar(day(i), instrument, 100.0, 100.0) for i in (1, 2, 3))),
+    )
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_leveraged_short_and_cover_use_actual_budget_in_every_engine(core: str) -> None:
+    _, result = _leveraged_tax_scenario(core)
+    assert [(f.side, f.quantity) for f in result.fills] == [
+        (Side.SELL, Decimal(16)),
+        (Side.BUY, Decimal(32)),
+    ]
+    assert all(s.gross_exposure <= 2 for s in result.snapshots)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_basket_quotes_consume_leveraged_cost_budget_in_order(core: str) -> None:
+    from backtest_engine.types.actions import BasketAction, GroupPolicy
+
+    _, result = _engine_scenario(
+        core,
+        RunConfig(
+            run_id="leveraged-basket",
+            initial_cash=1000.0,
+            fee_bps=0.0,
+            max_gross_leverage=2.0,
+            sell_tax_schedule=((date(2026, 8, 1), 1000.0),),
+        ),
+        _LeveragedBasketStrategy(
+            (
+                BasketAction(
+                    legs=(
+                        test_basket.market_leg(test_basket.A, Side.SELL, 8),
+                        test_basket.market_leg(test_basket.B, Side.SELL, 100),
+                    ),
+                    group_policy=GroupPolicy.BEST_EFFORT,
+                ),
+            )
+        ),
+        DataFeed(
+            tuple(
+                make_bar(day(i), instrument, 100.0, 100.0)
+                for i in (1, 2)
+                for instrument in (test_basket.A, test_basket.B)
+            )
+        ),
+    )
+    assert [f.quantity for f in result.fills] == [Decimal(8), Decimal(8)]
+    assert all(s.gross_exposure <= 2 for s in result.snapshots)

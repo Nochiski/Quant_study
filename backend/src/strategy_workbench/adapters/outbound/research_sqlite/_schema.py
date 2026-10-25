@@ -12,8 +12,15 @@
 | 3 | 실험(V3-03): `experiments`·`experiment_attempts`·`experiment_selections` |
 | 4 | 실험 대기열 조작(V3-04): `experiment_controls` |
 | 5 | 워크포워드 창별 자동 선택(V3-05): `experiment_window_picks` |
+| 6 | run 시작 시각(로드맵 M6 시간 추정): `backtest_run_starts` |
+| 7 | 실험 조작 이력(로드맵 M6 감사 기록): `experiment_control_changes` |
+| 8 | 실험을 만든 결과 실행(검증 랩 V5-02 튼튼한지 확인하기): `experiment_sources` |
+| 9 | 합성 사전등록·모의 claim·관측 결과(실제 개봉 권위 없음) |
+| 10 | 완료 run 의 머리 지표(목록 응답, 재설계 결정 1): `backtest_run_headlines` |
 
-v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다.
+v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다. v5 에서 올린
+파일의 기존 run 은 시작 시각이 없어 시간 추정의 근거가 되지 않는다. v9 에서 올린 파일의 기존 완료
+run 은 머리 지표가 없어 목록에서 지표 칸이 비어 보인다(결과 화면은 그대로 읽힌다).
 """
 
 from __future__ import annotations
@@ -29,7 +36,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 10
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -274,6 +281,187 @@ _V5_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
 
 V5_SCHEMA_OBJECTS = V4_SCHEMA_OBJECTS + _V5_ADDED_OBJECTS
 
+# run 이 처음 `running` 이 된 시각. `backtest_runs` 에 칸을 더하지 않고 곁 표로 둔다 — 칸을 더하면
+# 올린 파일과 새 파일의 표 DDL 이 달라져 manifest 대조가 깨진다. 시작 전에 끝난 run 은 행이 없다.
+_V6_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "backtest_run_starts",
+        """
+        CREATE TABLE backtest_run_starts (
+            accepted_order INTEGER PRIMARY KEY REFERENCES backtest_runs (accepted_order),
+            started_at TEXT NOT NULL
+        )
+        """,
+    ),
+)
+
+V6_SCHEMA_OBJECTS = V5_SCHEMA_OBJECTS + _V6_ADDED_OBJECTS
+
+# 실험 조작(일시정지·우선순위)을 바꿀 때마다 한 줄. `experiment_controls` 는 현재 값만 덮어쓰므로
+# 감사 기록은 이 표가 정본이다. v7 이전에 바꾼 조작은 이력이 없다.
+_V7_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "experiment_control_changes",
+        """
+        CREATE TABLE experiment_control_changes (
+            change_order INTEGER PRIMARY KEY,
+            experiment_order INTEGER NOT NULL REFERENCES experiments (experiment_order),
+            changed_at TEXT NOT NULL,
+            paused INTEGER NOT NULL CHECK (paused IN (0, 1)),
+            priority INTEGER NOT NULL CHECK (typeof(priority) = 'integer' AND priority >= 1)
+        )
+        """,
+    ),
+)
+
+V7_SCHEMA_OBJECTS = V6_SCHEMA_OBJECTS + _V7_ADDED_OBJECTS
+
+# "튼튼한지 확인하기"가 만든 실험과 그 버튼이 있던 결과 실행. 결과 화면이 실행으로 실험을 찾는다.
+# 설계 JSON 에 두지 않고 곁 표로 둬 실행 id 로 색인한다. 직접 만든 실험은 행이 없다.
+_V8_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "experiment_sources",
+        """
+        CREATE TABLE experiment_sources (
+            experiment_order INTEGER PRIMARY KEY REFERENCES experiments (experiment_order),
+            source_run_id TEXT NOT NULL COLLATE BINARY CHECK (length(trim(source_run_id)) >= 1)
+        )
+        """,
+    ),
+    (
+        "index",
+        "experiment_sources_by_run",
+        "CREATE INDEX experiment_sources_by_run ON experiment_sources (source_run_id)",
+    ),
+)
+
+V8_SCHEMA_OBJECTS = V7_SCHEMA_OBJECTS + _V8_ADDED_OBJECTS
+
+
+_V9_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "holdout_simulation_registrations",
+        """
+     CREATE TABLE holdout_simulation_registrations (
+       registration_id TEXT NOT NULL, registration_hash TEXT NOT NULL,
+       payload TEXT NOT NULL, payload_sha256 TEXT NOT NULL
+     )""",
+    ),
+    (
+        "trigger",
+        "holdout_simulation_registrations_no_update",
+        """
+     CREATE TRIGGER holdout_simulation_registrations_no_update
+     BEFORE UPDATE ON holdout_simulation_registrations BEGIN
+       SELECT RAISE(ABORT, 'simulation registration is immutable'); END""",
+    ),
+    (
+        "trigger",
+        "holdout_simulation_registrations_no_delete",
+        """
+     CREATE TRIGGER holdout_simulation_registrations_no_delete
+     BEFORE DELETE ON holdout_simulation_registrations BEGIN
+       SELECT RAISE(ABORT, 'simulation registration is immutable'); END""",
+    ),
+    (
+        "table",
+        "holdout_simulation_claims",
+        """
+     CREATE TABLE holdout_simulation_claims (
+       request_id TEXT NOT NULL,
+       registration_id TEXT NOT NULL REFERENCES holdout_simulation_registrations(registration_id),
+       registration_hash TEXT NOT NULL, namespace TEXT NOT NULL, window_id TEXT NOT NULL,
+       claimed_at TEXT NOT NULL, status TEXT NOT NULL, completed_at TEXT
+     )""",
+    ),
+    (
+        "index",
+        "holdout_simulation_window_once",
+        """
+     CREATE UNIQUE INDEX holdout_simulation_window_once
+       ON holdout_simulation_claims(namespace, window_id)""",
+    ),
+    (
+        "trigger",
+        "holdout_simulation_claims_no_delete",
+        """
+     CREATE TRIGGER holdout_simulation_claims_no_delete BEFORE DELETE ON holdout_simulation_claims
+     BEGIN SELECT RAISE(ABORT, 'simulation window consumption cannot be deleted'); END""",
+    ),
+    (
+        "trigger",
+        "holdout_simulation_claims_fixed_identity",
+        """
+     CREATE TRIGGER holdout_simulation_claims_fixed_identity
+     BEFORE UPDATE OF request_id, registration_id, registration_hash, namespace, window_id,
+                      claimed_at
+     ON holdout_simulation_claims
+     BEGIN SELECT RAISE(ABORT, 'simulation claim identity is immutable'); END""",
+    ),
+    (
+        "table",
+        "holdout_simulation_results",
+        """
+     CREATE TABLE holdout_simulation_results (
+       request_id TEXT NOT NULL REFERENCES holdout_simulation_claims(request_id),
+       payload TEXT NOT NULL, payload_sha256 TEXT NOT NULL
+     )""",
+    ),
+)
+
+_V9_ADDED_OBJECTS += (
+    (
+        "index",
+        "holdout_simulation_registration_id",
+        (
+            "CREATE UNIQUE INDEX holdout_simulation_registration_id "
+            "ON holdout_simulation_registrations(registration_id)"
+        ),
+    ),
+    (
+        "index",
+        "holdout_simulation_request_id",
+        (
+            "CREATE UNIQUE INDEX holdout_simulation_request_id "
+            "ON holdout_simulation_claims(request_id)"
+        ),
+    ),
+    (
+        "index",
+        "holdout_simulation_result_id",
+        (
+            "CREATE UNIQUE INDEX holdout_simulation_result_id "
+            "ON holdout_simulation_results(request_id)"
+        ),
+    ),
+)
+
+V9_SCHEMA_OBJECTS = V8_SCHEMA_OBJECTS + _V9_ADDED_OBJECTS
+
+# 완료 run 의 머리 지표(FULL 범위 총수익률·샤프·최대 낙폭). 목록이 결과 파일을 열지 않고 읽는
+# 투영이며, 완료 기록(`record_trial_result`, 완료 전이와 한 트랜잭션)에서 한 번 쓴다. 값이
+# 없는(사용 불가) 지표는 NULL 이다.
+_V10_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "backtest_run_headlines",
+        """
+        CREATE TABLE backtest_run_headlines (
+            accepted_order INTEGER PRIMARY KEY REFERENCES backtest_runs (accepted_order),
+            total_return REAL,
+            sharpe REAL,
+            max_drawdown REAL
+        )
+        """,
+    ),
+)
+
+V10_SCHEMA_OBJECTS = V9_SCHEMA_OBJECTS + _V10_ADDED_OBJECTS
+
 
 def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Connection], None]:
     def apply(connection: sqlite3.Connection) -> None:
@@ -290,13 +478,18 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V5_SCHEMA_OBJECTS,
+            objects=V10_SCHEMA_OBJECTS,
             error=ResearchStorageError,
             upgrades=(
                 SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _added(_V2_ADDED_OBJECTS)),
                 SchemaUpgrade(2, V2_SCHEMA_OBJECTS, _added(_V3_ADDED_OBJECTS)),
                 SchemaUpgrade(3, V3_SCHEMA_OBJECTS, _added(_V4_ADDED_OBJECTS)),
                 SchemaUpgrade(4, V4_SCHEMA_OBJECTS, _added(_V5_ADDED_OBJECTS)),
+                SchemaUpgrade(5, V5_SCHEMA_OBJECTS, _added(_V6_ADDED_OBJECTS)),
+                SchemaUpgrade(6, V6_SCHEMA_OBJECTS, _added(_V7_ADDED_OBJECTS)),
+                SchemaUpgrade(7, V7_SCHEMA_OBJECTS, _added(_V8_ADDED_OBJECTS)),
+                SchemaUpgrade(8, V8_SCHEMA_OBJECTS, _added(_V9_ADDED_OBJECTS)),
+                SchemaUpgrade(9, V9_SCHEMA_OBJECTS, _added(_V10_ADDED_OBJECTS)),
             ),
         ),
     )

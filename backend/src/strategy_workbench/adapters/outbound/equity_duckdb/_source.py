@@ -74,6 +74,12 @@ def _manifest(equity_root: Path, table: str) -> dict[str, object]:
 def table_builds(equity_root: Path) -> dict[str, str]:
     """커밋된 equity 테이블 → current_build. `_`·`.` 로 시작하는 디렉토리(`_pinned` 등)는 테이블이
     아니다(`equity.catalog.table_builds` 와 같은 규칙)."""
+    # 연구 보존 root는 완료 전에는 MANIFEST가 모두 있어도 실행 입력으로 공개하지 않는다.
+    if (equity_root / "_research_snapshot.pending").exists():
+        raise EquityDuckdbSetupError(
+            f"research snapshot publication pending — root={equity_root} "
+            "marker=_research_snapshot.pending"
+        )
     if not equity_root.is_dir():
         raise EquityDuckdbSetupError(f"equity root is not a directory — root={equity_root}")
     builds: dict[str, str] = {}

@@ -69,6 +69,7 @@ const parsedState = (source: string): DocumentState => {
 const formOf = (state: DocumentState): FormProjectionState => ({
   projection: projectForm(SCHEMA, state.parse, []),
   firstParsePending: false,
+  noValidParse: false,
   stale: false,
   tree:
     state.parse !== null && state.parse.status === "ok" ? state.parse.tree : {},
@@ -103,7 +104,7 @@ const stub = (): SourceTransactions => ({
   run: vi.fn(),
   feedback: { status: "idle" },
   feedbackFor: () => ({ status: "idle" }),
-  onEditorReady: vi.fn(),
+
   enabled: true,
   disabled: null,
   settling: false,

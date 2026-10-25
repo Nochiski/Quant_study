@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+from math import isfinite
 
 from backtest_engine.types.actions import StrategyAction
 from backtest_engine.types.instruments import InstrumentId
@@ -46,12 +47,26 @@ class OrderUpdateEvent:
     order_id: str
     status: OrderStatus
     detail: str | None = None
+    # 자유 문구와 별개인 견적 owner의 판정. 옛 기록에는 없으므로 None이다.
+    reason_code: str | None = None
+    cap_volume: int | None = None
 
 
 class CorporateActionType(Enum):
     SPLIT = "split"  # 주식 수 증가 + 가격 반비례 확인
     REVERSE_SPLIT = "reverse_split"  # 주식 수 감소 + 가격 반비례 확인
     SHARE_COUNT_CHANGE = "share_count_change"  # 주식 수 변화만 확인 (가격 미확인) — 알림 전용
+
+
+# 유동성 한도가 0주라 체결되지 않은 주문 상태 이벤트의 사유 코드(#411). Rust 세션도 같은 값을
+# 내며 두 코어 결과는 `tests/test_order_diagnostics.py`가 대조한다.
+LIQUIDITY_CAP_ZERO = "liquidity_cap_zero"
+
+# 가격 반비례가 확인되어 엔진이 보유 수량·대기 주문에 적용하는 사건(알림 전용 제외)의 정본.
+# workbench domain의 `PRICE_ADJUSTING_ACTIONS`(문자열)는 어댑터 테스트가 이 집합과 대조한다.
+PRICE_ADJUSTING_ACTION_TYPES = frozenset(
+    {CorporateActionType.SPLIT, CorporateActionType.REVERSE_SPLIT}
+)
 
 
 @dataclass(frozen=True)
@@ -183,8 +198,15 @@ class FillEvent:
     # 체결 세션 bar 의 유동성 캡 기준 거래량(`Bar.cap_volume`) — 브로커가 참여 한도를 곱한 그
     # 값이다. 참여율(체결 수량 ÷ 기준 거래량)을 결과만으로 다시 잴 수 있게 남긴다(검증 랩 V4-04).
     cap_volume: int
+    # 최종 체결 수량·가격으로 계획할 때 확정한 거래세. 청구·기록·거래 분석이 이 값을 읽는다.
+    sell_tax: float = 0.0
 
     def __post_init__(self) -> None:
+        if not isfinite(self.sell_tax) or self.sell_tax < 0:
+            raise ValueError(
+                f"fill sell_tax must be finite and >= 0 — "
+                f"fill_id={self.fill_id} sell_tax={self.sell_tax}"
+            )
         if self.cap_volume < 0:
             raise ValueError(
                 f"fill cap_volume must be >= 0 — fill_id={self.fill_id} "

@@ -6,15 +6,11 @@ are the ones the truthful pipeline (P1.5-04) relies on: adapter-owned snapshot i
 explicit warm-up history, deterministic ordering, window-invariant facts, failures as values, and
 raw facts only (no factor values).
 
-`ADAPTERS` names the cases; the `adapter` fixture builds them. Each case answers the subset of
-`FIELDS` its `list_fields()` declares, and must reject the rest as a failure value rather than
-synthesise it. `FIELDS` is the union of what any adapter can serve: the mock declares nine of them
-and ignores the rest, while the equity adapter (S21-3) serves the 29 EQUITY_FIELD_MAP ids whose
-source tables are built plus the internal `price.adj_close`. That union is deliberate — the
-window-invariance, PIT and cell-kind clauses below then run over every equity field, including the
-as-of ones (financials, consensus, filings) whose `available_date` is a filing date far behind
-`as_of` and the daily grids (flow, short, credit) whose empty cells carry a missing reason rather
-than a zero.
+`ADAPTERS`의 각 어댑터는 `FIELDS` 가운데 자기 카탈로그가 선언한 부분집합만 답하며 나머지는
+실패 값으로 거절한다. mock은 결정론적인 부분집합, 원장은 픽스처가 원천을 갖춘 필드를 답한다.
+이 합집합에 새 필드도 넣어 창 불변성·PIT·셀 종류를 함께 검사한다. 재무·공시는 과거 공개일을
+유지하고, 수급·공매도·신용의 빈 칸은 원천별 결측 사유를 보존한다.
+
 """
 
 from __future__ import annotations
@@ -83,8 +79,12 @@ FIELDS = (
     "event.insider_net_buy",
     # daily grids carrying an explicit missing-reason axis (flow_daily, short_daily, credit_daily)
     "flow.foreign_net_buy",
+    "flow.foreign_ownership",
+    "flow.foreign_limit_exhaustion",
+    "flow.pension_net_buy",
     "flow.institution_net_buy",
     "flow.retail_net_buy",
+    "short.short_sale_volume",
     "short.short_sale_value",
     "short.borrowed_quantity",
     "credit.margin_balance",
@@ -97,9 +97,7 @@ FIELDS = (
 ADAPTERS = [pytest.param("mock", id="mock"), pytest.param("equity_duckdb", id="equity_duckdb")]
 
 
-class ContractAdapter(
-    RawObservationPort, CancellableRawObservationPort, EquityDataPort, Protocol
-):
+class ContractAdapter(RawObservationPort, CancellableRawObservationPort, EquityDataPort, Protocol):
     """All three ports on one object — the suite checks they agree cell by cell.
 
     Cancellation is not optional for a contract case: a long trace must be interruptible on
@@ -189,9 +187,7 @@ def test_lagged_fields_are_present_on_the_first_history_session(
     adapter: ContractAdapter,
 ) -> None:
     """Lag is the adapter's job: warm-up sessions must already carry lagged fields."""
-    result = adapter.load_raw_observations(
-        _query(adapter, fields=("price.market_cap",), history=2)
-    )
+    result = adapter.load_raw_observations(_query(adapter, fields=("price.market_cap",), history=2))
     first = result.history_sessions[0]
     present = [
         o
@@ -210,6 +206,26 @@ def test_observations_are_deterministic_and_ordered(adapter: ContractAdapter) ->
     keys = [(o.as_of, o.security_id) for o in first.observations]
     assert keys == sorted(keys)
     assert len(keys) == len(set(keys))
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)
+@pytest.mark.parametrize("reverse", [False, True], ids=["suite-order", "reversed-order"])
+def test_observation_fields_follow_the_query_field_order(
+    adapter: ContractAdapter, reverse: bool
+) -> None:
+    """원시 계약: 관측의 fields 는 질의 field_ids 순서의 부분열이다(열 포트가 열 순서로 쓴다).
+
+    질의 순서를 뒤집어도 따라오는지 본다 — 어댑터가 자기 선언 순서로 내면 한쪽에서 실패한다.
+    """
+    fields = _fields(adapter)
+    query = _query(adapter, fields=tuple(reversed(fields)) if reverse else fields, history=3)
+    result = adapter.load_raw_observations(query)
+    assert result.ok and result.observations
+
+    position = {field_id: index for index, field_id in enumerate(query.field_ids)}
+    for observation in result.observations:
+        order = [position[field.field_id] for field in observation.fields]
+        assert order == sorted(set(order)), (observation.as_of, observation.security_id, order)
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)
@@ -246,9 +262,7 @@ def test_facts_do_not_depend_on_the_query_window(adapter: ContractAdapter) -> No
 def test_unknown_field_is_a_failure_value_not_a_synthetic_series(
     adapter: ContractAdapter,
 ) -> None:
-    result = adapter.load_raw_observations(
-        _query(adapter, fields=("price.close", "unknown.field"))
-    )
+    result = adapter.load_raw_observations(_query(adapter, fields=("price.close", "unknown.field")))
     assert result.status is DataLoadStatus.INVALID_QUERY
     assert not result.ok
     assert result.observations == ()
@@ -474,6 +488,42 @@ def test_result_rejects_every_non_finite_raw_number(value: float) -> None:
             (),
             (RawObservation(START, "a", True, (), previous_weight=value),),
         )
+
+
+@pytest.mark.parametrize("value", [True, False, 3, 0])
+def test_result_rejects_bool_and_int_raw_values(value: bool | int) -> None:
+    """값 타입은 정확히 float·str·None 이다. 열 포트와 한 계약을 쓰려고 bool(T2-01)과
+    int(#574 리뷰 P3-2)를 뺐다. 두 경우 문장 형식이 같다."""
+    field = RawFieldValue("price.close", value, START)
+    with pytest.raises(
+        RawObservationContractViolation,
+        match=(
+            rf"raw field value must be float, str or None — as_of={START} "
+            rf"security_id='a' field_id='price\.close' value={value}"
+        ),
+    ):
+        RawObservationSet(
+            DataLoadStatus.OK, "snap", (START,), (), (RawObservation(START, "a", True, (field,)),)
+        )
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)
+def test_raw_field_values_are_float_str_or_none(adapter: ContractAdapter) -> None:
+    """두 어댑터 모두 bool·int 값을 내지 않는다. 열 포트(`RawPanel`)는 숫자와 문자열만 담는다."""
+    queries = [_query(adapter, history=3)]
+    if isinstance(adapter, MockEquityDataAdapter):
+        # 달력 밖 합성 구간도 같은 값 타입이어야 한다.
+        queries.append(_query(adapter, start=date(2025, 3, 3), end=date(2025, 3, 14), history=5))
+    for query in queries:
+        result = adapter.load_raw_observations(query)
+        assert result.ok and result.observations
+        for observation in result.observations:
+            for field in observation.fields:
+                assert field.value is None or type(field.value) in (float, str), (
+                    observation.as_of,
+                    observation.security_id,
+                    field,
+                )
 
 
 @pytest.mark.parametrize("consumer_revalidation", [False, True])

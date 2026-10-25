@@ -2,6 +2,8 @@
 
 처음 사용하는 방법과 실제 화면은
 [Strategy Workbench 사용자 매뉴얼](../docs/manual/strategy-workbench/README.md)을 참고한다.
+화면의 배치·작업공간 계약은 [디자인 정본](../design-system/strategy-workbench/MASTER.md),
+전체 표면의 점검 범위와 남은 과제는 [편집기 사용성 검토](../docs/planning/ui-layout-polish/editor-usability-review.md)를 따른다.
 
 > 전략 authoring은 verbose YAML/JSON source editor 하나를 사용한다
 > ([ADR](../docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md),
@@ -57,7 +59,7 @@ graph를 typed input port, output type/unit, minimum history, inline validation�
   현재 문서의 JSON Pointer·팩터/노드 ID와 테마 선호를 검색한다.
 - `Ctrl/⌘+Enter`, `Ctrl/⌘+S`, `Ctrl/⌘+Shift+Enter`: 각각 현재 원문의 검증, 리비전 저장,
   백테스트다. 툴바와 같은 invalid/stale/dirty gate를 사용하며 IME 조합 중에는 실행하지 않는다.
-- `Alt+1`~`Alt+5`: 현재 route에서 제공하는 표현 탭만 연다.
+- `Alt+1`·`Alt+2`: 현재 route에서 제공하는 그래프·YAML 표현을 연다. 중간 결과에서 쓰면 편집 작업공간으로 복귀한다.
 
 패널 크기와 `system`/`light`/`dark` 테마 선호만 versioned local storage에 저장한다. 선택 path와
 view는 URL이 소유하고, StrategySpec·서버 revision에는 UI 선호를 넣지 않는다. dark 색상 token은
@@ -122,7 +124,7 @@ npm run docs:capture # 실행 중인 실제 frontend/backend로 사용자 매뉴
 `npm run test:e2e`가 본다. 이 명령은 실제 FastAPI와 production preview를 격리된 SQLite에서 함께 띄운다
 (`e2e/README.md`). 먼저 `backend`에서 `uv sync`와
 `uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release`를 실행해야 기본 Rust
-백테스트까지 검증된다.
+백테스트까지 검증된다. Rust 소스를 바꾼 뒤 다시 빌드하지 않으면 엔진이 오래된 확장을 거절한다.
 
 OpenAPI 생성물은 `src/shared/api/generated`에만 있고 앱 코드는 `shared/api` gateway를 통해서만
 접근한다. `npm run api:generate` 뒤 diff가 생기면 backend 계약과 생성물을 같은 변경으로 커밋한다.

@@ -58,16 +58,8 @@ const isRecord = (value: unknown): value is DraftRecord => {
   return record.key === draftKey(strategyId, baseRevision);
 };
 
-export const defaultDraftStorage = (): DraftStorage | null => {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    return null;
-  }
-};
-
 export const readDraft = (
-  storage: DraftStorage | null,
+  storage: Pick<Storage, "getItem"> | null,
   key: string,
 ): DraftRecord | null => {
   if (!storage) return null;
@@ -99,5 +91,27 @@ export const clearDraft = (storage: DraftStorage | null, key: string): void => {
     storage?.removeItem(PREFIX + key);
   } catch {
     // nothing to clear
+  }
+};
+
+/**
+ * 보관된 로컬 초안 전부(연구 홈의 "저장 안 됨", RD-01-A). 각 줄은 `readDraft`와 같은 검사를 거치고 최근에
+ * 보관한 것부터다. 보관함을 읽을 수 없으면 빈 목록이다.
+ */
+export const listDrafts = (
+  storage: Pick<Storage, "getItem" | "key" | "length"> | null,
+): DraftRecord[] => {
+  if (!storage) return [];
+  try {
+    const records: DraftRecord[] = [];
+    for (let index = 0; index < storage.length; index += 1) {
+      const name = storage.key(index);
+      if (name === null || !name.startsWith(PREFIX)) continue;
+      const record = readDraft(storage, name.slice(PREFIX.length));
+      if (record !== null) records.push(record);
+    }
+    return records.sort((left, right) => right.savedAt.localeCompare(left.savedAt));
+  } catch {
+    return [];
   }
 };

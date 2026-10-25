@@ -12,6 +12,7 @@ import { useEffect } from "react";
 import {
   strategyWorkbenchApi,
   type ExperimentRequest,
+  type ExperimentSelectionRequest,
 } from "../../../shared/api";
 
 export const experimentsKey = () => ["experiments"] as const;
@@ -21,7 +22,7 @@ export const EXPERIMENT_POLL_MS = 2_000;
 
 /**
  * 실험 목록(최근에 만든 순, 응답의 `next_after` 로 다음 쪽을 더 읽는다)과 대기열 표면(슬롯 사용량·우선순위
- * 상한). 상태·진행 수·끝났는지(`finished`)는 backend 가 파생해 싣는다(spec D6). 읽은 쪽 어디에든 끝나지 않은
+ * 상한). 상태·진행 수·실행까지 멈췄는지(`settled`)는 backend 가 파생해 싣는다(spec D6). 읽은 쪽 어디에든 끝나지 않은
  * 실험이 있으면 2초마다 읽은 쪽을 모두 다시 읽는다 — 뒤쪽의 일시정지한 실험도 재개·취소할 수 있다(#402
  * 리뷰 P2-1).
  */
@@ -33,7 +34,7 @@ export const experimentsQuery = () =>
     getNextPageParam: (page) => page.next_after ?? undefined,
     refetchInterval: (query) =>
       query.state.data?.pages.some((page) =>
-        page.items.some((item) => !item.finished),
+        page.items.some((item) => !item.settled),
       )
         ? EXPERIMENT_POLL_MS
         : false,
@@ -48,7 +49,7 @@ export const experimentQuery = (experimentId: string) =>
     queryKey: [...experimentsKey(), experimentId],
     queryFn: () => strategyWorkbenchApi.getExperiment(experimentId),
     refetchInterval: (query) =>
-      query.state.data?.finished === false ? EXPERIMENT_POLL_MS : false,
+      query.state.data?.settled === false ? EXPERIMENT_POLL_MS : false,
   });
 
 /**
@@ -110,6 +111,68 @@ export const experimentTrialsQuery = (experimentId: string) =>
     queryFn: () => strategyWorkbenchApi.listExperimentTrials(experimentId),
   });
 
+export const experimentAuditQuery = (experimentId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId, "audit"],
+    queryFn: () => strategyWorkbenchApi.getExperimentAudit(experimentId),
+  });
+
+export const experimentRemainingTimeQuery = (experimentId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId, "remaining-time"],
+    queryFn: () =>
+      strategyWorkbenchApi.getExperimentRemainingTime(experimentId),
+  });
+
+/** 칸 판정(추천·봉우리)과 민감도. 판정 기준은 backend(V4-03)가 소유한다. */
+export const experimentParameterMapQuery = (experimentId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId, "parameter-map"],
+    queryFn: () => strategyWorkbenchApi.getExperimentParameterMap(experimentId),
+  });
+
+/** 선택 당시 통계는 서버의 불변 기록이며 현재 원장에서 화면이 다시 만들지 않는다. */
+export const useSelectExperimentCandidate = (experimentId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: ExperimentSelectionRequest) => strategyWorkbenchApi.selectExperimentTrial(experimentId, request),
+    onSuccess: (selection) => queryClient.invalidateQueries({ queryKey: [...experimentsKey(), selection.experiment_id] }),
+  });
+};
+
+/**
+ * 결과 실행에서 "튼튼한지 확인하기"로 만든 실험(최근에 만든 순, US-DM-11). 끝나지 않은 실험이 있으면 목록과
+ * 같은 주기로 다시 읽는다.
+ */
+export const robustnessChecksQuery = (runId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), "robustness", runId],
+    queryFn: () => strategyWorkbenchApi.listRobustnessChecks(runId),
+    refetchInterval: (query) =>
+      query.state.data?.some((item) => !item.settled)
+        ? EXPERIMENT_POLL_MS
+        : false,
+  });
+
+/** 확인 창이 열릴 때만 묻는 미리 계산. 거절은 같은 실행이면 늘 같아 다시 묻지 않는다. */
+export const useRobustnessPreview = (runId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: [...experimentsKey(), "robustness", runId, "preview"],
+    queryFn: enabled
+      ? () => strategyWorkbenchApi.previewRobustnessCheck(runId)
+      : skipToken,
+    retry: false,
+  });
+
+export const useCreateRobustnessCheck = (runId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => strategyWorkbenchApi.createRobustnessCheck(runId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: experimentsKey() }),
+  });
+};
+
 export const experimentWalkForwardQuery = (experimentId: string) =>
   queryOptions({
     queryKey: [...experimentsKey(), experimentId, "walk-forward"],
@@ -159,4 +222,52 @@ export const useExperimentProgress = (experimentId: string, open: boolean) => {
     })();
     return () => controller.abort();
   }, [experimentId, open, queryClient]);
+};
+
+export const continuousLatestQuery = (experimentId: string, poll = true) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId, "continuous-account"],
+    queryFn: () =>
+      strategyWorkbenchApi.getExperimentContinuousAccount(experimentId),
+    retry: false,
+    refetchOnReconnect: false,
+    refetchInterval: (query) =>
+      poll &&
+      !query.state.error &&
+      query.state.data?.status === "running"
+        ? 1_000
+        : false,
+  });
+
+export const continuousAccountKey = (evaluationId: string | null) =>
+  ["continuous-account", evaluationId] as const;
+
+export const continuousAccountQuery = (evaluationId: string | null) =>
+  queryOptions({
+    queryKey: continuousAccountKey(evaluationId),
+    queryFn:
+      evaluationId === null
+        ? skipToken
+        : () => strategyWorkbenchApi.getContinuousAccount(evaluationId),
+    retry: false,
+    refetchOnReconnect: false,
+  });
+
+/** 같은 요청 ID를 재사용하여 응답 유실 뒤에도 새 실행을 만들지 않는다. */
+export const useRunContinuousAccount = (experimentId: string) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (requestId: string) =>
+      strategyWorkbenchApi.runExperimentContinuousAccount(
+        experimentId,
+        requestId,
+      ),
+    retry: 0,
+    onSuccess: (state) => {
+      client.setQueryData(continuousAccountKey(state.evaluation_id), state);
+      void client.invalidateQueries({
+        queryKey: [...experimentsKey(), experimentId, "continuous-account"],
+      });
+    },
+  });
 };

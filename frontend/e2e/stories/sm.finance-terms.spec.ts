@@ -50,13 +50,13 @@ test(
     expect(await currentSource(page)).toBe(source);
     await expectPhase(page, "검증 통과");
 
-    // 1440px에서는 편집기 최소 폭을 지키려고 사이드바가 계약 칸 위에 겹쳐 뜬다(#269). 사이드바를 닫아
-    // 계약 패널을 드러낸다.
+    // AI 창은 화면 위에 떠 있어 계약 칸을 가릴 수 있다. 창을 최소화해 계약 패널을 드러낸다.
     await assistant(page)
-      .getByRole("button", { name: "사이드바 닫기" })
+      .getByRole("button", { name: "AI 어시스턴트 접기" })
       .click();
 
     // 문서의 금융 필드는 전략 구조에서 고르면 계약 패널이 한글 뜻을 보인다.
+    await page.getByRole("button", { name: "전략 구조", exact: true }).click();
     await page.getByLabel("전략 구조 필터").fill("selection_count");
     await page
       .getByRole("tree", { name: "StrategySpec 문서 구조" })
@@ -72,6 +72,7 @@ test(
     // 내려가므로, 사용자처럼 제목까지 굴려 올려 읽는다.
     await scrollPageTo(heading);
     expect(await coveringElement(heading)).toBeNull();
+    await contract.getByText("필드 경로 · 타입 · 기술 근거", { exact: true }).click();
     await expect(
       contract
         .getByRole("term")

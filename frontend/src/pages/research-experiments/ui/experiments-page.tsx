@@ -6,6 +6,7 @@ import {
   experimentStatusLabel,
   experimentStatusTone,
   experimentsQuery,
+  TrialProgress,
   useCancelExperiment,
   useControlExperiment,
   type Experiment,
@@ -15,6 +16,7 @@ import { t, tFill } from "../../../shared/config";
 import { Link } from "../../../shared/lib/router";
 import { Badge, Button, EmptyState, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
+import "./experiments-page.css";
 
 /** 실험 한 줄의 조작. 대기열 규칙(슬롯·배정·우선순위 상한)은 backend 가 적용한다(spec D6). */
 const Actions = ({
@@ -192,8 +194,28 @@ export const ExperimentsPage = () => {
                           <Badge tone={experimentStatusTone(item.status)}>
                             {experimentStatusLabel(item.status)}
                           </Badge>
+                          {item.status === "completed" && item.selections.length === 0 ? (
+                            <>
+                              {" "}
+                              <Badge tone="info">{t("experiments.awaitingCandidate")}</Badge>{" "}
+                              <Link
+                                className="ui-button ui-button--secondary ui-button--small"
+                                to="/research/experiments/$experimentId"
+                                params={{ experimentId: item.record.experiment_id }}
+                                hash="candidate"
+                              >
+                                {t("experiments.notice.candidates")}
+                              </Link>
+                            </>
+                          ) : null}
+                          {item.status === "queued" ? (
+                            <small className="experiment-list__hint">
+                              {t("experiments.queuedHint")}
+                            </small>
+                          ) : null}
                         </td>
                         <td>
+                          <TrialProgress counts={counts} />
                           {tFill("experiments.counts", {
                             completed: counts.completed ?? 0,
                             total: Object.values(counts).reduce(

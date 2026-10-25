@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunState
 from strategy_workbench.domain.backtest.facade.trials import BlockedTrialAttempt, TrialLedgerEntry
 
 
@@ -28,11 +29,33 @@ class TrialLedgerRecords:
     blocked: tuple[BlockedTrialAttempt, ...]
 
 
+@dataclass(frozen=True)
+class RunHeadline:
+    """완료 run 의 머리 지표(FULL 범위). 목록이 결과 파일을 열지 않고 읽는 투영이다(재설계 결정 1).
+
+    값은 결과의 지표 레지스트리 값 그대로이고 사용 불가면 None 이다. 다시 계산하지 않는다.
+    """
+
+    total_return: float | None
+    sharpe: float | None
+    max_drawdown: float | None
+
+
 class TrialLedgerPort(Protocol):
     def record_trial_result(
-        self, run_id: str, *, session_sharpe: float | None, metric_registry_version: str
+        self,
+        completed: BacktestRunState,
+        *,
+        session_sharpe: float | None,
+        metric_registry_version: str,
+        headline: RunHeadline | None = None,
     ) -> None:
-        """완료된 run 의 대표 샤프 후보(세션 단위)와 지표 레지스트리 판본을 적는다."""
+        """run 의 완료 전이와 대표 샤프 후보(세션 단위)·지표 레지스트리 판본을 한 트랜잭션에 적는다.
+
+        `completed` 는 `COMPLETED` 상태여야 한다. `headline` 은 목록이 읽는 머리 지표다. 셋을
+        함께 적어 완료가 아닌 run 에 대표 샤프·머리 지표가 남지 않게 한다 — 서비스는 취소와
+        선형화해 완료가 이긴 뒤에만 부른다(#581 리뷰).
+        """
         ...
 
     def record_blocked_attempt(self, attempt: BlockedTrialAttempt) -> None:

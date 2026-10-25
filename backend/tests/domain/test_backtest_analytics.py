@@ -52,7 +52,7 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
         registry,
     )
 
-    assert registry.version == "metric-registry-v5"
+    assert registry.version == "metric-registry-v6"
     assert len(registry.definitions()) == 24
     assert _metric(report, "total_taxes").value == pytest.approx(0.6)
     assert _metric(report, "total_return").value == pytest.approx(0.1)

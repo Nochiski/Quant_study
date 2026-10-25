@@ -27,6 +27,7 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
     source_hash_of,
 )
 from strategy_workbench.bootstrap._container import build_container
+from strategy_workbench.domain.strategy.facade.document import CURRENT_SCHEMA_VERSION
 
 NOW = datetime(2026, 9, 5, 12, 30, tzinfo=UTC)
 
@@ -44,7 +45,7 @@ def _draft(
         source=source,
         format=SourceFormat.YAML,
         source_hash=source_hash_of(source),
-        schema_version="1.1",
+        schema_version=CURRENT_SCHEMA_VERSION,
         updated_at=updated_at,
     )
 
@@ -170,7 +171,7 @@ def test_draft_service_rejects_a_naive_clock(tmp_path: Path) -> None:
     with pytest.raises(InvalidStrategyDraftError, match="timezone-aware"):
         service.save(
             "naive-clock",
-            SaveStrategyDraftRequest(0, "", SourceFormat.YAML, "1.1"),
+            SaveStrategyDraftRequest(0, "", SourceFormat.YAML, CURRENT_SCHEMA_VERSION),
         )
 
 
@@ -187,7 +188,7 @@ def test_draft_service_reuses_authoring_source_size_limit(tmp_path: Path) -> Non
     with pytest.raises(InvalidStrategyDraftError, match="max_bytes=4"):
         service.save(
             "oversized",
-            SaveStrategyDraftRequest(0, "한글", SourceFormat.YAML, "1.1"),
+            SaveStrategyDraftRequest(0, "한글", SourceFormat.YAML, CURRENT_SCHEMA_VERSION),
         )
 
 
@@ -205,7 +206,7 @@ def test_sqlite_draft_rejects_corrupt_redundant_source_hash(tmp_path: Path) -> N
         SQLiteStrategyDraftRepository(path).get("draft-one")
 
 
-def test_schema_v1_is_validated_then_migrated_atomically_to_v2(tmp_path: Path) -> None:
+def test_schema_v1_is_validated_then_migrated_atomically_to_current(tmp_path: Path) -> None:
     path = tmp_path / "v1.sqlite3"
     with sqlite3.connect(path, isolation_level=None) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -219,10 +220,14 @@ def test_schema_v1_is_validated_then_migrated_atomically_to_v2(tmp_path: Path) -
     repository.save(_draft(), expected_version=0)
 
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
-        assert connection.execute(
-            "SELECT name FROM sqlite_schema WHERE name = 'strategy_drafts'"
-        ).fetchone() == ("strategy_drafts",)
+        # v1 → v2(초안) → v3(팩터 라이브러리)를 차례로 올린다.
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == (
+            sqlite_schema.SCHEMA_VERSION
+        )
+        for table in ("strategy_drafts", "factor_library", "factor_library_versions"):
+            assert connection.execute(
+                "SELECT name FROM sqlite_schema WHERE name = ?", (table,)
+            ).fetchone() == (table,)
 
 
 def test_schema_v1_mutation_rolls_back_v2_migration(tmp_path: Path) -> None:

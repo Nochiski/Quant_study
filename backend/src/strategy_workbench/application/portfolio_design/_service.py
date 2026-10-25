@@ -19,7 +19,7 @@ change; the observation adapter owns their as_of vintage (D-006).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Sized
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
 from dataclasses import dataclass, replace
 from datetime import date
 from typing import TypeVar
@@ -70,6 +70,8 @@ from strategy_workbench.domain.portfolio.facade.construction import (
 )
 from strategy_workbench.domain.strategy.facade.constraints import expression_code
 from strategy_workbench.domain.strategy.facade.specification import (
+    InvalidParameterValueError,
+    ParameterValue,
     StrategySpec,
     resolve_parameter_values,
 )
@@ -114,6 +116,27 @@ _PROGRESS_FACTOR_INPUTS = 0.197
 _PROGRESS_FACTORS_START = 0.279
 _PROGRESS_FACTORS_END = 0.87
 _PROGRESS_COMPILE = 0.966
+
+
+def _resolve_pipeline_parameters(
+    spec: StrategySpec,
+    requested: Mapping[str, ParameterValue],
+    options: Mapping[str, ParameterValue],
+) -> dict[str, ParameterValue]:
+    """공개 요청과 기존 내부 옵션을 한 관문에서 해소한다. 모순된 두 입력은 덮어쓰지 않는다."""
+    resolved = resolve_parameter_values(spec.parameters, requested)
+    if not options:
+        return resolved
+    legacy = resolve_parameter_values(spec.parameters, options)
+    if requested and resolved != legacy:
+        parameter_id = next(key for key in resolved if resolved[key] != legacy[key])
+        raise InvalidParameterValueError(
+            parameter_id,
+            "공개 요청과 내부 옵션의 파라미터 값이 다릅니다 — "
+            f"parameter_id={parameter_id} request={resolved[parameter_id]!r} "
+            f"options={legacy[parameter_id]!r}",
+        )
+    return legacy
 
 
 def _no_progress(fraction: float, message: str) -> None:
@@ -224,6 +247,27 @@ class _PreparedPipeline:
     plans: dict[str, FactorExecutionPlan]
     # 문서 검증 뒤에 해소한 실행 설정. 호출자가 브리지를 다시 부르지 않게 같이 돌려준다.
     environment: RunEnvironment
+    parameter_values: dict[str, ParameterValue]
+
+    @property
+    def history_sessions(self) -> int:
+        """원시 관측 질의가 시작일 앞에서 읽는 워밍업 세션 수.
+
+        플랜은 as_of 를 세고 포트는 시작일 앞의 세션만 센다.
+        """
+        return max((plan.minimum_history_sessions - 1 for plan in self.plans.values()), default=0)
+
+
+@dataclass(frozen=True)
+class PortfolioPreflight:
+    """데이터를 읽지 않는 사전 검사(`preflight`)의 답."""
+
+    engine: EngineCompatibility
+    # 아래 셋은 run 메모리 예약치의 입력이다(run-worker spec D8). 원시 관측 질의가 시작일 앞에서
+    # 읽을 워밍업 세션 수, 그 질의가 읽을 원천 필드 수, 팩터 실행 계획의 단계(노드) 수 합.
+    history_sessions: int
+    field_count: int
+    factor_steps: int
 
 
 @dataclass(frozen=True)
@@ -234,6 +278,9 @@ class PortfolioPipelineResult:
     observations: tuple[PortfolioObservation, ...]
     construction_trace: PortfolioConstructionTrace | None
     preview: PortfolioPreview
+    # 원시 관측을 읽은 세션 수(측정 구간 + 워밍업)와 필드 수. run 메모리 로그용이다(spec D8).
+    raw_sessions: int
+    raw_fields: int
 
 
 class PortfolioDesignService:
@@ -253,8 +300,8 @@ class PortfolioDesignService:
     def preview(self, request: PortfolioPreviewRequest) -> PortfolioPreview:
         return self.run_pipeline(request).preview
 
-    def preflight(self, request: PortfolioPreviewRequest) -> EngineCompatibility:
-        """관측 데이터를 읽지 않고 끝나는 검사만 돌려 엔진 호환성을 답한다.
+    def preflight(self, request: PortfolioPreviewRequest) -> PortfolioPreflight:
+        """관측 데이터를 읽지 않고 끝나는 검사만 돌려 엔진 호환성과 워밍업 세션 수를 답한다.
 
         `run_pipeline` 의 앞부분(스펙 검증·엔진 판정·팩터 메타데이터·실행 플랜·출력 타입/저장 참조
         거부)과 같은 `_prepare` 를 타므로, 여기서 예외 없이 끝난 스펙이 그 앞부분에서 예외로
@@ -273,7 +320,18 @@ class PortfolioDesignService:
         # 엔진 호환성만은 값으로 돌려주는 계약이므로 기본값이 바뀌어도 예외 경로로 새지 않게
         # 명시한다. 문서·실행 설정 오류는 위 docstring 대로 예외다.
         options = PortfolioPipelineOptions(require_engine_compatible=False)
-        return self._prepare(request.spec, options, request.environment).engine
+        prepared = self._prepare(
+            request.spec,
+            options,
+            request.environment,
+            requested_parameters=request.parameter_values,
+        )
+        return PortfolioPreflight(
+            engine=prepared.engine,
+            history_sessions=prepared.history_sessions,
+            field_count=len(_required_field_ids(request.spec, prepared.plans)),
+            factor_steps=sum(len(plan.steps) for plan in prepared.plans.values()),
+        )
 
     def run_pipeline(
         self,
@@ -298,7 +356,13 @@ class PortfolioDesignService:
         # 브리지는 `_prepare` 안에서 `validate_strategy` 뒤에 돈다 — 잘못된 문서는 코드화된
         # 진단으로 거절되어야 하고, 그 판정의 owner 는 validator 다. 플랜이 결측 정책을
         # 인자로 받으므로(P2-02) 해소한 실행 설정을 `_prepare` 가 돌려준다.
-        prepared = self._prepare(spec, pipeline_options, request.environment, checkpoint=checkpoint)
+        prepared = self._prepare(
+            spec,
+            pipeline_options,
+            request.environment,
+            requested_parameters=request.parameter_values,
+            checkpoint=checkpoint,
+        )
         environment = prepared.environment
         engine = prepared.engine
         metadata = prepared.metadata
@@ -309,10 +373,7 @@ class PortfolioDesignService:
             start=environment.start,
             end=environment.end,
             field_ids=_required_field_ids(spec, plans),
-            # Plans count as_of itself; the port counts sessions strictly before start.
-            history_sessions_before_start=max(
-                (plan.minimum_history_sessions - 1 for plan in plans.values()), default=0
-            ),
+            history_sessions_before_start=prepared.history_sessions,
         )
         progress(0.0, "Loading raw observations")
         try:
@@ -374,9 +435,7 @@ class PortfolioDesignService:
         )
         parameters = tuple(
             ResolvedFactorParameter(parameter_id, value)
-            for parameter_id, value in resolve_parameter_values(
-                spec.parameters, pipeline_options.parameter_values
-            ).items()
+            for parameter_id, value in prepared.parameter_values.items()
         )
         evaluations: list[FactorEvaluationRecord] = []
         factor_count = max(len(spec.factors), 1)
@@ -492,10 +551,19 @@ class PortfolioDesignService:
                 construction_trace = compiled.trace
         except NonFinitePortfolioCalculationError as error:
             raise _non_finite_rejection("portfolio", error) from error
+        # 현재 프로세스에서 실제 평가한 계획들의 판본이다. 평가 규칙 판본은 한 프로세스에 하나라
+        # 모든 계획이 같아야 한다 — 다르거나 평가한 팩터가 없으면 출처를 지어내지 않고 실패한다.
+        versions = {record.plan.evaluation_version for record in evaluation_records}
+        if len(versions) != 1:
+            raise RuntimeError(
+                f"factor evaluation version must be unique per run — versions={sorted(versions)}"
+            )
+        tape = replace(tape, factor_evaluation_version=versions.pop())
         preview = PortfolioPreview(
             tape=tape,
             engine=engine,
             warnings=raw.warnings,
+            parameter_values=prepared.parameter_values,
         )
         progress(1.0, "Target tape compiled")
         return PortfolioPipelineResult(
@@ -505,6 +573,8 @@ class PortfolioDesignService:
             observations=observations,
             construction_trace=construction_trace,
             preview=preview,
+            raw_sessions=len(raw.history_sessions) + len(raw.sessions),
+            raw_fields=len(raw_query.field_ids),
         )
 
     def _prepare(
@@ -514,6 +584,7 @@ class PortfolioDesignService:
         environment: RunEnvironment | None,
         *,
         checkpoint: Callable[[], None] = lambda: None,
+        requested_parameters: Mapping[str, ParameterValue] | None = None,
     ) -> _PreparedPipeline:
         """파이프라인의 데이터 무관 앞부분. `preflight` 와 `run_pipeline` 이 같은 판정을 쓴다.
 
@@ -523,14 +594,15 @@ class PortfolioDesignService:
         올린다 — 백테스트 시작과 같은 접수 거절 코드로 나간다(#351).
         """
 
-        validation = validate_strategy(spec)
-        if not validation.valid:
-            raise InvalidPortfolioRequestError(validation)
+        _require_valid_strategy(spec)
         checkpoint()
         resolved = require_environment(
             environment, requested_by=f"portfolio.preview({spec.title!r})"
         )
 
+        parameter_values = _resolve_pipeline_parameters(
+            spec, requested_parameters or {}, pipeline_options.parameter_values
+        )
         engine = self._engine_portfolio.assess(spec, resolved)
         if pipeline_options.require_engine_compatible and not engine.compatible:
             raise IncompatiblePortfolioRequestError(engine)
@@ -543,7 +615,38 @@ class PortfolioDesignService:
         ):
             raise TraceObservationCapabilityError(type(self._observation_source).__name__)
 
-        metadata = self._factor_metadata.resolve_factor_fields(
+        metadata, plans = self._numeric_factor_plans(spec, resolved.missing)
+        _validate_trace_selection(pipeline_options, plans)
+        checkpoint()
+        return _PreparedPipeline(
+            engine=engine,
+            metadata=metadata,
+            plans=plans,
+            environment=resolved,
+            parameter_values=parameter_values,
+        )
+
+    def validate_trial_strategy(self, spec: StrategySpec, *, missing: MissingPolicy) -> None:
+        """봉인 거절을 기록하기 전에 입력 전략만 검증한다. 구간 관측이나 실행은 하지 않는다.
+
+        실행 preflight와 같은 validator·metadata·plan owner를 소비하되 연구 구간을 바꾸거나
+        우회하지 않는다. 봉인 오류 응답 우선순위를 유지하면서 무효 전략의 감사 기록을 막는다.
+        """
+        _require_valid_strategy(spec)
+        self._numeric_factor_plans(spec, missing)
+
+    def _numeric_factor_plans(
+        self, spec: StrategySpec, missing: MissingPolicy
+    ) -> tuple[FactorMetadataSnapshot, dict[str, FactorExecutionPlan]]:
+        """팩터 계획을 컴파일하고 숫자가 아닌 출력을 거절한다. 실행 preflight와 봉인 기록 전
+        검증이 같은 단계를 같은 순서로 쓴다."""
+        metadata = self._strategy_metadata(spec)
+        plans = self._plans(spec, metadata, missing)
+        _reject_non_numeric_factor_outputs(spec, plans)
+        return metadata, plans
+
+    def _strategy_metadata(self, spec: StrategySpec) -> FactorMetadataSnapshot:
+        return self._factor_metadata.resolve_factor_fields(
             tuple(
                 sorted(
                     {
@@ -553,13 +656,6 @@ class PortfolioDesignService:
                     }
                 )
             )
-        )
-        plans = self._plans(spec, metadata, resolved.missing)
-        _reject_non_numeric_factor_outputs(spec, plans)
-        _validate_trace_selection(pipeline_options, plans)
-        checkpoint()
-        return _PreparedPipeline(
-            engine=engine, metadata=metadata, plans=plans, environment=resolved
         )
 
     def _plans(
@@ -793,6 +889,12 @@ def _between(start: float, end: float, fraction: float) -> float:
     return min(start + (end - start) * fraction, end)
 
 
+def _require_valid_strategy(spec: StrategySpec) -> None:
+    validation = validate_strategy(spec)
+    if not validation.valid:
+        raise InvalidPortfolioRequestError(validation)
+
+
 def _reject_non_numeric_factor_outputs(
     spec: StrategySpec, plans: dict[str, FactorExecutionPlan]
 ) -> None:
@@ -854,15 +956,31 @@ def _reject_sessions_outside_run_range(
     )
 
 
+def _look_ahead_violation(
+    *, field_id: str, security_id: str, as_of: date, available_date: date
+) -> LookAheadViolationError:
+    """look-ahead 위반 예외와 문장의 owner.
+
+    객체 경로(아래 `_to_factor_observation`)와 열 경로(`RawPanel.first_look_ahead` 가 돌려준 위치)가
+    같이 쓴다.
+    """
+    return LookAheadViolationError(
+        "raw field published after its observation date — "
+        f"field_id={field_id!r} security_id={security_id!r} "
+        f"as_of={as_of} available_date={available_date}"
+    )
+
+
 def _to_factor_observation(
     item: RawObservation, *, checkpoint: Callable[[], None]
 ) -> FactorObservation:
     for field in _checkpointed(item.fields, checkpoint):
         if field.available_date > item.as_of:
-            raise LookAheadViolationError(
-                "raw field published after its observation date — "
-                f"field_id={field.field_id!r} security_id={item.security_id!r} "
-                f"as_of={item.as_of} available_date={field.available_date}"
+            raise _look_ahead_violation(
+                field_id=field.field_id,
+                security_id=item.security_id,
+                as_of=item.as_of,
+                available_date=field.available_date,
             )
     return FactorObservation(
         as_of=item.as_of,

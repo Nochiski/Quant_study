@@ -1,0 +1,31 @@
+# 12-1 모멘텀: 최근 21세션을 뺀 252세션 수정주가 수익률이 높은 종목을 매월 20개 고른다.
+# 기준일 거래대금 상위 30%만 후보로 삼아 거래가 드문 소형주가 상위를 채우지 않게 한다.
+schema_version: "1.2"
+title: "12-1 모멘텀 · 거래대금 상위 30%"
+description: "매월 12-1 모멘텀 상위 20종목, 종목당 최대 5%"
+eligibility:
+  rules:
+    - field_id: price.trading_value
+      operator: top_percent
+      value: 0.3
+factors:
+  - factor_id: momentum_12_1
+    label: "12-1 모멘텀"
+    direction: high
+    graph:
+      nodes:
+        - kind: field
+          node_id: adj_close
+          field_id: price.adj_close
+        - kind: time_series
+          node_id: momentum
+          operator: momentum
+          input_node_id: adj_close
+          window: 252
+          lag: 21
+      output_node_id: momentum
+portfolio:
+  selection_count: 20
+  rebalance: monthly
+risk:
+  max_name_weight: 0.05

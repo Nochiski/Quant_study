@@ -26,6 +26,7 @@ const EVERY_CODE = Object.keys({
   "assistant.provider_not_installed": true,
   "assistant.provider_secret_missing": true,
   "assistant.result_unavailable": true,
+  "assistant.storage_unavailable": true,
   "assistant.session.not_found": true,
   "assistant.turn.not_found": true,
   "assistant.turn_in_progress": true,

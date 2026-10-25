@@ -1,0 +1,135 @@
+/* 실험 상태·시도·검증 결과·감사 기록의 읽기 순서를 구분한다. */
+.experiment-page__sections {
+  display: grid;
+  gap: var(--section-gap);
+  min-width: 0;
+}
+
+.experiment-page__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--text-size-small);
+}
+
+.experiment-page__identity code {
+  overflow-wrap: anywhere;
+}
+
+.experiment-section {
+  min-width: 0;
+  padding: var(--panel-padding);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+}
+
+.experiment-section h2,
+.experiment-section__title {
+  margin: 0;
+  font-size: var(--text-size-section-title);
+  font-weight: var(--font-weight-heading);
+  line-height: var(--line-height-heading);
+}
+
+.experiment-section__title,
+.experiment-audit caption {
+  padding: var(--panel-padding);
+  text-align: start;
+  font-weight: var(--font-weight-heading);
+}
+
+.experiment-interpretation {
+  padding: var(--space-3) var(--space-4);
+  border-inline-start: var(--space-1) solid var(--status-warn);
+  border-radius: var(--radius-small);
+  background: var(--status-warn-soft);
+  color: var(--text);
+  line-height: 1.7;
+}
+
+.experiment-table-scroll {
+  max-height: 32rem;
+  overflow: auto;
+}
+
+.experiment-page .data-list-page__table {
+  min-width: 40rem;
+}
+
+.experiment-page .data-list-page__table th {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+}
+
+.experiment-page h1,
+.experiment-page .data-list-page__table td {
+  overflow-wrap: anywhere;
+}
+
+.experiment-page .data-list-page__table td {
+  max-width: 24rem;
+}
+
+.experiment-table-scroll:focus-visible {
+  outline-offset: calc(-1 * var(--space-1));
+}
+
+.experiment-section__feedback {
+  margin: 0;
+  padding: var(--panel-padding);
+}
+
+/* 연속 계좌 결과는 창별 비교와 구분하고 작은 화면에서는 금액을 세로로 읽는다. */
+.experiment-continuous__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.experiment-continuous__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: var(--space-4);
+}
+
+.experiment-continuous__summary div {
+  min-width: 0;
+}
+
+.experiment-continuous__summary dt {
+  color: var(--text-muted);
+}
+
+.experiment-continuous__summary dd {
+  margin: var(--space-1) 0 0;
+  font-weight: var(--font-weight-heading);
+  overflow-wrap: anywhere;
+}
+
+.experiment-continuous__identity,
+.experiment-continuous__details {
+  overflow-wrap: anywhere;
+}
+
+.experiment-continuous__details summary {
+  min-height: 44px;
+  padding-block: var(--space-3);
+  cursor: pointer;
+}
+
+/* 끝난 실험의 다음 할 일(RD-10-B). */
+.experiment-page__next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--status-info);
+  border-radius: var(--radius-medium);
+  background: var(--status-info-soft);
+}

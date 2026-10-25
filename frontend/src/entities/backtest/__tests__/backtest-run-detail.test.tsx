@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { BacktestRunResult } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
-import { runEnvironmentFields } from "../model/run-environment-fields";
+import { runEnvironmentFields, runEnvironmentLabel } from "../model/run-environment-fields";
 import { BacktestRunDetail } from "../ui/backtest-run-detail";
 
 /** backend 가 만든 실행 설정 스키마 사본(`tools/export_runtime_schema.py`). */
@@ -26,19 +26,13 @@ const result = (): BacktestRunResult => ({
     run_id: "run-1",
     created_at: "2026-09-27T00:00:00Z",
     completed_at: "2026-09-27T00:00:05Z",
-    engine_core: "rust",
     engine_version: "test",
     run_fingerprint: "f".repeat(32),
-    run_spec: { metric_windows: [] },
+    run_spec: { core: "rust", initial_cash: 100_000_000, annualization_days: 252, metric_windows: [] },
     strategy_hash: "a".repeat(64),
     data_snapshot_id: "snapshot",
     target_tape_hash: "b".repeat(64),
     metric_registry_version: "metric-registry-v1",
-    initial_cash: 100_000_000,
-    annualization_days: 252,
-    fee_bps: 15,
-    slippage_bps: 10,
-    participation_rate: 0.1,
     environment: {
       market: "KRX",
       frequency: "daily",
@@ -84,8 +78,35 @@ const result = (): BacktestRunResult => ({
 });
 
 describe("run 상세의 실행 설정", () => {
-  it("manifest 의 실행 설정을 스키마 칸 순서·이름·단위·값 이름으로 보이고 environment hash 를 보인다", async () => {
+  it("결과 둘러보기에서 접힌 재현성 정보를 열고 키보드로 원본 표를 읽는다", async () => {
     render(<BacktestRunDetail result={result()} environmentFields={FIELDS} />);
+    const navigation = screen.getByRole("navigation", { name: "결과 둘러보기" });
+    const drawer = screen.getByRole("group", { name: "Manifest · 데이터 경고 · 재현성 정보" });
+    expect(within(drawer).getByText("100,000,000")).not.toBeVisible();
+    const manifest = within(navigation).getByRole("link", { name: "Manifest · 데이터 경고 · 재현성 정보" });
+    manifest.focus();
+    await userEvent.setup().keyboard("{Enter}");
+    expect(within(drawer).getByText("100,000,000")).toBeVisible();
+    const metrics = screen.getByRole("region", { name: "Raw metric table" });
+    metrics.focus();
+    expect(metrics).toHaveFocus();
+    expect(within(metrics).getByRole("table", { name: "Raw metric table" })).toBeVisible();
+  });
+
+  it("실행 상세에서 주문 상태 원본과 구조화된 유동성 사유를 보여 준다", async () => {
+    const value = result();
+    value.artifacts.order_updates = [{ session: "2026-10-12", order_id: "order-1", status: "open", reason_code: "liquidity_cap_zero", cap_volume: 0, detail: "original reason" }];
+    render(<BacktestRunDetail result={value} environmentFields={FIELDS} />);
+    const events = within(screen.getByRole("region", { name: "주문 상태 기록" }));
+    expect(events.getByText("유동성 한도 0주 기록 1건 (이벤트 기준)")).toBeVisible();
+    await userEvent.setup().click(events.getByText("주문 상태 원본 보기"));
+    expect(events.getByRole("table")).toHaveTextContent("original reason");
+  });
+
+  it("manifest 의 실행 설정을 스키마 칸 순서·이름·단위·값 이름으로 보이고 environment hash 를 보인다", async () => {
+    const recorded = result();
+    recorded.manifest.run_spec = { ...recorded.manifest.run_spec, core: "python", initial_cash: 765_432_100, annualization_days: 260 };
+    render(<BacktestRunDetail result={recorded} environmentFields={FIELDS} />);
     const user = userEvent.setup();
     const drawer = screen.getByRole("group", {
       name: "Manifest · 데이터 경고 · 재현성 정보",
@@ -103,39 +124,44 @@ describe("run 상세의 실행 설정", () => {
     )
       .getAllByRole("term")
       .map((term) => term.textContent);
-    expect(labels).toEqual([
-      "시장",
-      "빈도",
-      "시작일",
-      "종료일",
-      "유니버스",
-      "체결 시점",
-      "참여율 (%)",
-      "참여 기준",
-      "수수료 (bp)",
-      "슬리피지 (bp)",
-      "가격 충격 모델",
-      "가격 충격 계수",
-      "매도 거래세",
-      "매도 거래세율 (bp)",
-      "결측 처리",
-      "실행 설정 hash",
-    ]);
+    expect(labels).toEqual([...FIELDS.map(runEnvironmentLabel), "실행 설정 hash"]);
+    expect(row("Core")).toHaveTextContent("PYTHON");
+    expect(row("초기 자본 (KRW)")).toHaveTextContent("765,432,100");
+    expect(row("연환산 거래일")).toHaveTextContent("260");
     expect(row("시장")).toHaveTextContent("한국거래소(KRX)");
     expect(row("빈도")).toHaveTextContent("일봉");
     expect(row("시작일")).toHaveTextContent("2023-01-02");
     expect(row("유니버스")).toHaveTextContent("krx.common-stock");
     expect(row("체결 시점")).toHaveTextContent("다음 거래일 시가");
-    // 평면 비용 필드(15bp)가 아니라 실행 설정이 실제로 쓴 값을 보인다(P3-02 결정 4).
+    // 비용의 정본인 실행 설정이 실제로 쓴 값을 보인다.
     expect(row("참여율 (%)")).toHaveTextContent("20%");
     expect(row("참여 기준")).toHaveTextContent("20일 평균 거래대금");
     expect(row("수수료 (bp)")).toHaveTextContent("7bp");
-    expect(row("가격 충격 모델")).toHaveTextContent("√ 가격 충격(변동성·거래량 비례)");
+    expect(row("가격 충격 모델")).toHaveTextContent(
+      "√ 가격 충격(변동성·거래량 비례)",
+    );
     expect(row("가격 충격 계수")).toHaveTextContent("0.8");
     expect(row("매도 거래세")).toHaveTextContent("법정 세율(날짜별)");
-    expect(row("매도 거래세율 (bp)")).toHaveTextContent("—");
+    expect(row("매도 거래세율 (bp)")).toHaveTextContent("미적용");
+    expect(row("슬리피지 (bp)")).toHaveTextContent("미적용");
     expect(row("결측 처리")).toHaveTextContent("0으로 채우기");
     expect(row("실행 설정 hash")).toHaveTextContent(`${"e".repeat(16)}…`);
+  });
+
+  it("고정 충격·직접 세율 기록에서는 실제 적용한 값만 활성 값으로 보인다", () => {
+    const recorded = result();
+    recorded.manifest.environment = {
+      ...recorded.manifest.environment,
+      impact_model: "fixed_bps",
+      sell_tax: "custom",
+      sell_tax_bps: 12,
+    };
+    render(<BacktestRunDetail result={recorded} environmentFields={FIELDS} />);
+    const row = (label: string) =>
+      screen.getByText(label, { exact: true }).closest("div")!;
+    expect(row("슬리피지 (bp)")).toHaveTextContent("3bp");
+    expect(row("가격 충격 계수")).toHaveTextContent("미적용");
+    expect(row("매도 거래세율 (bp)")).toHaveTextContent("12bp");
   });
 
   it("스키마를 아직 못 읽었으면 기록된 키와 값을 그대로 보인다", async () => {
@@ -199,6 +225,15 @@ describe("run 상세의 데이터 경고", () => {
     "benchmark.invalid_bar_sessions_carried",
     "portfolio.sector_unknown_excluded",
     "analytics.base_rate_carried_forward",
+    "equity.reference_rows_dropped",
+    "equity.provisional_rows_dropped",
+    "equity.invalid_ohlc_rows_dropped",
+    "equity.corporate_action_without_bar_dropped",
+    "equity.unfolded_level_shift",
+    "equity.mock_data",
+    "equity.corporate_action_feed_empty",
+    "mock_equity_data",
+    "corporate_action_feed_empty",
   ])("%s 에 제목이 있다", async (code) => {
     const base = result();
     render(

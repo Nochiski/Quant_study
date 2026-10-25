@@ -10,6 +10,7 @@ from strategy_workbench.domain.factor.facade.registry import (
     FactorRegistry,
     factor_availability,
 )
+from strategy_workbench.domain.paging.facade.page import paginate, validate_page_request
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,9 @@ class FactorCatalogQuery:
     availability: tuple[FactorAvailability, ...] = ()
     page: int = 1
     page_size: int = 20
+
+    def __post_init__(self) -> None:
+        validate_page_request(self.page, self.page_size)
 
 
 @dataclass(frozen=True)
@@ -61,15 +65,14 @@ def build_factor_catalog(
         and (not query.categories or definition.category in query.categories)
         and (not query.availability or definition.availability in query.availability)
     )
-    page_count = (len(filtered) + query.page_size - 1) // query.page_size
-    offset = (query.page - 1) * query.page_size
+    window = paginate(filtered, query.page, query.page_size)
     return FactorCatalog(
         registry_version=registry.version,
-        factors=filtered[offset : offset + query.page_size],
-        total=len(filtered),
-        page=query.page,
-        page_size=query.page_size,
-        page_count=page_count,
+        factors=window.items,
+        total=window.total,
+        page=window.page,
+        page_size=window.page_size,
+        page_count=window.page_count,
         facets=FactorCatalogFacets(
             categories=tuple(FactorCategory),
             availability=tuple(FactorAvailability),

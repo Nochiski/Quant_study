@@ -1,9 +1,9 @@
 /* 백테스트 결과 표현은 이 entity가 소유하며 전략 편집기 수명주기와 분리한다. */
 .run-detail {
   display: grid;
-  gap: var(--space-5);
+  gap: var(--section-gap);
   min-width: 0;
-  padding: var(--space-5);
+  padding: var(--panel-padding);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-large);
   background: var(--surface-panel);
@@ -17,12 +17,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-5);
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
 .run-detail .run-detail__header h3 {
   margin: var(--space-1) 0 var(--space-2);
-  font-size: var(--text-size-display);
+  font-size: var(--text-size-section-title);
+  font-weight: var(--font-weight-heading);
+  line-height: var(--line-height-heading);
 }
 
 .run-detail .run-detail__header p,
@@ -35,7 +38,7 @@
 .run-detail .section-kicker {
   color: var(--accent);
   font-size: var(--text-size-small);
-  font-weight: var(--font-weight-strong);
+  font-weight: var(--font-weight-heading);
   letter-spacing: var(--tracking-wide);
 }
 
@@ -54,7 +57,7 @@
 
 .run-detail .metric-highlights {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--metric-card-min-width)), 1fr));
   gap: var(--space-2);
 }
 
@@ -69,17 +72,18 @@
   background: var(--surface-raised);
 }
 
-.run-detail .metric-highlights span {
+/* 카드 이름표만 약하게 한다. 값 안의 부호 표시(SignedValue)는 값 글자 그대로 둔다. */
+.run-detail .metric-highlights > div > span {
   color: var(--text-muted);
   font-size: var(--text-size-small);
 }
 
 .run-detail .metric-highlights strong {
   align-self: end;
-  overflow: hidden;
+  overflow-wrap: anywhere;
   font-family: var(--font-mono);
-  font-size: var(--text-size-title);
-  text-overflow: ellipsis;
+  font-size: var(--text-size-section-title);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 지표의 쉬운 이름·뜻(결과 설명 spec R4). 값보다 한 단계 약하게, 이름만 굵게. */
@@ -92,7 +96,7 @@
 .run-detail .metric-highlights__plain dfn {
   color: var(--text);
   font-style: normal;
-  font-weight: var(--font-weight-strong);
+  font-weight: var(--font-weight-heading);
 }
 
 .run-detail .metric-highlights small,
@@ -112,7 +116,11 @@
   gap: var(--space-3);
 }
 
-.run-detail .result-chart,
+/* 결과 패널은 grid 라 칸 안 넓은 표가 패널 폭을 밀지 않게 칸이 내용보다 좁아질 수 있어야 한다. */
+.run-detail .run-detail__holdings {
+  min-width: 0;
+}
+
 .run-detail .monthly-panel,
 .run-detail .raw-metric-panel,
 .run-detail .trade-panel,
@@ -124,54 +132,11 @@
   background: var(--surface-raised);
 }
 
-.run-detail .result-chart header,
-.run-detail .result-chart footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.run-detail .result-chart h4,
 .run-detail .monthly-panel h4,
 .run-detail .raw-metric-panel h4,
 .run-detail .trade-panel h4 {
   margin: 0;
   font-size: var(--text-size-body);
-}
-
-.run-detail .chart-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  font-size: var(--text-size-small);
-  font-weight: var(--font-weight-strong);
-}
-
-.run-detail .result-chart svg {
-  display: block;
-  width: 100%;
-  height: calc(var(--space-6) * 6);
-  margin-top: var(--space-4);
-}
-
-.run-detail .result-chart svg line {
-  stroke: var(--border);
-  stroke-width: 1;
-}
-
-.run-detail .result-chart svg path {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-}
-
-.run-detail .result-chart footer {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-size-small);
 }
 
 .run-detail .monthly-panel header span,
@@ -181,35 +146,8 @@
   font-size: var(--text-size-small);
 }
 
-.run-detail .monthly-grid {
-  display: grid;
-  grid-template-columns: repeat(
-    auto-fit,
-    minmax(calc(var(--space-6) * 3), 1fr)
-  );
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-}
-
-.run-detail .monthly-grid div {
-  display: grid;
-  gap: var(--space-1);
-  padding: var(--space-3);
-  border-radius: var(--radius-medium);
-  font-size: var(--text-size-small);
-}
-
-.run-detail .monthly-grid .is-positive {
-  background: var(--status-ok-soft);
-  color: var(--status-ok);
-}
-
-.run-detail .monthly-grid .is-negative {
-  background: var(--status-error-soft);
-  color: var(--status-error);
-}
-
 .run-detail .result-table-wrap {
+  position: relative;
   max-height: calc(var(--space-6) * 14);
   margin-top: var(--space-3);
   overflow: auto;
@@ -261,7 +199,7 @@
   cursor: pointer;
   color: var(--accent);
   font-size: var(--text-size-small);
-  font-weight: var(--font-weight-strong);
+  font-weight: var(--font-weight-heading);
 }
 
 .run-detail .manifest-grid {
@@ -304,11 +242,9 @@
 
 .run-detail .manifest-grid dd {
   margin: var(--space-1) 0 0;
-  overflow: hidden;
+  overflow-wrap: anywhere;
   font-family: var(--font-mono);
   font-size: var(--text-size-small);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .run-detail .manifest-warnings h5 {
@@ -367,5 +303,151 @@
   .run-detail .metric-highlights,
   .run-detail .manifest-grid dl {
     grid-template-columns: 1fr;
+  }
+}
+
+/* 긴 결과에서도 원본 숫자와 진단으로 바로 이동할 수 있게 한다. */
+.run-detail .run-detail__navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-block-end: var(--space-4);
+  border-block-end: 1px solid var(--border);
+}
+
+.run-detail .run-detail__navigation a {
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(var(--space-6) + var(--space-3));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+  color: var(--accent);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .result-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+.run-detail [id] {
+  scroll-margin-block: var(--space-4);
+}
+
+/* 결과 한눈에·운일까 튼튼할까 구역 제목(RD-07-A·B). */
+.run-detail .result-summary,
+.run-detail .result-evidence {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.run-detail .result-summary > h4,
+.run-detail .result-evidence > h4 {
+  margin: 0;
+  font-size: var(--text-size-subsection);
+}
+
+.run-detail .metric-highlights__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .result-evidence__disclaimer {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+/* 종목 선정과 손익 구조 두 카드를 같은 크기로 나란히 둔다(RD-07-C). */
+.run-detail .result-axes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.run-detail .axis-card {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-raised);
+}
+
+.run-detail .axis-card h5 {
+  margin: 0;
+  font-size: var(--text-size-subsection);
+}
+
+.run-detail .axis-card__metrics {
+  display: grid;
+  margin: 0;
+}
+
+.run-detail .axis-card__metrics > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border);
+}
+
+.run-detail .axis-card__metrics dt small {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .axis-card__metrics dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.run-detail .axis-card__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+/* 월별 수익률 표: 칸 배경은 방향의 옅은 색, 글자는 부호·방향 색(RD-07-D). */
+.run-detail .monthly-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: var(--space-1);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .monthly-table th {
+  color: var(--text-muted);
+  font-weight: var(--font-weight-heading);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.run-detail .monthly-table td {
+  min-width: calc(var(--space-6) * 1.5);
+  padding: var(--space-1);
+  border-radius: var(--radius-small);
+  text-align: center;
+}
+
+.run-detail .monthly-table .monthly-table__up {
+  background: var(--return-up-soft);
+}
+
+.run-detail .monthly-table .monthly-table__down {
+  background: var(--return-down-soft);
+}
+
+@media (max-width: 900px) {
+  .run-detail .result-axes {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

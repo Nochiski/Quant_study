@@ -89,22 +89,27 @@ class JsonPlanStore:
         return self._folder / f"{plan_id}{suffix}.json"
 
     def _write_once(self, path: Path, value: dict[str, object]) -> None:
-        self._folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if path.exists():
-            raise PlanExistsError(f"already recorded — file={path.name}")
-        fd, temporary = tempfile.mkstemp(dir=self._folder, prefix=f".{path.stem}.", suffix=".tmp")
+        write_once(path, value)
+
+
+def write_once(path: Path, value: dict[str, object]) -> None:
+    """임시 파일에 다 쓴 뒤 `os.link`로 붙인다. 이미 있으면 `PlanExistsError`(덮어쓰지 않는다)."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.exists():
+        raise PlanExistsError(f"already recorded — file={path.name}")
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=1)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(value, handle, ensure_ascii=False, indent=1)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(temporary, 0o600)
-            try:
-                os.link(temporary, path)
-            except FileExistsError as error:
-                raise PlanExistsError(f"already recorded — file={path.name}") from error
-        finally:
-            os.unlink(temporary)
+            os.link(temporary, path)
+        except FileExistsError as error:
+            raise PlanExistsError(f"already recorded — file={path.name}") from error
+    finally:
+        os.unlink(temporary)
 
 
 def _read(path: Path, schema: str) -> dict[str, object]:

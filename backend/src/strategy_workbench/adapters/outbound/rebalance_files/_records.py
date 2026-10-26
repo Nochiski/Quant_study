@@ -63,16 +63,7 @@ class JsonExecutionLog:
         self._replace(self._folder / f"raw-{day.isoformat()}.json", dict(payload))
 
     def _replace(self, path: Path, value: dict[str, object]) -> None:
-        self._folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd, temporary = tempfile.mkstemp(dir=self._folder, prefix=".record.", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(value, handle, ensure_ascii=False, indent=1)
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, path)
-        except BaseException:
-            os.unlink(temporary)
-            raise
+        replace_file(path, value)
 
     def day(self, day: date) -> DayRecord | None:
         path = self._path(day)
@@ -85,6 +76,20 @@ class JsonExecutionLog:
 
     def _path(self, day: date) -> Path:
         return self._folder / f"day-{day.isoformat()}.json"
+
+
+def replace_file(path: Path, value: dict[str, object]) -> None:
+    """임시 파일에 다 쓴 뒤 제자리에 갈아 끼운다(600)."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".record.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=1)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except BaseException:
+        os.unlink(temporary)
+        raise
 
 
 def _decode(path: Path) -> DayRecord:

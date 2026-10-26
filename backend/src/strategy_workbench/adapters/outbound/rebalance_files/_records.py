@@ -57,13 +57,10 @@ class JsonExecutionLog:
             day=record.day.isoformat(),
             recorded_at=record.recorded_at.isoformat(),
         )
-        self._replace(self._path(record.day), value)
+        replace_file(self._path(record.day), value)
 
     def save_raw(self, day: date, payload: Mapping[str, object]) -> None:
-        self._replace(self._folder / f"raw-{day.isoformat()}.json", dict(payload))
-
-    def _replace(self, path: Path, value: dict[str, object]) -> None:
-        replace_file(path, value)
+        replace_file(self._folder / f"raw-{day.isoformat()}.json", dict(payload))
 
     def day(self, day: date) -> DayRecord | None:
         path = self._path(day)

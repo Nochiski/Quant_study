@@ -17,7 +17,6 @@ from strategy_workbench.application.weekly_rebalance._risk import (
     RiskCommandStatus,
     RiskGuardService,
     RiskStatusResult,
-    day_closes,
 )
 from strategy_workbench.application.weekly_rebalance._service import (
     EARLIER_CLOSE_REASON,
@@ -148,6 +147,5 @@ __all__ = [
     "Waits",
     "WeeklyExecutionService",
     "WeeklyRebalanceService",
-    "day_closes",
     "plan_id_for",
 ]

@@ -40,7 +40,7 @@ class JsonPlanStore:
         self._folder = folder / "plans"
 
     def save(self, record: PlanRecord) -> None:
-        self._write_once(self._path(record.plan_id, ""), _encode_plan(record))
+        write_once(self._path(record.plan_id, ""), _encode_plan(record))
 
     def load(self, plan_id: str) -> PlanRecord | None:
         path = self._path(plan_id, "")
@@ -49,7 +49,7 @@ class JsonPlanStore:
         return _decode_plan(_read(path, PLAN_SCHEMA))
 
     def save_approval(self, plan_id: str, approval: Approval) -> None:
-        self._write_once(
+        write_once(
             self._path(plan_id, ".approval"),
             {
                 "schema": APPROVAL_SCHEMA,
@@ -87,9 +87,6 @@ class JsonPlanStore:
         if not PLAN_ID.fullmatch(plan_id):
             raise ValueError(f"invalid plan id — plan_id={plan_id!r}")
         return self._folder / f"{plan_id}{suffix}.json"
-
-    def _write_once(self, path: Path, value: dict[str, object]) -> None:
-        write_once(path, value)
 
 
 def write_once(path: Path, value: dict[str, object]) -> None:

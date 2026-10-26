@@ -47,8 +47,8 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.stream import (
 from strategy_workbench.adapters.outbound.rebalance_files.facade.plans import (
     JsonExecutionLog,
     JsonPlanStore,
-    JsonRiskStore,
 )
+from strategy_workbench.adapters.outbound.rebalance_files.facade.risk import JsonRiskStore
 from strategy_workbench.adapters.outbound.scope_signal.facade.source import ScopeSignalSource
 from strategy_workbench.application.offline_execution.facade.execution import (
     BrokerError,

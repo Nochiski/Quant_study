@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from strategy_workbench.adapters.outbound.rebalance_files.facade.plans import JsonRiskStore
+from strategy_workbench.adapters.outbound.rebalance_files.facade.risk import JsonRiskStore
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     PlanExistsError,
     RiskDay,

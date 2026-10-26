@@ -20,6 +20,12 @@
     ledger-reject --workdir <폴더> --intent <의도> --operator <이름> [--note]
     ledger-clear-latch --workdir <폴더> --operator <이름> [--note]
     ledger-resume --workdir <폴더> --operator <이름> [--note]   # 다시 대사하고 일치하면 정지를 푼다
+    risk-status --workdir <폴더>   # 낙폭 단계·고점·한도 판
+    risk-reset --workdir <폴더> --operator <이름> [--note]    # 고점을 마지막 장 마감 총자산으로
+    risk-resume --workdir <폴더> --operator <이름> [--note]   # 신규 매수 정지를 풀어 축소 단계로
+
+리스크 명령(risk-*)은 주문을 보내지 않는다. 사람의 명령은 리스크 기록에 남고, 낙폭 단계는 장 마감
+기록과 그 명령으로 다시 낸다(2026-10-26 리스크 가드).
 
 원장 고치기(ledger-*)는 원장 파일을 손으로 고치지 않게 하는 명령이다(2026-10-22 리뷰 #593).
 고친 일은 실행 사건 기록에 남고, 고친 뒤 다시 대사해 일치하면 신규 주문 정지가 풀린다.
@@ -62,6 +68,11 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     PrepareStatus,
     RepairError,
     RepairStatus,
+    RiskCommandStatus,
+    RiskDay,
+    RiskGuardService,
+    RiskStatusResult,
+    RiskVerdict,
     SignalBasis,
     SignalReadStatus,
     WeeklyExecutionService,
@@ -72,6 +83,7 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
     RebalanceAction,
     RebalanceLine,
 )
+from strategy_workbench.domain.risk.facade.risk import GuardReason, RiskLevel
 
 ServiceFactory = Callable[[Path, Path | None], WeeklyRebalanceService]
 # (작업 폴더, 보내는가, 승인이 필요한가) → 실행기. 끝나면 원장·연결을 닫는다.
@@ -92,6 +104,8 @@ FillRecorder = Callable[[Path, time], FillRecording]
 NoticeFactory = Callable[[], NoticeSender]
 # 작업 폴더 → 원장 고치기. 끝나면 원장·연결을 닫는다.
 RepairFactory = Callable[[Path], AbstractContextManager[LedgerRepairService]]
+# 작업 폴더 → 리스크 단계 보기·고치기(주문·키움 접속 없음)
+RiskFactory = Callable[[Path], RiskGuardService]
 # `signal-status`가 "아직 빌드가 없다(기다린다)"를 알리는 종료 코드. 예약 스크립트가 읽는다.
 SIGNAL_NOT_READY_EXIT = 3
 
@@ -103,6 +117,7 @@ class CliFactories:
     recorder: FillRecorder
     notifier: NoticeFactory
     repair: RepairFactory | None = None
+    risk: RiskFactory | None = None
 
 
 _ACTION_LABELS = {
@@ -115,6 +130,15 @@ _ACTION_LABELS = {
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
 # 주문지 머리의 "… 신호" 앞말
 _BASIS_LABELS = {SignalBasis.EVENING: "장 마감", SignalBasis.SUPPLEMENT: "주말 보강"}
+_LEVEL_LABELS = {
+    RiskLevel.NORMAL: "정상",
+    RiskLevel.WARN: "경고",
+    RiskLevel.REDUCE: "축소",
+    RiskLevel.HALT: "정지",
+}
+# 주문지 리스크 줄: 매수를 줄인 사유와 사지 않은 사유
+_CAPPED = frozenset({GuardReason.WEIGHT, GuardReason.ADV})
+_REFUSED = frozenset({GuardReason.BLOCKED, GuardReason.NO_FACTS})
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -176,12 +200,18 @@ def _parser() -> argparse.ArgumentParser:
     reject.add_argument("--intent", required=True)
     clear = commands.add_parser("ledger-clear-latch", help="정지 래치를 풀고 다시 대사한다")
     resume = commands.add_parser("ledger-resume", help="다시 대사하고 일치하면 정지를 푼다")
-    for command in (bind, reject, clear, resume):
-        command.add_argument("--operator", required=True, help="고친 사람(실행 기록에 남는다)")
+    risk_status = commands.add_parser("risk-status", help="리스크 낙폭 단계·고점·한도 판을 보인다")
+    risk_reset = commands.add_parser(
+        "risk-reset", help="고점을 마지막 장 마감 총자산으로 바꾸고 정상 단계로(입출금 반영 등)"
+    )
+    risk_resume = commands.add_parser("risk-resume", help="신규 매수 정지를 풀어 축소 단계로")
+    for command in (bind, reject, clear, resume, risk_reset, risk_resume):
+        command.add_argument("--operator", required=True, help="고친 사람(기록에 남는다)")
         command.add_argument("--note", default="")
     planning = (prepare, signal, show, approve, notify)
     running = (execute, close, report, export, fills)
-    for command in (*planning, *running, status, bind, reject, clear, resume):
+    risks = (risk_status, risk_reset, risk_resume)
+    for command in (*planning, *running, status, bind, reject, clear, resume, *risks):
         command.add_argument(
             "--workdir", type=Path, required=True, help="원장·주문안 폴더(저장소 밖)"
         )
@@ -202,6 +232,11 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             return 1
         print(f"[ok] received={recording.received}")
         return 0
+    if args.command.startswith("risk-"):
+        if factories.risk is None:
+            print("[unavailable] 리스크 명령을 이 명령줄에 연결하지 않았다")
+            return 1
+        return _run_risk(factories.risk(args.workdir), args)
     if args.command.startswith("ledger-"):
         if factories.repair is None:
             print("[unavailable] 원장 고치기를 이 명령줄에 연결하지 않았다")
@@ -220,11 +255,13 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
         )
         if result.record is not None:
             print(render(result.record, planning.plan(result.record.plan_id)[1]))
+        if result.verdict is not None:
+            print(render_verdict(result.verdict))
         print(f"[{result.status.value}] {result.detail}".rstrip())
         made = result.status in (PrepareStatus.OK, PrepareStatus.EXISTS)
         if args.notify:
             text = (
-                render_telegram(result.record, args.execute_on)
+                render_telegram(result.record, args.execute_on, result.verdict)
                 if made and result.record is not None
                 else render_telegram_notice(
                     result.status, args.signal_date, result.detail, args.basis
@@ -244,7 +281,7 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
         if record is None:
             print(f"[not_found] 주문안이 없습니다 — plan={args.plan}")
             return 1
-        text = render_telegram(record, args.execute_on)
+        text = render_telegram(record, args.execute_on, planning.risk_verdict(args.plan))
         if args.print:
             print(text)
             return 0
@@ -255,6 +292,8 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             print(f"[not_found] 주문안이 없습니다 — plan={args.plan}")
             return 1
         print(render(record, approval))
+        verdict = planning.risk_verdict(args.plan)
+        print(render_verdict(verdict) if verdict is not None else "리스크 판정 없음(주문하지 않는다)")
         return 0
     result = planning.approve(args.plan, args.approver, args.note, tuple(args.no_trade))
     print(f"[{result.status.value}] plan={args.plan} {result.detail}".rstrip())
@@ -296,6 +335,19 @@ def _run_repair(repairs: LedgerRepairService, args: argparse.Namespace) -> int:
     return 0 if result.status is RepairStatus.OK else 1
 
 
+def _run_risk(guard: RiskGuardService, args: argparse.Namespace) -> int:
+    if args.command == "risk-status":
+        result = guard.status()
+    elif args.command == "risk-reset":
+        result = guard.reset(args.operator, args.note)
+    else:
+        result = guard.resume(args.operator, args.note)
+    if result.state is not None and result.limits is not None:
+        print(render_risk_status(result))
+    print(f"[{result.status.value}] {result.detail}".rstrip())
+    return 0 if result.status is RiskCommandStatus.OK else 1
+
+
 def _send(factories: CliFactories, text: str) -> bool:
     try:
         factories.notifier().send(text)
@@ -315,8 +367,12 @@ def _run_execution(service: WeeklyExecutionService, args: argparse.Namespace) ->
         closed = service.close(args.plan)
         if closed.record is not None:
             print(render_day(closed.record))
+        if closed.risk is not None:
+            print(render_risk_day(closed.risk))
+        elif closed.risk_detail:
+            print(f"[risk_unavailable] 리스크 기록을 남기지 못했다 — {closed.risk_detail}")
         print(f"[{closed.status.value}] {closed.detail}".rstrip())
-        return 0 if closed.status is CloseStatus.OK else 1
+        return 0 if closed.status is CloseStatus.OK and not closed.risk_detail else 1
     if args.command == "export":
         for path in export_csv(args.workdir / "exports", service.days(), service.events()):
             print(f"[export] {path}")
@@ -588,11 +644,18 @@ _NOTICE_REASONS = {
     PrepareStatus.ACCOUNT_UNAVAILABLE: "키움 모의 계좌를 읽지 못함",
     PrepareStatus.NOT_RECONCILED: "실행 원장과 키움 계좌가 맞지 않음",
     PrepareStatus.INVALID_INPUT: "주문안 계산 입력이 맞지 않음",
+    PrepareStatus.RISK_UNAVAILABLE: "리스크 판정을 못 함",
 }
 
 
-def render_telegram(record: PlanRecord, execute_on: date) -> str:
-    """텔레그램 주문지(HTML, 2026-10-21 사용자 확정 양식). 굵게·인용 상자만 쓴다."""
+def render_telegram(
+    record: PlanRecord, execute_on: date, verdict: RiskVerdict | None = None
+) -> str:
+    """텔레그램 주문지(HTML, 2026-10-21 사용자 확정 양식). 굵게·인용 상자만 쓴다.
+
+    리스크 판정이 이번 주 무언가를 바꿨을 때만 맨 끝에 한 줄을 더한다(2026-10-26 사용자 결정 D3).
+    매도·매수 상자는 주문안(전략) 그대로이고, 리스크가 줄인 것은 그 한 줄이 말한다.
+    """
     plan, signal = record.plan, record.signal
     names = dict(signal.names)
     sells: list[str] = []
@@ -642,8 +705,101 @@ def render_telegram(record: PlanRecord, execute_on: date) -> str:
             f"{_topic_particle(unpriced[-1])} 신호일 종가가 없어(거래정지 등) "
             "이번 주 매매 없이 둡니다."
         )
+    risk = None if verdict is None else _telegram_risk(verdict, names)
+    if risk:
+        footer.append(f"<b>리스크</b> — {risk}")
     parts.append("\n".join(footer))
     return "\n\n".join(parts)
+
+
+def _telegram_risk(verdict: RiskVerdict, names: dict[str, str]) -> str:
+    """리스크가 바꾼 것을 한 줄로. 아무것도 바꾸지 않았으면 빈 문자열이다."""
+    loss = f"고점 대비 −{verdict.state.loss_bp / 100:.1f}%"
+    parts = {
+        RiskLevel.NORMAL: [],
+        RiskLevel.WARN: [f"{loss} 경고"],
+        RiskLevel.REDUCE: [f"{loss}로 보유·매수 절반"],
+        RiskLevel.HALT: [f"{loss}로 신규 매수 정지·보유 절반"],
+    }[verdict.guarded.level]
+    lines = verdict.guarded.lines
+    refused = [line.symbol for line in lines if _REFUSED & set(line.reasons)]
+    capped = [
+        line.symbol for line in lines if _CAPPED & set(line.reasons) and line.symbol not in refused
+    ]
+    for label, symbols in (("매수 줄임", capped), ("매수 안 함", refused)):
+        if symbols:
+            listed = ", ".join(names.get(symbol, symbol) for symbol in symbols)
+            parts.append(f"{label} {len(symbols)}종목({_html(listed)})")
+    if verdict.violations_since_last:
+        parts.append(f"지난 주문 뒤 한도 위반 {len(verdict.violations_since_last)}건")
+    return " · ".join(parts)
+
+
+def render_verdict(verdict: RiskVerdict) -> str:
+    state = verdict.state
+    lines = [
+        f"리스크 판정 · 단계 {_LEVEL_LABELS[state.level]} · 고점 대비 −{state.loss_bp / 100:.2f}% "
+        f"· 고점 {state.peak_krw:,}원 · 노출 {verdict.guarded.exposure_bp / 100:g}% "
+        f"· 한도 판 {verdict.limits_version} ({verdict.limits_sha256[:12]})"
+    ]
+    changed = verdict.guarded.changed()
+    lines += [
+        f"  {line.symbol} 목표 {line.plan_target:,} → {line.target:,} "
+        f"({', '.join(reason.value for reason in line.reasons)})"
+        for line in changed
+    ] or ["  리스크가 줄인 목표 없음"]
+    lines += [
+        f"  지난 주문 뒤 한도 위반: {violation}" for violation in verdict.violations_since_last
+    ]
+    return "\n".join(lines)
+
+
+def render_risk_status(result: RiskStatusResult) -> str:
+    state, limits = result.state, result.limits
+    if state is None or limits is None:
+        return ""
+    last = (
+        "없음"
+        if state.last_day is None or state.last_equity_krw is None
+        else f"{state.last_day.isoformat()} {state.last_equity_krw:,}원"
+    )
+    steps = limits.drawdown
+    lines = [
+        f"단계 {_LEVEL_LABELS[state.level]} · 고점 {state.peak_krw:,}원 · 마지막 장 마감 {last} · "
+        f"고점 대비 −{state.loss_bp / 100:.2f}%",
+        f"한도 판 {limits.version} ({limits.sha256[:12]}) · 경고 "
+        f"{_floor_equity(state.peak_krw, steps.warn_bp):,}원 · 축소 "
+        f"{_floor_equity(state.peak_krw, steps.reduce_bp):,}원 · 정지 "
+        f"{_floor_equity(state.peak_krw, steps.halt_bp):,}원 이하",
+    ]
+    return "\n".join(lines)
+
+
+def _floor_equity(peak_krw: int, loss_bp: int) -> int:
+    """그 낙폭 단계가 시작되는 총자산(이 값 이하)."""
+    return peak_krw * (10_000 - loss_bp) // 10_000
+
+
+def render_risk_day(record: RiskDay) -> str:
+    state = record.state
+    lines = [
+        f"리스크 점검 {record.day.isoformat()} · 단계 {_LEVEL_LABELS[state.level]}"
+        f"(전날 {_LEVEL_LABELS[record.previous_level]}) · 고점 대비 −{state.loss_bp / 100:.2f}%"
+    ]
+    review = record.review
+    if review is not None:
+        lines += [
+            f"  {_SIDE_LABELS.get(order.side, order.side)} {order.symbol} 계획 "
+            f"{order.plan_quantity:,} → 리스크 뒤 {order.guarded_quantity:,} · 체결 "
+            f"{order.filled_quantity:,} · 미체결 "
+            f"{'-' if order.unfilled_bp is None else f'{order.unfilled_bp / 100:.1f}%'}"
+            for order in review.orders
+        ]
+        lines += [f"  ⚠ 한도 위반: {violation}" for violation in review.violations] or [
+            "  한도 위반 없음"
+        ]
+        lines += [f"  기록: {note}" for note in review.notes]
+    return "\n".join(lines)
 
 
 def render_telegram_notice(

@@ -9,6 +9,10 @@
     <작업 폴더>/ledger/kiwoom-reference.sqlite 키움 모의 참조 원장
     <작업 폴더>/plans/                         주문안·승인
     <작업 폴더>/records/                       실행 사건·하루 기록
+    <작업 폴더>/risk/                          리스크 판정·장 마감 점검·사람의 명령
+
+리스크 한도는 저장소의 `backend/scripts/weekly_rebalance_risk_limits.json` 하나에서 읽는다(전략 코드
+밖, 배포 절차가 `scripts/`를 그대로 옮긴다).
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.stream import (
 from strategy_workbench.adapters.outbound.rebalance_files.facade.plans import (
     JsonExecutionLog,
     JsonPlanStore,
+    JsonRiskStore,
 )
 from strategy_workbench.adapters.outbound.scope_signal.facade.source import ScopeSignalSource
 from strategy_workbench.application.offline_execution.facade.execution import (
@@ -54,6 +59,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountState,
     AccountUnavailableError,
     LedgerRepairService,
+    RiskGuardService,
     WeeklyExecutionService,
     WeeklyRebalanceService,
 )
@@ -66,6 +72,7 @@ from strategy_workbench.bootstrap.weekly_rebalance._repair import KiwoomLedgerRe
 
 KST = timezone(timedelta(hours=9))
 REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
+RISK_LIMITS_FILE = REPOSITORY_ROOT / "backend" / "scripts" / "weekly_rebalance_risk_limits.json"
 START_PAUSE_SECONDS = 1.5
 
 
@@ -129,7 +136,17 @@ def build_weekly_rebalance(workdir: Path, model_root: Path | None) -> WeeklyReba
         ScopeSignalSource((model_root or root / "model_db").expanduser()),
         KiwoomAccountSource(root),
         JsonPlanStore(root),
+        risk=JsonRiskStore(root, RISK_LIMITS_FILE),
+        log=JsonExecutionLog(root),
         now=lambda: datetime.now(KST),
+    )
+
+
+def build_risk_guard(workdir: Path) -> RiskGuardService:
+    """리스크 단계 보기·고점 초기화·정지 해제. 주문을 보내지 않고 키움에도 접속하지 않는다."""
+    root = outside_repository(workdir)
+    return RiskGuardService(
+        JsonRiskStore(root, RISK_LIMITS_FILE), JsonExecutionLog(root), now=lambda: datetime.now(KST)
     )
 
 
@@ -153,6 +170,7 @@ def open_weekly_execution(
             gateway,
             KiwoomMarket(broker),
             JsonExecutionLog(root),
+            risk=JsonRiskStore(root, RISK_LIMITS_FILE),
             now=lambda: datetime.now(KST),
             sleep=time.sleep,
             require_approval=require_approval,
@@ -223,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
             record_today_fills,
             telegram_notice,
             open_ledger_repair,
+            build_risk_guard,
         ),
         argv,
     )

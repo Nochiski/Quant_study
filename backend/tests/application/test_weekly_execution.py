@@ -1,22 +1,20 @@
 """주간 리밸런싱 실행기(S07). 게이트웨이·호가·기록은 메모리 대역이고 기다림은 0초다.
 
 주문안(신호일 10-23, 자리 3·완충 5): D 100주 유지, E 100주 매도, A·B 각 130주 매수.
-기준가는 모두 10,000원이다.
+기준가는 모두 10,000원이다. 리스크 판정은 따로 정하지 않으면 주문안 목표 그대로다.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountState,
     Approval,
     CloseStatus,
-    DayRecord,
     ExecuteStatus,
-    ExecutionEvent,
     GatewayState,
     MarketError,
     OrderRequest,
@@ -24,6 +22,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     Phase,
     PlanRecord,
     PriceInfo,
+    RiskVerdict,
     SignalRecord,
     SubmitOutcome,
     SubmitStatus,
@@ -36,7 +35,16 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
     RebalancePolicy,
     plan_rebalance,
 )
-from tests.application.test_weekly_rebalance import Plans
+from strategy_workbench.domain.risk.facade.risk import (
+    DrawdownState,
+    RiskLevel,
+    SecurityFlag,
+    SignalFacts,
+    TradeStatus,
+    ViWindow,
+    guard_targets,
+)
+from tests.application.test_weekly_rebalance import LIMITS, Log, Plans, Risk, close_record
 
 KST = timezone(timedelta(hours=9))
 MONDAY = datetime(2026, 10, 26, 9, 10, tzinfo=KST)
@@ -144,6 +152,13 @@ class Gateway:
 class Market:
     quotes: dict[str, Quote] = field(default_factory=dict)
     closes: dict[str, int] = field(default_factory=dict)
+    statuses: dict[str, TradeStatus] = field(default_factory=dict)
+    unreadable: set[str] = field(default_factory=set)
+
+    def trade_status(self, symbol: str) -> TradeStatus:
+        if symbol in self.unreadable:
+            raise MarketError(f"kiwoom ka10100 failed — symbol={symbol}")
+        return self.statuses.get(symbol, TradeStatus(symbol, frozenset(), 13_000, 7_000))
 
     def quote(self, symbol: str) -> Quote:
         if symbol not in self.quotes:
@@ -156,29 +171,23 @@ class Market:
         return PriceInfo(symbol, f"이름{symbol[-1]}", self.closes[symbol])
 
 
-@dataclass
-class Log:
-    events_: list[ExecutionEvent] = field(default_factory=list)
-    days_: dict[date, DayRecord] = field(default_factory=dict)
-    raws: dict[date, Mapping[str, object]] = field(default_factory=dict)
-
-    def append(self, event: ExecutionEvent) -> None:
-        self.events_.append(event)
-
-    def events(self) -> tuple[ExecutionEvent, ...]:
-        return tuple(self.events_)
-
-    def save_raw(self, day: date, payload: Mapping[str, object]) -> None:
-        self.raws[day] = payload
-
-    def save_day(self, record: DayRecord) -> None:
-        self.days_[record.day] = record
-
-    def day(self, day: date) -> DayRecord | None:
-        return self.days_.get(day)
-
-    def days(self) -> tuple[DayRecord, ...]:
-        return tuple(self.days_[day] for day in sorted(self.days_))
+def verdict_for(record: PlanRecord, level: RiskLevel = RiskLevel.NORMAL) -> RiskVerdict:
+    """주문안 목표에 그 단계의 리스크 한도를 씌운 판정. 종목 자료는 넉넉하다."""
+    guarded = guard_targets(
+        targets=record.plan.target_shares(),
+        holdings=record.account.holdings,
+        frozen=(),
+        prices={line.symbol: line.reference_price_krw or 0 for line in record.plan.lines},
+        facts={
+            line.symbol: SignalFacts(10_000_000_000, admin=False, halted=False)
+            for line in record.plan.lines
+        },
+        equity_krw=record.plan.equity_krw,
+        level=level,
+        limits=LIMITS,
+    )
+    state = DrawdownState(level, 100_000_000, None, 0, None, None)
+    return RiskVerdict(PLAN, record.created_at, 1, "ab" * 32, state, guarded)
 
 
 @dataclass
@@ -187,28 +196,38 @@ class Rig:
     gateway: Gateway
     market: Market
     log: Log
+    risk: Risk
     service: WeeklyExecutionService
 
 
 def rig(
-    *, approved: bool = True, now: datetime = MONDAY, policy: ExecutionPolicy | None = None
+    *,
+    approved: bool = True,
+    now: datetime = MONDAY,
+    policy: ExecutionPolicy | None = None,
+    level: RiskLevel | None = RiskLevel.NORMAL,
 ) -> Rig:
+    """`level`이 None이면 리스크 판정이 없는 주문안이다."""
     plans = Plans()
-    plans.save(plan_record())
+    record = plan_record()
+    plans.save(record)
     if approved:
         plans.save_approval(PLAN, Approval(now, "동민"))
-    gateway, market, log = Gateway(), Market(), Log()
+    gateway, market, log, risk = Gateway(), Market(), Log(), Risk()
+    if level is not None:
+        risk.save_verdict(verdict_for(record, level))
     service = WeeklyExecutionService(
         plans,
         gateway,
         market,
         log,
+        risk=risk,
         now=lambda: now,
         sleep=lambda _: None,
         policy=policy,
         waits=Waits(0, 8, 0, 0, 3),
     )
-    return Rig(plans, gateway, market, log, service)
+    return Rig(plans, gateway, market, log, risk, service)
 
 
 def _sent(r: Rig) -> list[tuple[str, str, int, int]]:
@@ -390,6 +409,7 @@ def test_close_on_a_later_day_does_not_record_the_weeks_fills_again() -> None:
         r.gateway,
         r.market,
         r.log,
+        risk=r.risk,
         now=lambda: MONDAY + timedelta(days=1, hours=6),
         sleep=lambda _: None,
         waits=Waits(0, 8, 0, 0, 3),
@@ -436,3 +456,113 @@ def test_cash_limited_buy_is_sized_with_the_fee_budget_the_ledger_checks() -> No
     b = next(line for line in result.lines if line.symbol == "00000B")
     # 684,000 ÷ (10,020 × 1.0040) = 67.99 → 67주. 35bp 로는 68주(684,086원)라 현금을 넘었다
     assert (b.outcome, b.quantity) == ("sent", 67)
+
+
+# --- 리스크 가드(②·③) -------------------------------------------------------------------------
+
+
+def test_a_plan_without_a_risk_verdict_sends_nothing() -> None:
+    r = rig(level=None)
+    result = r.service.execute(PLAN, Phase.OPEN, send=True)
+    assert result.status is ExecuteStatus.RISK_UNAVAILABLE and r.gateway.submitted == []
+    unreadable = rig()
+    unreadable.risk.limits_ = None
+    assert unreadable.service.execute(PLAN, Phase.OPEN, send=True).status is (
+        ExecuteStatus.RISK_UNAVAILABLE
+    )
+    assert unreadable.gateway.submitted == []
+
+
+def test_orders_follow_the_risk_targets_not_the_plan_targets() -> None:
+    r = rig(level=RiskLevel.REDUCE)
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    # 노출 50%: D 100주 → 50주(매도 50), E 0주, A·B 130주 → 65주
+    assert _sent(r) == [
+        (f"{PLAN}-00000D-sell", "sell", 50, 9_990),
+        (f"{PLAN}-00000E-sell", "sell", 100, 9_990),
+        (f"{PLAN}-00000A-buy", "buy", 65, 10_020),
+        (f"{PLAN}-00000B-buy", "buy", 65, 10_020),
+    ]
+
+
+def test_a_buy_of_a_flagged_name_is_blocked_every_round_and_a_sell_goes_out() -> None:
+    r = rig()
+    warned = TradeStatus("00000A", frozenset({SecurityFlag.INVESTMENT_WARNING}), 13_000, 7_000)
+    r.market.statuses = {"00000A": warned, "00000E": replace(warned, symbol="00000E")}
+    result = r.service.execute(PLAN, Phase.OPEN, send=True)
+    outcomes = {line.symbol: line.outcome for line in result.lines}
+    assert outcomes == {"00000E": "sent", "00000A": "risk_blocked", "00000B": "sent"}
+    blocked = [e for e in r.log.events_ if e.kind == "risk_blocked"]
+    assert [(e.symbol, e.side) for e in blocked] == [("00000A", "buy")]
+    assert "investment_warning" in blocked[0].detail
+    r.service.execute(PLAN, Phase.CHASE, send=True)
+    assert all(o.symbol != "00000A" for o in r.gateway.submitted)
+
+
+def test_an_active_vi_holds_the_order_for_one_round_only() -> None:
+    r = rig()
+    vi = ViWindow(time(9, 8), None)  # 09:10 에 해제 시각 없이 발동 2분째
+    r.market.statuses = {"00000A": TradeStatus("00000A", frozenset(), 13_000, 7_000, (vi,))}
+    first = r.service.execute(PLAN, Phase.OPEN, send=True)
+    assert {line.symbol: line.outcome for line in first.lines}["00000A"] == "risk_hold"
+    r.market.statuses = {}
+    r.service.execute(PLAN, Phase.CHASE, send=True)
+    assert f"{PLAN}-00000A-buy" in {o.intent_id for o in r.gateway.submitted}
+
+
+def test_an_unreadable_status_skips_only_that_order_this_round() -> None:
+    r = rig()
+    r.market.unreadable = {"00000A"}
+    result = r.service.execute(PLAN, Phase.OPEN, send=True)
+    outcomes = {line.symbol: line.outcome for line in result.lines}
+    assert outcomes == {"00000E": "sent", "00000A": "no_status", "00000B": "sent"}
+
+
+def test_close_counts_unfilled_against_the_risk_targets_and_reviews_the_day() -> None:
+    r = rig(level=RiskLevel.REDUCE)
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    r.gateway.fill(f"{PLAN}-00000A-buy", 65, 10_020)
+    r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
+    closed = r.service.close()
+    assert closed.status is CloseStatus.OK and closed.record is not None
+    orders = {(o.symbol, o.side): o for o in closed.record.orders}
+    # 계획 수량은 리스크 뒤 65주이고, 리스크가 만든 D 매도 50주도 줄에 든다
+    assert (orders[("00000A", "buy")].quantity, orders[("00000A", "buy")].missed_krw) == (65, 0)
+    assert orders[("00000D", "sell")].quantity == 50
+    assert closed.risk is not None and closed.risk.review is not None
+    reviewed = {(o.symbol, o.side): o for o in closed.risk.review.orders}
+    assert (
+        reviewed[("00000A", "buy")].plan_quantity,
+        reviewed[("00000A", "buy")].reduced_by_risk,
+    ) == (
+        130,
+        65,
+    )
+    assert reviewed[("00000A", "buy")].unfilled_bp == 0
+    assert reviewed[("00000D", "sell")].plan_quantity == 0
+    assert closed.risk.review.violations == ()
+    assert r.risk.days_[MONDAY.date()] == closed.risk
+
+
+def test_close_records_the_drawdown_level_move_of_the_day() -> None:
+    r = rig()
+    r.log.save_day(close_record(date(2026, 10, 23), 100_000_000))
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
+    closed = r.service.close()
+    # 고점 1억 → 오늘 총자산 약 300만: 정지 선을 넘었다
+    assert closed.risk is not None
+    assert (closed.risk.previous_level, closed.risk.state.level) == (
+        RiskLevel.NORMAL,
+        RiskLevel.HALT,
+    )
+
+
+def test_a_close_still_records_the_day_when_risk_records_are_unreadable() -> None:
+    r = rig()
+    r.market.closes = {"00000D": 10_050, "00000E": 9_900}
+    r.risk.limits_ = None
+    closed = r.service.close()
+    assert closed.status is CloseStatus.OK and closed.record is not None
+    assert closed.risk is None and "limits" in closed.risk_detail
+    assert r.service.days() == (closed.record,)

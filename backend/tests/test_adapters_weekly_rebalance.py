@@ -26,6 +26,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     SignalRecord,
 )
 from strategy_workbench.domain.rebalance.facade.rebalance import RebalancePolicy, plan_rebalance
+from strategy_workbench.domain.risk.facade.risk import SignalFacts
 
 KST = timezone(timedelta(hours=9))
 DAY = date(2026, 10, 23)
@@ -206,6 +207,34 @@ def test_signal_reads_names_and_why_unranked_names_left(tmp_path: Path) -> None:
     # 유니버스 판이 없으면 이름·이유 없이 진행한다
     bare = ScopeSignalSource(model_db(tmp_path / "bare")).read(DAY, SignalBasis.EVENING).snapshot
     assert bare is not None and bare.names is None and bare.exclusion_reasons is None
+
+
+def test_signal_reads_the_trading_value_and_flags_the_risk_guard_needs(tmp_path: Path) -> None:
+    root = model_db(tmp_path)
+    universe = root / "factor_inputs" / "fi_universe" / f"v={PRICES}"
+    universe.mkdir(parents=True)
+    # adv20 은 신호일 포함 20거래일 평균 거래대금(억 원)이다
+    pq.write_table(
+        pa.table(
+            {
+                "ticker": ["000001", "000002", "000003"],
+                "adv20": [45_139.435991656, 2.15, None],
+                "is_admin": [False, True, False],
+                "is_halted": [False, False, True],
+            }
+        ),
+        universe / "part0.parquet",
+    )
+    snapshot = ScopeSignalSource(root).read(DAY, SignalBasis.EVENING).snapshot
+    assert snapshot is not None and snapshot.facts is not None
+    assert dict(snapshot.facts) == {
+        "000001": SignalFacts(4_513_943_599_166, admin=False, halted=False),
+        "000002": SignalFacts(215_000_000, admin=True, halted=False),
+        "000003": SignalFacts(None, admin=False, halted=True),
+    }
+    # 옛 판처럼 칸이 없으면 자료 없음(None) — 리스크는 그 종목들을 사지 않는다
+    bare = ScopeSignalSource(model_db(tmp_path / "bare")).read(DAY, SignalBasis.EVENING).snapshot
+    assert bare is not None and bare.facts is None
 
 
 def test_missing_model_db_is_unreadable(tmp_path: Path) -> None:

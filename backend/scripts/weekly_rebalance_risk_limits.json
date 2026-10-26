@@ -1,0 +1,33 @@
+{
+ "schema": "s07-risk-limits/1",
+ "version": 1,
+ "drawdown": {
+  "initial_peak_krw": 100000000,
+  "warn_bp": 1000,
+  "reduce_bp": 1500,
+  "halt_bp": 2000,
+  "recover_bp": 1000,
+  "reduced_exposure_bp": 5000
+ },
+ "max_weight_bp": 1500,
+ "max_adv_participation_bp": 1000,
+ "near_limit_bp": 300,
+ "vi_unreleased_hold_minutes": 5,
+ "blocked_buy_flags": [
+  "admin",
+  "halted",
+  "liquidation",
+  "investment_warning",
+  "investment_danger",
+  "unknown"
+ ],
+ "changes": [
+  {
+   "version": 1,
+   "date": "2026-10-26",
+   "by": "정동민",
+   "what": "처음 정함 — 낙폭 −10% 경고·−15% 노출 50%·−20% 신규 매수 정지(사람만 해제), 축소는 −10% 위로 회복하면 해제, 시작 고점 1억 원(10-21 운용 시작 자본), 단일 종목 매수 뒤 15%, 매수 금액 ≤ 20일 평균 거래대금 10%, 상한가 3% 안 매수는 그 회차 보류, VI 해제 시각이 없으면 발동 뒤 5분 보류, 관리·정지·정리매매·투자경고·투자위험·모르는 표시는 매수 금지",
+   "why": "S07 완전 자동 전환(2026-10-26)으로 사람이 걸러 주던 안전장치가 사라짐. 리스크 가드 플랜 사용자 승인(D1~D4 추천안), 근거는 docs/planning/research-to-trading/S07-weekly-rebalance.md H절"
+  }
+ ]
+}

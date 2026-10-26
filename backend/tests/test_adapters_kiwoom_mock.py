@@ -102,6 +102,9 @@ class FakeKiwoom:
         self.quotes: dict[str, tuple[tuple[int, ...], tuple[int, ...]]] = {}
         self.rate_limited: set[str] = set()  # 다음 한 번만 호출 한도(1700)로 답할 TR
         self.last_prices: dict[str, int] = {}
+        self.audit: dict[str, tuple[str, str]] = {}  # 종목 → (감리구분, 투자유의종목여부)
+        self.price_limits: dict[str, tuple[int, int]] = {}  # 종목 → (상한가, 하한가)
+        self.vi: dict[str, list[dict[str, str]]] = {}  # 종목 → 그날 VI 발동 행
         self.calls: list[Call] = []
         self.after: dict[str, list[Callable[[], None]]] = {}  # 한 번만 돈다
         self.every: dict[str, list[Callable[[], None]]] = {}  # 호출마다 돈다
@@ -185,9 +188,31 @@ class FakeKiwoom:
 
     def _ka10001(self, body: dict[str, object], _: dict[str, str]) -> KiwoomHttpResponse:
         code = str(body["stk_cd"])
+        upper, lower = self.price_limits.get(code, (0, 0))
         return self._ok(
-            {"stk_cd": code, "stk_nm": "삼성전자", "cur_prc": f"+{self.last_prices[code]}"}
+            {
+                "stk_cd": code,
+                "stk_nm": "삼성전자",
+                "cur_prc": f"+{self.last_prices[code]}",
+                # 2026-10-26 모의 실측처럼 상한가는 +, 하한가는 − 부호가 붙는다
+                "upl_pric": f"+{upper}",
+                "lst_pric": f"-{lower}",
+            }
         )
+
+    def _ka10100(self, body: dict[str, object], _: dict[str, str]) -> KiwoomHttpResponse:
+        code = str(body["stk_cd"])
+        audit, warning = self.audit.get(code, ("정상", "0"))
+        return self._ok(
+            {"code": code, "name": "삼성전자", "auditInfo": audit, "orderWarning": warning}
+        )
+
+    def _ka10054(self, body: dict[str, object], _: dict[str, str]) -> KiwoomHttpResponse:
+        # 2026-10-26 모의 실측: 거래량·거래대금 구분을 쓰지 않아도 범위 칸을 비우면 1511 이다
+        for key in ("min_trde_qty", "max_trde_qty", "min_trde_prica", "max_trde_prica"):
+            if not str(body.get(key, "")):
+                return self._error("1511", f"필수 입력 값에 값이 존재하지 않습니다. {key}")
+        return self._ok({"motn_stk": self.vi.get(str(body["stk_cd"]), [])})
 
     def _kt00018(self, _: dict[str, object], headers: dict[str, str]) -> KiwoomHttpResponse:
         rows = [

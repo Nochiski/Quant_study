@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import time
 from pathlib import Path
+
+import pytest
 
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import (
     KiwoomCredentials,
@@ -10,10 +13,12 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import (
 )
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.market import KiwoomMarket
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
+    MarketError,
     OrderRequest,
     SubmitStatus,
 )
 from strategy_workbench.bootstrap.weekly_rebalance.facade.command import OfflineOrderGateway
+from strategy_workbench.domain.risk.facade.risk import SecurityFlag, ViWindow
 from tests.test_adapters_kiwoom_mock import ACCOUNT, APP_KEY, SECRET, SYMBOL, Clock, FakeKiwoom
 
 CREDENTIALS = KiwoomCredentials(APP_KEY, SECRET, ACCOUNT)
@@ -112,6 +117,83 @@ def test_market_shares_the_broker_session_and_reads_book_and_price(tmp_path: Pat
     assert (price.name, price.last_price_krw) == ("삼성전자", 70_050)
     assert not {"kt10000", "kt10001", "kt10003"} & set(fake.api_ids())
     assert fake.api_ids().count("au10001") == 1  # 토큰은 한 번만 받는다
+    shared.close()
+
+
+def test_market_reads_flags_price_limits_and_the_days_krx_vi(tmp_path: Path) -> None:
+    clock = Clock()
+    fake = FakeKiwoom(clock)
+    fake.audit[SYMBOL] = ("투자경고", "5")
+    fake.price_limits[SYMBOL] = (91_000, 49_000)
+    fake.last_prices[SYMBOL] = 70_000
+    fake.vi[SYMBOL] = [
+        {
+            "stk_cd": SYMBOL,
+            "trde_cntr_proc_time": "090801",
+            "virelis_time": "091031",
+            "stex_tp": "KRX",
+        },
+        {
+            "stk_cd": SYMBOL,
+            "trde_cntr_proc_time": "092000",
+            "virelis_time": "000000",
+            "stex_tp": "KRX",
+        },
+        {
+            "stk_cd": SYMBOL,
+            "trde_cntr_proc_time": "172311",
+            "virelis_time": "172511",
+            "stex_tp": "NXT",
+        },
+    ]
+    shared = broker(tmp_path, fake, clock, transmit=False)
+    status = KiwoomMarket(shared).trade_status(SYMBOL)
+    assert status.flags == {SecurityFlag.INVESTMENT_WARNING}
+    assert (status.upper_limit_krw, status.lower_limit_krw) == (91_000, 49_000)
+    # NXT 행은 빼고, 해제 시각 000000 은 아직 모름(None)
+    assert status.vi == (ViWindow(time(9, 8, 1), time(9, 10, 31)), ViWindow(time(9, 20), None))
+    [vi_call] = [call for call in fake.calls if call.api_id == "ka10054"]
+    assert (vi_call.body["stk_cd"], vi_call.body["stex_tp"]) == (SYMBOL, "1")
+    assert not {"kt10000", "kt10001", "kt10003"} & set(fake.api_ids())
+    shared.close()
+
+
+@pytest.mark.parametrize(
+    ("audit", "warning", "flags"),
+    [
+        ("정상", "0", set()),
+        (
+            "관리종목|투자주의",
+            "2",
+            {SecurityFlag.ADMIN, SecurityFlag.CAUTION, SecurityFlag.LIQUIDATION},
+        ),
+        ("거래정지", "4", {SecurityFlag.HALTED, SecurityFlag.INVESTMENT_DANGER}),
+        ("단기과열", "3", {SecurityFlag.OVERHEATED}),
+        ("처음 보는 값", "0", {SecurityFlag.UNKNOWN}),
+        ("정상", "", {SecurityFlag.UNKNOWN}),
+        ("정상", "9", {SecurityFlag.UNKNOWN}),
+    ],
+)
+def test_kiwoom_status_words_map_to_flags_and_unknown_words_block(
+    tmp_path: Path, audit: str, warning: str, flags: set[SecurityFlag]
+) -> None:
+    clock = Clock()
+    fake = FakeKiwoom(clock)
+    fake.audit[SYMBOL] = (audit, warning)
+    fake.price_limits[SYMBOL] = (91_000, 49_000)
+    fake.last_prices[SYMBOL] = 70_000
+    shared = broker(tmp_path, fake, clock, transmit=False)
+    assert KiwoomMarket(shared).trade_status(SYMBOL).flags == flags
+    shared.close()
+
+
+def test_missing_price_limits_are_unreadable(tmp_path: Path) -> None:
+    clock = Clock()
+    fake = FakeKiwoom(clock)
+    fake.last_prices[SYMBOL] = 70_000  # 상하한가 0
+    shared = broker(tmp_path, fake, clock, transmit=False)
+    with pytest.raises(MarketError, match="price limits"):
+        KiwoomMarket(shared).trade_status(SYMBOL)
     shared.close()
 
 

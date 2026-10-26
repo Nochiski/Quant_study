@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
@@ -11,10 +12,15 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountUnavailableError,
     Approval,
     ApproveStatus,
+    DayRecord,
     EarlierClose,
+    ExecutionEvent,
     PlanExistsError,
     PlanRecord,
     PrepareStatus,
+    RiskDay,
+    RiskUnavailableError,
+    RiskVerdict,
     SignalBasis,
     SignalRead,
     SignalReadStatus,
@@ -22,10 +28,22 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     WeeklyRebalanceService,
 )
 from strategy_workbench.domain.rebalance.facade.rebalance import RebalanceAction, RebalancePolicy
+from strategy_workbench.domain.risk.facade.risk import (
+    GuardReason,
+    PostTradeReview,
+    RiskAction,
+    RiskLevel,
+    RiskLimits,
+    SignalFacts,
+    parse_limits,
+)
+from tests.domain.test_risk import PAYLOAD
 
 KST = timezone(timedelta(hours=9))
 DAY = date(2026, 10, 23)
 NOW = datetime(2026, 10, 23, 16, 10, tzinfo=KST)
+# 이 대역의 주문안은 자리 3개(종목당 약 33%)라 단일 종목 상한만 50%로 넓힌다
+LIMITS = parse_limits({**PAYLOAD, "max_weight_bp": 5_000}, "ab" * 32)
 
 
 def snapshot(**overrides: object) -> SignalSnapshot:
@@ -38,6 +56,11 @@ def snapshot(**overrides: object) -> SignalSnapshot:
         "untraded": frozenset(),
         "scores_sha256": "ab" * 32,
         "prices_build_id": "e_20261023T065450Z",
+        # 거래대금 100억 원, 관리·정지 표시 없음 — 리스크 한도가 목표를 줄이지 않는다
+        "facts": dict.fromkeys(
+            ("000001", "000002", "000003", "000004", "000009"),
+            SignalFacts(10_000_000_000, admin=False, halted=False),
+        ),
     }
     values.update(overrides)
     return SignalSnapshot(**values)  # pyright: ignore[reportArgumentType]  # reason: 테스트 대역 값
@@ -93,13 +116,86 @@ class Plans:
         return tuple(sorted(self.records))
 
 
+@dataclass
+class Log:
+    events_: list[ExecutionEvent] = field(default_factory=list)
+    days_: dict[date, DayRecord] = field(default_factory=dict)
+    raws: dict[date, Mapping[str, object]] = field(default_factory=dict)
+
+    def append(self, event: ExecutionEvent) -> None:
+        self.events_.append(event)
+
+    def events(self) -> tuple[ExecutionEvent, ...]:
+        return tuple(self.events_)
+
+    def save_raw(self, day: date, payload: Mapping[str, object]) -> None:
+        self.raws[day] = payload
+
+    def save_day(self, record: DayRecord) -> None:
+        self.days_[record.day] = record
+
+    def day(self, day: date) -> DayRecord | None:
+        return self.days_.get(day)
+
+    def days(self) -> tuple[DayRecord, ...]:
+        return tuple(self.days_[day] for day in sorted(self.days_))
+
+
+@dataclass
+class Risk:
+    """리스크 저장소 대역. `limits_`가 None이면 한도 파일을 읽지 못한 것처럼 군다."""
+
+    limits_: RiskLimits | None = field(default_factory=lambda: LIMITS)
+    actions_: list[RiskAction] = field(default_factory=list)
+    verdicts: dict[str, RiskVerdict] = field(default_factory=dict)
+    days_: dict[date, RiskDay] = field(default_factory=dict)
+
+    def limits(self) -> RiskLimits:
+        if self.limits_ is None:
+            raise RiskUnavailableError("risk limits unreadable — file=limits.json")
+        return self.limits_
+
+    def actions(self) -> tuple[RiskAction, ...]:
+        return tuple(self.actions_)
+
+    def add_action(self, action: RiskAction) -> None:
+        self.actions_.append(action)
+
+    def save_verdict(self, verdict: RiskVerdict) -> None:
+        if verdict.plan_id in self.verdicts:
+            raise PlanExistsError(verdict.plan_id)
+        self.verdicts[verdict.plan_id] = verdict
+
+    def verdict(self, plan_id: str) -> RiskVerdict | None:
+        return self.verdicts.get(plan_id)
+
+    def save_day(self, record: RiskDay) -> None:
+        self.days_[record.day] = record
+
+    def days(self) -> tuple[RiskDay, ...]:
+        return tuple(self.days_[day] for day in sorted(self.days_))
+
+
+def close_record(day: date, equity_krw: int, *, matched: bool = True) -> DayRecord:
+    """장 마감 기록. 낙폭은 총자산만 본다."""
+    at = datetime.combine(day, datetime.min.time(), KST) + timedelta(hours=15, minutes=40)
+    return DayRecord(day, at, "weekly-2026-10-16", matched, "", equity_krw, (), equity_krw, 0, ())
+
+
 def service(
-    signals: Signals | None = None, account: Account | None = None, plans: Plans | None = None
+    signals: Signals | None = None,
+    account: Account | None = None,
+    plans: Plans | None = None,
+    *,
+    risk: Risk | None = None,
+    log: Log | None = None,
 ) -> WeeklyRebalanceService:
     return WeeklyRebalanceService(
         signals or Signals(),
         account or Account(),
         plans or Plans(),
+        risk=risk or Risk(),
+        log=log or Log(),
         now=lambda: NOW,
         policy=RebalancePolicy(slots=3, keep_rank=5),
     )
@@ -253,3 +349,77 @@ def test_approval_can_take_symbols_out_of_this_week() -> None:
     approved = rebalance.approve("weekly-2026-10-23", "동민", no_trade=("000002", "000002"))
     assert approved.status is ApproveStatus.OK and approved.approval is not None
     assert approved.approval.no_trade == ("000002",)
+
+
+# --- 리스크 판정(S07 리스크 가드 ①) -------------------------------------------------------------
+
+
+def test_prepare_leaves_a_risk_verdict_with_the_limits_it_used() -> None:
+    risk, plans = Risk(), Plans()
+    result = service(plans=plans, risk=risk).prepare(DAY)
+    assert result.status is PrepareStatus.OK and result.verdict is not None
+    verdict = risk.verdicts["weekly-2026-10-23"]
+    assert verdict == result.verdict
+    assert (verdict.limits_version, verdict.limits_sha256) == (1, "ab" * 32)
+    assert verdict.state.level is RiskLevel.NORMAL
+    # 한도 안이라 리스크 목표 = 주문안 목표
+    assert verdict.guarded.targets() == plans.records["weekly-2026-10-23"].plan.target_shares()
+
+
+def test_prepare_halves_targets_after_a_15_percent_drawdown() -> None:
+    log = Log()
+    log.save_day(close_record(date(2026, 10, 23), 85_000_000))  # 시작 고점 1억 대비 −15%
+    result = service(log=log).prepare(DAY)
+    assert result.verdict is not None and result.verdict.state.level is RiskLevel.REDUCE
+    # 주문안 97주 → 48주(내림)
+    assert result.verdict.guarded.targets() == dict.fromkeys(("000001", "000002", "000003"), 48)
+    assert {line.reasons for line in result.verdict.guarded.lines} == {(GuardReason.EXPOSURE,)}
+
+
+def test_unreconciled_close_records_do_not_move_the_drawdown() -> None:
+    log = Log()
+    log.save_day(close_record(date(2026, 10, 23), 80_000_000, matched=False))
+    result = service(log=log).prepare(DAY)
+    assert result.verdict is not None and result.verdict.state.level is RiskLevel.NORMAL
+
+
+def test_no_plan_is_left_when_risk_cannot_be_judged() -> None:
+    plans = Plans()
+    result = service(plans=plans, risk=Risk(limits_=None)).prepare(DAY)
+    assert result.status is PrepareStatus.RISK_UNAVAILABLE and plans.records == {}
+    assert "limits.json" in result.detail
+
+
+def test_names_without_signal_day_facts_are_not_bought() -> None:
+    signals = Signals(SignalRead(SignalReadStatus.OK, snapshot(facts=None)))
+    result = service(signals).prepare(DAY)
+    assert result.verdict is not None
+    assert result.verdict.guarded.targets() == dict.fromkeys(("000001", "000002", "000003"), 0)
+
+
+def test_the_next_verdict_carries_violations_found_since_the_last_plan() -> None:
+    risk, plans = Risk(), Plans()
+    service(plans=plans, risk=risk).prepare(DAY)
+    first = risk.verdicts["weekly-2026-10-23"]
+    risk.days_[date(2026, 10, 26)] = RiskDay(
+        date(2026, 10, 26),
+        NOW + timedelta(days=3),
+        1,
+        "ab" * 32,
+        RiskLevel.NORMAL,
+        first.state,
+        PostTradeReview((), ("리스크가 허용한 수량보다 더 샀다 — symbol=000001",), ()),
+    )
+    later = WeeklyRebalanceService(
+        Signals(SignalRead(SignalReadStatus.OK, snapshot(signal_date=date(2026, 10, 30)))),
+        Account(),
+        plans,
+        risk=risk,
+        log=Log(),
+        now=lambda: NOW + timedelta(days=7),
+        policy=RebalancePolicy(slots=3, keep_rank=5),
+    ).prepare(date(2026, 10, 30))
+    assert later.verdict is not None
+    assert later.verdict.violations_since_last == (
+        "리스크가 허용한 수량보다 더 샀다 — symbol=000001",
+    )

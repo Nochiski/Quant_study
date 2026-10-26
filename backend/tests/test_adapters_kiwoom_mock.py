@@ -103,6 +103,7 @@ class FakeKiwoom:
         self.rate_limited: set[str] = set()  # 다음 한 번만 호출 한도(1700)로 답할 TR
         self.last_prices: dict[str, int] = {}
         self.audit: dict[str, tuple[str, str]] = {}  # 종목 → (감리구분, 투자유의종목여부)
+        self.state: dict[str, str] = {}  # 종목 → 종목상태(파이프로 이은 토큰)
         self.price_limits: dict[str, tuple[int, int]] = {}  # 종목 → (상한가, 하한가)
         self.vi: dict[str, list[dict[str, str]]] = {}  # 종목 → 그날 VI 발동 행
         self.calls: list[Call] = []
@@ -203,8 +204,16 @@ class FakeKiwoom:
     def _ka10100(self, body: dict[str, object], _: dict[str, str]) -> KiwoomHttpResponse:
         code = str(body["stk_cd"])
         audit, warning = self.audit.get(code, ("정상", "0"))
+        # 2026-10-26 모의 실측(제주항공): "state": "증거금100%"
+        state = self.state.get(code, "증거금40%|담보대출|신용가능")
         return self._ok(
-            {"code": code, "name": "삼성전자", "auditInfo": audit, "orderWarning": warning}
+            {
+                "code": code,
+                "name": "삼성전자",
+                "auditInfo": audit,
+                "orderWarning": warning,
+                "state": state,
+            }
         )
 
     def _ka10054(self, body: dict[str, object], _: dict[str, str]) -> KiwoomHttpResponse:

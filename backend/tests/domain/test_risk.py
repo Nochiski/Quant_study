@@ -135,8 +135,9 @@ def test_reset_moves_the_peak_to_the_given_equity_and_clears_the_level() -> None
         peak_krw=79_000_000,
     )
     state = drawdown_state(_closes(79_000_000, 75_000_000), (reset,), LIMITS.drawdown)
-    # 새 고점 7,900만 기준 7,500만은 −5.06% → 정상
+    # 새 고점 7,900만 기준 7,500만은 −5.06% → 정상. 고점일은 그 총자산을 기록한 장 마감일이다
     assert (state.level, state.peak_krw, state.loss_bp) == (RiskLevel.NORMAL, 79_000_000, 506)
+    assert state.peak_day == date(2026, 10, 26)
 
 
 def test_no_close_yet_starts_from_the_initial_peak() -> None:
@@ -163,14 +164,16 @@ def _guard(
     holdings: dict[str, int],
     *,
     level: RiskLevel = RiskLevel.NORMAL,
+    exposed: dict[str, int] | None = None,
     facts: dict[str, SignalFacts] | None = None,
     equity: int = 10_000_000,
-    frozen: frozenset[str] = frozenset(),
 ) -> dict[str, tuple[int, tuple[GuardReason, ...]]]:
+    """`exposed`는 주문안을 그 단계의 노출로 다시 잰 목표다(도메인 rebalance 의
+    `scaled_targets`)."""
     guarded = guard_targets(
         targets=targets,
+        exposed=targets if exposed is None else exposed,
         holdings=holdings,
-        frozen=frozen,
         prices=dict.fromkeys(targets, 10_000),
         facts=FACTS if facts is None else facts,
         equity_krw=equity,
@@ -187,13 +190,14 @@ def test_normal_level_keeps_targets_inside_the_limits() -> None:
     }
 
 
-def test_reduce_halves_every_target_including_kept_holdings() -> None:
+def test_reduce_trades_the_reduced_exposure_targets_including_kept_holdings() -> None:
     lines = _guard(
         {"000001": 101, "000002": 100, "000003": 0},
         {"000002": 100, "000003": 40},
         level=RiskLevel.REDUCE,
+        exposed={"000001": 50, "000002": 50, "000003": 0},
     )
-    # 새 매수 101주 → 50주(내림), 그대로 두던 보유 100주 → 50주 매도, 파는 종목은 그대로 0
+    # 새 매수 101주 → 50주, 그대로 두던 보유 100주 → 50주 매도, 파는 종목은 그대로 0
     assert lines == {
         "000001": (50, (GuardReason.EXPOSURE,)),
         "000002": (50, (GuardReason.EXPOSURE,)),
@@ -202,7 +206,12 @@ def test_reduce_halves_every_target_including_kept_holdings() -> None:
 
 
 def test_halt_halves_targets_and_buys_nothing() -> None:
-    lines = _guard({"000001": 100, "000002": 100}, {"000002": 60}, level=RiskLevel.HALT)
+    lines = _guard(
+        {"000001": 100, "000002": 100},
+        {"000002": 60},
+        level=RiskLevel.HALT,
+        exposed={"000001": 50, "000002": 50},
+    )
     # 보유 없는 000001: 절반 50주도 사지 않는다. 000002: 절반 50주로 줄이는 매도만
     assert lines == {
         "000001": (0, (GuardReason.EXPOSURE, GuardReason.HALT)),
@@ -210,13 +219,14 @@ def test_halt_halves_targets_and_buys_nothing() -> None:
     }
 
 
-def test_names_the_plan_cannot_trade_are_left_as_they_are() -> None:
-    # 주문안이 매매가 막혀 그대로 둔 종목(거래정지·신호일 가격 없음)은 축소해도 팔 주문을
-    # 만들지 않는다
-    lines = _guard(
-        {"000001": 100}, {"000001": 100}, level=RiskLevel.REDUCE, frozen=frozenset({"000001"})
-    )
-    assert lines == {"000001": (100, ())}
+def test_reduced_exposure_never_raises_a_target_above_the_plan() -> None:
+    lines = _guard({"000001": 40}, {"000001": 40}, level=RiskLevel.REDUCE, exposed={"000001": 45})
+    assert lines == {"000001": (40, ())}
+
+
+def test_a_missing_reduced_exposure_target_stops_the_judgement() -> None:
+    with pytest.raises(ValueError, match="000001"):
+        _guard({"000001": 40}, {}, level=RiskLevel.REDUCE, exposed={})
 
 
 def test_single_name_cap_limits_buys_but_not_existing_overweight() -> None:
@@ -325,7 +335,7 @@ def test_an_active_vi_holds_both_sides(window: ViWindow, verdict: OrderVerdict) 
 # --- 체결 후 점검 -------------------------------------------------------------------------------
 
 
-def test_review_flags_buys_beyond_the_guard_and_blocked_names_that_filled() -> None:
+def test_review_flags_buys_beyond_the_guard_and_notes_names_blocked_that_day() -> None:
     review = review_day(
         (
             ReviewOrder("000001", "buy", 100, 50, 60, 12),  # 리스크가 50주로 줄였는데 60주 체결
@@ -340,10 +350,10 @@ def test_review_flags_buys_beyond_the_guard_and_blocked_names_that_filled() -> N
     reviewed = {order.symbol: order for order in review.orders}
     assert (reviewed["000001"].reduced_by_risk, reviewed["000001"].unfilled_bp) == (50, 0)
     assert reviewed["000002"].unfilled_bp == 7_500
-    assert len(review.violations) == 2
-    assert "000001" in review.violations[0] and "000002" in review.violations[1]
-    # 60주 × 1만 = 60만 ÷ 400만 = 15% → 상한과 같아 기록하지 않는다
-    assert review.notes == ()
+    assert len(review.violations) == 1 and "000001" in review.violations[0]
+    # 막힌 종목은 위반이 아니라 기록이다 — 앞 회차에 허용돼 체결된 뒤 표시가 붙을 수 있다(리뷰 P3-4)
+    # 60주 × 1만 = 60만 ÷ 400만 = 15% → 비중 상한과 같아 기록하지 않는다
+    assert len(review.notes) == 1 and "000002" in review.notes[0]
 
 
 def test_review_notes_names_above_the_weight_cap_at_the_close() -> None:
@@ -369,6 +379,7 @@ def test_limits_keep_version_and_fingerprint() -> None:
         {"schema": "s07-risk-limits/0"},
         {"max_weight_bp": 0},
         {"blocked_buy_flags": ["admin", "nonsense"]},
+        {"blocked_buy_flags": [["admin"]]},
         {"drawdown": {**DRAWDOWN, "halt_bp": 1_400}},
         {"drawdown": {**DRAWDOWN, "recover_bp": 1_600}},
     ],

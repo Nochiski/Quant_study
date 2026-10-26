@@ -1,10 +1,11 @@
 """주문안 목표 주식 수에 리스크 한도를 씌운다(S07 리스크 가드 ①, 주문안을 만들 때).
 
 목표를 줄이기만 한다. 새 종목을 넣거나 늘리지 않고, 종목마다 따로 판정한다(그래서 승인의 이번 주
-매매 제외로 목표에서 종목을 빼도 남은 종목의 판정은 그대로다). 주문안이 매매가 막혀 그대로 둔
-종목(`frozen`: 거래정지·신호일 가격 없음)은 건드리지 않는다 — 낼 수 없는 매도를 만들지 않는다. 순서:
+매매 제외로 목표에서 종목을 빼도 남은 종목의 판정은 그대로다). 순서:
 
-1. 낙폭 축소·정지 단계면 모든 목표에 노출 비율을 곱해 내림한다(보유도 줄인다).
+1. 낙폭 축소·정지 단계면 주문안을 그 노출 비율로 다시 잰 목표(`exposed`, 전략 쪽
+   `domain/rebalance`의 `scaled_targets` — 고른 종목·밴드·매매가 막힌 보유는 주문안 규칙 그대로)를
+   쓴다. 보유도 줄인다. 주문안 목표보다 늘리지 않는다.
 2. 정지 단계면 지금 보유보다 많이 사지 않는다.
 3. 남은 매수는 신호일 표시(관리·거래정지)와 자료가 있어야 하고, 단일 종목 비중 상한과 20일 평균
    거래대금 참여 상한 안으로 줄인다. 이미 상한을 넘은 보유는 팔지 않는다.
@@ -13,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -22,7 +23,7 @@ from strategy_workbench.domain.risk._limits import BP, RiskLimits
 
 
 class GuardReason(StrEnum):
-    EXPOSURE = "exposure"  # 낙폭 축소로 목표에 노출 비율을 곱했다
+    EXPOSURE = "exposure"  # 낙폭 축소로 줄인 노출의 목표를 썼다
     HALT = "halt"  # 낙폭 정지로 사지 않는다
     BLOCKED = "blocked"  # 신호일 관리종목·거래정지 표시
     NO_FACTS = "no_facts"  # 거래대금·표시 자료가 없어 판정할 수 없다(사지 않는다)
@@ -64,8 +65,8 @@ class GuardedTargets:
 def guard_targets(
     *,
     targets: Mapping[str, int],
+    exposed: Mapping[str, int],
     holdings: Mapping[str, int],
-    frozen: Collection[str],
     prices: Mapping[str, int],
     facts: Mapping[str, SignalFacts] | None,
     equity_krw: int,
@@ -78,11 +79,12 @@ def guard_targets(
         if plan_target < 0:
             raise ValueError(f"target must not be negative — symbol={symbol} target={plan_target}")
         current = holdings.get(symbol, 0)
-        if symbol in frozen:
-            lines.append(GuardedLine(symbol, current, plan_target, plan_target, ()))
-            continue
         reasons: list[GuardReason] = []
-        target = plan_target * exposure // BP
+        target = plan_target
+        if exposure < BP:
+            if symbol not in exposed:
+                raise ValueError(f"no reduced-exposure target — symbol={symbol} level={level}")
+            target = min(exposed[symbol], plan_target)
         if target != plan_target:
             reasons.append(GuardReason.EXPOSURE)
         if level is RiskLevel.HALT and target > current:

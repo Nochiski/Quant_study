@@ -30,7 +30,9 @@ class RiskUnavailableError(Exception):
 class RiskVerdict:
     """주문안을 만들 때의 리스크 판정. 주문안마다 한 번만 쓰고 실행기는 이 목표로 낸다.
 
-    `violations_since_last`는 바로 앞 판정 뒤 체결 후 점검이 찾은 위반이다(주문지 한 줄).
+    - `violations_since_last`: 바로 앞 주문안 뒤 체결 후 점검이 찾은 위반(주문지 한 줄).
+    - `plan_created_at`: 판정한 주문안의 만든 시각. 실행기는 주문안과 같을 때만 이 판정으로 낸다.
+    - `close_from_plan`: 신호일 장 마감 기록이 없어 주문안 총자산을 그날 장 마감으로 접었다.
     """
 
     plan_id: str
@@ -40,6 +42,8 @@ class RiskVerdict:
     state: DrawdownState
     guarded: GuardedTargets
     violations_since_last: tuple[str, ...] = ()
+    plan_created_at: datetime | None = None
+    close_from_plan: bool = False
 
 
 @dataclass(frozen=True)
@@ -65,7 +69,7 @@ class RiskStore(Protocol):
     def add_action(self, action: RiskAction) -> None: ...
 
     def save_verdict(self, verdict: RiskVerdict) -> None:
-        """이미 있으면 `PlanExistsError`."""
+        """이미 있으면 `PlanExistsError`, 쓰지 못하면 `RiskUnavailableError`."""
         ...
 
     def verdict(self, plan_id: str) -> RiskVerdict | None: ...

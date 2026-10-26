@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
@@ -39,18 +39,15 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal impor
     SignalSource,
 )
 from strategy_workbench.domain.rebalance.facade.rebalance import (
-    LineCause,
-    RebalanceAction,
-    RebalancePlan,
     RebalancePolicy,
     plan_rebalance,
+    scaled_targets,
     signal_anomalies,
     week_targets,
 )
-from strategy_workbench.domain.risk.facade.risk import guard_targets
+from strategy_workbench.domain.risk.facade.risk import exposure_bp, guard_targets
 
 UNTRADED_REASON = "신호일 거래량 0(거래정지 가능)"
-_FROZEN_CAUSES = frozenset({LineCause.BLOCKED, LineCause.STALE_PRICE})
 EARLIER_CLOSE_REASON = "신호일 종가 없음(거래정지 등) — {day} 종가로 평가"
 
 
@@ -129,12 +126,7 @@ class WeeklyRebalanceService:
         plan_id = plan_id_for(signal_date)
         existing = self._plans.load(plan_id)
         if existing is not None:
-            return PrepareResult(
-                PrepareStatus.EXISTS,
-                existing,
-                "plan already recorded",
-                self._stored_verdict(plan_id),
-            )
+            return self._existing(existing, signal_date, basis, "plan already recorded")
         read = self._signals.read(signal_date, basis)
         if not read.ok or read.snapshot is None:
             return PrepareResult(PrepareStatus.SIGNAL_UNAVAILABLE, detail=read.detail)
@@ -191,12 +183,6 @@ class WeeklyRebalanceService:
             if signal.previous_build_id is None
             else f"직전 빌드 {signal.previous_build_id} 순위를 쓸 수 없음(읽기 실패)"
         )
-        try:
-            verdict = self._verdict(plan_id, plan, account.holdings, signal)
-        except (RiskUnavailableError, ValueError) as error:
-            return PrepareResult(
-                PrepareStatus.RISK_UNAVAILABLE, detail=f"{error} — plan_id={plan_id}"
-            )
         record = PlanRecord(
             plan_id,
             self._now(),
@@ -221,38 +207,105 @@ class WeeklyRebalanceService:
             plan,
         )
         try:
+            verdict = self._verdict(record, signal)
+        except (RiskUnavailableError, ValueError) as error:
+            return PrepareResult(
+                PrepareStatus.RISK_UNAVAILABLE, detail=f"{error} — plan_id={plan_id}"
+            )
+        try:
             self._plans.save(record)
         except PlanExistsError:
             # 다른 실행이 먼저 남겼다. 먼저 남은 것이 정본이다.
             stored = self._plans.load(plan_id)
-            return PrepareResult(
-                PrepareStatus.EXISTS,
-                stored,
-                "plan recorded concurrently",
-                self._stored_verdict(plan_id),
-            )
-        self._risk.save_verdict(verdict)
-        return PrepareResult(PrepareStatus.OK, record, verdict=verdict)
+            if stored is None:
+                raise
+            return self._existing(stored, signal_date, basis, "plan recorded concurrently")
+        return self._save_verdict(PrepareStatus.OK, record, verdict)
 
-    def _verdict(
-        self,
-        plan_id: str,
-        plan: RebalancePlan,
-        holdings: Mapping[str, int],
-        signal: SignalSnapshot,
-    ) -> RiskVerdict:
-        """지금 낙폭 단계와 신호일 자료로 주문안 목표를 줄인다. 앞 판정 뒤 찾은 위반을 싣는다."""
+    def _existing(
+        self, record: PlanRecord, signal_date: date, basis: SignalBasis, detail: str
+    ) -> PrepareResult:
+        """이미 남은 주문안. 판정이 없으면(판정 저장 전에 멈춤) 같은 빌드일 때만 다시 판정한다
+        (리뷰 P2-2). 판정을 못 하면 주문안이 있어도 만들지 못한 것으로 알린다."""
+        try:
+            stored = self._risk.verdict(record.plan_id)
+        except RiskUnavailableError as error:
+            return PrepareResult(PrepareStatus.RISK_UNAVAILABLE, record, str(error))
+        if stored is not None:
+            return self._bound(PrepareStatus.EXISTS, record, stored, detail)
+        read = self._signals.read(signal_date, basis)
+        if not read.ok or read.snapshot is None:
+            return PrepareResult(
+                PrepareStatus.RISK_UNAVAILABLE,
+                record,
+                f"plan has no risk verdict and the signal is unreadable — {read.detail}",
+            )
+        if read.snapshot.build_id != record.signal.build_id:
+            return PrepareResult(
+                PrepareStatus.RISK_UNAVAILABLE,
+                record,
+                f"plan has no risk verdict and the build moved — plan={record.signal.build_id} "
+                f"signal={read.snapshot.build_id}",
+            )
+        try:
+            verdict = self._verdict(record, read.snapshot)
+        except (RiskUnavailableError, ValueError) as error:
+            return PrepareResult(PrepareStatus.RISK_UNAVAILABLE, record, str(error))
+        return self._save_verdict(PrepareStatus.EXISTS, record, verdict)
+
+    def _save_verdict(
+        self, status: PrepareStatus, record: PlanRecord, verdict: RiskVerdict
+    ) -> PrepareResult:
+        try:
+            self._risk.save_verdict(verdict)
+        except RiskUnavailableError as error:
+            # 주문안은 남았다. 다시 부르면 같은 빌드로 판정을 다시 만든다
+            return PrepareResult(PrepareStatus.RISK_UNAVAILABLE, record, str(error))
+        except PlanExistsError:
+            stored = self._risk.verdict(record.plan_id)
+            if stored is None:
+                raise
+            return self._bound(status, record, stored, "verdict recorded concurrently")
+        return PrepareResult(status, record, verdict=verdict)
+
+    @staticmethod
+    def _bound(
+        status: PrepareStatus, record: PlanRecord, verdict: RiskVerdict, detail: str
+    ) -> PrepareResult:
+        """판정이 이 주문안의 것인가. 주문안을 지우고 다시 만들면 남은 옛 판정과 갈린다
+        (리뷰 P3-2)."""
+        if verdict.plan_created_at != record.created_at:
+            return PrepareResult(
+                PrepareStatus.RISK_UNAVAILABLE,
+                record,
+                f"risk verdict belongs to another plan — plan_id={record.plan_id} "
+                f"plan_created_at={record.created_at.isoformat()} "
+                f"verdict_plan_created_at={verdict.plan_created_at}",
+            )
+        return PrepareResult(status, record, detail, verdict)
+
+    def _verdict(self, record: PlanRecord, signal: SignalSnapshot) -> RiskVerdict:
+        """지금 낙폭 단계와 신호일 자료로 주문안 목표를 줄인다. 앞 주문안 뒤 찾은 위반을 싣는다.
+
+        신호일 장 마감 기록이 없으면(close 실패·대사 불일치) 주문안 총자산(신호일 종가 평가)을
+        그날 장 마감으로 접는다(리뷰 P1-1).
+        """
+        plan = record.plan
+        signal_day = date.fromisoformat(record.signal.signal_date)
         limits = self._risk.limits()
-        state = current_state(self._risk, self._log, limits)
+        judged = current_state(
+            self._risk,
+            self._log,
+            limits,
+            close_on=(signal_day, plan.equity_krw, record.created_at.tzinfo),
+        )
+        level = judged.state.level
         guarded = guard_targets(
             targets=plan.target_shares(),
-            holdings=holdings,
-            # 매매가 막혀 그대로 둔 보유 종목은 리스크도 건드리지 않는다(낼 수 없는 매도)
-            frozen={
-                line.symbol
-                for line in plan.lines
-                if line.action is RebalanceAction.HOLD and line.cause in _FROZEN_CAUSES
-            },
+            # 노출을 줄이는 단계면 주문안을 그 비율의 자본으로 다시 잰다
+            # (밴드·막힌 보유는 주문안 규칙)
+            exposed=scaled_targets(plan, exposure_bp(level, limits.drawdown)),
+            holdings=record.account.holdings,
             prices={
                 line.symbol: line.reference_price_krw
                 for line in plan.lines
@@ -260,11 +313,11 @@ class WeeklyRebalanceService:
             },
             facts=signal.facts,
             equity_krw=plan.equity_krw,
-            level=state.level,
+            level=level,
             limits=limits,
         )
-        earlier = [item for item in self._plans.plan_ids() if item < plan_id]
-        previous = self._risk.verdict(earlier[-1]) if earlier else None
+        earlier = [item for item in self._plans.plan_ids() if item < record.plan_id]
+        previous = self._plans.load(earlier[-1]) if earlier else None
         since = None if previous is None else previous.created_at
         violations = tuple(
             violation
@@ -273,14 +326,16 @@ class WeeklyRebalanceService:
             for violation in day.review.violations
         )
         return RiskVerdict(
-            plan_id, self._now(), limits.version, limits.sha256, state, guarded, violations
+            record.plan_id,
+            self._now(),
+            limits.version,
+            limits.sha256,
+            judged.state,
+            guarded,
+            violations,
+            plan_created_at=record.created_at,
+            close_from_plan=judged.from_plan,
         )
-
-    def _stored_verdict(self, plan_id: str) -> RiskVerdict | None:
-        try:
-            return self._risk.verdict(plan_id)
-        except RiskUnavailableError:
-            return None
 
     def approve(
         self, plan_id: str, approver: str, note: str = "", no_trade: tuple[str, ...] = ()
@@ -317,5 +372,6 @@ class WeeklyRebalanceService:
         return self._plans.load(plan_id), self._plans.approval(plan_id)
 
     def risk_verdict(self, plan_id: str) -> RiskVerdict | None:
-        """주문안의 리스크 판정. 없거나 읽지 못하면 None(실행기는 이때 주문하지 않는다)."""
-        return self._stored_verdict(plan_id)
+        """주문안의 리스크 판정. 없으면 None, 읽지 못하면 `RiskUnavailableError`(실행기는 두
+        경우 모두 주문하지 않는다)."""
+        return self._risk.verdict(plan_id)

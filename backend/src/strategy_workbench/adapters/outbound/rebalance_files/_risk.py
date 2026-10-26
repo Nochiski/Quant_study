@@ -15,13 +15,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
 from typing import TypeVar
 
-from strategy_workbench.adapters.outbound.rebalance_files._plans import write_once
+from strategy_workbench.adapters.outbound.rebalance_files._plans import PLAN_ID, write_once
 from strategy_workbench.adapters.outbound.rebalance_files._records import replace_file
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     RiskDay,
@@ -45,7 +44,6 @@ from strategy_workbench.domain.risk.facade.risk import (
 _T = TypeVar("_T")
 VERDICT_SCHEMA = "s07-risk-verdict/1"
 RISK_DAY_SCHEMA = "s07-risk-day/1"
-_PLAN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 class JsonRiskStore:
@@ -81,6 +79,14 @@ class JsonRiskStore:
             ) from error
 
     def add_action(self, action: RiskAction) -> None:
+        try:
+            self._append_action(action)
+        except OSError as error:
+            raise RiskUnavailableError(
+                f"risk action not written — file=actions.jsonl error={error}"
+            ) from error
+
+    def _append_action(self, action: RiskAction) -> None:
         self._folder.mkdir(parents=True, exist_ok=True, mode=0o700)
         line = json.dumps(
             {
@@ -97,16 +103,33 @@ class JsonRiskStore:
             handle.write(line + "\n")
 
     def save_verdict(self, verdict: RiskVerdict) -> None:
-        write_once(self._verdict_path(verdict.plan_id), _encode_verdict(verdict))
+        path = self._verdict_path(verdict.plan_id)
+        try:
+            write_once(path, _encode_verdict(verdict))
+        except OSError as error:
+            raise RiskUnavailableError(
+                f"risk verdict not written — file={path.name} error={error}"
+            ) from error
 
     def verdict(self, plan_id: str) -> RiskVerdict | None:
         path = self._verdict_path(plan_id)
         if not path.exists():
             return None
-        return _decoded(path, VERDICT_SCHEMA, _decode_verdict)
+        verdict = _decoded(path, VERDICT_SCHEMA, _decode_verdict)
+        if verdict.plan_id != plan_id:
+            raise RiskUnavailableError(
+                f"risk verdict is for another plan — file={path.name} plan_id={verdict.plan_id}"
+            )
+        return verdict
 
     def save_day(self, record: RiskDay) -> None:
-        replace_file(self._folder / f"day-{record.day.isoformat()}.json", _encode_day(record))
+        path = self._folder / f"day-{record.day.isoformat()}.json"
+        try:
+            replace_file(path, _encode_day(record))
+        except OSError as error:
+            raise RiskUnavailableError(
+                f"risk day not written — file={path.name} error={error}"
+            ) from error
 
     def days(self) -> tuple[RiskDay, ...]:
         if not self._folder.exists():
@@ -117,7 +140,7 @@ class JsonRiskStore:
         )
 
     def _verdict_path(self, plan_id: str) -> Path:
-        if not _PLAN_ID.fullmatch(plan_id):
+        if not PLAN_ID.fullmatch(plan_id):
             raise ValueError(f"invalid plan id — plan_id={plan_id!r}")
         return self._folder / f"verdict-{plan_id}.json"
 
@@ -179,6 +202,10 @@ def _encode_verdict(verdict: RiskVerdict) -> dict[str, object]:
             for line in guarded.lines
         ],
         "violations_since_last": list(verdict.violations_since_last),
+        "plan_created_at": None
+        if verdict.plan_created_at is None
+        else verdict.plan_created_at.isoformat(),
+        "close_from_plan": verdict.close_from_plan,
     }
 
 
@@ -201,6 +228,10 @@ def _decode_verdict(value: dict[str, object]) -> RiskVerdict:
         _decode_state(value["state"]),
         GuardedTargets(RiskLevel(value["level"]), _int(value["exposure_bp"]), lines),
         tuple(str(item) for item in _sequence(value["violations_since_last"])),
+        plan_created_at=None
+        if value["plan_created_at"] is None
+        else datetime.fromisoformat(str(value["plan_created_at"])),
+        close_from_plan=bool(value["close_from_plan"]),
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
@@ -10,15 +11,17 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
 )
 from strategy_workbench.domain.risk.facade.risk import ActionKind, RiskLevel
 from tests.application.test_weekly_rebalance import KST, Log, Risk, close_record
+from tests.domain.test_risk import LIMITS
 
 SUNDAY = datetime(2026, 11, 1, 10, 0, tzinfo=KST)
 
 
 def guard(*equities: int, risk: Risk | None = None) -> tuple[RiskGuardService, Risk]:
+    """시작 고점 1억 원 한도로 본다."""
     log = Log()
     for index, equity in enumerate(equities):
         log.save_day(close_record(date(2026, 10, 26) + timedelta(days=index), equity))
-    risk = risk or Risk()
+    risk = risk or Risk(limits_=LIMITS)
     return RiskGuardService(risk, log, now=lambda: SUNDAY), risk
 
 
@@ -75,4 +78,24 @@ def test_reset_moves_the_peak_to_the_last_close() -> None:
 def test_reset_needs_a_close_record() -> None:
     service, risk = guard()
     assert service.reset("동민", "").status is RiskCommandStatus.NO_CLOSE
+    assert risk.actions_ == []
+
+
+def test_rerunning_the_days_close_keeps_a_resume_made_after_it() -> None:
+    # 리뷰 P2-1: 같은 날 close 를 다시 돌리면 기록 시각이 해제 명령보다 뒤로 밀려 정지가 되살아났다
+    log, risk = Log(), Risk(limits_=LIMITS)
+    log.save_day(close_record(date(2026, 10, 23), 83_000_000))  # −17% 축소
+    monday = close_record(date(2026, 10, 26), 79_000_000)  # 15:40 −21% 정지
+    log.save_day(monday)
+    resumed_at = datetime(2026, 10, 26, 16, 0, tzinfo=KST)
+    service = RiskGuardService(risk, log, now=lambda: resumed_at)
+    assert service.resume("동민", "").status is RiskCommandStatus.OK
+    log.save_day(replace(monday, recorded_at=datetime(2026, 10, 26, 16, 30, tzinfo=KST)))
+    state = service.status().state
+    assert state is not None and state.level is RiskLevel.REDUCE
+
+
+def test_a_blank_operator_is_refused_without_recording() -> None:
+    service, risk = guard(79_000_000)
+    assert service.resume(" ", "").status is RiskCommandStatus.INVALID
     assert risk.actions_ == []

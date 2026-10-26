@@ -89,7 +89,9 @@ def drawdown_state(
             level = _next_level(level, previous_loss, loss, limits)
             last = item
         elif item.kind is ActionKind.RESET and item.peak_krw is not None:
-            peak, peak_day, level, loss = item.peak_krw, item.at.date(), RiskLevel.NORMAL, 0
+            # 새 고점은 마지막 장 마감 총자산이라 고점일도 그 장 마감일이다
+            peak, level, loss = item.peak_krw, RiskLevel.NORMAL, 0
+            peak_day = item.at.date() if last is None else last.day
         elif item.kind is ActionKind.RESUME and level is RiskLevel.HALT:
             level = RiskLevel.REDUCE
     return DrawdownState(

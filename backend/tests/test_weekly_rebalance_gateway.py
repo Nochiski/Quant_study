@@ -145,13 +145,31 @@ def test_market_reads_flags_price_limits_and_the_days_krx_vi(tmp_path: Path) -> 
             "virelis_time": "172511",
             "stex_tp": "NXT",
         },
+        # 조회 종목이 아닌 행은 쓰지 않는다(리뷰 P2-4)
+        {
+            "stk_cd": "000660",
+            "trde_cntr_proc_time": "091500",
+            "virelis_time": "091700",
+            "stex_tp": "KRX",
+        },
+        # 모르는 거래소 표기는 KRX 로 본다(빼지 않는 쪽)
+        {
+            "stk_cd": SYMBOL,
+            "trde_cntr_proc_time": "093000",
+            "virelis_time": "093200",
+            "stex_tp": "1",
+        },
     ]
     shared = broker(tmp_path, fake, clock, transmit=False)
     status = KiwoomMarket(shared).trade_status(SYMBOL)
     assert status.flags == {SecurityFlag.INVESTMENT_WARNING}
     assert (status.upper_limit_krw, status.lower_limit_krw) == (91_000, 49_000)
-    # NXT 행은 빼고, 해제 시각 000000 은 아직 모름(None)
-    assert status.vi == (ViWindow(time(9, 8, 1), time(9, 10, 31)), ViWindow(time(9, 20), None))
+    # NXT·다른 종목 행은 빼고, 해제 시각 000000 은 아직 모름(None)
+    assert status.vi == (
+        ViWindow(time(9, 8, 1), time(9, 10, 31)),
+        ViWindow(time(9, 20), None),
+        ViWindow(time(9, 30), time(9, 32)),
+    )
     [vi_call] = [call for call in fake.calls if call.api_id == "ka10054"]
     assert (vi_call.body["stk_cd"], vi_call.body["stex_tp"]) == (SYMBOL, "1")
     assert not {"kt10000", "kt10001", "kt10003"} & set(fake.api_ids())
@@ -159,27 +177,32 @@ def test_market_reads_flags_price_limits_and_the_days_krx_vi(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize(
-    ("audit", "warning", "flags"),
+    ("audit", "warning", "state", "flags"),
     [
-        ("정상", "0", set()),
+        ("정상", "0", "증거금40%|담보대출|신용가능", set()),
         (
             "관리종목|투자주의",
             "2",
+            "증거금100%",
             {SecurityFlag.ADMIN, SecurityFlag.CAUTION, SecurityFlag.LIQUIDATION},
         ),
-        ("거래정지", "4", {SecurityFlag.HALTED, SecurityFlag.INVESTMENT_DANGER}),
-        ("단기과열", "3", {SecurityFlag.OVERHEATED}),
-        ("처음 보는 값", "0", {SecurityFlag.UNKNOWN}),
-        ("정상", "", {SecurityFlag.UNKNOWN}),
-        ("정상", "9", {SecurityFlag.UNKNOWN}),
+        # 관리종목은 감리구분이 정상이어도 종목상태 토큰에만 있을 수 있다
+        # (COLLECT_PLAN 게이트 E2, 리뷰 P2-3)
+        ("정상", "0", "증거금100%|관리종목", {SecurityFlag.ADMIN}),
+        ("거래정지", "4", "증거금100%", {SecurityFlag.HALTED, SecurityFlag.INVESTMENT_DANGER}),
+        ("단기과열", "3", "", {SecurityFlag.OVERHEATED}),
+        ("처음 보는 값", "0", "", {SecurityFlag.UNKNOWN}),
+        ("정상", "", "", {SecurityFlag.UNKNOWN}),
+        ("정상", "9", "", {SecurityFlag.UNKNOWN}),
     ],
 )
 def test_kiwoom_status_words_map_to_flags_and_unknown_words_block(
-    tmp_path: Path, audit: str, warning: str, flags: set[SecurityFlag]
+    tmp_path: Path, audit: str, warning: str, state: str, flags: set[SecurityFlag]
 ) -> None:
     clock = Clock()
     fake = FakeKiwoom(clock)
     fake.audit[SYMBOL] = (audit, warning)
+    fake.state[SYMBOL] = state
     fake.price_limits[SYMBOL] = (91_000, 49_000)
     fake.last_prices[SYMBOL] = 70_000
     shared = broker(tmp_path, fake, clock, transmit=False)

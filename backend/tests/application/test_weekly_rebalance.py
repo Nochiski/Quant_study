@@ -29,6 +29,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
 )
 from strategy_workbench.domain.rebalance.facade.rebalance import RebalanceAction, RebalancePolicy
 from strategy_workbench.domain.risk.facade.risk import (
+    DrawdownState,
     GuardReason,
     PostTradeReview,
     RiskAction,
@@ -37,13 +38,21 @@ from strategy_workbench.domain.risk.facade.risk import (
     SignalFacts,
     parse_limits,
 )
-from tests.domain.test_risk import PAYLOAD
+from tests.domain.test_risk import DRAWDOWN, PAYLOAD
 
 KST = timezone(timedelta(hours=9))
 DAY = date(2026, 10, 23)
 NOW = datetime(2026, 10, 23, 16, 10, tzinfo=KST)
-# 이 대역의 주문안은 자리 3개(종목당 약 33%)라 단일 종목 상한만 50%로 넓힌다
-LIMITS = parse_limits({**PAYLOAD, "max_weight_bp": 5_000}, "ab" * 32)
+# 이 대역의 주문안은 자리 3개(종목당 약 33%)라 단일 종목 상한을 50%로 넓히고, 대역 계좌(300만 원)에
+# 맞춰 시작 고점을 300만 원으로 둔다
+LIMITS = parse_limits(
+    {
+        **PAYLOAD,
+        "max_weight_bp": 5_000,
+        "drawdown": {**DRAWDOWN, "initial_peak_krw": 3_000_000},
+    },
+    "ab" * 32,
+)
 
 
 def snapshot(**overrides: object) -> SignalSnapshot:
@@ -149,6 +158,8 @@ class Risk:
     actions_: list[RiskAction] = field(default_factory=list)
     verdicts: dict[str, RiskVerdict] = field(default_factory=dict)
     days_: dict[date, RiskDay] = field(default_factory=dict)
+    failed_saves: int = 0  # 판정 저장이 이만큼 실패한다(디스크 오류 흉내)
+    unreadable_verdicts: bool = False
 
     def limits(self) -> RiskLimits:
         if self.limits_ is None:
@@ -162,11 +173,16 @@ class Risk:
         self.actions_.append(action)
 
     def save_verdict(self, verdict: RiskVerdict) -> None:
+        if self.failed_saves:
+            self.failed_saves -= 1
+            raise RiskUnavailableError("risk verdict not written — file=verdict.json")
         if verdict.plan_id in self.verdicts:
             raise PlanExistsError(verdict.plan_id)
         self.verdicts[verdict.plan_id] = verdict
 
     def verdict(self, plan_id: str) -> RiskVerdict | None:
+        if self.unreadable_verdicts:
+            raise RiskUnavailableError(f"risk record unreadable — file=verdict-{plan_id}.json")
         return self.verdicts.get(plan_id)
 
     def save_day(self, record: RiskDay) -> None:
@@ -202,15 +218,15 @@ def service(
 
 
 def test_prepare_records_the_signal_and_plan_once() -> None:
-    signals, plans = Signals(), Plans()
-    first = service(signals, plans=plans).prepare(DAY)
+    signals, plans, risk = Signals(), Plans(), Risk()
+    first = service(signals, plans=plans, risk=risk).prepare(DAY)
     assert first.status is PrepareStatus.OK and first.record is not None
     record = first.record
     assert record.plan_id == "weekly-2026-10-23"
     assert record.signal.ranks[:2] == (("000001", 1), ("000002", 2))
     assert record.signal.scores_sha256 == "ab" * 32
     assert record.plan.target_shares() == dict.fromkeys(("000001", "000002", "000003"), 97)
-    again = service(signals, plans=plans).prepare(DAY)
+    again = service(signals, plans=plans, risk=risk).prepare(DAY)
     assert again.status is PrepareStatus.EXISTS and again.record == record
     assert signals.calls == 1  # 남긴 주문안이 있으면 신호를 다시 읽지 않는다
 
@@ -359,18 +375,21 @@ def test_prepare_leaves_a_risk_verdict_with_the_limits_it_used() -> None:
     result = service(plans=plans, risk=risk).prepare(DAY)
     assert result.status is PrepareStatus.OK and result.verdict is not None
     verdict = risk.verdicts["weekly-2026-10-23"]
-    assert verdict == result.verdict
+    assert verdict == result.verdict and result.record is not None
     assert (verdict.limits_version, verdict.limits_sha256) == (1, "ab" * 32)
     assert verdict.state.level is RiskLevel.NORMAL
+    assert verdict.plan_created_at == result.record.created_at
+    assert verdict.close_from_plan  # 장 마감 기록이 없어 주문안 총자산으로 접었다
     # 한도 안이라 리스크 목표 = 주문안 목표
     assert verdict.guarded.targets() == plans.records["weekly-2026-10-23"].plan.target_shares()
 
 
 def test_prepare_halves_targets_after_a_15_percent_drawdown() -> None:
     log = Log()
-    log.save_day(close_record(date(2026, 10, 23), 85_000_000))  # 시작 고점 1억 대비 −15%
+    log.save_day(close_record(date(2026, 10, 23), 2_550_000))  # 시작 고점 300만 대비 −15%
     result = service(log=log).prepare(DAY)
     assert result.verdict is not None and result.verdict.state.level is RiskLevel.REDUCE
+    assert not result.verdict.close_from_plan
     # 주문안 97주 → 48주(내림)
     assert result.verdict.guarded.targets() == dict.fromkeys(("000001", "000002", "000003"), 48)
     assert {line.reasons for line in result.verdict.guarded.lines} == {(GuardReason.EXPOSURE,)}
@@ -378,9 +397,11 @@ def test_prepare_halves_targets_after_a_15_percent_drawdown() -> None:
 
 def test_unreconciled_close_records_do_not_move_the_drawdown() -> None:
     log = Log()
-    log.save_day(close_record(date(2026, 10, 23), 80_000_000, matched=False))
+    log.save_day(close_record(date(2026, 10, 23), 2_000_000, matched=False))
     result = service(log=log).prepare(DAY)
+    # 어긋난 날은 빼고, 신호일 기록이 없으니 주문안 총자산(300만)으로 접는다
     assert result.verdict is not None and result.verdict.state.level is RiskLevel.NORMAL
+    assert result.verdict.close_from_plan
 
 
 def test_no_plan_is_left_when_risk_cannot_be_judged() -> None:
@@ -397,17 +418,69 @@ def test_names_without_signal_day_facts_are_not_bought() -> None:
     assert result.verdict.guarded.targets() == dict.fromkeys(("000001", "000002", "000003"), 0)
 
 
-def test_the_next_verdict_carries_violations_found_since_the_last_plan() -> None:
-    risk, plans = Risk(), Plans()
+def test_a_missing_signal_day_close_is_judged_from_the_plan_equity() -> None:
+    # 리뷰 P1-1: 신호일 장 마감 기록이 빠지면(close 실패) 그 전 기록의 낡은 단계로 목표를 전량 냈다
+    log = Log()
+    log.save_day(close_record(date(2026, 10, 22), 3_000_000))
+    account = Account(AccountState(2_250_000, {}, None))  # 신호일 종가 평가 총자산 −25%
+    result = service(account=account, log=log).prepare(DAY)
+    assert result.verdict is not None and result.verdict.close_from_plan
+    assert (result.verdict.state.level, result.verdict.state.last_day) == (RiskLevel.HALT, DAY)
+    assert set(result.verdict.guarded.targets().values()) == {0}
+
+
+def test_a_plan_left_without_a_verdict_is_judged_on_the_next_prepare() -> None:
+    # 리뷰 P2-2: 판정 저장이 실패한 주문안을 다시 부르면 판정 없이 평소 주문지가 나갔다
+    signals, plans, risk = Signals(), Plans(), Risk(failed_saves=1)
+    first = service(signals, plans=plans, risk=risk).prepare(DAY)
+    assert first.status is PrepareStatus.RISK_UNAVAILABLE and first.record is not None
+    assert "weekly-2026-10-23" in plans.records and risk.verdicts == {}
+    again = service(signals, plans=plans, risk=risk).prepare(DAY)
+    assert again.status is PrepareStatus.EXISTS and again.verdict is not None
+    assert again.verdict.plan_created_at == first.record.created_at
+    assert risk.verdicts["weekly-2026-10-23"] == again.verdict
+
+
+def test_a_verdict_is_not_rebuilt_from_another_build() -> None:
+    plans, risk = Plans(), Risk(failed_saves=1)
     service(plans=plans, risk=risk).prepare(DAY)
-    first = risk.verdicts["weekly-2026-10-23"]
-    risk.days_[date(2026, 10, 26)] = RiskDay(
-        date(2026, 10, 26),
-        NOW + timedelta(days=3),
+    other = Signals(SignalRead(SignalReadStatus.OK, snapshot(build_id="e_rebuilt")))
+    again = service(other, plans=plans, risk=risk).prepare(DAY)
+    assert again.status is PrepareStatus.RISK_UNAVAILABLE and risk.verdicts == {}
+    assert "e_rebuilt" in again.detail
+
+
+def test_an_unreadable_verdict_is_not_a_made_plan() -> None:
+    plans, risk = Plans(), Risk()
+    service(plans=plans, risk=risk).prepare(DAY)
+    risk.unreadable_verdicts = True
+    again = service(plans=plans, risk=risk).prepare(DAY)
+    assert again.status is PrepareStatus.RISK_UNAVAILABLE and again.verdict is None
+
+
+def test_the_next_verdict_carries_violations_found_since_the_last_plan() -> None:
+    # 리뷰 P3-5: 앞 주문안에 판정이 없으면 이미 실은 위반까지 처음부터 다시 셌다.
+    # 기준은 앞 주문안 시각이다
+    risk, plans = Risk(failed_saves=1), Plans()
+    service(plans=plans, risk=risk).prepare(DAY)
+    first = plans.records["weekly-2026-10-23"]
+    state = DrawdownState(RiskLevel.NORMAL, 3_000_000, None, 0, None, None)
+    risk.days_[date(2026, 10, 22)] = RiskDay(
+        date(2026, 10, 22),
+        NOW - timedelta(days=1),
         1,
         "ab" * 32,
         RiskLevel.NORMAL,
-        first.state,
+        state,
+        PostTradeReview((), ("앞 주문안 전 위반",), ()),
+    )
+    risk.days_[date(2026, 10, 26)] = RiskDay(
+        date(2026, 10, 26),
+        first.created_at + timedelta(days=3),
+        1,
+        "ab" * 32,
+        RiskLevel.NORMAL,
+        state,
         PostTradeReview((), ("리스크가 허용한 수량보다 더 샀다 — symbol=000001",), ()),
     )
     later = WeeklyRebalanceService(

@@ -32,7 +32,7 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
 
 PLAN_SCHEMA = "weekly-rebalance-plan/1"
 APPROVAL_SCHEMA = "weekly-rebalance-approval/1"
-_PLAN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+PLAN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 class JsonPlanStore:
@@ -84,7 +84,7 @@ class JsonPlanStore:
         )
 
     def _path(self, plan_id: str, suffix: str) -> Path:
-        if not _PLAN_ID.fullmatch(plan_id):
+        if not PLAN_ID.fullmatch(plan_id):
             raise ValueError(f"invalid plan id — plan_id={plan_id!r}")
         return self._folder / f"{plan_id}{suffix}.json"
 

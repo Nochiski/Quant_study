@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
 
-from strategy_workbench.application.weekly_rebalance._risk import current_state
+from strategy_workbench.application.weekly_rebalance._risk import close_at, current_state
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.market import (
     MarketError,
     MarketSource,
@@ -199,11 +199,8 @@ class WeeklyExecutionService:
             limits = self._risk.limits()
         except RiskUnavailableError as error:
             return ExecuteResult(ExecuteStatus.RISK_UNAVAILABLE, detail=str(error))
-        if verdict is None:
-            return ExecuteResult(
-                ExecuteStatus.RISK_UNAVAILABLE,
-                detail=f"no risk verdict for the plan — plan_id={plan_id}",
-            )
+        if verdict is None or verdict.plan_created_at != record.created_at:
+            return ExecuteResult(ExecuteStatus.RISK_UNAVAILABLE, detail=_unbound(record, verdict))
         try:
             if send and not self._gateway.initialized():
                 self._gateway.initialize()
@@ -484,10 +481,15 @@ class WeeklyExecutionService:
             for event in self._log.events()
             if event.plan_id == plan_id and event.kind == "submit" and event.at.date() == today
         }
+        # 판정을 읽지 못하면(또는 다른 주문안의 판정이면) 하루 기록은 주문안 수량으로 남기되
+        # 리스크 점검은 남기지 않는다 — 가드 전 주문안처럼 보이게 하지 않는다(리뷰 P3-1)
+        risk_error = ""
         try:
             verdict = self._risk.verdict(plan_id)
-        except RiskUnavailableError:
-            verdict = None
+        except RiskUnavailableError as error:
+            verdict, risk_error = None, str(error)
+        if verdict is not None and verdict.plan_created_at != record.created_at:
+            verdict, risk_error = None, _unbound(record, verdict)
         try:
             state = self._gateway.state()
             plan_orders = [o for o in state.orders if o.intent_id in sent_today]
@@ -561,6 +563,8 @@ class WeeklyExecutionService:
         )
         self._log.save_raw(day_record.day, evidence)
         self._log.save_day(day_record)
+        if risk_error:
+            return CloseResult(CloseStatus.OK, day_record, risk_detail=risk_error)
         try:
             risk = self._risk_day(day_record, plan_id, plan_deltas, planned)
         except (RiskUnavailableError, OSError, ValueError) as error:
@@ -577,8 +581,9 @@ class WeeklyExecutionService:
         """그날 낙폭 단계와 체결 후 점검을 남긴다. 주문 직전 판정이 막은 매수는 사건 기록에서
         읽는다."""
         limits = self._risk.limits()
-        state = current_state(self._risk, self._log, limits)
-        before = current_state(self._risk, self._log, limits, before=day_record.day)
+        state = current_state(self._risk, self._log, limits).state
+        today_close = close_at(day_record.day, day_record.recorded_at.tzinfo)
+        before = current_state(self._risk, self._log, limits, before=today_close).state
         review = None
         if day_record.orders:
             blocked = {
@@ -661,6 +666,16 @@ class WeeklyExecutionService:
                 self._previewing,
             )
         )
+
+
+def _unbound(record: PlanRecord, verdict: RiskVerdict | None) -> str:
+    if verdict is None:
+        return f"no risk verdict for the plan — plan_id={record.plan_id}"
+    return (
+        f"risk verdict belongs to another plan — plan_id={record.plan_id} "
+        f"plan_created_at={record.created_at.isoformat()} "
+        f"verdict_plan_created_at={verdict.plan_created_at}"
+    )
 
 
 def _sides(deltas: Iterable[tuple[str, int]]) -> dict[tuple[str, str], int]:

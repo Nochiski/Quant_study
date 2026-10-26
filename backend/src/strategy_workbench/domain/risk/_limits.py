@@ -127,7 +127,9 @@ def parse_limits(payload: Mapping[str, object], sha256: str) -> RiskLimits:
         raise ValueError(f"drawdown fields differ — expected={list(_DRAWDOWN_FIELDS)}")
     flags = payload["blocked_buy_flags"]
     known = {flag.value for flag in SecurityFlag}
-    if not isinstance(flags, list) or any(flag not in known for flag in flags):
+    if not isinstance(flags, list) or any(
+        not isinstance(flag, str) or flag not in known for flag in flags
+    ):
         raise ValueError(f"unknown security flag — blocked_buy_flags={flags!r}")
     return RiskLimits(
         version=_integer(payload, "version"),

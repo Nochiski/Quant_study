@@ -58,7 +58,17 @@ def _verdict() -> RiskVerdict:
             GuardedLine("000002", 30, 0, 0, ()),
         ),
     )
-    return RiskVerdict("weekly-2026-10-30", SATURDAY, 1, "ab" * 32, STATE, guarded, ("위반 한 줄",))
+    return RiskVerdict(
+        "weekly-2026-10-30",
+        SATURDAY,
+        1,
+        "ab" * 32,
+        STATE,
+        guarded,
+        ("위반 한 줄",),
+        plan_created_at=SATURDAY - timedelta(seconds=1),
+        close_from_plan=True,
+    )
 
 
 def _mode(path: Path) -> int:
@@ -126,6 +136,30 @@ def test_a_damaged_verdict_stops_risk_judgement(tmp_path: Path) -> None:
     path.write_text('{"schema": "s07-risk-verdict/1"}', encoding="utf-8")
     with pytest.raises(RiskUnavailableError, match="verdict-weekly-2026-10-30.json"):
         store.verdict("weekly-2026-10-30")
+
+
+def test_a_verdict_filed_under_another_plan_is_unreadable(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.save_verdict(_verdict())
+    folder = tmp_path / "work" / "risk"
+    (folder / "verdict-weekly-2026-10-30.json").rename(folder / "verdict-weekly-2026-11-06.json")
+    with pytest.raises(RiskUnavailableError, match="weekly-2026-11-06"):
+        store.verdict("weekly-2026-11-06")
+
+
+def test_a_write_failure_is_a_risk_failure(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.add_action(RiskAction(SATURDAY, ActionKind.RESUME, "동민"))  # 폴더를 만든다
+    folder = tmp_path / "work" / "risk"
+    folder.chmod(0o500)
+    try:
+        with pytest.raises(RiskUnavailableError):
+            store.save_verdict(_verdict())
+        day = RiskDay(date(2026, 11, 2), SATURDAY, 1, "ab" * 32, RiskLevel.NORMAL, STATE, None)
+        with pytest.raises(RiskUnavailableError):
+            store.save_day(day)
+    finally:
+        folder.chmod(0o700)
 
 
 def test_the_shipped_limits_file_reads() -> None:

@@ -5,11 +5,16 @@
 - 종목 상태(리스크 가드의 주문 직전 판정, 2026-10-26 모의 실측으로 세 TR 모두 답함):
   - 표시: `ka10100` 종목정보의 `auditInfo`(감리구분: 정상·관리종목·거래정지·단기과열·투자주의·
     투자경고, `|`로 여럿)와 `orderWarning`(투자유의: 0 없음·1 ETF 주의·2 정리매매·3 단기과열·
-    4 투자위험·5 투자경고). 모르는 값·빈 값은 `UNKNOWN`이다(리스크가 매수를 막는 쪽).
+    4 투자위험·5 투자경고). 모르는 값·빈 값은 `UNKNOWN`이다(리스크가 매수를 막는 쪽). 관리종목은
+    종목상태 `state`의 `|` 토큰에도 본다 — 감리구분만 보면 관리종목의 47%를 놓친다(원장
+    `database/docs/COLLECT_PLAN.md` 게이트 E2, `stage/rules_kiwoom.py`의 `is_admin_issue`). 그 밖의
+    `state` 토큰(증거금·담보대출·신용가능)은 표시가 아니다.
   - 상하한가: `ka10001`의 `upl_pric`·`lst_pric`(부호를 뗀다). 0이면 읽지 못한 것이다.
-  - VI: `ka10054` 그 종목의 그날 발동 행 중 KRX 것만. 발동 `trde_cntr_proc_time`, 해제
-    `virelis_time`(`000000`이면 아직 모름) HHmmss. 범위 칸을 비우면 1511로 거절해 넓은 범위를
-    채운다.
+  - VI: `ka10054` 그 종목의 그날 발동 행. 응답 행의 종목이 조회 종목인 것만 쓰고, 거래소가 NXT 인
+    행만 뺀다(모르는 표기는 KRX 로 본다). 발동 `trde_cntr_proc_time`, 해제 `virelis_time`
+    (`000000`이면 아직 모름) HHmmss. 범위 칸을 비우면 1511로 거절해 넓은 범위를 채운다.
+    2026-10-26 모의 실측: 종목을 주면 그 종목 행만 오고 `stex_tp`는 `KRX`, 안 풀린 VI 는
+    `000000`이다.
 """
 
 from __future__ import annotations
@@ -17,7 +22,12 @@ from __future__ import annotations
 from datetime import time
 
 from strategy_workbench.adapters.outbound.kiwoom_mock._broker import KiwoomMockBroker
-from strategy_workbench.adapters.outbound.kiwoom_mock._rows import ContractViolation, number, text
+from strategy_workbench.adapters.outbound.kiwoom_mock._rows import (
+    ContractViolation,
+    number,
+    text,
+)
+from strategy_workbench.adapters.outbound.kiwoom_mock._rows import symbol as kiwoom_symbol
 from strategy_workbench.application.offline_execution.facade.execution import BrokerError
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     MarketError,
@@ -35,6 +45,8 @@ _AUDIT_FLAGS = {
     "투자경고": SecurityFlag.INVESTMENT_WARNING,
     "투자위험": SecurityFlag.INVESTMENT_DANGER,
 }
+# 종목상태(`state`) 토큰 가운데 표시인 것
+_STATE_FLAGS = {"관리종목": SecurityFlag.ADMIN, "거래정지": SecurityFlag.HALTED}
 _WARNING_FLAGS = {
     "1": SecurityFlag.CAUTION,
     "2": SecurityFlag.LIQUIDATION,
@@ -86,7 +98,13 @@ class KiwoomMarket:
         vi = self._call("ka10054", "/api/dostk/stkinfo", symbol, _VI_QUERY)
         try:
             upper, lower = abs(number(basic, "upl_pric")), abs(number(basic, "lst_pric"))
-            windows = tuple(_vi_window(row) for row in _rows(vi, "motn_stk") if _krx(row))
+            windows = tuple(
+                _vi_window(row)
+                for row in _rows(vi, "motn_stk")
+                # 거래소 접미사(`_NX`·`_AL`)·접두어를 떼고 조회 종목과 견준다
+                if kiwoom_symbol(text(row, "stk_cd").split("_", 1)[0]) == symbol
+                and text(row, "stex_tp") != "NXT"
+            )
         except (ContractViolation, ValueError) as error:
             raise MarketError(f"unreadable status — symbol={symbol} error={error}") from error
         if upper <= 0 or lower <= 0:
@@ -118,6 +136,11 @@ def _flags(info: dict[str, object]) -> frozenset[SecurityFlag]:
     warning = text(info, "orderWarning")
     if warning != "0":
         flags.add(_WARNING_FLAGS.get(warning, SecurityFlag.UNKNOWN))
+    flags |= {
+        _STATE_FLAGS[token.strip()]
+        for token in text(info, "state").split("|")
+        if token.strip() in _STATE_FLAGS
+    }
     return frozenset(flags)
 
 
@@ -126,10 +149,6 @@ def _rows(body: dict[str, object], key: str) -> list[dict[str, object]]:
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
         raise ContractViolation(f"kiwoom list field is not a list of objects — key={key}")
     return rows
-
-
-def _krx(row: dict[str, object]) -> bool:
-    return text(row, "stex_tp") in ("", "KRX")
 
 
 def _vi_window(row: dict[str, object]) -> ViWindow:

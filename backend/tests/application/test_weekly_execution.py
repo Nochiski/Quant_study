@@ -34,6 +34,7 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
     Quote,
     RebalancePolicy,
     plan_rebalance,
+    scaled_targets,
 )
 from strategy_workbench.domain.risk.facade.risk import (
     DrawdownState,
@@ -42,6 +43,7 @@ from strategy_workbench.domain.risk.facade.risk import (
     SignalFacts,
     TradeStatus,
     ViWindow,
+    exposure_bp,
     guard_targets,
 )
 from tests.application.test_weekly_rebalance import LIMITS, Log, Plans, Risk, close_record
@@ -172,11 +174,11 @@ class Market:
 
 
 def verdict_for(record: PlanRecord, level: RiskLevel = RiskLevel.NORMAL) -> RiskVerdict:
-    """주문안 목표에 그 단계의 리스크 한도를 씌운 판정. 종목 자료는 넉넉하다."""
+    """주문안 목표에 그 단계의 리스크 한도를 씌운 판정(서비스와 같은 길). 종목 자료는 넉넉하다."""
     guarded = guard_targets(
         targets=record.plan.target_shares(),
+        exposed=scaled_targets(record.plan, exposure_bp(level, LIMITS.drawdown)),
         holdings=record.account.holdings,
-        frozen=(),
         prices={line.symbol: line.reference_price_krw or 0 for line in record.plan.lines},
         facts={
             line.symbol: SignalFacts(10_000_000_000, admin=False, halted=False)
@@ -187,7 +189,9 @@ def verdict_for(record: PlanRecord, level: RiskLevel = RiskLevel.NORMAL) -> Risk
         limits=LIMITS,
     )
     state = DrawdownState(level, 100_000_000, None, 0, None, None)
-    return RiskVerdict(PLAN, record.created_at, 1, "ab" * 32, state, guarded)
+    return RiskVerdict(
+        PLAN, record.created_at, 1, "ab" * 32, state, guarded, plan_created_at=record.created_at
+    )
 
 
 @dataclass
@@ -476,9 +480,10 @@ def test_a_plan_without_a_risk_verdict_sends_nothing() -> None:
 def test_orders_follow_the_risk_targets_not_the_plan_targets() -> None:
     r = rig(level=RiskLevel.REDUCE)
     r.service.execute(PLAN, Phase.OPEN, send=True)
-    # 노출 50%: D 100주 → 50주(매도 50), E 0주, A·B 130주 → 65주
+    # 노출 50%: 종목당 목표 1,306,666원의 절반 653,333원. D 100주(100만 원)는 절반 목표에서
+    # ±25% 밖이라 65주로(매도 35), E 0주, A·B 는 절반 목표로 65주
     assert _sent(r) == [
-        (f"{PLAN}-00000D-sell", "sell", 50, 9_990),
+        (f"{PLAN}-00000D-sell", "sell", 35, 9_990),
         (f"{PLAN}-00000E-sell", "sell", 100, 9_990),
         (f"{PLAN}-00000A-buy", "buy", 65, 10_020),
         (f"{PLAN}-00000B-buy", "buy", 65, 10_020),
@@ -528,7 +533,7 @@ def test_close_counts_unfilled_against_the_risk_targets_and_reviews_the_day() ->
     orders = {(o.symbol, o.side): o for o in closed.record.orders}
     # 계획 수량은 리스크 뒤 65주이고, 리스크가 만든 D 매도 50주도 줄에 든다
     assert (orders[("00000A", "buy")].quantity, orders[("00000A", "buy")].missed_krw) == (65, 0)
-    assert orders[("00000D", "sell")].quantity == 50
+    assert orders[("00000D", "sell")].quantity == 35
     assert closed.risk is not None and closed.risk.review is not None
     reviewed = {(o.symbol, o.side): o for o in closed.risk.review.orders}
     assert (
@@ -566,3 +571,43 @@ def test_a_close_still_records_the_day_when_risk_records_are_unreadable() -> Non
     assert closed.status is CloseStatus.OK and closed.record is not None
     assert closed.risk is None and "limits" in closed.risk_detail
     assert r.service.days() == (closed.record,)
+
+
+def test_a_verdict_of_another_plan_sends_nothing() -> None:
+    # 리뷰 P3-2: 주문안을 지우고 다시 만들면 남은 옛 판정의 목표로 냈다
+    r = rig()
+    r.risk.verdicts[PLAN] = replace(
+        r.risk.verdicts[PLAN], plan_created_at=MONDAY - timedelta(days=30)
+    )
+    result = r.service.execute(PLAN, Phase.OPEN, send=True)
+    assert result.status is ExecuteStatus.RISK_UNAVAILABLE and r.gateway.submitted == []
+    assert "another plan" in result.detail
+
+
+def test_close_does_not_pass_plan_quantities_off_as_guarded_when_the_verdict_is_unreadable() -> (
+    None
+):
+    # 리뷰 P3-1: 판정을 읽지 못하면 가드 전 주문안처럼 주문안 수량으로 점검까지 남겼다
+    r = rig(level=RiskLevel.REDUCE)
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
+    r.risk.unreadable_verdicts = True
+    closed = r.service.close()
+    assert closed.status is CloseStatus.OK and closed.record is not None
+    assert closed.risk is None and "verdict" in closed.risk_detail
+    assert r.risk.days_ == {}
+
+
+def test_a_name_blocked_after_a_fill_is_noted_not_called_a_violation() -> None:
+    # 리뷰 P3-4: 09:05 에 허용돼 체결된 매수가 뒤 회차에 막히면 가드 결함으로 오보했다
+    r = rig()
+    r.service.execute(PLAN, Phase.OPEN, send=True)
+    r.gateway.fill(f"{PLAN}-00000A-buy", 50, 10_020)
+    warned = TradeStatus("00000A", frozenset({SecurityFlag.INVESTMENT_WARNING}), 13_000, 7_000)
+    r.market.statuses = {"00000A": warned}
+    r.service.execute(PLAN, Phase.CHASE, send=True)
+    r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
+    closed = r.service.close()
+    assert closed.risk is not None and closed.risk.review is not None
+    assert closed.risk.review.violations == ()
+    assert any("00000A" in note for note in closed.risk.review.notes)

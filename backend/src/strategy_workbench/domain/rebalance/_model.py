@@ -196,9 +196,8 @@ def plan_rebalance(
                 _line(symbol, hold, rank, shares, shares, prices, reason, review=stale, cause=cause)
             )
             continue
-        gap = abs(shares * price - target_value)
-        resized = policy.shares_for(target_value, price)
-        if gap * BP > target_value * policy.resize_band_bp and resized != shares:
+        resized = banded_shares(policy, shares, target_value, price)
+        if resized != shares:
             reason = f"목표 금액에서 ±{policy.resize_band_bp / 100:g}% 넘게 벗어남"
             resize = RebalanceAction.RESIZE
             lines.append(
@@ -245,6 +244,44 @@ def plan_rebalance(
 
     lines.sort(key=lambda line: (_ACTION_ORDER[line.action], line.rank or 0, line.symbol))
     return RebalancePlan(policy, cash_krw, equity, target_value, tuple(lines))
+
+
+def banded_shares(policy: RebalancePolicy, current: int, target_value: int, price: int) -> int:
+    """남긴 종목의 목표 주식 수. 목표 금액에서 밴드 안이면 지금 주식 수, 넘으면 목표 금액으로
+    맞춘다."""
+    gap = abs(current * price - target_value)
+    resized = policy.shares_for(target_value, price)
+    return resized if gap * BP > target_value * policy.resize_band_bp else current
+
+
+def scaled_targets(plan: RebalancePlan, exposure_bp: int) -> dict[str, int]:
+    """주문안을 종목당 목표 금액의 `exposure_bp`만큼으로 다시 잰 목표 주식 수(리스크 가드의
+    노출 축소).
+
+    고른 종목·순위·매도는 주문안 그대로다. 남긴 종목은 줄인 목표 금액에서 같은 밴드로 다시
+    재고(그래서 축소가 이어져도 밴드 안 보유를 매주 다시 줄이지 않는다), 새 매수는 줄인 목표
+    금액으로 산다. 매매가 막혀 그대로 둔 보유는 그대로 둔다. `exposure_bp`가 10,000이면
+    `plan.target_shares()`와 같다.
+    """
+    if not 0 < exposure_bp <= BP:
+        raise ValueError(f"exposure must be within (0, 100%] — exposure_bp={exposure_bp}")
+    target_value = plan.target_value_krw * exposure_bp // BP
+    targets: dict[str, int] = {}
+    for line in plan.lines:
+        price = line.reference_price_krw
+        if line.action is RebalanceAction.SKIP:
+            continue
+        if line.action is RebalanceAction.SELL:
+            targets[line.symbol] = 0
+        elif line.cause in (LineCause.BLOCKED, LineCause.STALE_PRICE) or price is None:
+            targets[line.symbol] = line.target_shares
+        elif line.action is RebalanceAction.BUY:
+            targets[line.symbol] = plan.policy.shares_for(target_value, price)
+        else:
+            targets[line.symbol] = banded_shares(
+                plan.policy, line.current_shares, target_value, price
+            )
+    return targets
 
 
 @dataclass(frozen=True)

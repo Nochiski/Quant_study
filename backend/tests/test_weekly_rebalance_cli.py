@@ -62,6 +62,7 @@ from tests.application.test_weekly_rebalance import (
     close_record,
     snapshot,
 )
+from tests.domain.test_risk import LIMITS as PEAK_100M
 from tests.test_adapters_kiwoom_mock import ACCOUNT, APP_KEY, SECRET, SYMBOL, Clock, FakeKiwoom
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -415,13 +416,16 @@ def _planner(
     risk: Risk | None = None,
     log: Log | None = None,
 ) -> ServiceFactory:
+    # 리스크 기록·하루 기록은 명령 사이에 남는다(실제 파일처럼 한 벌을 함께 쓴다)
+    risk, log = risk or Risk(), log or Log()
+
     def factory(workdir: Path, model_root: Path | None) -> WeeklyRebalanceService:
         return WeeklyRebalanceService(
             signals,
             account,
             plans,
-            risk=risk or Risk(),
-            log=log or Log(),
+            risk=risk,
+            log=log,
             now=lambda: NOW,
             policy=RebalancePolicy(slots=3, keep_rank=5),
         )
@@ -602,7 +606,7 @@ def test_prepare_prints_the_risk_verdict_and_tells_when_it_could_not_judge(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     log = Log()
-    log.save_day(close_record(date(2026, 10, 23), 84_000_000))  # −16%
+    log.save_day(close_record(date(2026, 10, 23), 2_520_000))  # 시작 고점 300만 대비 −16%
     notices = Notices()
     factories = CliFactories(
         _planner(Signals(), Account(), Plans(), log=log),
@@ -632,8 +636,8 @@ def test_prepare_prints_the_risk_verdict_and_tells_when_it_could_not_judge(
 def test_risk_commands_show_reset_and_resume_with_an_operator(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    log, risk = Log(), Risk()
-    log.save_day(close_record(date(2026, 10, 30), 79_000_000))  # −21% → 정지
+    log, risk = Log(), Risk(limits_=PEAK_100M)
+    log.save_day(close_record(date(2026, 10, 30), 79_000_000))  # 시작 고점 1억 대비 −21% → 정지
 
     def guard(workdir: Path) -> RiskGuardService:
         # 명령은 그 장 마감 기록 뒤에 남는다(일요일 오전)
@@ -680,5 +684,50 @@ def test_close_prints_the_risk_check_of_the_day(
     capsys.readouterr()
     assert run_cli(factories, ["close", *common]) == 0
     shown = capsys.readouterr().out
-    assert "리스크 점검 2026-10-26 · 단계 정지(전날 정상)" in shown
+    assert "리스크 점검 2026-10-26 · 단계 정상(전날 정상)" in shown
     assert "한도 위반 없음" in shown
+
+
+def test_a_plan_without_a_verdict_is_reported_as_not_made(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # 리뷰 P2-2: 판정 저장이 실패한 주문안을 다시 부르면 리스크 언급 없는 평소 주문지가 나갔다
+    notices = Notices()
+    plans, risk = Plans(), Risk(failed_saves=2)
+    factories = CliFactories(
+        _planner(Signals(), Account(), plans, risk=risk),
+        _no_execution,
+        _no_recorder,
+        lambda: notices,
+    )
+    common = ["--workdir", str(tmp_path), "--model-root", str(tmp_path)]
+    prepare = [
+        "prepare",
+        *common,
+        "--signal-date",
+        "2026-10-23",
+        "--notify",
+        "--execute-on",
+        "2026-10-26",
+    ]
+    assert run_cli(factories, prepare) == 1
+    assert run_cli(factories, prepare) == 1  # 주문안은 남았지만 판정을 아직 못 남겼다
+    assert all("리스크 판정을 못 함 (risk_unavailable)" in text for text in notices.sent)
+    assert run_cli(factories, prepare) == 0  # 같은 빌드로 판정을 다시 만든다
+    assert notices.sent[-1].startswith("<b>S07 주문지</b>")
+    capsys.readouterr()
+    show = ["notify-plan", "--workdir", str(tmp_path), "--plan", "weekly-2026-10-23"]
+    risk.unreadable_verdicts = True
+    assert run_cli(factories, [*show, "--execute-on", "2026-10-26", "--print"]) == 1
+    assert "[risk_unavailable]" in capsys.readouterr().out
+
+
+def test_the_verdict_says_when_the_signal_day_close_was_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    factories = CliFactories(
+        _planner(Signals(), Account(), Plans()), _no_execution, _no_recorder, _no_notifier
+    )
+    prepare = ["prepare", "--workdir", str(tmp_path), "--model-root", str(tmp_path)]
+    assert run_cli(factories, [*prepare, "--signal-date", "2026-10-23"]) == 0
+    assert "신호일 장 마감 기록이 없어 주문안 총자산으로 판정" in capsys.readouterr().out

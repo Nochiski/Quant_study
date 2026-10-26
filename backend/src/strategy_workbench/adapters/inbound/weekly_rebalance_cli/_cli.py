@@ -72,6 +72,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     RiskDay,
     RiskGuardService,
     RiskStatusResult,
+    RiskUnavailableError,
     RiskVerdict,
     SignalBasis,
     SignalReadStatus,
@@ -258,7 +259,10 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
         if result.verdict is not None:
             print(render_verdict(result.verdict))
         print(f"[{result.status.value}] {result.detail}".rstrip())
-        made = result.status in (PrepareStatus.OK, PrepareStatus.EXISTS)
+        # 판정이 없는 주문안은 실행기가 내지 않으므로 만든 것으로 치지 않는다(리뷰 P2-2)
+        made = (
+            result.status in (PrepareStatus.OK, PrepareStatus.EXISTS) and result.verdict is not None
+        )
         if args.notify:
             text = (
                 render_telegram(result.record, args.execute_on, result.verdict)
@@ -281,7 +285,17 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
         if record is None:
             print(f"[not_found] 주문안이 없습니다 — plan={args.plan}")
             return 1
-        text = render_telegram(record, args.execute_on, planning.risk_verdict(args.plan))
+        try:
+            verdict = planning.risk_verdict(args.plan)
+        except RiskUnavailableError as error:
+            verdict, why = None, str(error)
+        else:
+            why = f"리스크 판정이 없다 — plan={args.plan}"
+        if verdict is None:
+            # 판정이 없는 주문안은 실행기가 내지 않는다. 평소 주문지로 보이게 보내지 않는다
+            print(f"[risk_unavailable] {why}")
+            return 1
+        text = render_telegram(record, args.execute_on, verdict)
         if args.print:
             print(text)
             return 0
@@ -292,7 +306,11 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             print(f"[not_found] 주문안이 없습니다 — plan={args.plan}")
             return 1
         print(render(record, approval))
-        verdict = planning.risk_verdict(args.plan)
+        try:
+            verdict = planning.risk_verdict(args.plan)
+        except RiskUnavailableError as error:
+            print(f"리스크 판정을 읽지 못함(주문하지 않는다) — {error}")
+            return 0
         print(
             render_verdict(verdict) if verdict is not None else "리스크 판정 없음(주문하지 않는다)"
         )
@@ -749,6 +767,8 @@ def render_verdict(verdict: RiskVerdict) -> str:
         f"· 고점 {state.peak_krw:,}원 · 노출 {verdict.guarded.exposure_bp / 100:g}% "
         f"· 한도 판 {verdict.limits_version} ({verdict.limits_sha256[:12]})"
     ]
+    if verdict.close_from_plan:
+        lines.append("  신호일 장 마감 기록이 없어 주문안 총자산으로 판정")
     changed = verdict.guarded.changed()
     lines += [
         f"  {line.symbol} 목표 {line.plan_target:,} → {line.target:,} "

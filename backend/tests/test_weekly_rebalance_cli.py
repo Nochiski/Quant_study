@@ -589,11 +589,11 @@ def test_telegram_ends_with_one_risk_line_when_risk_changed_the_week() -> None:
         _verdict(RiskLevel.REDUCE, 1_620, lines, ("리스크가 허용한 수량보다 더 샀다",)),
     )
     assert text.endswith(
-        "\n<b>리스크</b> — 고점 대비 −16.2%로 보유·매수 절반 · 매수 줄임 1종목(에이블씨엔씨) · "
-        "매수 안 함 1종목(한솔홀딩스) · 지난 주문 뒤 한도 위반 1건"
+        "\n<b>리스크</b> — 고점 대비 −16.2%로 보유·매수 절반(축소 매도 1종목) · "
+        "매수 줄임 1종목(에이블씨엔씨) · 매수 안 함 1종목(한솔홀딩스) · 지난 주문 뒤 한도 위반 1건"
     )
     halted = render_telegram(record, date(2026, 10, 26), _verdict(RiskLevel.HALT, 2_050, lines))
-    assert "고점 대비 −20.5%로 신규 매수 정지·보유 절반" in halted
+    assert "고점 대비 −20.5%로 신규 매수 정지·보유 절반(축소 매도 1종목)" in halted
     warned = render_telegram(record, date(2026, 10, 26), _verdict(RiskLevel.WARN, 1_100, ()))
     assert warned.endswith("\n<b>리스크</b> — 고점 대비 −11.0% 경고")
 

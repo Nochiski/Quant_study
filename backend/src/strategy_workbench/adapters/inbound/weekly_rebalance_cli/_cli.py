@@ -293,7 +293,9 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             return 1
         print(render(record, approval))
         verdict = planning.risk_verdict(args.plan)
-        print(render_verdict(verdict) if verdict is not None else "리스크 판정 없음(주문하지 않는다)")
+        print(
+            render_verdict(verdict) if verdict is not None else "리스크 판정 없음(주문하지 않는다)"
+        )
         return 0
     result = planning.approve(args.plan, args.approver, args.note, tuple(args.no_trade))
     print(f"[{result.status.value}] plan={args.plan} {result.detail}".rstrip())
@@ -715,13 +717,18 @@ def render_telegram(
 def _telegram_risk(verdict: RiskVerdict, names: dict[str, str]) -> str:
     """리스크가 바꾼 것을 한 줄로. 아무것도 바꾸지 않았으면 빈 문자열이다."""
     loss = f"고점 대비 −{verdict.state.loss_bp / 100:.1f}%"
+    lines = verdict.guarded.lines
+    # 매도·매수 상자는 주문안 그대로라, 리스크가 만든 매도는 이 줄이 센다
+    sells = sum(
+        GuardReason.EXPOSURE in line.reasons and line.target < line.current_shares for line in lines
+    )
+    reduced = f"(축소 매도 {sells}종목)" if sells else ""
     parts = {
         RiskLevel.NORMAL: [],
         RiskLevel.WARN: [f"{loss} 경고"],
-        RiskLevel.REDUCE: [f"{loss}로 보유·매수 절반"],
-        RiskLevel.HALT: [f"{loss}로 신규 매수 정지·보유 절반"],
+        RiskLevel.REDUCE: [f"{loss}로 보유·매수 절반{reduced}"],
+        RiskLevel.HALT: [f"{loss}로 신규 매수 정지·보유 절반{reduced}"],
     }[verdict.guarded.level]
-    lines = verdict.guarded.lines
     refused = [line.symbol for line in lines if _REFUSED & set(line.reasons)]
     capped = [
         line.symbol for line in lines if _CAPPED & set(line.reasons) and line.symbol not in refused

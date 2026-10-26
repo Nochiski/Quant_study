@@ -13,18 +13,24 @@
 - 승인에서 이번 주 매매에서 뺀 종목(`no_trade`)은 사지도 팔지도 않는다. 팔려던 보유 종목을 빼면 그
   종목이 자리를 차지하므로 순위가 낮은 새 매수도 그만큼 하지 않는다(`week_targets`).
 - 살 수량은 S05가 현금을 검사하는 비용 상한(`ExecutionPolicy.buy_fee_budget_bp`)으로 정한다.
+- 리스크 가드(2026-10-26): 주문안 목표가 아니라 주문안과 함께 남긴 리스크 판정의 목표로 낸다. 판정이
+  없거나 읽지 못하면 아무것도 내지 않는다. 주문 하나하나는 내기 직전에 그 순간의 종목 상태(표시·
+  상하한가·VI)로 한 번 더 판정해 막거나 그 회차만 보류한다. 상태를 읽지 못한 주문은 그 회차를
+  건너뛴다.
 - 장 마감 기록은 신호 기준가 대비 체결 차이와 미체결 기회비용, 그날 총자산을 남긴다. 주문 줄과
   거래 금액은 그날 낸 주문만 센다. 주문은 당일만 유효하므로(잔량은 장 마감에 사라진다) 그날 체결도
-  그날 낸 주문에서만 생긴다. 실행일이 아닌 날은 보유·현금·총자산만 남는다.
+  그날 낸 주문에서만 생긴다. 실행일이 아닌 날은 보유·현금·총자산만 남는다. 계획 수량은 리스크
+  판정 뒤 수량이다. 하루 기록을 남긴 뒤 낙폭 단계와 체결 후 점검을 리스크 기록에 남긴다.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
 
+from strategy_workbench.application.weekly_rebalance._risk import close_at, current_state
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.market import (
     MarketError,
     MarketSource,
@@ -46,6 +52,12 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.records impo
     ExecutionEvent,
     ExecutionLog,
 )
+from strategy_workbench.application.weekly_rebalance.ports.outgoing.risk import (
+    RiskDay,
+    RiskStore,
+    RiskUnavailableError,
+    RiskVerdict,
+)
 from strategy_workbench.domain.rebalance.facade.rebalance import (
     ExecutionPolicy,
     affordable_shares,
@@ -53,6 +65,13 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
     missed_krw,
     shortfall_bp,
     week_targets,
+)
+from strategy_workbench.domain.risk.facade.risk import (
+    OrderVerdict,
+    ReviewOrder,
+    RiskLimits,
+    check_order,
+    review_day,
 )
 
 
@@ -69,6 +88,7 @@ class ExecuteStatus(StrEnum):
     STALE = "stale"
     HALTED = "halted"
     UNAVAILABLE = "unavailable"
+    RISK_UNAVAILABLE = "risk_unavailable"  # 리스크 판정이 없거나 한도를 읽지 못했다
 
 
 @dataclass(frozen=True)
@@ -97,9 +117,14 @@ class CloseStatus(StrEnum):
 
 @dataclass(frozen=True)
 class CloseResult:
+    """`risk`는 낙폭 단계와 체결 후 점검이다. 리스크 기록을 남기지 못하면 None이고 사유는
+    `risk_detail`에 있다(하루 기록은 그래도 남는다)."""
+
     status: CloseStatus
     record: DayRecord | None = None
     detail: str = ""
+    risk: RiskDay | None = None
+    risk_detail: str = ""
 
 
 @dataclass(frozen=True)
@@ -121,6 +146,7 @@ class WeeklyExecutionService:
         market: MarketSource,
         log: ExecutionLog,
         *,
+        risk: RiskStore,
         now: Callable[[], datetime],
         sleep: Callable[[float], None],
         policy: ExecutionPolicy | None = None,
@@ -135,6 +161,7 @@ class WeeklyExecutionService:
         self._gateway = gateway
         self._market = market
         self._log = log
+        self._risk = risk
         self._now = now
         self._sleep = sleep
         self._policy = policy or ExecutionPolicy()
@@ -168,6 +195,13 @@ class WeeklyExecutionService:
                 f"max={self._max_stale_days}",
             )
         try:
+            verdict = self._risk.verdict(plan_id)
+            limits = self._risk.limits()
+        except RiskUnavailableError as error:
+            return ExecuteResult(ExecuteStatus.RISK_UNAVAILABLE, detail=str(error))
+        if verdict is None or verdict.plan_created_at != record.created_at:
+            return ExecuteResult(ExecuteStatus.RISK_UNAVAILABLE, detail=_unbound(record, verdict))
+        try:
             if send and not self._gateway.initialized():
                 self._gateway.initialize()
                 self._event(plan_id, phase, "initialized", detail="기준 잔고를 잡았다")
@@ -188,7 +222,7 @@ class WeeklyExecutionService:
             if phase is Phase.CHASE:
                 lines += self._cancel_open(record, state, send=send)
                 state = self._gateway.state()
-            lines += self._place(record, phase, state, excluded, send=send)
+            lines += self._place(record, verdict, limits, phase, state, excluded, send=send)
         except GatewayError as error:
             self._event(plan_id, phase, "error", detail=str(error))
             return ExecuteResult(ExecuteStatus.UNAVAILABLE, tuple(), str(error))
@@ -255,6 +289,8 @@ class WeeklyExecutionService:
     def _place(
         self,
         record: PlanRecord,
+        verdict: RiskVerdict,
+        limits: RiskLimits,
         phase: Phase,
         state: GatewayState,
         excluded: frozenset[str],
@@ -268,7 +304,7 @@ class WeeklyExecutionService:
             for order in state.orders
             if order.intent_id.startswith(f"{record.plan_id}-") and not order.terminal
         }
-        deltas = _deltas(record, state, excluded)
+        deltas = _deltas(record, verdict, state, excluded)
         ranks = {line.symbol: line.rank or 0 for line in record.plan.lines}
         budget = [
             self._policy.max_orders_per_day
@@ -280,7 +316,7 @@ class WeeklyExecutionService:
             quantity = min(quantity, state.holdings.get(symbol, 0))
             lines.append(
                 self._order(
-                    record, phase, symbol, "sell", quantity, existing, blocked, budget, send
+                    record, limits, phase, symbol, "sell", quantity, existing, blocked, budget, send
                 )
             )
         if send and any(line.outcome == SubmitStatus.SENT.value for line in lines):
@@ -300,6 +336,7 @@ class WeeklyExecutionService:
         for symbol, quantity in sorted(buys, key=lambda item: (ranks.get(item[0], 0), item[0])):
             line = self._order(
                 record,
+                limits,
                 phase,
                 symbol,
                 "buy",
@@ -319,6 +356,7 @@ class WeeklyExecutionService:
     def _order(
         self,
         record: PlanRecord,
+        limits: RiskLimits,
         phase: Phase,
         symbol: str,
         side: str,
@@ -366,6 +404,15 @@ class WeeklyExecutionService:
         limit = limit_price(side, quote, self._policy.limit_level)
         if limit is None:
             return skipped("no_quote", "호가가 없다(거래정지·VI 가능) — 다음 회차에 다시 본다")
+        try:
+            status = self._market.trade_status(symbol)
+        except MarketError as error:
+            return skipped("no_status", f"종목 상태를 읽지 못했다 — {error}", limit)
+        check = check_order(side, limit, status, self._now().time(), limits)
+        if check.verdict is OrderVerdict.BLOCK:
+            return skipped("risk_blocked", check.message, limit)
+        if check.verdict is OrderVerdict.HOLD:
+            return skipped("risk_hold", f"{check.message} — 다음 회차에 다시 본다", limit)
         if available is not None:
             affordable = affordable_shares(available, limit, self._policy.buy_fee_budget_bp)
             quantity = min(quantity, affordable)
@@ -401,7 +448,7 @@ class WeeklyExecutionService:
             asks=quote.asks[:3],
             bids=quote.bids[:3],
             status=outcome.status.value,
-            detail=outcome.detail,
+            detail=" · ".join((outcome.detail, *check.notes)).strip(" ·"),
         )
         return OrderLine(
             symbol, side, quantity, limit, intent_id, outcome.status.value, outcome.detail
@@ -434,16 +481,35 @@ class WeeklyExecutionService:
             for event in self._log.events()
             if event.plan_id == plan_id and event.kind == "submit" and event.at.date() == today
         }
+        # 판정을 읽지 못하면(또는 다른 주문안의 판정이면) 하루 기록은 주문안 수량으로 남기되
+        # 리스크 점검은 남기지 않는다 — 가드 전 주문안처럼 보이게 하지 않는다(리뷰 P3-1)
+        risk_error = ""
+        try:
+            verdict = self._risk.verdict(plan_id)
+        except RiskUnavailableError as error:
+            verdict, risk_error = None, str(error)
+        if verdict is not None and verdict.plan_created_at != record.created_at:
+            verdict, risk_error = None, _unbound(record, verdict)
         try:
             state = self._gateway.state()
             plan_orders = [o for o in state.orders if o.intent_id in sent_today]
-            planned_symbols = (
-                {line.symbol for line in record.plan.lines if line.delta_shares}
-                if plan_orders
-                else set()
+            plan_deltas = _sides(
+                (line.symbol, line.delta_shares) for line in record.plan.lines if plan_orders
+            )
+            # 리스크 판정이 있으면 그 목표가 그날의 계획이다(가드 전 주문안만 주문안 목표를 쓴다)
+            day_deltas = (
+                plan_deltas
+                if verdict is None
+                else _sides(
+                    (line.symbol, line.target - line.current_shares)
+                    for line in verdict.guarded.lines
+                    if plan_orders
+                )
             )
             symbols = sorted(
-                set(state.holdings) | {o.symbol for o in plan_orders} | planned_symbols
+                set(state.holdings)
+                | {o.symbol for o in plan_orders}
+                | {symbol for symbol, _ in (*plan_deltas, *day_deltas)}
             )
             prices = {symbol: self._market.price(symbol) for symbol in symbols}
             evidence = self._gateway.evidence()
@@ -456,11 +522,7 @@ class WeeklyExecutionService:
         approval = self._plans.approval(plan_id)
         excluded = frozenset(approval.no_trade if approval is not None else ())
         skipped = excluded | set(week_targets(record.plan, excluded).dropped_buys)
-        planned = {
-            (line.symbol, "buy" if line.delta_shares > 0 else "sell"): abs(line.delta_shares)
-            for line in record.plan.lines
-            if line.delta_shares and line.symbol not in skipped and plan_orders
-        }
+        planned = {key: quantity for key, quantity in day_deltas.items() if key[0] not in skipped}
         references = {line.symbol: line.reference_price_krw or 0 for line in record.plan.lines}
         orders: list[DayOrder] = []
         for (symbol, side), quantity in sorted(planned.items()):
@@ -501,7 +563,66 @@ class WeeklyExecutionService:
         )
         self._log.save_raw(day_record.day, evidence)
         self._log.save_day(day_record)
-        return CloseResult(CloseStatus.OK, day_record)
+        if risk_error:
+            return CloseResult(CloseStatus.OK, day_record, risk_detail=risk_error)
+        try:
+            risk = self._risk_day(day_record, plan_id, plan_deltas, planned)
+        except (RiskUnavailableError, OSError, ValueError) as error:
+            return CloseResult(CloseStatus.OK, day_record, risk_detail=str(error))
+        return CloseResult(CloseStatus.OK, day_record, risk=risk)
+
+    def _risk_day(
+        self,
+        day_record: DayRecord,
+        plan_id: str,
+        plan_deltas: dict[tuple[str, str], int],
+        planned: dict[tuple[str, str], int],
+    ) -> RiskDay:
+        """그날 낙폭 단계와 체결 후 점검을 남긴다. 주문 직전 판정이 막은 매수는 사건 기록에서
+        읽는다."""
+        limits = self._risk.limits()
+        state = current_state(self._risk, self._log, limits).state
+        today_close = close_at(day_record.day, day_record.recorded_at.tzinfo)
+        before = current_state(self._risk, self._log, limits, before=today_close).state
+        review = None
+        if day_record.orders:
+            blocked = {
+                event.symbol
+                for event in self._log.events()
+                if event.plan_id == plan_id
+                and event.kind == "risk_blocked"
+                and event.side == "buy"
+                and not event.preview
+                and event.at.date() == day_record.day
+            }
+            review = review_day(
+                [
+                    ReviewOrder(
+                        order.symbol,
+                        order.side,
+                        plan_deltas.get((order.symbol, order.side), 0),
+                        planned.get((order.symbol, order.side), 0),
+                        order.filled_quantity,
+                        order.shortfall_bp,
+                    )
+                    for order in day_record.orders
+                ],
+                blocked_buys=blocked,
+                holdings=day_record.holdings,
+                equity_krw=day_record.equity_krw,
+                limits=limits,
+            )
+        risk = RiskDay(
+            day_record.day,
+            self._now(),
+            limits.version,
+            limits.sha256,
+            before.level,
+            state,
+            review,
+        )
+        self._risk.save_day(risk)
+        return risk
 
     def days(self) -> tuple[DayRecord, ...]:
         return self._log.days()
@@ -547,10 +668,34 @@ class WeeklyExecutionService:
         )
 
 
-def _deltas(record: PlanRecord, state: GatewayState, excluded: frozenset[str]) -> dict[str, int]:
-    """주문안 종목만 본다(이번 주 뺀 종목과 함께 빠진 새 매수 제외). 지금 보유와 살아 있는 주문을
-    목표에서 뺀다."""
-    targets = week_targets(record.plan, excluded).targets
+def _unbound(record: PlanRecord, verdict: RiskVerdict | None) -> str:
+    if verdict is None:
+        return f"no risk verdict for the plan — plan_id={record.plan_id}"
+    return (
+        f"risk verdict belongs to another plan — plan_id={record.plan_id} "
+        f"plan_created_at={record.created_at.isoformat()} "
+        f"verdict_plan_created_at={verdict.plan_created_at}"
+    )
+
+
+def _sides(deltas: Iterable[tuple[str, int]]) -> dict[tuple[str, str], int]:
+    """(종목, 주식 수 변화) → {(종목, 방향): 수량}. 변화가 없는 종목은 뺀다."""
+    return {
+        (symbol, "buy" if delta > 0 else "sell"): abs(delta) for symbol, delta in deltas if delta
+    }
+
+
+def _deltas(
+    record: PlanRecord, verdict: RiskVerdict, state: GatewayState, excluded: frozenset[str]
+) -> dict[str, int]:
+    """주문안 종목만 본다(이번 주 뺀 종목과 함께 빠진 새 매수 제외). 목표는 리스크 판정의 목표다.
+    지금 보유와 살아 있는 주문을 목표에서 뺀다."""
+    guarded = verdict.guarded.targets()
+    targets = {
+        symbol: guarded[symbol]
+        for symbol in week_targets(record.plan, excluded).targets
+        if symbol in guarded
+    }
     projected: dict[str, int] = dict(state.holdings)
     for order in state.orders:
         sign = 1 if order.side == "buy" else -1

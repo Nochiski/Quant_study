@@ -13,6 +13,11 @@ from strategy_workbench.application.weekly_rebalance._repair import (
     RepairResult,
     RepairStatus,
 )
+from strategy_workbench.application.weekly_rebalance._risk import (
+    RiskCommandStatus,
+    RiskGuardService,
+    RiskStatusResult,
+)
 from strategy_workbench.application.weekly_rebalance._service import (
     EARLIER_CLOSE_REASON,
     UNTRADED_REASON,
@@ -66,6 +71,12 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.repair impor
     ResumeOutcome,
     UnresolvedOrder,
 )
+from strategy_workbench.application.weekly_rebalance.ports.outgoing.risk import (
+    RiskDay,
+    RiskStore,
+    RiskUnavailableError,
+    RiskVerdict,
+)
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal import (
     EarlierClose,
     SignalBasis,
@@ -117,6 +128,13 @@ __all__ = [
     "RepairResult",
     "RepairStatus",
     "ResumeOutcome",
+    "RiskCommandStatus",
+    "RiskDay",
+    "RiskGuardService",
+    "RiskStatusResult",
+    "RiskStore",
+    "RiskUnavailableError",
+    "RiskVerdict",
     "SignalBasis",
     "SignalRead",
     "SignalReadStatus",

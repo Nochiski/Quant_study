@@ -6,7 +6,7 @@ import csv
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import date, time
+from datetime import date, time, timedelta
 from pathlib import Path
 
 import pytest
@@ -28,6 +28,8 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     LedgerRepairService,
     NoticeError,
     PlanRecord,
+    RiskGuardService,
+    RiskVerdict,
     SignalBasis,
     SignalRead,
     SignalReadStatus,
@@ -41,9 +43,26 @@ from strategy_workbench.bootstrap.weekly_rebalance.facade.command import (
 )
 from strategy_workbench.domain.order_execution.facade.orders import Account as BrokerAccount
 from strategy_workbench.domain.rebalance.facade.rebalance import RebalancePolicy, plan_rebalance
+from strategy_workbench.domain.risk.facade.risk import (
+    DrawdownState,
+    GuardedLine,
+    GuardedTargets,
+    GuardReason,
+    RiskLevel,
+)
 from tests.application.test_ledger_repair import Repair
-from tests.application.test_weekly_execution import PLAN, Log, rig
-from tests.application.test_weekly_rebalance import NOW, Account, Plans, Signals, snapshot
+from tests.application.test_weekly_execution import PLAN, rig
+from tests.application.test_weekly_rebalance import (
+    NOW,
+    Account,
+    Log,
+    Plans,
+    Risk,
+    Signals,
+    close_record,
+    snapshot,
+)
+from tests.domain.test_risk import LIMITS as PEAK_100M
 from tests.test_adapters_kiwoom_mock import ACCOUNT, APP_KEY, SECRET, SYMBOL, Clock, FakeKiwoom
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -52,13 +71,15 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 def test_cli_prepares_shows_and_approves_once(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    plans = Plans()
+    plans, risk = Plans(), Risk()
 
     def factory(workdir: Path, model_root: Path | None) -> WeeklyRebalanceService:
         return WeeklyRebalanceService(
             Signals(),
             Account(),
             plans,
+            risk=risk,
+            log=Log(),
             now=lambda: NOW,
             policy=RebalancePolicy(slots=3, keep_rank=5),
         )
@@ -81,6 +102,7 @@ def test_cli_prepares_shows_and_approves_once(
     assert run_cli(factories, ["show", *common, *plan]) == 0
     shown = capsys.readouterr().out
     assert "승인: 동민" in shown and "이번 주 매매에서 뺀 종목: 000002" in shown
+    assert "리스크 판정 · 단계 정상" in shown
     assert run_cli(factories, ["show", *common, "--plan", "weekly-2026-10-30"]) == 1
 
 
@@ -387,10 +409,25 @@ def test_signal_status_tells_the_schedule_whether_to_keep_waiting(
         assert f"[{read.status.value}]" in capsys.readouterr().out
 
 
-def _planner(signals: Signals, account: Account, plans: Plans) -> ServiceFactory:
+def _planner(
+    signals: Signals,
+    account: Account,
+    plans: Plans,
+    risk: Risk | None = None,
+    log: Log | None = None,
+) -> ServiceFactory:
+    # 리스크 기록·하루 기록은 명령 사이에 남는다(실제 파일처럼 한 벌을 함께 쓴다)
+    risk, log = risk or Risk(), log or Log()
+
     def factory(workdir: Path, model_root: Path | None) -> WeeklyRebalanceService:
         return WeeklyRebalanceService(
-            signals, account, plans, now=lambda: NOW, policy=RebalancePolicy(slots=3, keep_rank=5)
+            signals,
+            account,
+            plans,
+            risk=risk,
+            log=log,
+            now=lambda: NOW,
+            policy=RebalancePolicy(slots=3, keep_rank=5),
         )
 
     return factory
@@ -491,3 +528,206 @@ def test_notify_plan_prints_without_sending(
     assert run_cli(factories, show) == 0 and len(notices.sent) == 1
     missing = ["notify-plan", *common, "--plan", "weekly-2026-10-30", "--execute-on", "2026-11-02"]
     assert run_cli(factories, missing) == 1
+
+
+# --- 리스크 가드 -------------------------------------------------------------------------------
+
+
+def _telegram_record() -> PlanRecord:
+    names = {"000003": "HMM", "000004": "에이블씨엔씨", "000005": "한솔홀딩스"}
+    plan = plan_rebalance(
+        RebalancePolicy(slots=3, keep_rank=5),
+        ranks={"000003": 1, "000004": 2, "000005": 3},
+        holdings={"000003": 300},
+        prices=dict.fromkeys(names, 10_000),
+        cash_krw=7_000_000,
+        blocked={},
+    )
+    signal = SignalRecord(
+        "scope@2.0", "e_b", "2026-10-23", "ab" * 32, "e_p", (), names=tuple(names.items())
+    )
+    return PlanRecord("weekly-2026-10-23", NOW, signal, AccountState(7_000_000, {}, None), plan)
+
+
+def _verdict(
+    level: RiskLevel, loss_bp: int, lines: tuple[GuardedLine, ...], violations: tuple[str, ...] = ()
+) -> RiskVerdict:
+    state = DrawdownState(level, 100_000_000, None, loss_bp, date(2026, 10, 23), 0)
+    exposure = 5_000 if level in (RiskLevel.REDUCE, RiskLevel.HALT) else 10_000
+    return RiskVerdict(
+        "weekly-2026-10-23",
+        NOW,
+        1,
+        "ab" * 32,
+        state,
+        GuardedTargets(level, exposure, lines),
+        violations,
+    )
+
+
+def test_telegram_is_unchanged_when_risk_changed_nothing() -> None:
+    record = _telegram_record()
+    plain = _verdict(
+        RiskLevel.NORMAL,
+        467,
+        tuple(
+            GuardedLine(symbol, 0, target, target, ())
+            for symbol, target in record.plan.target_shares().items()
+        ),
+    )
+    assert render_telegram(record, date(2026, 10, 26), plain) == render_telegram(
+        record, date(2026, 10, 26)
+    )
+
+
+def test_telegram_ends_with_one_risk_line_when_risk_changed_the_week() -> None:
+    record = _telegram_record()
+    lines = (
+        GuardedLine("000003", 300, 326, 163, (GuardReason.EXPOSURE,)),
+        GuardedLine("000004", 0, 326, 100, (GuardReason.EXPOSURE, GuardReason.ADV)),
+        GuardedLine("000005", 0, 326, 0, (GuardReason.EXPOSURE, GuardReason.BLOCKED)),
+    )
+    text = render_telegram(
+        record,
+        date(2026, 10, 26),
+        _verdict(RiskLevel.REDUCE, 1_620, lines, ("리스크가 허용한 수량보다 더 샀다",)),
+    )
+    assert text.endswith(
+        "\n<b>리스크</b> — 고점 대비 −16.2%로 보유·매수 절반(축소 매도 1종목) · "
+        "매수 줄임 1종목(에이블씨엔씨) · 매수 안 함 1종목(한솔홀딩스) · 지난 주문 뒤 한도 위반 1건"
+    )
+    halted = render_telegram(record, date(2026, 10, 26), _verdict(RiskLevel.HALT, 2_050, lines))
+    assert "고점 대비 −20.5%로 신규 매수 정지·보유 절반(축소 매도 1종목)" in halted
+    warned = render_telegram(record, date(2026, 10, 26), _verdict(RiskLevel.WARN, 1_100, ()))
+    assert warned.endswith("\n<b>리스크</b> — 고점 대비 −11.0% 경고")
+
+
+def test_prepare_prints_the_risk_verdict_and_tells_when_it_could_not_judge(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    log = Log()
+    log.save_day(close_record(date(2026, 10, 23), 2_520_000))  # 시작 고점 300만 대비 −16%
+    notices = Notices()
+    factories = CliFactories(
+        _planner(Signals(), Account(), Plans(), log=log),
+        _no_execution,
+        _no_recorder,
+        lambda: notices,
+    )
+    common = ["--workdir", str(tmp_path), "--model-root", str(tmp_path)]
+    prepare = ["prepare", *common, "--signal-date", "2026-10-23"]
+    notify = ["--notify", "--execute-on", "2026-10-26"]
+    assert run_cli(factories, [*prepare, *notify]) == 0
+    shown = capsys.readouterr().out
+    assert "리스크 판정 · 단계 축소 · 고점 대비 −16.00%" in shown
+    assert "000001 목표 97 → 48 (exposure)" in shown
+    assert "보유·매수 절반" in notices.sent[-1]
+
+    unjudged = CliFactories(
+        _planner(Signals(), Account(), Plans(), risk=Risk(limits_=None)),
+        _no_execution,
+        _no_recorder,
+        lambda: notices,
+    )
+    assert run_cli(unjudged, [*prepare, *notify]) == 1
+    assert "리스크 판정을 못 함 (risk_unavailable)" in notices.sent[-1]
+
+
+def test_risk_commands_show_reset_and_resume_with_an_operator(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    log, risk = Log(), Risk(limits_=PEAK_100M)
+    log.save_day(close_record(date(2026, 10, 30), 79_000_000))  # 시작 고점 1억 대비 −21% → 정지
+
+    def guard(workdir: Path) -> RiskGuardService:
+        # 명령은 그 장 마감 기록 뒤에 남는다(일요일 오전)
+        return RiskGuardService(risk, log, now=lambda: NOW + timedelta(days=9))
+
+    planner = _planner(Signals(), Account(), Plans())
+    factories = CliFactories(planner, _no_execution, _no_recorder, _no_notifier, risk=guard)
+    common = ["--workdir", str(tmp_path)]
+    assert run_cli(factories, ["risk-status", *common]) == 0
+    shown = capsys.readouterr().out
+    assert "단계 정지 · 고점 100,000,000원 · 마지막 장 마감 2026-10-30 79,000,000원" in shown
+    assert "고점 대비 −21.00%" in shown and "한도 판 1" in shown
+    with pytest.raises(SystemExit):  # 해제한 사람은 반드시 받는다
+        run_cli(factories, ["risk-resume", *common])
+    capsys.readouterr()
+    assert run_cli(factories, ["risk-resume", *common, "--operator", "동민"]) == 0
+    resumed = capsys.readouterr().out
+    assert "[ok]" in resumed and "단계 축소" in resumed
+    assert run_cli(factories, ["risk-resume", *common, "--operator", "동민"]) == 1  # 이제 정지 아님
+    assert run_cli(factories, ["risk-reset", *common, "--operator", "동민", "--note", "입금"]) == 0
+    assert "고점 79,000,000원" in capsys.readouterr().out
+    assert [action.kind.value for action in risk.actions_] == ["resume", "reset"]
+    no_risk = CliFactories(planner, _no_execution, _no_recorder, _no_notifier)
+    assert run_cli(no_risk, ["risk-status", *common]) == 1
+
+
+def test_close_prints_the_risk_check_of_the_day(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    r = rig(level=RiskLevel.REDUCE)
+
+    @contextmanager
+    def execution(workdir: Path, send: bool, approval: bool) -> Iterator[WeeklyExecutionService]:
+        yield r.service
+
+    factories = CliFactories(
+        _planner(Signals(), Account(), Plans()), execution, _no_recorder, _no_notifier
+    )
+    common = ["--workdir", str(tmp_path)]
+    assert (
+        run_cli(factories, ["execute", *common, "--plan", PLAN, "--phase", "open", "--send"]) == 0
+    )
+    r.market.closes = {"00000A": 10_100, "00000B": 10_000, "00000D": 10_050, "00000E": 9_900}
+    capsys.readouterr()
+    assert run_cli(factories, ["close", *common]) == 0
+    shown = capsys.readouterr().out
+    assert "리스크 점검 2026-10-26 · 단계 정상(전날 정상)" in shown
+    assert "한도 위반 없음" in shown
+
+
+def test_a_plan_without_a_verdict_is_reported_as_not_made(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # 리뷰 P2-2: 판정 저장이 실패한 주문안을 다시 부르면 리스크 언급 없는 평소 주문지가 나갔다
+    notices = Notices()
+    plans, risk = Plans(), Risk(failed_saves=2)
+    factories = CliFactories(
+        _planner(Signals(), Account(), plans, risk=risk),
+        _no_execution,
+        _no_recorder,
+        lambda: notices,
+    )
+    common = ["--workdir", str(tmp_path), "--model-root", str(tmp_path)]
+    prepare = [
+        "prepare",
+        *common,
+        "--signal-date",
+        "2026-10-23",
+        "--notify",
+        "--execute-on",
+        "2026-10-26",
+    ]
+    assert run_cli(factories, prepare) == 1
+    assert run_cli(factories, prepare) == 1  # 주문안은 남았지만 판정을 아직 못 남겼다
+    assert all("리스크 판정을 못 함 (risk_unavailable)" in text for text in notices.sent)
+    assert run_cli(factories, prepare) == 0  # 같은 빌드로 판정을 다시 만든다
+    assert notices.sent[-1].startswith("<b>S07 주문지</b>")
+    capsys.readouterr()
+    show = ["notify-plan", "--workdir", str(tmp_path), "--plan", "weekly-2026-10-23"]
+    risk.unreadable_verdicts = True
+    assert run_cli(factories, [*show, "--execute-on", "2026-10-26", "--print"]) == 1
+    assert "[risk_unavailable]" in capsys.readouterr().out
+
+
+def test_the_verdict_says_when_the_signal_day_close_was_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    factories = CliFactories(
+        _planner(Signals(), Account(), Plans()), _no_execution, _no_recorder, _no_notifier
+    )
+    prepare = ["prepare", "--workdir", str(tmp_path), "--model-root", str(tmp_path)]
+    assert run_cli(factories, [*prepare, "--signal-date", "2026-10-23"]) == 0
+    assert "신호일 장 마감 기록이 없어 주문안 총자산으로 판정" in capsys.readouterr().out

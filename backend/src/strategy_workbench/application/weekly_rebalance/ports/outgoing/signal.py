@@ -8,6 +8,8 @@ from datetime import date
 from enum import StrEnum
 from typing import Protocol
 
+from strategy_workbench.domain.risk.facade.risk import SignalFacts
+
 __all__ = [
     "EarlierClose",
     "SignalBasis",
@@ -65,6 +67,9 @@ class SignalSnapshot:
     exclusion_reasons: Mapping[str, str] | None = None
     # 신호일 가격 행이 없는 종목의 그 전 마지막 종가. 보유 종목 평가에만 쓴다.
     earlier_closes: Mapping[str, EarlierClose] | None = None
+    # 점수를 계산한 판의 신호일 종목 자료(20일 평균 거래대금·관리·정지). 리스크 한도가 읽는다.
+    # 못 읽으면 None이고, 리스크는 자료 없는 종목을 사지 않는다.
+    facts: Mapping[str, SignalFacts] | None = None
 
 
 @dataclass(frozen=True)

@@ -1,1 +1,1 @@
-DEPENDS_ON: tuple[str, ...] = ("domain.rebalance",)
+DEPENDS_ON: tuple[str, ...] = ("domain.rebalance", "domain.risk")

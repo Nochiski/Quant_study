@@ -32,7 +32,7 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
 
 PLAN_SCHEMA = "weekly-rebalance-plan/1"
 APPROVAL_SCHEMA = "weekly-rebalance-approval/1"
-_PLAN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+PLAN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 class JsonPlanStore:
@@ -40,7 +40,7 @@ class JsonPlanStore:
         self._folder = folder / "plans"
 
     def save(self, record: PlanRecord) -> None:
-        self._write_once(self._path(record.plan_id, ""), _encode_plan(record))
+        write_once(self._path(record.plan_id, ""), _encode_plan(record))
 
     def load(self, plan_id: str) -> PlanRecord | None:
         path = self._path(plan_id, "")
@@ -49,7 +49,7 @@ class JsonPlanStore:
         return _decode_plan(_read(path, PLAN_SCHEMA))
 
     def save_approval(self, plan_id: str, approval: Approval) -> None:
-        self._write_once(
+        write_once(
             self._path(plan_id, ".approval"),
             {
                 "schema": APPROVAL_SCHEMA,
@@ -84,27 +84,29 @@ class JsonPlanStore:
         )
 
     def _path(self, plan_id: str, suffix: str) -> Path:
-        if not _PLAN_ID.fullmatch(plan_id):
+        if not PLAN_ID.fullmatch(plan_id):
             raise ValueError(f"invalid plan id — plan_id={plan_id!r}")
         return self._folder / f"{plan_id}{suffix}.json"
 
-    def _write_once(self, path: Path, value: dict[str, object]) -> None:
-        self._folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if path.exists():
-            raise PlanExistsError(f"already recorded — file={path.name}")
-        fd, temporary = tempfile.mkstemp(dir=self._folder, prefix=f".{path.stem}.", suffix=".tmp")
+
+def write_once(path: Path, value: dict[str, object]) -> None:
+    """임시 파일에 다 쓴 뒤 `os.link`로 붙인다. 이미 있으면 `PlanExistsError`(덮어쓰지 않는다)."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.exists():
+        raise PlanExistsError(f"already recorded — file={path.name}")
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=1)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(value, handle, ensure_ascii=False, indent=1)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(temporary, 0o600)
-            try:
-                os.link(temporary, path)
-            except FileExistsError as error:
-                raise PlanExistsError(f"already recorded — file={path.name}") from error
-        finally:
-            os.unlink(temporary)
+            os.link(temporary, path)
+        except FileExistsError as error:
+            raise PlanExistsError(f"already recorded — file={path.name}") from error
+    finally:
+        os.unlink(temporary)
 
 
 def _read(path: Path, schema: str) -> dict[str, object]:

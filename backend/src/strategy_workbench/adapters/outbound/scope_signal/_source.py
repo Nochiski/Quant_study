@@ -11,6 +11,8 @@
 - `factor_inputs/fi_prices/v=<fi_build_id>/*.parquet`: 점수를 계산한 가격 판
   (`ticker`·`date`·`close`·`volume`). 신호일 행이 없는 종목(거래정지 등)은 같은 판의 그 전 마지막
   종가를 따로 싣는다(보유 종목 평가용).
+- `factor_inputs/fi_universe/v=<fi_build_id>/*.parquet`: 같은 판의 신호일 유니버스. 이름·빠진 이유와
+  리스크 가드가 읽는 20일 평균 거래대금(`adv20`, 억 원)·관리종목(`is_admin`)·거래정지(`is_halted`).
 
 종류별 포인터(`latest_<basis>.json`)가 가리키는 판만 읽고, 그 판은 MANIFEST 빌드 목록에 있어야 한다.
 폴더에 남은 옛 판을 훑지 않는다. `current_build`는 종류와 상관없이 마지막 커밋이라 보지 않는다 —
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import date
 from pathlib import Path
 
@@ -35,6 +38,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     SignalReadStatus,
     SignalSnapshot,
 )
+from strategy_workbench.domain.risk.facade.risk import SignalFacts
 
 # 메인 모델 scope_v2.0(2026-10-11 사용자 결정 N-47, 엑셀 주 모델과 같다). scope@1.0은 비교용이다.
 DEFAULT_MODEL_ID = "scope@2.0"
@@ -108,9 +112,8 @@ class ScopeSignalSource:
         closes, untraded = _closes(prices_dir, signal_date)
         earlier = _earlier_closes(prices_dir, signal_date, closes)
         previous_id, previous_ranks = _previous(model_dir, manifest, build_id, signal_date)
-        names, reasons = _universe_notes(
-            self._root / "factor_inputs" / "fi_universe" / f"v={prices_build_id}", ranks, closes
-        )
+        universe = self._root / "factor_inputs" / "fi_universe" / f"v={prices_build_id}"
+        names, reasons = _universe_notes(universe, ranks, closes)
         return SignalRead(
             SignalReadStatus.OK,
             SignalSnapshot(
@@ -127,6 +130,7 @@ class ScopeSignalSource:
                 names,
                 reasons,
                 earlier,
+                _facts(universe),
             ),
         )
 
@@ -267,6 +271,38 @@ def _universe_notes(
                 else "시총 하한 미만"
             )
     return names, reasons
+
+
+_EOK_KRW = 100_000_000
+
+
+def _facts(folder: Path) -> dict[str, SignalFacts] | None:
+    """리스크 한도가 읽는 신호일 종목 자료. 판이나 칸이 없으면 None — 리스크는 그 종목을 사지
+    않는다."""
+    files = sorted(folder.glob("*.parquet"))
+    if not files:
+        return None
+    try:
+        table = pa.concat_tables(
+            [
+                pq.read_table(file, columns=["ticker", "adv20", "is_admin", "is_halted"])
+                for file in files
+            ]
+        )
+    except (OSError, ValueError, KeyError, pa.ArrowInvalid):
+        return None
+    facts: dict[str, SignalFacts] = {}
+    for row in table.to_pylist():
+        ticker, adv20 = row["ticker"], row["adv20"]
+        if not isinstance(ticker, str):
+            continue
+        known = isinstance(adv20, int | float) and math.isfinite(adv20) and adv20 >= 0
+        facts[ticker] = SignalFacts(
+            round(adv20 * _EOK_KRW) if known else None,
+            admin=row["is_admin"] is not False,  # 모르면 막는 쪽
+            halted=row["is_halted"] is not False,
+        )
+    return facts
 
 
 def _closes(folder: Path, signal_date: date) -> tuple[dict[str, int], frozenset[str]]:

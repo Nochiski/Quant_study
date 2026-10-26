@@ -10,6 +10,7 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
     RebalancePlan,
     RebalancePolicy,
     plan_rebalance,
+    scaled_targets,
     signal_anomalies,
     week_targets,
 )
@@ -298,3 +299,49 @@ def test_signal_anomalies_flag_bulk_disappearance_from_the_top() -> None:
     assert "2종목" in reason and "000003" in reason and "000012" in reason
     shrunk = {code: rank for code, rank in previous.items() if rank <= 30 or rank > 34}
     assert "100 → 96" in signal_anomalies(shrunk, previous)[0]  # 4% 감소, 상위 30은 그대로
+
+
+# --- 자본 일부로 다시 잰 목표(S07 리스크 가드의 노출 축소) ----------------------------------------
+
+
+def _plan(holdings: dict[str, int], prices: dict[str, int], cash_krw: int) -> RebalancePlan:
+    codes = _codes(4)
+    return plan_rebalance(
+        POLICY,
+        ranks={code: rank for rank, code in enumerate(codes, 1)},
+        holdings=holdings,
+        prices={**dict.fromkeys(codes, 10_000), **prices},
+        cash_krw=cash_krw,
+        blocked={"000004": "정지"} if "000004" in holdings else {},
+    )
+
+
+@pytest.mark.parametrize(
+    ("holdings", "cash_krw"),
+    [
+        ({}, 3_000_000),
+        ({"000001": 130, "000002": 110, "000003": 60}, 0),
+        ({"000005": 80}, 2_000_000),
+    ],
+)
+def test_full_exposure_gives_back_the_plan_targets(holdings: dict[str, int], cash_krw: int) -> None:
+    plan = _plan(holdings, {"000005": 10_000}, cash_krw)
+    assert scaled_targets(plan, 10_000) == plan.target_shares()
+
+
+def test_half_exposure_sizes_every_kept_or_new_name_to_half_the_slot_value() -> None:
+    # 총자산 3,000,000원 → 종목당 980,000원, 절반 490,000원(±25% = 122,500원)
+    plan = _plan({"000001": 98, "000002": 46, "000003": 30}, {}, 1_260_000)
+    targets = scaled_targets(plan, 5_000)
+    # 000001 98주(980,000원)는 절반 목표에서 벗어나 48주로,
+    # 000002 46주(460,000원)는 밴드 안이라 그대로
+    assert targets == {"000001": 48, "000002": 46, "000003": 48}
+
+
+def test_half_exposure_keeps_blocked_holdings_and_sells_what_the_plan_sells() -> None:
+    plan = _plan({"000004": 100, "000009": 50}, {"000009": 10_000}, 1_500_000)
+    targets = scaled_targets(plan, 5_000)
+    assert targets["000004"] == 100  # 매매가 막혀 그대로 둔 보유는 노출과 상관없이 그대로
+    assert targets["000009"] == 0  # 주문안이 파는 종목은 0
+    # 새 매수는 절반 목표 금액으로 산다(980,000 × 50% = 490,000원 → 48주)
+    assert targets["000001"] == 48

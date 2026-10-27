@@ -10,6 +10,7 @@ import numpy as np
 
 from .. import data
 from .. import fib_channel as fc
+from .. import market as mk
 from .. import pivot_points as pp
 from .. import signals as sg
 from .. import volume_profile as vp
@@ -336,6 +337,7 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
         checklist_summary = f"미검증 지표 기준 양호 {good(habit)}/{len(habit)} (연구 결과 전 — 근거 있는 지표 없음)"
 
     extras_block = _extras_block(root, match, s.dates)
+    combo_block = _combo_block(root, match, b, scorecard)
 
     panel = {
         "positions": positions,
@@ -349,6 +351,7 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
         "d11_score": scorecard.get("D11"),
         "fired": fired,
         "extras": extras_block,
+        "combo": combo_block,
         "trend": [{"label": t["label"], "now": f"{t['now']:,.{digits}f}", "broken": t["broken"]} for t in trend],
     }
     prev = float(b.close[last - 1])
@@ -364,6 +367,40 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
         "scorecard": bool(scorecard),
     }
     return {"meta": meta, "chart": chart, "panel": panel}
+
+
+def _combo_block(
+    root: Path, match: data.Match, b: sg.Bars, scorecard: dict[str, dict[str, str]]
+) -> dict[str, object]:
+    """묶음 지표 — 눌림목 점수(종목만)와 시장 투매 비율(PREREG2 P1·P2 정의)."""
+    snap = mk.snapshot(root)
+    out: dict[str, object] = {
+        "date": snap.date,
+        "panic": {
+            "fraction": snap.panic,
+            "n": len(snap.panic_tickers()),
+            "universe": int(snap.in_universe.sum()),
+            "is_panic": bool(snap.panic >= mk.PANIC_FRACTION),
+            "score": scorecard.get("P2"),
+        },
+    }
+    if match.kind != "stock":
+        return out
+    c, h = b.close, b.high
+    p52 = float(c[-1] / np.nanmax(h[-250:])) if c.shape[0] >= 250 else float("nan")
+    r20 = float(c[-1] / c[-21] - 1.0) if c.shape[0] > 20 else float("nan")
+    hit = np.flatnonzero(snap.tickers == match.code)
+    in_u = bool(hit.size and snap.in_universe[hit[0]])
+    score = float(snap.score[hit[0]]) if in_u else mk.place(p52, r20, snap.p52, snap.r20, snap.in_universe)
+    out["pullback"] = {
+        "score": score,
+        "label": mk.pullback_label(score),
+        "p52": p52,
+        "r20": r20,
+        "in_universe": in_u,
+        "score_card": scorecard.get("P1"),
+    }
+    return out
 
 
 def _near(x: sm.NearLevel, digits: int) -> dict[str, object]:

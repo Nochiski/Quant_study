@@ -71,6 +71,15 @@ def caption(payload: dict[str, object]) -> str:
         f"<b>{m['name']}</b> {_fmt(float(m['close']), d)} ({float(m['change_pct']):+.2f}%) · {m['date']} 종가",
         f"점검표: {p['checklist_summary']}",
     ]
+    combo = p.get("combo")
+    if isinstance(combo, dict):
+        pn = combo["panic"]
+        parts = []
+        if combo.get("pullback"):
+            pb = combo["pullback"]
+            parts.append(f"눌림목 점수 {pb['score'] * 100:.0f}({pb['label']})")
+        parts.append(f"시장 RSI<30 비율 {pn['fraction'] * 100:.0f}%{' 투매일' if pn['is_panic'] else ''}")
+        lines.append("묶음: " + " · ".join(parts))
     fired = p["fired"]
     if fired:
         lines.append("오늘 신호: " + ", ".join(f["text"] for f in fired))

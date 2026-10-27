@@ -78,6 +78,10 @@ def caption(payload: dict[str, object]) -> str:
         if combo.get("pullback"):
             pb = combo["pullback"]
             parts.append(f"눌림목 점수 {pb['score'] * 100:.0f}({pb['label']})")
+        for key, title in (("high52", "52주 고점 근접"), ("composite", "가격 기반 종합")):
+            o = combo.get(key)
+            if o and o["score"] == o["score"]:
+                parts.append(f"{title} {o['score'] * 100:.0f}({o['label']})")
         parts.append(f"시장 RSI<30 비율 {pn['fraction'] * 100:.0f}%{' 투매일' if pn['is_panic'] else ''}")
         lines.append("묶음: " + " · ".join(parts))
     fired = p["fired"]

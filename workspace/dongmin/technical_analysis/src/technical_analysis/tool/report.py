@@ -400,6 +400,12 @@ def _combo_block(
         "in_universe": in_u,
         "score_card": scorecard.get("P1"),
     }
+    if in_u:
+        i = int(hit[0])
+        hi52 = float(mk.pct_rank(snap.p52, snap.in_universe)[i])
+        comp = float(snap.composite[i])
+        out["high52"] = {"score": hi52, "label": mk.quintile_label(hi52), "score_card": scorecard.get("E11")}
+        out["composite"] = {"score": comp, "label": mk.quintile_label(comp), "score_card": scorecard.get("F2")}
     return out
 
 

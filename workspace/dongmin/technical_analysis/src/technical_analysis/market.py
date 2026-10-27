@@ -4,6 +4,7 @@
 - 눌림목 점수: 유니버스 안 백분위 pct(P52) + pct(−R20) 를 다시 유니버스 안 백분위(0~1)로.
   P52 = 종가 ÷ 최근 250봉 고가 최댓값, R20 = 종가 ÷ 20봉 전 종가 − 1. 상위 20% = 눌림목, 하위 30% = 피할 쪽.
 - 투매일: 유니버스 중 RSI14 < 30 종목 비율 ≥ 25%.
+- 52주 고점 근접·가격 기반 종합은 연구 3차(PREREG3)의 E11·F2 와 같은 정의(상위 20% 대 하위 20%).
 """
 
 import csv
@@ -72,6 +73,31 @@ def pullback_label(score: float) -> str:
     return "중간"
 
 
+def price_composite(
+    p52: np.ndarray, r20: np.ndarray, vol60: np.ndarray, max20: np.ndarray, mad: np.ndarray, mask: np.ndarray
+) -> np.ndarray:
+    """가격 기반 종합(연구 3차 F2): 저변동·최근 눌림·52주 고점 근접·낮은 MAX·높은 MAD 백분위의 평균을 다시 백분위로.
+
+    성분이 하나라도 없으면 NaN.
+    """
+    parts = [pct_rank(-np.asarray(vol60, dtype=float), mask), pct_rank(-np.asarray(r20, dtype=float), mask),
+             pct_rank(p52, mask), pct_rank(-np.asarray(max20, dtype=float), mask), pct_rank(mad, mask)]
+    stack = np.vstack(parts)
+    s = np.where(np.isnan(stack).any(axis=0), np.nan, stack.mean(axis=0))
+    return pct_rank(s, mask & ~np.isnan(s))
+
+
+def quintile_label(score: float) -> str:
+    """연구 판정이 상위 20% 대 하위 20% 였던 지표의 라벨."""
+    if np.isnan(score):
+        return "계산 불가"
+    if score >= 0.8:
+        return "상위 20%"
+    if score <= 0.2:
+        return "하위 20%"
+    return "중간"
+
+
 def panic_fraction(rsi: np.ndarray, mask: np.ndarray) -> float:
     """유니버스 중 RSI14 < 30 비율(RSI 가 정의된 종목만)."""
     ok = mask & ~np.isnan(rsi)
@@ -88,6 +114,10 @@ class Snapshot:
     rsi: np.ndarray
     score: np.ndarray  # 유니버스 안 눌림목 점수, 밖은 NaN
     panic: float
+    vol60: np.ndarray
+    max20: np.ndarray
+    mad: np.ndarray
+    composite: np.ndarray  # 유니버스 안 가격 기반 종합 백분위, 밖은 NaN
 
     def panic_tickers(self) -> list[str]:
         ok = self.in_universe & ~np.isnan(self.rsi) & (self.rsi < 30)
@@ -104,10 +134,13 @@ def snapshot(root: Path) -> Snapshot:
     prices = data.current_files(root, "price_adj_daily")
     build = json.loads((root / "price_adj_daily" / "MANIFEST.json").read_text())["current_build"]
     last = str(con.execute("SELECT max(date) FROM read_parquet(?)", [prices]).fetchone()[0])
-    cache = _cache_dir() / f"market_{last}_{build}.npz"
+    cache = _cache_dir() / f"market_v2_{last}_{build}.npz"
     if cache.exists():
         z = np.load(cache, allow_pickle=False)
-        return Snapshot(last, z["tickers"], z["in_universe"], z["p52"], z["r20"], z["rsi"], z["score"], float(z["panic"]))
+        return Snapshot(
+            last, z["tickers"], z["in_universe"], z["p52"], z["r20"], z["rsi"], z["score"], float(z["panic"]),
+            z["vol60"], z["max20"], z["mad"], z["composite"],
+        )
     cal = [r[0] for r in con.execute(
         "SELECT date FROM read_parquet(?) WHERE date <= ? ORDER BY date DESC LIMIT ?",
         [data.current_files(root, "trading_calendar"), last, LOOKBACK_ROWS + 40],
@@ -146,6 +179,9 @@ def snapshot(root: Path) -> Snapshot:
     p52 = np.full(n, np.nan)
     r20 = np.full(n, np.nan)
     rsi = np.full(n, np.nan)
+    vol60 = np.full(n, np.nan)
+    max20 = np.full(n, np.nan)
+    mad = np.full(n, np.nan)
     in_u = np.zeros(n, dtype=bool)
     for i, t in enumerate(tickers):
         h, c, traded_today = by[t]
@@ -157,11 +193,21 @@ def snapshot(root: Path) -> Snapshot:
         if ca.shape[0] > 20:
             r20[i] = ca[-1] / ca[-21] - 1.0
         rsi[i] = ind.rsi(ca, 14)[-1]
+        if ca.shape[0] > 60:
+            vol60[i] = np.diff(np.log(ca[-61:])).std()
+        if ca.shape[0] > 20:
+            max20[i] = (ca[-20:] / ca[-21:-1] - 1.0).max()
+        if ca.shape[0] >= 200:
+            mad[i] = ca[-21:].mean() / ca[-200:].mean()
         in_u[i] = t in universe
     score = pullback_score(p52, r20, in_u)
-    snap = Snapshot(last, tickers, in_u, p52, r20, rsi, score, panic_fraction(rsi, in_u))
+    comp = price_composite(p52, r20, vol60, max20, mad, in_u)
+    snap = Snapshot(last, tickers, in_u, p52, r20, rsi, score, panic_fraction(rsi, in_u), vol60, max20, mad, comp)
     cache.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(cache, tickers=tickers, in_universe=in_u, p52=p52, r20=r20, rsi=rsi, score=score, panic=snap.panic)
+    np.savez(
+        cache, tickers=tickers, in_universe=in_u, p52=p52, r20=r20, rsi=rsi, score=score, panic=snap.panic,
+        vol60=vol60, max20=max20, mad=mad, composite=comp,
+    )
     return snap
 
 

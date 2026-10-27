@@ -1,0 +1,29 @@
+[project]
+name = "technical-analysis"
+version = "0.1.0"
+description = "기술적 지표 계산 모듈과 종목 조회 도구(동민 개인 실습 폴더)"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "duckdb>=1.0",
+]
+
+[project.optional-dependencies]
+# 연구처럼 종목 수천 개를 돌릴 때만 필요하다. 없으면 같은 코드가 순수 파이썬으로 돈다
+fast = ["numba>=0.59"]
+
+[project.scripts]
+ta = "technical_analysis.tool.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/technical_analysis"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

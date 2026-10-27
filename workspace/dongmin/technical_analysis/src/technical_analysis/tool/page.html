@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root {
+  --bg: #131722; --panel: #1a1e2b; --line: #2a2e39; --fg: #d1d4dc; --muted: #8b90a0;
+  --up: #f0443a; --down: #3b82f6; --good: #26a69a; --warn: #f0a83a; --bad: #ef5350;
+  --ema20: #f2a03d; --ema50: #e5534b; --user: #9aa0ab; --auto1: #2ec4b6; --auto2: #b48ee8; --auto3: #f4a261;
+  --support: #26a69a; --resist: #ef6c5a;
+  --f: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "SF Mono", Menlo, ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: var(--f); font-size: 13px; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 400px; grid-template-rows: auto auto minmax(0, 1fr); height: 100%; }
+header { grid-column: 1 / 3; grid-row: 1; display: flex; gap: 18px; align-items: baseline; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header h1 { margin: 0; font-size: 18px; font-weight: 700; }
+header .code { color: var(--muted); font-family: var(--mono); }
+header .px { font-family: var(--mono); font-size: 18px; }
+.chg.up { color: var(--up); } .chg.down { color: var(--down); }
+header .asof { color: var(--muted); margin-left: auto; }
+.toolbar { grid-column: 1 / 2; grid-row: 2; display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 16px; border-bottom: 1px solid var(--line); color: var(--muted); }
+.toolbar label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; white-space: nowrap; }
+.toolbar .sw { display: inline-block; width: 14px; height: 2px; vertical-align: middle; }
+.chartwrap { grid-column: 1 / 2; grid-row: 3; position: relative; min-height: 0; }
+#chart { position: absolute; inset: 0; }
+#vp { position: absolute; inset: 0; pointer-events: none; }
+aside { grid-column: 2 / 3; grid-row: 2 / 4; border-left: 1px solid var(--line); overflow-y: auto; padding: 10px 14px 24px; background: var(--panel); }
+aside h2 { font-size: 12px; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin: 16px 0 6px; text-transform: uppercase; }
+aside h2:first-child { margin-top: 2px; }
+table { width: 100%; border-collapse: collapse; }
+td { padding: 3px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+.pill { display: inline-block; padding: 0 6px; border-radius: 9px; font-size: 11px; border: 1px solid currentColor; white-space: nowrap; }
+.pill.good { color: var(--good); } .pill.warn { color: var(--warn); } .pill.none { color: var(--muted); } .pill.bad { color: var(--bad); }
+.note { color: var(--muted); font-size: 11.5px; line-height: 1.5; margin-top: 4px; }
+.ch { border-left: 3px solid var(--user); padding: 4px 8px; margin: 6px 0; }
+.ch b { font-weight: 600; }
+.sum { margin: 6px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; }
+.mono { font-family: var(--mono); }
+body.png .toolbar { display: none; }
+body.png aside .note { display: none; }
+body.png aside { overflow: hidden; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto auto 60vh auto; height: auto; }
+  header, .toolbar, .chartwrap, aside { grid-column: 1 / 2; }
+  aside { grid-row: 4; border-left: 0; }
+  .chartwrap { height: 60vh; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1 id="name"></h1><span class="code" id="code"></span>
+    <span class="px" id="px"></span><span class="chg" id="chg"></span>
+    <span class="asof" id="asof"></span>
+  </header>
+  <div class="toolbar" id="toolbar"></div>
+  <div class="chartwrap"><div id="chart"></div><canvas id="vp"></canvas></div>
+  <aside id="panel"></aside>
+</div>
+<script>
+const P = __PAYLOAD__;
+if (location.hash === "#png") document.body.classList.add("png");
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const D = P.meta.digits;
+const fmt = (v, d = D) => v == null || Number.isNaN(v) ? "—" : Number(v).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d });
+const pct = (v, d = 1) => v == null || Number.isNaN(v) ? "—" : (v > 0 ? "+" : "") + v.toFixed(d) + "%";
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---------- 머리 ----------
+document.getElementById("name").textContent = P.meta.name;
+document.getElementById("code").textContent = P.meta.kind === "index" ? "지수" : P.meta.code;
+document.getElementById("px").textContent = fmt(P.meta.close);
+const chg = document.getElementById("chg");
+chg.textContent = pct(P.meta.change_pct, 2);
+chg.className = "chg " + (P.meta.change_pct >= 0 ? "up" : "down");
+document.getElementById("asof").textContent = P.meta.date + " 종가 기준 · 일봉";
+
+// ---------- 차트 ----------
+const el = document.getElementById("chart");
+const chart = LightweightCharts.createChart(el, {
+  autoSize: true,
+  layout: { background: { color: css("--bg") }, textColor: css("--muted"), fontFamily: css("--f") },
+  grid: { vertLines: { color: "rgba(42,46,57,.5)" }, horzLines: { color: "rgba(42,46,57,.5)" } },
+  rightPriceScale: { borderColor: css("--line"), scaleMargins: { top: 0.05, bottom: 0.12 } },
+  timeScale: { borderColor: css("--line"), rightOffset: 4 },
+  crosshair: { mode: 0 },
+  localization: { priceFormatter: (p) => fmt(p) },
+});
+const candle = chart.addCandlestickSeries({
+  upColor: css("--up"), downColor: css("--down"), borderVisible: false,
+  wickUpColor: css("--up"), wickDownColor: css("--down"), priceLineVisible: true,
+});
+candle.setData(P.chart.candles.concat(P.chart.whitespace.map((t) => ({ time: t }))));
+const vol = chart.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
+chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.9, bottom: 0 } });
+vol.setData(P.chart.volume.map((v) => ({ time: v.time, value: v.value ?? 0, color: v.up ? "rgba(240,68,58,.35)" : "rgba(59,130,246,.35)" })));
+
+const noScale = () => null;
+function lineSeries(color, style = 0, width = 1) {
+  return chart.addLineSeries({
+    color, lineWidth: width, lineStyle: style, priceLineVisible: false, lastValueVisible: false,
+    crosshairMarkerVisible: false, autoscaleInfoProvider: noScale,
+  });
+}
+const layers = {};
+function layer(key, make) { layers[key] = { series: [], priceLines: [], make, on: false }; }
+function show(key, on) {
+  const L = layers[key];
+  if (on && !L.on) { L.make(L); L.on = true; }
+  if (!on && L.on) {
+    L.series.forEach((s) => chart.removeSeries(s));
+    L.priceLines.forEach((pl) => candle.removePriceLine(pl));
+    L.series = []; L.priceLines = []; L.on = false;
+  }
+  drawMarkers(); drawVP();
+}
+
+layer("ema", (L) => {
+  const a = lineSeries(css("--ema20"), 0, 1); a.setData(P.chart.ema.ema20);
+  const b = lineSeries(css("--ema50"), 0, 1); b.setData(P.chart.ema.ema50);
+  L.series.push(a, b);
+});
+
+const chColors = { user: css("--user"), auto: [css("--auto1"), css("--auto2"), css("--auto3")] };
+P.chart.channels.forEach((c, i) => {
+  const color = c.kind === "user" ? chColors.user : chColors.auto[(i - (P.chart.channels[0].kind === "user" ? 1 : 0)) % 3];
+  c.color = color;
+  layer("ch" + i, (L) => {
+    c.grid.forEach((g) => {
+      const key = g.ratio === 0 || g.ratio === 1;
+      const s = lineSeries(color, key ? 0 : 2, key ? 1.5 : 1);
+      s.setData(g.points); L.series.push(s);
+    });
+  });
+  layer("fib" + i, (L) => {
+    c.fib.forEach((g) => {
+      const s = lineSeries(color, 1, 1);
+      s.applyOptions({ title: String(g.ratio) });
+      s.setData(g.points); L.series.push(s);
+    });
+  });
+});
+
+layer("trend", (L) => {
+  P.chart.trend.forEach((t) => {
+    const s = lineSeries(t.label.startsWith("지지") ? css("--support") : css("--resist"), 0, 1.5);
+    s.setData(t.points); L.series.push(s);
+  });
+});
+
+const pvNames = { s3: "S3", s2: "S2", s1: "S1", p: "P", r1: "R1", r2: "R2", r3: "R3" };
+[["next_day", "다음 거래일"], ["week", "이번 주"], ["month", "이번 달"]].forEach(([k, title]) => {
+  layer("pv_" + k, (L) => {
+    Object.entries(P.chart.pivot_levels[k]).forEach(([nm, v]) => {
+      if (v == null) return;
+      L.priceLines.push(candle.createPriceLine({
+        price: v, color: nm === "p" ? "#c9a227" : nm.startsWith("r") ? css("--resist") : css("--support"),
+        lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: `${title} ${pvNames[nm]}`,
+      }));
+    });
+  });
+});
+
+let vpWindow = null;
+layer("vp60", () => { vpWindow = "60"; });
+layer("vp120", () => { vpWindow = "120"; });
+layer("vp250", () => { vpWindow = "250"; });
+layer("pivots", () => {});
+layer("allpivots", () => {});
+
+function drawMarkers() {
+  const m = [];
+  if (layers.pivots.on || layers.allpivots.on) {
+    P.chart.pivots.forEach((p) => {
+      if (!p.major && !layers.allpivots.on) return;
+      const hi = p.kind === "high";
+      m.push({
+        time: p.time, position: hi ? "aboveBar" : "belowBar", shape: hi ? "arrowDown" : "arrowUp",
+        color: hi ? css("--resist") : css("--support"),
+        text: p.major ? `앞 ${p.back}·뒤 ${p.forward}` : "",
+      });
+    });
+  }
+  P.chart.channels.forEach((c, i) => {
+    if (!layers["ch" + i].on && !layers["fib" + i].on) return;
+    c.points.forEach((pt, j) => m.push({ time: pt.time, position: "inBar", shape: "circle", color: c.color, text: `${c.label} ${"①②③"[j]}` }));
+  });
+  m.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+  candle.setMarkers(m);
+}
+
+const cv = document.getElementById("vp");
+function drawVP() {
+  const ctx = cv.getContext("2d");
+  const r = el.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  cv.style.width = r.width + "px"; cv.style.height = r.height + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, r.width, r.height);
+  const on = ["vp60", "vp120", "vp250"].find((k) => layers[k].on);
+  if (!on) return;
+  const prof = P.chart.profiles[on.slice(2)];
+  if (!prof) return;
+  const plotW = r.width - chart.priceScale("right").width();
+  const maxV = Math.max(...prof.volume);
+  const maxW = plotW * 0.22;
+  for (let i = 0; i < prof.volume.length; i++) {
+    const y1 = candle.priceToCoordinate(prof.edges[i + 1]);
+    const y0 = candle.priceToCoordinate(prof.edges[i]);
+    if (y1 == null || y0 == null) continue;
+    const w = (prof.volume[i] / maxV) * maxW;
+    const isPoc = Math.abs((prof.edges[i] + prof.edges[i + 1]) / 2 - prof.poc) < 1e-9;
+    ctx.fillStyle = isPoc ? "rgba(242,160,61,.55)" : "rgba(139,144,160,.28)";
+    ctx.fillRect(plotW - w, Math.min(y0, y1) + 0.5, w, Math.max(1, Math.abs(y0 - y1) - 1));
+  }
+}
+chart.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(drawVP));
+new ResizeObserver(() => requestAnimationFrame(drawVP)).observe(el);
+setInterval(drawVP, 400);
+
+// ---------- 켜고 끄기 ----------
+const tb = document.getElementById("toolbar");
+function toggle(key, text, color, on) {
+  const lab = document.createElement("label");
+  lab.innerHTML = `<input type="checkbox" id="t_${key}"> ${color ? `<span class="sw" style="background:${color}"></span>` : ""}${esc(text)}`;
+  tb.appendChild(lab);
+  const box = lab.querySelector("input");
+  box.checked = on;
+  box.addEventListener("change", () => {
+    if (key.startsWith("vp") && box.checked) ["vp60", "vp120", "vp250"].forEach((k) => { if (k !== key) { document.getElementById("t_" + k).checked = false; show(k, false); } });
+    show(key, box.checked);
+  });
+  if (on) show(key, true);
+}
+const logLab = document.createElement("label");
+logLab.innerHTML = `<input type="checkbox" id="t_log"> 로그 눈금`;
+tb.appendChild(logLab);
+logLab.querySelector("input").addEventListener("change", (e) => {
+  chart.priceScale("right").applyOptions({ mode: e.target.checked ? 1 : 0 });
+  requestAnimationFrame(drawVP);
+});
+toggle("ema", "EMA 20·50", css("--ema20"), true);
+P.chart.channels.forEach((c, i) => {
+  const first = c.kind === "user" || (P.chart.channels[0].kind !== "user" && i === 0);
+  toggle("ch" + i, `${c.label}(0.5 등간격)`, c.color, first);
+  toggle("fib" + i, `${c.label} 피보나치 비율`, c.color, false);
+});
+toggle("trend", "추세선", css("--support"), true);
+toggle("pivots", "주요 피봇", null, true);
+toggle("allpivots", "모든 피봇", null, false);
+toggle("pv_next_day", "피봇 포인트(다음 거래일)", null, false);
+toggle("pv_week", "피봇 포인트(이번 주)", null, false);
+toggle("pv_month", "피봇 포인트(이번 달)", null, false);
+toggle("vp60", "매물대 60일", null, false);
+toggle("vp120", "매물대 120일", null, true);
+toggle("vp250", "매물대 250일", null, false);
+const nShow = 260;
+const nAll = P.chart.candles.length;
+chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, nAll - nShow), to: nAll + 25 });
+
+// ---------- 오른쪽 상태 요약 ----------
+const pane = document.getElementById("panel");
+const scorePill = (s) => !s ? `<span class="pill none">미측정</span>` :
+  `<span class="pill ${s.verdict === "유효" || s.verdict === "매수 신호로 쓸 만함" ? "good" : s.verdict === "반대" || s.verdict === "피해야 할 신호" ? "bad" : "none"}" title="${esc(s.summary)}">${esc(s.verdict)}</span>`;
+const statusPill = (st) => `<span class="pill ${st === "양호" ? "good" : st === "주의" ? "warn" : "none"}">${st}</span>`;
+let h = "";
+const X = P.panel;
+h += `<h2>오늘 점검표</h2><div class="sum">${esc(X.checklist_summary)}${X.d11 != null ? ` · 양호 개수 ${X.d11}/10 ${scorePill(X.d11_score)}` : ""}</div><table>`;
+X.checklist.forEach((c) => {
+  h += `<tr><td>${esc(c.text)}<div class="note">${esc(c.value)}</div></td><td>${statusPill(c.status)}</td><td>${scorePill(c.score)}</td></tr>`;
+});
+h += `</table><div class="note">'양호'는 사용자 점검표 기준(교과서 기본안). 오른쪽 칸은 과거 실측 판정(2010–15·2020–26, 사전등록 기준) — 칸에 마우스를 올리면 숫자. 결과 파일이 없으면 '미측정'.</div>`;
+h += `<h2>오늘 켜진 신호</h2>`;
+h += X.fired.length ? `<table>${X.fired.map((f) => `<tr><td>${esc(f.text)}</td><td>${scorePill(f.score)}</td></tr>`).join("")}</table>` : `<div class="note">없음</div>`;
+h += `<h2>채널 안 위치</h2>`;
+if (X.user_note) h += `<div class="note">${esc(X.user_note)}</div>`;
+P.chart.channels.forEach((c, i) => {
+  const pos = X.positions[i];
+  h += `<div class="ch" style="border-color:${c.color}"><b>${esc(c.label)}</b> · ${c.direction}
+    <div class="mono">레벨 ${pos.ratio} — ${esc(pos.below)} ~ ${esc(pos.above)}</div>
+    <div class="note">위 선까지 ${pct(pos.to_above_pct)} · 아래 선까지 ${pct(pos.to_below_pct)}<br>
+    점: ${c.points.map((p, j) => `${"①②③"[j]} ${p.time} ${fmt(p.value)}`).join(" · ")}<br>${esc(c.evidence)}</div></div>`;
+});
+if (P.chart.channels.some((c) => c.kind === "auto"))
+  h += `<div class="note">자동 채널은 지난 꺾임에 맞춰 고른 것이라 그 자체로 예측력의 근거가 아니다 — 성적표 C1 참조. 점수 = (꺾임 수 − 같은 채널을 무작위 위치로 옮겼을 때 평균 꺾임 수) ÷ 무작위 표준편차. 0.5 간격이 하루 진폭(ATR)보다 좁은 채널은 후보에서 뺀다.</div>`;
+h += `<h2>가까운 저항·지지</h2><table>`;
+X.near_above.slice().reverse().forEach((x) => { h += `<tr><td>${esc(x.labels)}</td><td class="num">${x.value}</td><td class="num" style="color:var(--resist)">${pct(x.pct)}</td><td class="num">${x.atr}ATR</td></tr>`; });
+h += `<tr><td><b>종가</b></td><td class="num"><b>${fmt(P.meta.close)}</b></td><td></td><td></td></tr>`;
+X.near_below.forEach((x) => { h += `<tr><td>${esc(x.labels)}</td><td class="num">${x.value}</td><td class="num" style="color:var(--support)">${pct(x.pct)}</td><td class="num">${x.atr}ATR</td></tr>`; });
+h += `</table>`;
+if (X.trend.length) h += `<div class="note">${X.trend.map((t) => `${esc(t.label)} 오늘 ${t.now}${t.broken ? " — <b>이탈</b>" : ""}`).join(" · ")}</div>`;
+h += `<h2>변동성</h2><div class="mono">ATR14 ${pct(X.volatility.atr_pct, 2).replace("+", "")} · 20일 변동성(연) ${X.volatility.rv20.toFixed(0)}% · ATR 1년 분위 ${X.volatility.atr_pctile.toFixed(0)}</div>`;
+const E = X.extras;
+if (E) {
+  const krw = (v) => {
+    const a = Math.abs(v);
+    const s = a >= 1e12 ? (v / 1e12).toFixed(2) + "조" : (v / 1e8).toFixed(0) + "억";
+    return (v > 0 ? "+" : "") + s;
+  };
+  const fl = (f) => f.days === 0 ? "자료 없음" : `${krw(f.krw)} (시총 ${pct(f.pct_cap, 2)})`;
+  h += `<h2>수급 · 공매도 · 신용 <span style="text-transform:none">(${esc(E.scope)}, ${E.last_date})</span></h2><table>`;
+  h += `<tr><td>외국인 5일 / 20일</td><td class="num">${fl(E.foreign.d5)}<br>${fl(E.foreign.d20)}</td></tr>`;
+  h += `<tr><td>기관 5일 / 20일</td><td class="num">${fl(E.institution.d5)}<br>${fl(E.institution.d20)}</td></tr>`;
+  if (E.short_weight) h += `<tr><td>공매도 거래 비중</td><td class="num">${E.short_weight.value.toFixed(2)}% <span class="note">(${E.short_weight.date})</span></td></tr>`;
+  if (E.lending) h += `<tr><td>대차잔고 20일 변화</td><td class="num">${pct(E.lending.chg_pct)} <span class="note">(${E.lending.date})</span></td></tr>`;
+  if (E.credit_rate) h += `<tr><td>신용잔고율</td><td class="num">${E.credit_rate.value.toFixed(2)}% <span class="note">(${E.credit_rate.date})</span></td></tr>`;
+  if (E.credit) h += `<tr><td>신용잔고 20일 변화</td><td class="num">${pct(E.credit.chg_pct)} <span class="note">(${E.credit.date})</span></td></tr>`;
+  h += `</table><div class="note">공매도는 2023-11~2025-03 전면 금지 기간이 있다.</div>`;
+} else {
+  h += `<h2>수급</h2><div class="note">이 지수는 구성 종목 표가 없어 수급을 내지 않는다(코스피·코스닥만).</div>`;
+}
+h += `<div class="note" style="margin-top:14px">가격은 수정주가를 마지막 봉 = 실제 종가로 맞춘 값. 피봇은 직전 극값에서 ATR 3배 되돌린 점, 주요 피봇은 앞뒤 2개월 이상 극값. 예측 점수가 아니라 지금 상태다.</div>`;
+pane.innerHTML = h;
+document.body.dataset.ready = "1";
+</script>
+</body>
+</html>

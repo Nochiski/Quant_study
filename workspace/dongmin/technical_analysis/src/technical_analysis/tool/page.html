@@ -83,13 +83,21 @@ chg.className = "chg " + (P.meta.change_pct >= 0 ? "up" : "down");
 document.getElementById("asof").textContent = P.meta.date + " 종가 기준 · 일봉";
 
 // ---------- 차트 ----------
+// 날짜 축 눈금(time = "YYYY-MM-DD", type 0 연·1 월·2 일). 연휴로 짧은 달 다음엔 라이브러리가 월 눈금 자리에
+// 일 눈금을 넣어 '4일'처럼 달 없이 찍힌다 — 일 눈금은 '11/4'로 달을 붙인다
+function tickLabel(time, type) {
+  const [y, m, d] = String(time).split("-").map(Number);
+  if (type === 0) return `${y}년`;
+  if (type === 1) return `${m}월`;
+  return `${m}/${d}`;
+}
 const el = document.getElementById("chart");
 const chart = LightweightCharts.createChart(el, {
   autoSize: true,
   layout: { background: { color: css("--bg") }, textColor: css("--muted"), fontFamily: css("--f") },
   grid: { vertLines: { color: "rgba(42,46,57,.5)" }, horzLines: { color: "rgba(42,46,57,.5)" } },
   rightPriceScale: { borderColor: css("--line"), scaleMargins: { top: 0.05, bottom: 0.12 } },
-  timeScale: { borderColor: css("--line"), rightOffset: 4 },
+  timeScale: { borderColor: css("--line"), rightOffset: 4, tickMarkFormatter: tickLabel },
   crosshair: { mode: 0 },
   localization: { priceFormatter: (p) => fmt(p) },
 });
@@ -148,6 +156,13 @@ P.chart.channels.forEach((c, i) => {
   });
 });
 
+layer("patterns", (L) => {
+  P.chart.patterns.forEach((p) => {
+    if (p.points.length < 2) return;
+    const s = lineSeries("#c9a227", 2, 1.5); s.setData(p.points); L.series.push(s);
+  });
+});
+
 layer("trend", (L) => {
   P.chart.trend.forEach((t) => {
     const s = lineSeries(t.label.startsWith("지지") ? css("--support") : css("--resist"), 0, 1.5);
@@ -192,6 +207,9 @@ function drawMarkers() {
     if (!layers["ch" + i].on && !layers["fib" + i].on) return;
     c.points.forEach((pt, j) => m.push({ time: pt.time, position: "inBar", shape: "circle", color: c.color, text: `${c.label} ${"①②③"[j]}` }));
   });
+  if (layers.patterns.on) {
+    P.chart.patterns.forEach((p) => m.push({ time: p.time, position: p.bull ? "belowBar" : "aboveBar", shape: "square", color: "#c9a227", text: p.name }));
+  }
   m.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
   candle.setMarkers(m);
 }
@@ -254,6 +272,7 @@ P.chart.channels.forEach((c, i) => {
   toggle("fib" + i, `${c.label} 피보나치 비율`, c.color, false);
 });
 toggle("trend", "추세선", css("--support"), true);
+toggle("patterns", "차트 패턴(최근 20일)", "#c9a227", true);
 toggle("pivots", "주요 피봇", null, true);
 toggle("allpivots", "모든 피봇", null, false);
 toggle("pv_next_day", "피봇 포인트(다음 거래일)", null, false);
@@ -273,6 +292,25 @@ const scorePill = (s) => !s ? `<span class="pill none">미측정</span>` :
 const statusPill = (st) => `<span class="pill ${st === "양호" ? "good" : st === "주의" ? "warn" : "none"}">${st}</span>`;
 let h = "";
 const X = P.panel;
+const O = X.odds;
+if (O) {
+  const p100 = (v) => v == null ? "—" : Math.round(v * 100) + "%";
+  h += `<h2>기술적 점수 · 20거래일 뒤 확률</h2>`;
+  if (O.score != null) {
+    const cls = O.score_label === "상위 20%" ? "good" : O.score_label === "하위 20%" ? "warn" : "none";
+    h += `<div class="sum"><b style="font-size:16px">기술적 점수 ${Math.round(O.score * 100)}</b> / 100 <span class="pill ${cls}">${esc(O.score_label)}</span>
+      <div class="note">가격 기반 종합(저변동·최근 눌림·52주 고점·낮은 MAX·이평 거리)의 유니버스 안 백분위 — 연구 3차 '정보 있음'</div></div>`;
+  } else {
+    h += `<div class="sum">추세 상태 <b>${esc(O.label)}</b></div>`;
+  }
+  const row = (t, a, b) => `<tr><td>${t}</td><td class="num">${a}</td><td class="num">${b}</td></tr>`;
+  h += `<table>${row("", O.basis === "점수 구간" ? `점수 ${esc(O.label)}` : "같은 상태", "전체")}
+    ${row("상승 확률", `<b>${p100(O.up)}</b>`, p100(O.base_up))}
+    ${row("하락 확률", p100(O.down), p100(O.base_down))}
+    ${O.beat != null ? row("코스피보다 나음", p100(O.beat), p100(O.base_beat)) : ""}
+    ${row("평균 수익", pct(O.mean_ret * 100), pct(O.base_mean * 100))}</table>`;
+  h += `<div class="note">${esc(O.sample)} · n = ${O.n.toLocaleString("ko-KR")}. 과거에 같은 ${O.basis === "점수 구간" ? "점수 구간" : "추세 상태"}였던 경우의 실제 비율이지 예측 모델이 아니다. 시장 방향이 더 크게 좌우한다.</div>`;
+}
 h += `<h2>오늘 점검표</h2><div class="sum">${esc(X.checklist_summary)}${X.d11 != null ? ` · 양호 개수 ${X.d11}/10 ${scorePill(X.d11_score)}` : ""}</div><table>`;
 X.checklist.forEach((c) => {
   h += `<tr><td>${esc(c.text)}<div class="note">${esc(c.value)}</div></td><td>${statusPill(c.status)}</td><td>${scorePill(c.score)}</td></tr>`;
@@ -297,6 +335,15 @@ if (CB) {
   h += `<tr><td>시장 투매(유니버스 중 RSI 30 아래)<div class="note">${pn.n}/${pn.universe}종목 · 기준 25%</div></td><td><span class="pill ${pn.is_panic ? "warn" : "none"}">${(pn.fraction * 100).toFixed(1)}% ${pn.is_panic ? "투매일" : "평소"}</span></td><td>${scorePill(pn.score)}</td></tr></table>`;
   h += `<div class="note">눌림목 = 52주 고점에 가깝고 최근 20일 눌린 정도의 유니버스 안 백분위(높을수록). 과거 상위 20% − 하위 20% 가 20일 +1.55%p(정보 있음, 코스피 대비 비용 뒤는 미달). 투매일 반등은 과거 18번 평균 코스피 대비 +4.3% 였지만 같은 자료에서 찾은 가설이라 앞으로 오는 투매일로 확인 중.</div>`;
 }
+const PT = X.patterns || [];
+h += `<h2>최근 20일 차트 패턴</h2>`;
+if (PT.length) {
+  const p100 = (v) => Math.round(v * 100) + "%";
+  h += `<table>${PT.map((r) => `<tr><td>${esc(r.name)}<div class="note">${r.date} 완성(${r.ago === 0 ? "오늘" : r.ago + "거래일 전"})${r.level ? ` · 돌파선 ${esc(r.level)}` : ""}${r.odds ? ` · 20일 뒤 상승 ${p100(r.odds.up)} · 코스피보다 나음 ${p100(r.odds.beat_kospi)}${r.base ? ` (전체 ${p100(r.base.up)}·${p100(r.base.beat_kospi)})` : ""}` : ""}</div></td><td>${scorePill(r.score)}</td></tr>`).join("")}</table>`;
+} else {
+  h += `<div class="note">없음</div>`;
+}
+h += `<div class="note">연구 4차 정의(확정 지그재그 피봇 ATR 2배, 넥라인·돌파선을 종가로 넘은 날 = 완성). 판정은 같은 날 다른 종목 대비 20거래일(2010–15·2020–26) — 고전 패턴(헤드앤숄더·이중 천장/바닥·박스·삼각형)은 모두 무의미, 급등 추격형(상승 갭·깃발·장대양봉)은 피해야 할 신호.</div>`;
 h += `<h2>오늘 켜진 신호</h2>`;
 h += X.fired.length ? `<table>${X.fired.map((f) => `<tr><td>${esc(f.text)}</td><td>${scorePill(f.score)}</td></tr>`).join("")}</table>` : `<div class="note">없음</div>`;
 h += `<h2>채널 안 위치</h2>`;

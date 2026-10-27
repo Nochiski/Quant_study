@@ -5,6 +5,7 @@ import math
 import re
 import subprocess
 import time
+from html import escape
 from pathlib import Path
 
 CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
@@ -68,9 +69,18 @@ def caption(payload: dict[str, object]) -> str:
     assert isinstance(m, dict) and isinstance(p, dict)
     d = int(m["digits"])
     lines = [
-        f"<b>{m['name']}</b> {_fmt(float(m['close']), d)} ({float(m['change_pct']):+.2f}%) · {m['date']} 종가",
+        f"{_fmt(float(m['close']), d)} ({float(m['change_pct']):+.2f}%) · {m['date']} 종가",
         f"점검표: {p['checklist_summary']}",
     ]
+    o = p.get("odds")
+    if isinstance(o, dict):
+        head = f"기술적 점수 {o['score'] * 100:.0f}({o['score_label']})" if o["score"] is not None else f"추세 상태 {o['label']}"
+        beat = f" · 코스피보다 나음 {o['beat'] * 100:.0f}%" if o["beat"] is not None else ""
+        base_beat = f"·{o['base_beat'] * 100:.0f}%" if o["base_beat"] is not None else ""
+        lines.append(
+            f"{head} → 20거래일 뒤 상승 {o['up'] * 100:.0f}% · 하락 {o['down'] * 100:.0f}%{beat}"
+            f" (전체 {o['base_up'] * 100:.0f}%·{o['base_down'] * 100:.0f}%{base_beat}, 과거 빈도)"
+        )
     combo = p.get("combo")
     if isinstance(combo, dict):
         pn = combo["panic"]
@@ -84,6 +94,12 @@ def caption(payload: dict[str, object]) -> str:
                 parts.append(f"{title} {o['score'] * 100:.0f}({o['label']})")
         parts.append(f"시장 RSI<30 비율 {pn['fraction'] * 100:.0f}%{' 투매일' if pn['is_panic'] else ''}")
         lines.append("묶음: " + " · ".join(parts))
+    pats = p.get("patterns")
+    if isinstance(pats, list) and pats:
+        lines.append(
+            "차트 패턴(20일): "
+            + ", ".join(f"{x['name']} {str(x['date'])[5:]}({x['score']['verdict'] if x['score'] else '미측정'})" for x in pats[:4])
+        )
     fired = p["fired"]
     if fired:
         lines.append("오늘 신호: " + ", ".join(f["text"] for f in fired))
@@ -99,4 +115,7 @@ def caption(payload: dict[str, object]) -> str:
         lines.append("예측 점수가 아니라 지금 상태. 실측 = 2010–15·2020–26 과거 성적(사전등록 판정).")
     else:
         lines.append("예측 점수가 아니라 지금 상태. 점검표 실측은 연구 결과 뒤 채워짐.")
-    return "\n".join(lines)
+    # 텔레그램 HTML 은 <b> 말고 < > & 를 엔티티로 받는다(RSI<30 · %K>%D 가 태그로 읽혀 발송이 거절됐다)
+    body = [escape(s, quote=False) for s in lines]
+    body[0] = f"<b>{escape(str(m['name']), quote=False)}</b> {body[0]}"
+    return "\n".join(body)

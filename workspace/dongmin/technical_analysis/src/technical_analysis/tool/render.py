@@ -99,6 +99,12 @@ def caption(payload: dict[str, object]) -> str:
                 parts.append(f"{title} {o['score'] * 100:.0f}({o['label']})")
         parts.append(f"시장 RSI<30 비율 {pn['fraction'] * 100:.0f}%{' 투매일' if pn['is_panic'] else ''}")
         lines.append("묶음: " + " · ".join(parts))
+    combo_m = p.get("combo", {}).get("market") if isinstance(p.get("combo"), dict) else None
+    tm = combo_m.get("temp") if isinstance(combo_m, dict) else None
+    if isinstance(tm, dict) and isinstance(tm.get("score"), float) and math.isfinite(tm["score"]):
+        fq = tm.get("freq")
+        tail = f" · 같은 구간 20일 뒤 코스피 상승 2010–15 {fq['S1'] * 100:.0f}% / 2020–26 {fq['S2'] * 100:.0f}%" if fq else ""
+        lines.append(f"시장 체온 {tm['score']:.0f}/100({tm['label']}){tail} — 기간마다 방향이 반대(판정 무의미)")
     av = p.get("avoid")
     if isinstance(av, list) and av:
         seen: dict[str, list[dict[str, object]]] = {}

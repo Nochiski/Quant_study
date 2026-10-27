@@ -6,6 +6,7 @@
 - 투매일: 유니버스 중 RSI14 < 30 종목 비율 ≥ 25%.
 - 52주 고점 근접·가격 기반 종합은 연구 3차(PREREG3)의 E11·F2 와 같은 정의(상위 20% 대 하위 20%).
 - 국면 점수·시장폭·수급 순위·피해야 할 상태는 연구 6차(2010–15 발견, 2020–26 검증) D02·D06·F01·A06·C03·B06 정의.
+- 시장 체온 점수는 연구 7차(PREREG7): 시장폭·−투매 비율·지수 200일선 거리의 자기 과거 750일 백분위 평균 × 100.
 """
 
 import csv
@@ -324,3 +325,99 @@ def log_observe(path: Path, date: str, rows: list[tuple[str, list[str]]]) -> boo
         for name, ts in rows:
             w.writerow([date, name, len(ts), " ".join(ts)])
     return True
+
+
+TEMP_WIN = 750  # 7차: 자기 과거 백분위 창(거래일)
+TEMP_MINP = 120
+TEMP_ROWS = TEMP_WIN + 260  # 점수 창 + 시장폭(200일 평균)·RSI 를 쌓을 앞부분
+
+
+def trailing_pct_last(x: np.ndarray, win: int = TEMP_WIN, minp: int = TEMP_MINP) -> float:
+    """마지막 값이 직전 win 개(자신 포함) 안 어디인지(작은 값 수 + 같은 값 수 절반) ÷ 개수. 모자라면 NaN."""
+    w = x[-win:]
+    w = w[np.isfinite(w)]
+    if not np.isfinite(x[-1]) or w.shape[0] < minp:
+        return float("nan")
+    return float(((w < x[-1]).sum() + 0.5 * (w == x[-1]).sum()) / w.shape[0])
+
+
+@dataclass(frozen=True)
+class Temperature:
+    date: str
+    score: dict[str, float]  # 지수명 → 0~100
+    parts: dict[str, float]  # 성분 백분위(0~1): breadth·neg_panic·dist200_<지수>
+    breadth: float
+    panic: float
+
+
+def temperature(root: Path) -> Temperature:
+    """7차 시장 체온 점수(코스피·코스닥). 같은 날·같은 빌드면 캐시를 읽는다.
+
+    유니버스는 universe_daily 의 그날 값(보통주·상장·비정지·비관리·20일 평균 거래대금 10억↑·상장 60일↑)으로 근사한다.
+    """
+    con = duckdb.connect()
+    prices = data.current_files(root, "price_adj_daily")
+    build = json.loads((root / "price_adj_daily" / "MANIFEST.json").read_text())["current_build"]
+    last = str(con.execute("SELECT max(date) FROM read_parquet(?)", [prices]).fetchone()[0])
+    cache = _cache_dir() / f"temp_v1_{last}_{build}.npz"
+    if cache.exists():
+        z = np.load(cache, allow_pickle=False)
+        return Temperature(last, {"코스피": float(z["k"]), "코스닥": float(z["q"])},
+                           {k: float(z[f"p_{k}"]) for k in ("breadth", "neg_panic", "dist200_코스피", "dist200_코스닥")},
+                           float(z["breadth"]), float(z["panic"]))
+    cal = np.array(sorted(r[0] for r in con.execute(
+        "SELECT date FROM read_parquet(?) WHERE date <= ? ORDER BY date DESC LIMIT ?",
+        [data.current_files(root, "trading_calendar"), last, TEMP_ROWS + 220],
+    ).fetchall()), dtype="datetime64[D]")
+    days = cal[-TEMP_ROWS:]
+    px = con.execute(
+        "SELECT ticker, date, adj_close FROM read_parquet(?) WHERE date >= ? AND date <= ? AND adj_close IS NOT NULL ORDER BY ticker, date",
+        [prices, str(cal[0]), last],
+    ).fetchnumpy()
+    uni = con.execute(
+        """SELECT ticker, date FROM read_parquet(?) WHERE date >= ? AND date <= ? AND sec_type = 'common' AND status = 'listed'
+           AND NOT halt_state AND NOT admin_state AND adv20_krw >= ? AND listing_age_days >= ?""",
+        [data.current_files(root, "universe_daily"), str(days[0]), last, ADV_KRW, LISTING_AGE],
+    ).fetchnumpy()
+    tick, ti = np.unique(px["ticker"], return_inverse=True)
+    di = np.searchsorted(days, px["date"].astype("datetime64[D]"))
+    in_days = (di < days.shape[0]) & (days[np.minimum(di, days.shape[0] - 1)] == px["date"].astype("datetime64[D]"))
+    U = np.zeros((days.shape[0], tick.shape[0]), dtype=bool)
+    uj = np.searchsorted(tick, uni["ticker"])
+    ud = np.searchsorted(days, uni["date"].astype("datetime64[D]"))
+    okj = (uj < tick.shape[0]) & (tick[np.minimum(uj, tick.shape[0] - 1)] == uni["ticker"])
+    U[ud[okj], uj[okj]] = True
+    above = np.full(U.shape, np.nan)
+    low_rsi = np.full(U.shape, np.nan)
+    close = px["adj_close"].astype(float)
+    bounds = np.flatnonzero(np.diff(ti)) + 1
+    for rows in np.split(np.arange(ti.shape[0]), bounds):
+        j = int(ti[rows[0]])
+        c = close[rows]
+        sma = ind.sma(c, 200)
+        r = ind.rsi(c, 14)
+        m = in_days[rows]
+        d = di[rows][m]
+        with np.errstate(invalid="ignore"):
+            above[d, j] = np.where(np.isfinite(sma[m]), (c[m] > sma[m]).astype(float), np.nan)
+            low_rsi[d, j] = np.where(np.isfinite(r[m]), (r[m] < 30).astype(float), np.nan)
+    with np.errstate(invalid="ignore"):
+        a_ok, r_ok = U & np.isfinite(above), U & np.isfinite(low_rsi)
+        breadth = np.where(a_ok.sum(1) > 20, np.where(a_ok, above, 0).sum(1) / np.maximum(a_ok.sum(1), 1), np.nan)
+        panic = np.where(r_ok.sum(1) > 20, np.where(r_ok, low_rsi, 0).sum(1) / np.maximum(r_ok.sum(1), 1), np.nan)
+    parts = {"breadth": trailing_pct_last(breadth), "neg_panic": trailing_pct_last(-panic)}
+    score: dict[str, float] = {}
+    for name in ("코스피", "코스닥"):
+        rows = dict(con.execute(
+            "SELECT date, close_idx FROM read_parquet(?) WHERE index_name = ? AND date >= ? AND date <= ?",
+            [data.current_files(root, "index_daily"), name, str(cal[0]), last],
+        ).fetchall())
+        c = np.array([float(rows[k]) if k in rows else np.nan for k in cal.astype(object)])
+        dist = (c / ind.sma(c, 200) - 1)[-TEMP_ROWS:]
+        parts[f"dist200_{name}"] = trailing_pct_last(dist)
+        trio = [parts["breadth"], parts["neg_panic"], parts[f"dist200_{name}"]]
+        score[name] = float(np.mean(trio) * 100) if all(np.isfinite(trio)) else float("nan")
+    t = Temperature(last, score, parts, float(breadth[-1]), float(panic[-1]))
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(cache, k=score["코스피"], q=score["코스닥"], breadth=t.breadth, panic=t.panic, **{f"p_{k}": v for k, v in parts.items()})
+    return t

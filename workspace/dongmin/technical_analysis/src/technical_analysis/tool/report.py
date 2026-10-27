@@ -174,6 +174,7 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
     ema = {
         "ema20": [{"time": times[i], "value": round(float(v), 4)} for i, v in enumerate(k.ema20) if not math.isnan(v)],
         "ema50": [{"time": times[i], "value": round(float(v), 4)} for i, v in enumerate(k.ema50) if not math.isnan(v)],
+        "sma200": [{"time": times[i], "value": round(float(v), 4)} for i, v in enumerate(k.sma200) if not math.isnan(v)],
     }
     span = zz.extreme_span(k.pivots, b.high, b.low, last)
     pivots = []
@@ -344,7 +345,8 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
     extras_block = _extras_block(root, match, s.dates)
     combo_block = _combo_block(root, match, b, scorecard)
     odds_block = _odds_block(root, match, s.dates, b.close, k, combo_block)
-    avoid_rows = _avoid_block(b, times, last, scorecard, combo_block)
+    # 회피 판정은 종목으로 검증한 것이라 지수 화면에는 싣지 않는다
+    avoid_rows = None if match.kind == "index" else _avoid_block(b, times, last, scorecard, combo_block)
 
     panel = {
         "positions": positions,
@@ -386,7 +388,8 @@ def _combo_block(
     snap = mk.snapshot(root)
     out: dict[str, object] = {
         "date": snap.date,
-        "market": {"bull": snap.bull, "breadth200": snap.breadth200, "breadth_weak": bool(snap.breadth200 <= av.BREADTH_WEAK)},
+        "market": {"bull": snap.bull, "breadth200": snap.breadth200, "breadth_weak": bool(snap.breadth200 <= av.BREADTH_WEAK),
+                   "temp": _temp_block(root, match, scorecard)},
         "panic": {
             "fraction": snap.panic,
             "n": len(snap.panic_tickers()),
@@ -425,6 +428,27 @@ def _combo_block(
             "signal": bool(snap.panic > mk.PANIC_BUY_FRACTION and snap.rsi[i] < 30), "rsi": float(snap.rsi[i]),
             "score_card": scorecard.get("R6_D08"),
         }
+    return out
+
+
+def temp_label(score: float) -> str:
+    """7차 문턱: 30 이하 식음 · 70 이상 달아오름."""
+    if not math.isfinite(score):
+        return "계산 불가"
+    return "식음" if score <= 30 else "달아오름" if score >= 70 else "보통"
+
+
+def _temp_block(root: Path, match: data.Match, scorecard: dict[str, dict[str, str]]) -> dict[str, object]:
+    """시장 체온 점수(연구 7차)와 같은 10분위의 과거 20일 뒤 코스피 상승 비율(2010–15·2020–26 따로 — 방향이 반대였다)."""
+    t = mk.temperature(root)
+    name = match.code if match.kind == "index" and match.code in t.score else "코스피"
+    sc = t.score[name]
+    out: dict[str, object] = {"index": name, "score": sc, "label": temp_label(sc), "parts": t.parts, "score_card": scorecard.get("R7_TEMP")}
+    path = scorecard_path().with_name("prob_market.json")
+    if name == "코스피" and math.isfinite(sc) and path.exists():
+        d = json.loads(path.read_text())["deciles"][min(int(sc // 10), 9)]
+        out["freq"] = {"lo": round(d["lo"] * 100), "hi": round(d["hi"] * 100),
+                       "S1": d["by_seg"]["S1"]["up"], "S2": d["by_seg"]["S2"]["up"], "n1": d["by_seg"]["S1"]["n"], "n2": d["by_seg"]["S2"]["n"]}
     return out
 
 

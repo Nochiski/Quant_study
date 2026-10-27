@@ -98,3 +98,10 @@ def test_regime_score_switches_signal_by_regime() -> None:
     mask = np.array([True, True, True])
     assert mk.regime_score(True, near, r20, mask).tolist() == [1.0, 0.0, 0.5]   # 상승장: 고점 근접 높을수록
     assert mk.regime_score(False, near, r20, mask).tolist() == [0.0, 1.0, 0.5]  # 하락장: 많이 빠질수록
+
+
+def test_trailing_pct_last_counts_ties_half_and_needs_min_points() -> None:
+    x = np.array([1.0, 2.0, 3.0, 2.0])
+    assert mk.trailing_pct_last(x, win=750, minp=3) == (1 + 0.5 * 2) / 4  # 작은 값 1개 + 같은 값 2개(자신 포함) 절반
+    assert np.isnan(mk.trailing_pct_last(x, win=750, minp=5))
+    assert mk.trailing_pct_last(np.array([9.0, 1.0, 2.0]), win=2, minp=2) == 0.75  # 창 밖(9)은 안 셈

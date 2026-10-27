@@ -102,3 +102,10 @@ def test_grid_neighbours_up_channel() -> None:
     below, above = summary.grid_neighbours(ch, x=20, price=133.0, k=2)
     assert below == [(1.5, 130.0), (1.0, 120.0)]
     assert above == [(2.0, 140.0), (2.5, 150.0)]
+
+
+def test_temp_label_thresholds() -> None:
+    from technical_analysis.tool import report
+
+    assert [report.temp_label(x) for x in (0.0, 30.0, 50.0, 70.0, 100.0)] == ["식음", "식음", "보통", "달아오름", "달아오름"]
+    assert report.temp_label(float("nan")) == "계산 불가"

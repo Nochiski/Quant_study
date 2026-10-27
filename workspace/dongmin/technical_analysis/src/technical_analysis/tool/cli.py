@@ -6,6 +6,7 @@
     ta channel list
     ta channel rm 코스피
     ta panic                    # 오늘 시장 투매 비율, 투매일이면 전진 관찰 기록에 한 줄
+    ta observe                  # 연구 6차 검증 신호(국면 점수·피해야 할 상태·투매·수급)의 오늘 해당 종목을 전진 관찰 기록에
 """
 
 import argparse
@@ -84,12 +85,24 @@ def _panic() -> int:
     return 0
 
 
+def _observe() -> int:
+    snap = mk.snapshot(data.equity_root())
+    rows = mk.observe_rows(snap)
+    log = Path("~/quant-data/technical-analysis/forward_r6.csv").expanduser()
+    new = mk.log_observe(log, snap.date, rows)
+    print(f"{snap.date} " + " · ".join(f"{n} {len(t)}" if n != "REGIME" else " ".join(t) for n, t in rows))
+    print(f"전진 관찰 기록 {'추가' if new else '이미 있음'}: {log}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["channel"]:
         return _channel(argv[1:])
     if argv[:1] == ["panic"]:
         return _panic()
+    if argv[:1] == ["observe"]:
+        return _observe()
     ap = argparse.ArgumentParser(prog="ta", description="종목·지수 기술적 상태 한 장")
     ap.add_argument("query", help="종목명·코드·지수명")
     ap.add_argument("--png", action="store_true", help="PNG 와 텔레그램용 글도 만든다")

@@ -55,3 +55,28 @@ def test_forward_log_appends_once_per_day(tmp_path: Path) -> None:
 )
 def test_pullback_label(score: float, label: str) -> None:
     assert mk.pullback_label(score) == label
+
+
+def test_price_composite_averages_percentiles_in_good_direction() -> None:
+    # 종목 0: 고점 근접·저변동·최근 눌림·낮은 MAX·높은 MAD → 모든 성분 1등 → 1.0
+    p52 = np.array([0.99, 0.9, 0.8])
+    r20 = np.array([-0.1, 0.0, 0.1])
+    vol60 = np.array([0.01, 0.02, 0.03])
+    max20 = np.array([0.02, 0.05, 0.10])
+    mad = np.array([1.2, 1.0, 0.8])
+    s = mk.price_composite(p52, r20, vol60, max20, mad, np.ones(3, dtype=bool))
+    np.testing.assert_allclose(s, [1.0, 0.5, 0.0])
+
+
+def test_price_composite_needs_every_component() -> None:
+    nan = float("nan")
+    s = mk.price_composite(
+        np.array([0.9, 0.8, nan]), np.array([0.0, 0.1, 0.0]), np.array([0.01, 0.02, 0.01]),
+        np.array([0.02, 0.05, 0.02]), np.array([1.0, 0.9, 1.0]), np.ones(3, dtype=bool),
+    )
+    assert np.isnan(s[2]) and not np.isnan(s[0])
+
+
+@pytest.mark.parametrize(("score", "label"), [(0.85, "상위 20%"), (0.5, "중간"), (0.15, "하위 20%"), (float("nan"), "계산 불가")])
+def test_quintile_label(score: float, label: str) -> None:
+    assert mk.quintile_label(score) == label

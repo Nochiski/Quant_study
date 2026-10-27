@@ -286,6 +286,13 @@ if (CB) {
     const cls = pb.label.startsWith("눌림목") ? "good" : pb.label.startsWith("하위") ? "warn" : "none";
     h += `<tr><td>눌림목 점수 ${Number.isNaN(pb.score) ? "—" : Math.round(pb.score * 100)}<div class="note">52주 고점 대비 ${pct((pb.p52 - 1) * 100)} · 20일 ${pct(pb.r20 * 100)}${pb.in_universe ? "" : " · 유니버스 밖(참고)"}</div></td><td><span class="pill ${cls}">${esc(pb.label)}</span></td><td>${scorePill(pb.score_card)}</td></tr>`;
   }
+  const qline = (o, title, note) => {
+    if (!o) return "";
+    const cls = o.label === "상위 20%" ? "good" : o.label === "하위 20%" ? "warn" : "none";
+    return `<tr><td>${title} ${Number.isNaN(o.score) ? "—" : Math.round(o.score * 100)}<div class="note">${note}</div></td><td><span class="pill ${cls}">${esc(o.label)}</span></td><td>${scorePill(o.score_card)}</td></tr>`;
+  };
+  h += qline(CB.high52, "52주 고점 근접", "유니버스 안 백분위 — 저변동·반전·시총을 빼도 남은 정보(연구 3차)");
+  h += qline(CB.composite, "가격 기반 종합", "저변동·최근 눌림·52주 고점·낮은 MAX·이평 거리 백분위 평균(동일가중 고정)");
   const pn = CB.panic;
   h += `<tr><td>시장 투매(유니버스 중 RSI 30 아래)<div class="note">${pn.n}/${pn.universe}종목 · 기준 25%</div></td><td><span class="pill ${pn.is_panic ? "warn" : "none"}">${(pn.fraction * 100).toFixed(1)}% ${pn.is_panic ? "투매일" : "평소"}</span></td><td>${scorePill(pn.score)}</td></tr></table>`;
   h += `<div class="note">눌림목 = 52주 고점에 가깝고 최근 20일 눌린 정도의 유니버스 안 백분위(높을수록). 과거 상위 20% − 하위 20% 가 20일 +1.55%p(정보 있음, 코스피 대비 비용 뒤는 미달). 투매일 반등은 과거 18번 평균 코스피 대비 +4.3% 였지만 같은 자료에서 찾은 가설이라 앞으로 오는 투매일로 확인 중.</div>`;

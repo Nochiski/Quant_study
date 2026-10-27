@@ -277,7 +277,7 @@ h += `<h2>오늘 점검표</h2><div class="sum">${esc(X.checklist_summary)}${X.d
 X.checklist.forEach((c) => {
   h += `<tr><td>${esc(c.text)}<div class="note">${esc(c.value)}</div></td><td>${statusPill(c.status)}</td><td>${scorePill(c.score)}</td></tr>`;
 });
-h += `</table><div class="note">'양호'는 사용자 점검표 기준(교과서 기본안). 오른쪽 칸은 과거 실측 판정이다 — 연구 결과 전에는 '미측정'.</div>`;
+h += `</table><div class="note">'양호'는 사용자 점검표 기준(교과서 기본안). 오른쪽 칸은 과거 실측 판정(2010–15·2020–26, 사전등록 기준) — 칸에 마우스를 올리면 숫자. 결과 파일이 없으면 '미측정'.</div>`;
 h += `<h2>오늘 켜진 신호</h2>`;
 h += X.fired.length ? `<table>${X.fired.map((f) => `<tr><td>${esc(f.text)}</td><td>${scorePill(f.score)}</td></tr>`).join("")}</table>` : `<div class="note">없음</div>`;
 h += `<h2>채널 안 위치</h2>`;

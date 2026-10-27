@@ -82,5 +82,8 @@ def caption(payload: dict[str, object]) -> str:
     if p["near_below"]:
         b = p["near_below"][0]
         lines.append(f"아래 {b['value']} ({b['pct']:+.1f}%, {b['labels']})")
-    lines.append("예측 점수가 아니라 지금 상태. 점검표 실측은 연구 결과 뒤 채워짐.")
+    if m.get("scorecard"):
+        lines.append("예측 점수가 아니라 지금 상태. 실측 = 2010–15·2020–26 과거 성적(사전등록 판정).")
+    else:
+        lines.append("예측 점수가 아니라 지금 상태. 점검표 실측은 연구 결과 뒤 채워짐.")
     return "\n".join(lines)

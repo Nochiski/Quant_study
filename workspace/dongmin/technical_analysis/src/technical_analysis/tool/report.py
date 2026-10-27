@@ -330,6 +330,8 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
 
     if verified:
         checklist_summary = f"근거 있는 지표 기준 양호 {good(verified)}/{len(verified)} · 습관 지표 양호 {good(habit)}/{len(habit)}"
+    elif scorecard:
+        checklist_summary = f"근거 있는 지표 없음(과거 실측에서 '유효' 0개) · 습관 지표 양호 {good(habit)}/{len(habit)}"
     else:
         checklist_summary = f"미검증 지표 기준 양호 {good(habit)}/{len(habit)} (연구 결과 전 — 근거 있는 지표 없음)"
 

@@ -94,6 +94,12 @@ def caption(payload: dict[str, object]) -> str:
                 parts.append(f"{title} {o['score'] * 100:.0f}({o['label']})")
         parts.append(f"시장 RSI<30 비율 {pn['fraction'] * 100:.0f}%{' 투매일' if pn['is_panic'] else ''}")
         lines.append("묶음: " + " · ".join(parts))
+    pats = p.get("patterns")
+    if isinstance(pats, list) and pats:
+        lines.append(
+            "차트 패턴(20일): "
+            + ", ".join(f"{x['name']} {str(x['date'])[5:]}({x['score']['verdict'] if x['score'] else '미측정'})" for x in pats[:4])
+        )
     fired = p["fired"]
     if fired:
         lines.append("오늘 신호: " + ", ".join(f["text"] for f in fired))

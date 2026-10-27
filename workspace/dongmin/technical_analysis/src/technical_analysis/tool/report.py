@@ -11,6 +11,7 @@ import numpy as np
 from .. import data
 from .. import fib_channel as fc
 from .. import market as mk
+from .. import patterns as pt
 from .. import pivot_points as pp
 from .. import signals as sg
 from .. import volume_profile as vp
@@ -20,6 +21,7 @@ from . import odds as od
 from . import summary as sm
 
 FUTURE_BARS = 80  # 채널·추세선을 오른쪽으로 늘려 그릴 미래 봉 수
+RECENT_PATTERN_BARS = 20  # 최근 이 봉 수 안에 완성된 차트 패턴을 보인다
 LINE_SAMPLE_BARS = 20  # 로그 눈금에서도 선이 맞게 보이도록 이 간격마다 점을 찍는다
 MAJOR_PIVOT_BARS = 42  # 앞뒤 2개월 이상 극값인 피봇만 차트에 표시
 AUTO_TOP = 3
@@ -257,6 +259,7 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
         "profiles": profiles,
         "digits": digits,
     }
+    pattern_rows, chart["patterns"] = _patterns_block(b, times, last, digits, scorecard)
 
     # 오른쪽 상태 요약
     close = float(b.close[last])
@@ -355,6 +358,7 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
         "extras": extras_block,
         "combo": combo_block,
         "odds": odds_block,
+        "patterns": pattern_rows,
         "trend":[{"label": t["label"], "now": f"{t['now']:,.{digits}f}", "broken": t["broken"]} for t in trend],
     }
     prev = float(b.close[last - 1])
@@ -430,6 +434,46 @@ def _odds_block(
         bench = np.where(hit, ks.bars.close[np.minimum(pos, ks.dates.shape[0] - 1)], np.nan)
     o = od.state_odds(dates, close, od.trend_state(close, k.ema20, k.ema50, k.sma200), bench)
     return None if o is None else {"score": None, "score_label": None, **o.__dict__}
+
+
+def _patterns_block(
+    b: sg.Bars, times: list[str], last: int, digits: int, scorecard: dict[str, dict[str, str]]
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """최근 RECENT_PATTERN_BARS 봉 안에 완성된 차트 패턴(연구 4차 정의) — 패널 줄과 차트 표시.
+
+    판정이 무의미·판정 불가가 아닌 패턴만 과거 빈도(20거래일 뒤 상승·코스피보다 나음)를 붙인다.
+    """
+    path = scorecard_path().with_name("prob_patterns.json")
+    freq = json.loads(path.read_text()) if path.exists() else {}
+    table = od.load_table(od.table_path(scorecard_path()))
+    base = table["all"] if table is not None else None
+    found = [p for p in pt.detect(b.open, b.high, b.low, b.close) if p.complete > last - RECENT_PATTERN_BARS]
+    rows: list[dict[str, object]] = []
+    marks: list[dict[str, object]] = []
+    for p in sorted(found, key=lambda x: (-x.complete, x.kind)):
+        card = scorecard.get(p.kind)
+        judged = card is not None and card["verdict"] != "무의미" and not card["verdict"].startswith("판정 불가")
+        rows.append(
+            {
+                "kind": p.kind,
+                "name": pt.NAMES[p.kind],
+                "date": times[p.complete],
+                "ago": last - p.complete,
+                "level": None if math.isnan(p.level) else f"{p.level:,.{digits}f}",
+                "score": card,
+                "odds": freq.get(p.kind) if judged else None,
+                "base": base if judged else None,
+            }
+        )
+        marks.append(
+            {
+                "time": times[p.complete],
+                "name": pt.NAMES[p.kind],
+                "bull": p.kind in pt.BULLISH,
+                "points": [{"time": times[x], "value": round(y, 4)} for x, y in zip(p.points, p.prices, strict=True)],
+            }
+        )
+    return rows, marks
 
 
 def _near(x: sm.NearLevel, digits: int) -> dict[str, object]:

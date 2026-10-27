@@ -124,6 +124,7 @@ class Scored:
     pierces: int
     last_turn_day: int  # 마지막 꺾임 날(없으면 −1)
     last_turn_ratio: float  # 그 선의 레벨
+    expected_pierces: float = float("nan")  # 무작위 위치 평균 관통 수(꺾임률 비교용, 순위에는 안 씀)
 
     @property
     def score(self) -> float:
@@ -163,17 +164,21 @@ def score(
 
     rng = np.random.default_rng(seed)
     span = abs(GRID_STEP * ch.width)
-    shifted = []
+    shifted_turns = []
+    shifted_pierces = []
     for u in rng.uniform(0.0, span, n_shift):
         g = grid_lines(ch, x, lo, hi, offset=float(u))
-        shifted.append(rx.reactions(c, h, lo_, a, g.values, 1, last, last).counts().turn)
+        sc = rx.reactions(c, h, lo_, a, g.values, 1, last, last).counts()
+        shifted_turns.append(sc.turn)
+        shifted_pierces.append(sc.pierce)
     return Scored(
         channel=ch,
         turns=cnt.turn,
-        expected_turns=float(np.mean(shifted)) if shifted else 0.0,
+        expected_turns=float(np.mean(shifted_turns)) if shifted_turns else 0.0,
         pierces=cnt.pierce,
         last_turn_day=last_day,
         last_turn_ratio=last_ratio,
+        expected_pierces=float(np.mean(shifted_pierces)) if shifted_pierces else float("nan"),
     )
 
 

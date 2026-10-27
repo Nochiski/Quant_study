@@ -6,11 +6,9 @@ requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
     "duckdb>=1.0",
+    # 자동 채널 점수(후보 수백 개 × 무작위 이동)를 몇 초 안에 내려면 필요하다
+    "numba>=0.59",
 ]
-
-[project.optional-dependencies]
-# 연구처럼 종목 수천 개를 돌릴 때만 필요하다. 없으면 같은 코드가 순수 파이썬으로 돈다
-fast = ["numba>=0.59"]
 
 [project.scripts]
 ta = "technical_analysis.tool.cli:main"

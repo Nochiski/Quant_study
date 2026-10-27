@@ -332,13 +332,9 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
+    { name = "numba" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
-
-[package.optional-dependencies]
-fast = [
-    { name = "numba" },
 ]
 
 [package.dev-dependencies]
@@ -349,10 +345,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.0" },
-    { name = "numba", marker = "extra == 'fast'", specifier = ">=0.59" },
+    { name = "numba", specifier = ">=0.59" },
     { name = "numpy", specifier = ">=1.26" },
 ]
-provides-extras = ["fast"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]

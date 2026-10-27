@@ -83,13 +83,21 @@ chg.className = "chg " + (P.meta.change_pct >= 0 ? "up" : "down");
 document.getElementById("asof").textContent = P.meta.date + " 종가 기준 · 일봉";
 
 // ---------- 차트 ----------
+// 날짜 축 눈금(time = "YYYY-MM-DD", type 0 연·1 월·2 일). 연휴로 짧은 달 다음엔 라이브러리가 월 눈금 자리에
+// 일 눈금을 넣어 '4일'처럼 달 없이 찍힌다 — 일 눈금은 '11/4'로 달을 붙인다
+function tickLabel(time, type) {
+  const [y, m, d] = String(time).split("-").map(Number);
+  if (type === 0) return `${y}년`;
+  if (type === 1) return `${m}월`;
+  return `${m}/${d}`;
+}
 const el = document.getElementById("chart");
 const chart = LightweightCharts.createChart(el, {
   autoSize: true,
   layout: { background: { color: css("--bg") }, textColor: css("--muted"), fontFamily: css("--f") },
   grid: { vertLines: { color: "rgba(42,46,57,.5)" }, horzLines: { color: "rgba(42,46,57,.5)" } },
   rightPriceScale: { borderColor: css("--line"), scaleMargins: { top: 0.05, bottom: 0.12 } },
-  timeScale: { borderColor: css("--line"), rightOffset: 4 },
+  timeScale: { borderColor: css("--line"), rightOffset: 4, tickMarkFormatter: tickLabel },
   crosshair: { mode: 0 },
   localization: { priceFormatter: (p) => fmt(p) },
 });

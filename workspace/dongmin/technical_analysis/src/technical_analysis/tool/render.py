@@ -5,6 +5,7 @@ import math
 import re
 import subprocess
 import time
+from html import escape
 from pathlib import Path
 
 CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
@@ -68,7 +69,7 @@ def caption(payload: dict[str, object]) -> str:
     assert isinstance(m, dict) and isinstance(p, dict)
     d = int(m["digits"])
     lines = [
-        f"<b>{m['name']}</b> {_fmt(float(m['close']), d)} ({float(m['change_pct']):+.2f}%) · {m['date']} 종가",
+        f"{_fmt(float(m['close']), d)} ({float(m['change_pct']):+.2f}%) · {m['date']} 종가",
         f"점검표: {p['checklist_summary']}",
     ]
     combo = p.get("combo")
@@ -99,4 +100,7 @@ def caption(payload: dict[str, object]) -> str:
         lines.append("예측 점수가 아니라 지금 상태. 실측 = 2010–15·2020–26 과거 성적(사전등록 판정).")
     else:
         lines.append("예측 점수가 아니라 지금 상태. 점검표 실측은 연구 결과 뒤 채워짐.")
-    return "\n".join(lines)
+    # 텔레그램 HTML 은 <b> 말고 < > & 를 엔티티로 받는다(RSI<30 · %K>%D 가 태그로 읽혀 발송이 거절됐다)
+    body = [escape(s, quote=False) for s in lines]
+    body[0] = f"<b>{escape(str(m['name']), quote=False)}</b> {body[0]}"
+    return "\n".join(body)

@@ -299,7 +299,8 @@ if (O) {
   if (O.score != null) {
     const cls = O.score_label === "상위 20%" ? "good" : O.score_label === "하위 20%" ? "warn" : "none";
     h += `<div class="sum"><b style="font-size:16px">기술적 점수 ${Math.round(O.score * 100)}</b> / 100 <span class="pill ${cls}">${esc(O.score_label)}</span>
-      <div class="note">가격 기반 종합(저변동·최근 눌림·52주 고점·낮은 MAX·이평 거리)의 유니버스 안 백분위 — 연구 3차 '정보 있음'</div></div>`;
+      <div class="mono" style="margin-top:4px">${O.bull ? "상승장 → 52주 고점 근접 순위" : "하락장 → 20일 반전(많이 빠진 쪽) 순위"}</div>
+      <div class="note">국면 점수(연구 6차 D02): 코스피가 200일선 위면 52주 고점에 가까운 종목, 아래면 20일간 많이 빠진 종목이 높다. 2010–15 에서 찾고 2020–26 에서 한 번 검증(상위−하위 20일 +2.55%p, t 4.8). 확률은 같은 국면·같은 점수 구간의 과거 비율.</div></div>`;
   } else {
     h += `<div class="sum">추세 상태 <b>${esc(O.label)}</b></div>`;
   }
@@ -309,8 +310,22 @@ if (O) {
     ${row("하락 확률", p100(O.down), p100(O.base_down))}
     ${O.beat != null ? row("코스피보다 나음", p100(O.beat), p100(O.base_beat)) : ""}
     ${row("평균 수익", pct(O.mean_ret * 100), pct(O.base_mean * 100))}</table>`;
+  if (X.combo && X.combo.market) {
+    const M = X.combo.market;
+    h += `<div class="mono" style="margin:6px 0">시장 국면: ${M.bull ? "상승장(코스피 200일선 위)" : "하락장(코스피 200일선 아래)"} · 시장폭 ${(M.breadth200 * 100).toFixed(0)}%${M.breadth_weak ? " 약함" : ""}</div>`;
+  }
   h += `<div class="note">${esc(O.sample)} · n = ${O.n.toLocaleString("ko-KR")}. 과거에 같은 ${O.basis === "점수 구간" ? "점수 구간" : "추세 상태"}였던 경우의 실제 비율이지 예측 모델이 아니다. 시장 방향이 더 크게 좌우한다.</div>`;
 }
+const AV = X.avoid || [];
+h += `<h2>피해야 할 상태 (최근 20일)</h2>`;
+if (AV.length) {
+  const byKind = {};
+  AV.forEach((r) => { (byKind[r.kind] = byKind[r.kind] || []).push(r); });  // 최근 날짜가 앞
+  h += `<table>${Object.values(byKind).map((rs) => `<tr><td>${esc(rs[0].name)}${rs.length > 1 ? ` ×${rs.length}` : ""}</td><td class="num">${rs[0].ago === 0 ? "오늘" : rs[0].date.slice(5) + " · " + rs[0].ago + "일 전"}</td><td>${scorePill(rs[0].score)}</td></tr>`).join("")}</table>`;
+} else {
+  h += `<div class="mono" style="margin:4px 0">해당 없음</div>`;
+}
+h += `<div class="note">연구 6차에서 2010–15 에 찾고 2020–26 에서도 남은 회피 신호: 고점 80% 아래에서 20일 신고가(−1.3%p/20일) · 시장폭 50% 이하 날 신고가(−1.1%p) · 거래량 3배 & 하루 −5% 하락 폭량(−1.5%p) · 시가 −3% 하락 갭(−0.6%p). 같은 날 다른 종목 대비, 주로 중소형주에서.</div>`;
 h += `<h2>오늘 점검표</h2><div class="sum">${esc(X.checklist_summary)}${X.d11 != null ? ` · 양호 개수 ${X.d11}/10 ${scorePill(X.d11_score)}` : ""}</div><table>`;
 X.checklist.forEach((c) => {
   h += `<tr><td>${esc(c.text)}<div class="note">${esc(c.value)}</div></td><td>${statusPill(c.status)}</td><td>${scorePill(c.score)}</td></tr>`;
@@ -331,6 +346,12 @@ if (CB) {
   };
   h += qline(CB.high52, "52주 고점 근접", "유니버스 안 백분위 — 저변동·반전·시총을 빼도 남은 정보(연구 3차)");
   h += qline(CB.composite, "가격 기반 종합", "저변동·최근 눌림·52주 고점·낮은 MAX·이평 거리 백분위 평균(동일가중 고정)");
+  if (CB.flow && !Number.isNaN(CB.flow.rank)) {
+    h += `<tr><td>외국인+기관 5일 순매수 강도 ${Math.round(CB.flow.rank * 100)}<div class="note">거래대금 대비, 유니버스 안 백분위(낮을수록 많이 팜). 하위 5% 면 이후 반등(6차 검증)</div></td><td><span class="pill ${CB.flow.signal ? "good" : "none"}">${CB.flow.signal ? "대량 매도 — 반등 쪽" : "보통"}</span></td><td>${scorePill(CB.flow.score_card)}</td></tr>`;
+  }
+  if (CB.panic_buy) {
+    h += `<tr><td>투매일 과매도<div class="note">시장 RSI<30 비율 20% 넘는 날 이 종목 RSI<30 이면 5일 반등(6차 검증, 소형주 쪽)</div></td><td><span class="pill ${CB.panic_buy.signal ? "good" : "none"}">${CB.panic_buy.signal ? "해당" : "아님"}</span></td><td>${scorePill(CB.panic_buy.score_card)}</td></tr>`;
+  }
   const pn = CB.panic;
   h += `<tr><td>시장 투매(유니버스 중 RSI 30 아래)<div class="note">${pn.n}/${pn.universe}종목 · 기준 25%</div></td><td><span class="pill ${pn.is_panic ? "warn" : "none"}">${(pn.fraction * 100).toFixed(1)}% ${pn.is_panic ? "투매일" : "평소"}</span></td><td>${scorePill(pn.score)}</td></tr></table>`;
   h += `<div class="note">눌림목 = 52주 고점에 가깝고 최근 20일 눌린 정도의 유니버스 안 백분위(높을수록). 과거 상위 20% − 하위 20% 가 20일 +1.55%p(정보 있음, 코스피 대비 비용 뒤는 미달). 투매일 반등은 과거 18번 평균 코스피 대비 +4.3% 였지만 같은 자료에서 찾은 가설이라 앞으로 오는 투매일로 확인 중.</div>`;

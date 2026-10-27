@@ -74,7 +74,12 @@ def caption(payload: dict[str, object]) -> str:
     ]
     o = p.get("odds")
     if isinstance(o, dict):
-        head = f"기술적 점수 {o['score'] * 100:.0f}({o['score_label']})" if o["score"] is not None else f"추세 상태 {o['label']}"
+        if o["score"] is None:
+            head = f"추세 상태 {o['label']}"
+        elif o.get("score_name"):
+            head = f"기술적 점수 {o['score'] * 100:.0f}({o['score_label']}, {'상승장' if o['bull'] else '하락장'}·{o['score_name']})"
+        else:
+            head = f"기술적 점수 {o['score'] * 100:.0f}({o['score_label']})"
         beat = f" · 코스피보다 나음 {o['beat'] * 100:.0f}%" if o["beat"] is not None else ""
         base_beat = f"·{o['base_beat'] * 100:.0f}%" if o["base_beat"] is not None else ""
         lines.append(
@@ -94,6 +99,15 @@ def caption(payload: dict[str, object]) -> str:
                 parts.append(f"{title} {o['score'] * 100:.0f}({o['label']})")
         parts.append(f"시장 RSI<30 비율 {pn['fraction'] * 100:.0f}%{' 투매일' if pn['is_panic'] else ''}")
         lines.append("묶음: " + " · ".join(parts))
+    av = p.get("avoid")
+    if isinstance(av, list) and av:
+        seen: dict[str, list[dict[str, object]]] = {}
+        for x in av:
+            seen.setdefault(str(x["kind"]), []).append(x)
+        lines.append(
+            "피해야 할 상태(20일): "
+            + ", ".join(f"{xs[0]['name']}{f' ×{len(xs)}' if len(xs) > 1 else ''} {str(xs[0]['date'])[5:]}" for xs in seen.values())
+        )
     pats = p.get("patterns")
     if isinstance(pats, list) and pats:
         lines.append(

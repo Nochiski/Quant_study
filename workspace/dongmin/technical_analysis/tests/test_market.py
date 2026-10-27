@@ -80,3 +80,21 @@ def test_price_composite_needs_every_component() -> None:
 @pytest.mark.parametrize(("score", "label"), [(0.85, "상위 20%"), (0.5, "중간"), (0.15, "하위 20%"), (float("nan"), "계산 불가")])
 def test_quintile_label(score: float, label: str) -> None:
     assert mk.quintile_label(score) == label
+
+
+def test_log_observe_writes_once_per_date(tmp_path) -> None:
+    path = tmp_path / "forward_r6.csv"
+    rows = [("REGIME", ["bear", "breadth=0.223"]), ("A06", ["000001", "000002"]), ("F01", [])]
+    assert mk.log_observe(path, "2026-10-23", rows)
+    assert not mk.log_observe(path, "2026-10-23", rows)
+    text = path.read_text().splitlines()
+    assert text[0] == "date,signal,n,tickers" and len(text) == 4
+    assert text[2] == "2026-10-23,A06,2,000001 000002"
+
+
+def test_regime_score_switches_signal_by_regime() -> None:
+    near = np.array([0.95, 0.60, 0.80])
+    r20 = np.array([0.10, -0.20, 0.00])
+    mask = np.array([True, True, True])
+    assert mk.regime_score(True, near, r20, mask).tolist() == [1.0, 0.0, 0.5]   # 상승장: 고점 근접 높을수록
+    assert mk.regime_score(False, near, r20, mask).tolist() == [0.0, 1.0, 0.5]  # 하락장: 많이 빠질수록

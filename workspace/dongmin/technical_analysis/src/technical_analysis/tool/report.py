@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .. import avoid as av
 from .. import data
 from .. import fib_channel as fc
 from .. import market as mk
@@ -343,6 +344,7 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
     extras_block = _extras_block(root, match, s.dates)
     combo_block = _combo_block(root, match, b, scorecard)
     odds_block = _odds_block(root, match, s.dates, b.close, k, combo_block)
+    avoid_rows = _avoid_block(b, times, last, scorecard, combo_block)
 
     panel = {
         "positions": positions,
@@ -359,6 +361,7 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
         "combo": combo_block,
         "odds": odds_block,
         "patterns": pattern_rows,
+        "avoid": avoid_rows,
         "trend":[{"label": t["label"], "now": f"{t['now']:,.{digits}f}", "broken": t["broken"]} for t in trend],
     }
     prev = float(b.close[last - 1])
@@ -383,6 +386,7 @@ def _combo_block(
     snap = mk.snapshot(root)
     out: dict[str, object] = {
         "date": snap.date,
+        "market": {"bull": snap.bull, "breadth200": snap.breadth200, "breadth_weak": bool(snap.breadth200 <= av.BREADTH_WEAK)},
         "panic": {
             "fraction": snap.panic,
             "n": len(snap.panic_tickers()),
@@ -413,6 +417,14 @@ def _combo_block(
         comp = float(snap.composite[i])
         out["high52"] = {"score": hi52, "label": mk.quintile_label(hi52), "score_card": scorecard.get("E11")}
         out["composite"] = {"score": comp, "label": mk.quintile_label(comp), "score_card": scorecard.get("F2")}
+        rs = float(snap.regime_score[i])
+        out["regime_score"] = {"score": rs, "label": mk.quintile_label(rs), "score_card": scorecard.get("R6_D02")}
+        fr = float(snap.flow_rank[i])
+        out["flow"] = {"rank": fr, "signal": bool(fr <= mk.FLOW_BOTTOM), "score_card": scorecard.get("R6_F01")}
+        out["panic_buy"] = {
+            "signal": bool(snap.panic > mk.PANIC_BUY_FRACTION and snap.rsi[i] < 30), "rsi": float(snap.rsi[i]),
+            "score_card": scorecard.get("R6_D08"),
+        }
     return out
 
 
@@ -420,12 +432,14 @@ def _odds_block(
     root: Path, match: data.Match, dates: np.ndarray, close: np.ndarray, k: sg.Computed, combo: dict[str, object]
 ) -> dict[str, object] | None:
     """기술적 점수와 20거래일 뒤 상승·하락 확률(과거 빈도). 유니버스 안 종목은 점수 구간, 나머지는 추세 상태."""
-    comp = combo.get("composite")
-    table = od.load_table(od.table_path(scorecard_path()))
-    if isinstance(comp, dict) and table is not None:
-        o = od.decile_odds(table, float(comp["score"]))
+    rs, mkt = combo.get("regime_score"), combo.get("market")
+    path = scorecard_path().with_name("prob_regime.json")
+    if isinstance(rs, dict) and isinstance(mkt, dict) and path.exists():
+        side = "bull" if mkt["bull"] else "bear"
+        o = od.decile_odds(json.loads(path.read_text())[side], float(rs["score"]))
         if o is not None:
-            return {"score": comp["score"], "score_label": comp["label"], **o.__dict__}
+            name = "52주 고점 근접" if mkt["bull"] else "20일 반전(많이 빠진 쪽)"
+            return {"score": rs["score"], "score_label": rs["label"], "score_name": name, "bull": mkt["bull"], **o.__dict__}
     bench = None
     if match.code != "코스피":
         ks = data.load(root, data.Match("index", "코스피", "코스피"))
@@ -474,6 +488,22 @@ def _patterns_block(
             }
         )
     return rows, marks
+
+
+def _avoid_block(
+    b: sg.Bars, times: list[str], last: int, scorecard: dict[str, dict[str, str]], combo: dict[str, object]
+) -> list[dict[str, object]]:
+    """최근 RECENT_PATTERN_BARS 봉 안 '피해야 할 상태'(연구 6차 A06·C03·B06, 오늘만 D06 — 시장폭이 단면이라)."""
+    fl = av.flags(b.open, b.close, b.volume)
+    rows: list[dict[str, object]] = []
+    for t in range(last, max(last - RECENT_PATTERN_BARS, 0), -1):
+        for k in ("A06", "C03", "B06"):
+            if fl[k][t]:
+                rows.append({"kind": k, "name": av.NAMES[k], "date": times[t], "ago": last - t, "score": scorecard.get(av.CARD[k])})
+    mkt = combo.get("market")
+    if isinstance(mkt, dict) and mkt["breadth_weak"] and bool(av.breakout20(b.close)[last]):
+        rows.insert(0, {"kind": "D06", "name": av.NAMES["D06"], "date": times[last], "ago": 0, "score": scorecard.get(av.CARD["D06"])})
+    return rows
 
 
 def _near(x: sm.NearLevel, digits: int) -> dict[str, object]:

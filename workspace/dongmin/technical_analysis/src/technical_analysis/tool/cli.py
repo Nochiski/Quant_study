@@ -5,6 +5,7 @@
     ta channel set 코스피 2019-08-06:low 2022-09-30:low 2024-07-11:high
     ta channel list
     ta channel rm 코스피
+    ta panic                    # 오늘 시장 투매 비율, 투매일이면 전진 관찰 기록에 한 줄
 """
 
 import argparse
@@ -13,6 +14,7 @@ import sys
 from pathlib import Path
 
 from .. import data
+from .. import market as mk
 from . import channels as chs
 from . import render, report
 
@@ -70,10 +72,24 @@ def _channel(argv: list[str]) -> int:
     return 0
 
 
+def _panic() -> int:
+    snap = mk.snapshot(data.equity_root())
+    tickers = snap.panic_tickers()
+    print(f"{snap.date} 유니버스 {int(snap.in_universe.sum())}종목 중 RSI 30 아래 {len(tickers)}종목 = {snap.panic * 100:.1f}%"
+          f" (투매일 기준 {mk.PANIC_FRACTION * 100:.0f}%)")
+    if snap.panic >= mk.PANIC_FRACTION:
+        log = Path("~/quant-data/technical-analysis/forward_p2.csv").expanduser()
+        new = mk.log_panic(log, snap.date, snap.panic, tickers)
+        print(f"투매일 — 전진 관찰 기록 {'추가' if new else '이미 있음'}: {log}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["channel"]:
         return _channel(argv[1:])
+    if argv[:1] == ["panic"]:
+        return _panic()
     ap = argparse.ArgumentParser(prog="ta", description="종목·지수 기술적 상태 한 장")
     ap.add_argument("query", help="종목명·코드·지수명")
     ap.add_argument("--png", action="store_true", help="PNG 와 텔레그램용 글도 만든다")

@@ -72,6 +72,15 @@ def caption(payload: dict[str, object]) -> str:
         f"{_fmt(float(m['close']), d)} ({float(m['change_pct']):+.2f}%) · {m['date']} 종가",
         f"점검표: {p['checklist_summary']}",
     ]
+    o = p.get("odds")
+    if isinstance(o, dict):
+        head = f"기술적 점수 {o['score'] * 100:.0f}({o['score_label']})" if o["score"] is not None else f"추세 상태 {o['label']}"
+        beat = f" · 코스피보다 나음 {o['beat'] * 100:.0f}%" if o["beat"] is not None else ""
+        base_beat = f"·{o['base_beat'] * 100:.0f}%" if o["base_beat"] is not None else ""
+        lines.append(
+            f"{head} → 20거래일 뒤 상승 {o['up'] * 100:.0f}% · 하락 {o['down'] * 100:.0f}%{beat}"
+            f" (전체 {o['base_up'] * 100:.0f}%·{o['base_down'] * 100:.0f}%{base_beat}, 과거 빈도)"
+        )
     combo = p.get("combo")
     if isinstance(combo, dict):
         pn = combo["panic"]

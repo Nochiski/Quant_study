@@ -16,6 +16,7 @@ from .. import signals as sg
 from .. import volume_profile as vp
 from .. import zigzag as zz
 from . import channels as chs
+from . import odds as od
 from . import summary as sm
 
 FUTURE_BARS = 80  # 채널·추세선을 오른쪽으로 늘려 그릴 미래 봉 수
@@ -338,6 +339,7 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
 
     extras_block = _extras_block(root, match, s.dates)
     combo_block = _combo_block(root, match, b, scorecard)
+    odds_block = _odds_block(root, match, s.dates, b.close, k, combo_block)
 
     panel = {
         "positions": positions,
@@ -352,7 +354,8 @@ def build(root: Path, match: data.Match, stored: chs.StoredChannel | None, score
         "fired": fired,
         "extras": extras_block,
         "combo": combo_block,
-        "trend": [{"label": t["label"], "now": f"{t['now']:,.{digits}f}", "broken": t["broken"]} for t in trend],
+        "odds": odds_block,
+        "trend":[{"label": t["label"], "now": f"{t['now']:,.{digits}f}", "broken": t["broken"]} for t in trend],
     }
     prev = float(b.close[last - 1])
     meta = {
@@ -407,6 +410,26 @@ def _combo_block(
         out["high52"] = {"score": hi52, "label": mk.quintile_label(hi52), "score_card": scorecard.get("E11")}
         out["composite"] = {"score": comp, "label": mk.quintile_label(comp), "score_card": scorecard.get("F2")}
     return out
+
+
+def _odds_block(
+    root: Path, match: data.Match, dates: np.ndarray, close: np.ndarray, k: sg.Computed, combo: dict[str, object]
+) -> dict[str, object] | None:
+    """기술적 점수와 20거래일 뒤 상승·하락 확률(과거 빈도). 유니버스 안 종목은 점수 구간, 나머지는 추세 상태."""
+    comp = combo.get("composite")
+    table = od.load_table(od.table_path(scorecard_path()))
+    if isinstance(comp, dict) and table is not None:
+        o = od.decile_odds(table, float(comp["score"]))
+        if o is not None:
+            return {"score": comp["score"], "score_label": comp["label"], **o.__dict__}
+    bench = None
+    if match.code != "코스피":
+        ks = data.load(root, data.Match("index", "코스피", "코스피"))
+        pos = np.searchsorted(ks.dates, dates)
+        hit = (pos < ks.dates.shape[0]) & (ks.dates[np.minimum(pos, ks.dates.shape[0] - 1)] == dates)
+        bench = np.where(hit, ks.bars.close[np.minimum(pos, ks.dates.shape[0] - 1)], np.nan)
+    o = od.state_odds(dates, close, od.trend_state(close, k.ema20, k.ema50, k.sma200), bench)
+    return None if o is None else {"score": None, "score_label": None, **o.__dict__}
 
 
 def _near(x: sm.NearLevel, digits: int) -> dict[str, object]:

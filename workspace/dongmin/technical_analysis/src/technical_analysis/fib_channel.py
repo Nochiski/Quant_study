@@ -6,9 +6,10 @@ c 위치의 기준선 값을 뺀 값이다. 레벨 r 선: y = y_a + m(x − x_a)
 - 주 세트(사용자 TradingView 설정): 폭의 0.5배 등간격 선 {0.5·k : k 정수}.
 - 보조 세트: 피보나치 비율(`FIB_RATIOS`).
 
-자동 모드는 유의 피봇으로 만든 후보를 '세 번째 점 뒤 등간격 선에서 꺾인 수 − 같은 채널을 무작위로
-옮겼을 때 평균 꺾인 수'로 순위를 매긴다. 선 간격이 촘촘한 채널은 아무 흔들림이나 선에 닿아 그냥 세면
-늘 1등이 되기 때문이다.
+자동 모드는 유의 피봇으로 만든 후보를 '(세 번째 점 뒤 등간격 선에서 꺾인 수 − 같은 채널을 무작위로
+옮겼을 때 평균 꺾인 수) ÷ 무작위 꺾인 수의 표준편차(최소 1)'로 순위를 매긴다(사전등록 v1.1). 그냥 세면
+촘촘한 채널이 아무 흔들림에나 닿아 1등이 되고, 차이만 빼도 촘촘할수록 흔들림이 커서 1등을 독식한다.
+0.5 간격이 그날 ATR 보다 좁은 채널은 후보에서 뺀다.
 """
 
 from dataclasses import dataclass
@@ -84,12 +85,18 @@ def ratio_lines(ch: Channel, x: np.ndarray, ratios: tuple[float, ...] = FIB_RATI
 
 
 def candidates(
-    pivots: zz.Pivots, sig: np.ndarray, direction: int, min_gap: int = MIN_GAP_BARS, recent: int = RECENT_PIVOTS
+    pivots: zz.Pivots,
+    sig: np.ndarray,
+    direction: int,
+    min_gap: int = MIN_GAP_BARS,
+    recent: int = RECENT_PIVOTS,
+    min_spacing: float = 0.0,
 ) -> list[Channel]:
     """유의 피봇으로 만든 자동 후보.
 
     상승 = (저점 a, 저점 b, 고점 c), 기울기 > 0, 폭 > 0. 하락 = (고점, 고점, 저점), 기울기 < 0, 폭 < 0.
-    x_b − x_a ≥ min_gap, x_c > x_a. 가장 최근 유의 저점·고점 각 recent 개 안에서 고른다.
+    x_b − x_a ≥ min_gap, x_c > x_a, 0.5 간격 ≥ min_spacing(기준일 ATR). 가장 최근 유의 저점·고점 각
+    recent 개 안에서 고른다.
     """
     lows = [j for j in np.flatnonzero(sig) if pivots.kind[j] == zz.LOW]
     highs = [j for j in np.flatnonzero(sig) if pivots.kind[j] == zz.HIGH]
@@ -111,7 +118,7 @@ def candidates(
             if xc <= xa:
                 continue
             ch = Channel(xa, ya, xb, yb, xc, float(pivots.price[c]))
-            if ch.width * direction > 0:
+            if ch.width * direction > 0 and abs(GRID_STEP * ch.width) >= min_spacing:
                 out.append(ch)
     return out
 
@@ -125,10 +132,12 @@ class Scored:
     last_turn_day: int  # 마지막 꺾임 날(없으면 −1)
     last_turn_ratio: float  # 그 선의 레벨
     expected_pierces: float = float("nan")  # 무작위 위치 평균 관통 수(꺾임률 비교용, 순위에는 안 씀)
+    shifted_sd: float = 0.0  # 무작위 위치 꺾임 수의 표준편차(모집단)
 
     @property
     def score(self) -> float:
-        return self.turns - self.expected_turns
+        """(실제 꺾임 − 무작위 평균) ÷ max(무작위 표준편차, 1)."""
+        return (self.turns - self.expected_turns) / max(self.shifted_sd, 1.0)
 
 
 def score(
@@ -141,7 +150,7 @@ def score(
     n_shift: int = 20,
     seed: int = 0,
 ) -> Scored | None:
-    """세 번째 점 뒤 ~ as_of(최근 500봉까지)의 등간격 선 꺾임 점수. 60봉 미만이면 None(후보 제외)."""
+    """세 번째 점 뒤 ~ as_of(최근 500봉까지)의 등간격 선 꺾임과 무작위 대조. 60봉 미만이면 None(후보 제외)."""
     if as_of - ch.xc < MIN_BARS_AFTER_C:
         return None
     t0 = max(ch.xc + 1, as_of - MAX_SCORE_BARS + 1)
@@ -179,6 +188,7 @@ def score(
         last_turn_day=last_day,
         last_turn_ratio=last_ratio,
         expected_pierces=float(np.mean(shifted_pierces)) if shifted_pierces else float("nan"),
+        shifted_sd=float(np.std(shifted_turns)) if shifted_turns else 0.0,
     )
 
 
@@ -203,7 +213,7 @@ def auto_select(
     usable = pivots.usable(as_of)
     sig = zz.significant(usable, high, low, sig_window, as_of)
     scored = []
-    for ch in candidates(usable, sig, direction):
+    for ch in candidates(usable, sig, direction, min_spacing=float(atr[as_of])):
         sc = score(ch, close, high, low, atr, as_of, n_shift, seed)
         if sc is not None:
             scored.append(sc)

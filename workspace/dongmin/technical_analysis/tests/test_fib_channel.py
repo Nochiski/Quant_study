@@ -94,7 +94,8 @@ def test_score_beats_random_shift_for_series_that_turns_on_the_lines() -> None:
     s = fc.score(ch, close, high, low, atr, as_of=399, n_shift=20, seed=1)
     assert s.turns > 0
     assert s.score > 0
-    assert s.score == pytest.approx(s.turns - s.expected_turns)
+    # v1.1: (실제 − 무작위 평균) ÷ max(무작위 표준편차, 1)
+    assert s.score == pytest.approx((s.turns - s.expected_turns) / max(s.shifted_sd, 1.0))
 
 
 def test_score_ignores_data_after_as_of() -> None:
@@ -113,9 +114,33 @@ def test_score_requires_min_bars_after_third_point() -> None:
     assert fc.score(ch, close, high, low, atr, as_of=399, n_shift=5, seed=0) is None
 
 
-def test_auto_select_ranks_by_score_then_recency() -> None:
-    a = fc.Scored(fc.Channel(0, 1.0, 70, 2.0, 30, 5.0), turns=5, expected_turns=2.0, pierces=1, last_turn_day=-1, last_turn_ratio=float("nan"))
-    b = fc.Scored(fc.Channel(0, 1.0, 70, 2.0, 40, 5.0), turns=6, expected_turns=3.0, pierces=1, last_turn_day=-1, last_turn_ratio=float("nan"))
-    c = fc.Scored(fc.Channel(0, 1.0, 70, 2.0, 50, 5.0), turns=9, expected_turns=2.0, pierces=1, last_turn_day=-1, last_turn_ratio=float("nan"))
-    ranked = fc.rank([a, b, c])
-    assert [s.channel.xc for s in ranked] == [50, 40, 30]
+def scored(xc: int, turns: int, expected: float, sd: float) -> fc.Scored:
+    return fc.Scored(
+        fc.Channel(0, 1.0, 70, 2.0, xc, 5.0),
+        turns=turns,
+        expected_turns=expected,
+        pierces=1,
+        last_turn_day=-1,
+        last_turn_ratio=float("nan"),
+        shifted_sd=sd,
+    )
+
+
+def test_rank_by_standardised_score_then_recency() -> None:
+    # 차이는 c(+7)가 가장 크지만 흔들림(표준편차 7)도 커서 z = 1 → b(+3, 표준편차 1, z = 3)가 1위
+    a = scored(30, 5, 2.0, 3.0)  # z = 1
+    b = scored(40, 6, 3.0, 1.0)  # z = 3
+    c = scored(50, 9, 2.0, 7.0)  # z = 1, a 보다 최근
+    assert [s.channel.xc for s in fc.rank([a, b, c])] == [40, 50, 30]
+
+
+def test_sd_below_one_is_floored() -> None:
+    assert scored(30, 4, 2.0, 0.2).score == pytest.approx(2.0)
+
+
+def test_candidates_drop_channels_denser_than_one_atr() -> None:
+    p = piv([(-1, 0, 10.0), (-1, 70, 12.0), (1, 80, 13.0), (1, 90, 30.0)])
+    sig = np.ones(4, dtype=bool)
+    # 고점 13 → 폭 약 1 → 0.5 간격 0.5 < ATR 2 → 빠짐. 고점 30 → 폭 약 18 → 간격 9 ≥ 2 → 남음
+    cands = fc.candidates(p, sig, fc.UP, min_gap=60, recent=8, min_spacing=2.0)
+    assert {c.xc for c in cands} == {90}

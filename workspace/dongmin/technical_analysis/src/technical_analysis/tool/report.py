@@ -125,6 +125,7 @@ def _channel_block(
             else math.nan
         )
         evidence = (
+            f"점수 {scored.score:+.1f}(무작위 대비 표준편차 배수) · "
             f"세 번째 점 뒤 꺾임 {scored.turns}회(무작위 위치 평균 {scored.expected_turns:.1f}회)"
             f" · 관통 {scored.pierces}회 · 꺾임률 {real_rate:.0f}%(무작위 {rand_rate:.0f}%){last_turn}"
         )

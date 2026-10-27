@@ -290,7 +290,7 @@ P.chart.channels.forEach((c, i) => {
     점: ${c.points.map((p, j) => `${"①②③"[j]} ${p.time} ${fmt(p.value)}`).join(" · ")}<br>${esc(c.evidence)}</div></div>`;
 });
 if (P.chart.channels.some((c) => c.kind === "auto"))
-  h += `<div class="note">자동 채널은 지난 꺾임에 맞춰 고른 것이라 그 자체로 예측력의 근거가 아니다 — 성적표 C1 참조. 점수 = 꺾임 수 − 같은 채널을 무작위 위치로 옮겼을 때 평균 꺾임 수.</div>`;
+  h += `<div class="note">자동 채널은 지난 꺾임에 맞춰 고른 것이라 그 자체로 예측력의 근거가 아니다 — 성적표 C1 참조. 점수 = (꺾임 수 − 같은 채널을 무작위 위치로 옮겼을 때 평균 꺾임 수) ÷ 무작위 표준편차. 0.5 간격이 하루 진폭(ATR)보다 좁은 채널은 후보에서 뺀다.</div>`;
 h += `<h2>가까운 저항·지지</h2><table>`;
 X.near_above.slice().reverse().forEach((x) => { h += `<tr><td>${esc(x.labels)}</td><td class="num">${x.value}</td><td class="num" style="color:var(--resist)">${pct(x.pct)}</td><td class="num">${x.atr}ATR</td></tr>`; });
 h += `<tr><td><b>종가</b></td><td class="num"><b>${fmt(P.meta.close)}</b></td><td></td><td></td></tr>`;

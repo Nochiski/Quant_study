@@ -62,7 +62,8 @@
 -- 원본 판 줄과 정정 판 줄이 네 표에서 같을 때만. 그 행만 `available_date < rcept_dt`, basis 는 둘 다
 -- derived). `stg_rcept_dt_map` 은 stage 에 실재하지 않는다(GATES §9). 판본은 `api_restated` 하나 ·
 -- `restated_unknown = true`(4A).
--- 격리 4종: non_krw · period_unresolved · rcept_lag_out_of_range · duplicate_vintage.
+-- 격리 6종: non_krw · period_unresolved · rcept_lag_out_of_range · total_asset_nonpositive ·
+-- unit_scale_suspect · duplicate_vintage. 가운데 둘은 값 품질 격리다(e1.32.0 연구 DB S1-c, `judged`).
 WITH _acct(metric, tier, kind, tokens, sjs, agg, require_tag, basis, family) AS (
     VALUES
         ('revenue', 'a_concept', 'concept', ['Revenue'], ['IS', 'CIS'], 'pick', NULL, 'standard', 'flow'),
@@ -423,17 +424,77 @@ resolved AS (
       ON i.corp_code = h.corp_code AND i.bsns_year = h.bsns_year
      AND i.reprt_code = h.reprt_code AND i.fs_div = h.fs_div
 ),
-judged AS (
+judged0 AS (
+    -- 격리 1차 — 원 단위 축 · 기간 · 접수 지연. 접수 지연은 **정정 사슬의 원본 접수일**로 잰다(e1.32.0 연구 DB
+    -- S1-c). DART API 는 정정이 있으면 정정본 하나를 돌려줘 판의 `rcept_dt` 가 정정 접수일이므로, 정정일로
+    -- 재면 원본을 제때 낸 보고서의 늦은 정정(정원엔시스 FY2015 원본 2016-03-30 · 2023-01-18 지분표 정정)이
+    -- 버려진다. 이 상한이 잡을 것은 `period_end` 오판(1년 어긋나면 지연이 365일 넘게 튄다)과 음수 지연(결산 전
+    -- 접수)이다 — 원본 자체가 상한 밖이거나 결산 전이면 여전히 격리한다. 원본 링크(`disclosure_version.
+    -- orig_rcept_no`, 사슬을 평평하게 접어 언제나 원본)가 없으면 자기 접수일이다. 날짜는 원천 `rcept_dt`(지연
+    -- 축)이고, 공개일 승계(`redate`)와는 따로 본다 — 값이 바뀐 정정은 정정일 공개로 남는다.
     SELECT r.*,
            CASE WHEN NOT coalesce(r.is_krw_group, FALSE)         THEN 'non_krw'
                 WHEN r.period_end IS NULL                        THEN 'period_unresolved'
                 WHEN r.rcept_dt IS NULL
-                     OR date_diff('day', r.period_end, r.rcept_dt) < 0
-                     OR date_diff('day', r.period_end, r.rcept_dt)
+                     OR date_diff('day', r.period_end, coalesce(od.rcept_dt, r.rcept_dt)) < 0
+                     OR date_diff('day', r.period_end, coalesce(od.rcept_dt, r.rcept_dt))
                         > CAST(k.rcept_lag_p99_days AS BIGINT)   THEN 'rcept_lag_out_of_range'
            END                                                   AS pre_reject
     FROM resolved r
     CROSS JOIN _const k
+    LEFT JOIN disclosure_version c ON c.rcept_no = r.rcept_no
+    LEFT JOIN dt od ON od.rcept_no = c.orig_rcept_no
+),
+ta AS (
+    -- 자산총계 — 값 품질 격리(S1-c)의 축. 그룹당 한 값(`val` 의 pick, 모호하면 NULL).
+    SELECT corp_code, bsns_year, reprt_code, fs_div, CAST(v AS DOUBLE) AS v
+    FROM val
+    WHERE metric = 'total_asset'
+),
+scale AS (
+    -- 단위 의심의 재료(e1.32.0 연구 DB S1-c). XBRL 전체 단위를 잘못 적은 보고서(×10³·×10⁶·÷10⁶)는 자산·매출이
+    -- 같은 배수로 튄다(하나34호스팩 2025 1Q 자산 98,989,407.7억 — 앞뒤 분기 98.4억·99.6억). 같은 (법인, fs_div)
+    -- 의 자산총계 **양수** 시계열(1차 격리 없는 행)에서 앞뒤 4칸(자기 포함 최대 9칸) 이동중앙값 대비
+    -- |log10(자산 ÷ 중앙값)| 과 창 행 수를 낸다. 중앙값은 앞뒤를 함께 보므로 최신 행·첫 행 오류도 잡고,
+    -- 계단 변화(합병)는 창의 과반이 새 수준이 되면 따라간다. 창 폭 넷 = 한 회계연도의 보고서 판본 수(`_rcode`)
+    -- — ROWS 틀 폭도 숫자 리터럴 금지 규약(tests/test_equity_build.py)을 따른다.
+    -- 판정에 필요한 열만 창에 싣는다(fin_std 빌드 메모리 상한이 빠듯하다 — 서버 최대 RSS 7.2GB / 8GB).
+    SELECT corp_code, bsns_year, reprt_code, fs_div,
+           abs(log10(v / median(v) OVER w))                      AS dev,
+           count(*) OVER w                                       AS n_win
+    FROM (SELECT j.corp_code, j.bsns_year, j.reprt_code, j.fs_div, j.period_end, j.report_code,
+                 t.v, n.n_side
+          FROM judged0 j
+          JOIN ta t
+            ON t.corp_code = j.corp_code AND t.bsns_year = j.bsns_year
+           AND t.reprt_code = j.reprt_code AND t.fs_div = j.fs_div
+          CROSS JOIN (SELECT count(*) AS n_side FROM _rcode) n
+          WHERE j.pre_reject IS NULL AND t.v > 0) s
+    WINDOW w AS (PARTITION BY corp_code, fs_div
+                 ORDER BY period_end, report_code, bsns_year, reprt_code
+                 ROWS BETWEEN n_side PRECEDING AND n_side FOLLOWING)
+),
+judged AS (
+    -- 격리 2차 — 값 품질(e1.32.0 연구 DB S1-c). 1차 사유가 있으면 그것이 이긴다.
+    -- `total_asset_nonpositive`: 자산총계 ≤ 0(BS 줄이 거의 다 0 인 빈 XBRL 7행 · 자산·부채만 0 인 정정본 1행).
+    --   자산을 분모로 쓰는 비율이 무한대·NULL 이 되고 손익 0 이 TTM 에 섞인다. 로그 비율은 0 을 못 보므로 따로.
+    -- `unit_scale_suspect`: 창 행 수 ≥ `unit_scale_min_rows` 이고 편차 ≥ `unit_scale_log10_min`(100배). 값을
+    --   10^k 로 되돌리지 않는다 — EPS 는 같은 배수가 아니라 계정마다 되돌림이 다르다.
+    -- 격리된 행은 `kept` 밖이라 4분기 파생·현금흐름 분기값·`revenue_basis_prev` 의 구성에서도 빠진다.
+    SELECT j.* REPLACE (
+             coalesce(j.pre_reject,
+                      CASE WHEN t.v <= 0                           THEN 'total_asset_nonpositive'
+                           WHEN s.n_win >= k.unit_scale_min_rows
+                                AND s.dev >= k.unit_scale_log10_min THEN 'unit_scale_suspect'
+                      END)                                       AS pre_reject)
+    FROM judged0 j
+    CROSS JOIN _const k
+    LEFT JOIN ta t
+      ON t.corp_code = j.corp_code AND t.bsns_year = j.bsns_year
+     AND t.reprt_code = j.reprt_code AND t.fs_div = j.fs_div
+    LEFT JOIN scale s
+      ON s.corp_code = j.corp_code AND s.bsns_year = j.bsns_year
+     AND s.reprt_code = j.reprt_code AND s.fs_div = j.fs_div
 ),
 dup AS (
     SELECT corp_code, period_end, report_code, fs_div, count(*) AS n_grain

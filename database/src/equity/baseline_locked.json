@@ -4,7 +4,7 @@
     "security.backfill_end": "규칙 e1.15.0 에서 **유도값으로 전환**. `security.sql` 이 자기 거래일 축(td = stg_index_daily distinct date)의 max 를 쓴다. trading_calendar 쪽과 같은 날짜임은 EG17 이 증명한다.",
     "trading_calendar.backfill_end": "규칙 e1.15.0 에서 **유도값으로 전환**(플랜 v2 §4 B.2 · v1 §8 Task 5.1). EG17 이 `max(trading_calendar.date) == max(stg_price_daily.date)` 와 `>= 직전 빌드 max`(퇴행 금지) 두 술어로 대신 본다. 상수로 두면 거래일이 하루 늘 때마다 사람이 올려야 하고 안 올리면 매일 빌드가 폐기된다."
   },
-  "_lock": "S22 확정본 (2026-09-06). 서버 data/equity/baseline.json 과 **바이트 동일**해야 한다 — 검사는 database/scripts/check_baseline_lock.py, 설치는 이 파일을 그대로 scp 로 덮어쓰기. baseline_seed_s*.json 은 슬라이스별 제안 시드이고 정본이 아니다. _measured[] 는 등재된 상수 전건의 근거이며 server_evidence 는 그 표의 커밋된 current_build 게이트 metrics 에서 그대로 읽은 값이다. 2026-09-11(규칙 e1.15.0 · 플랜 v2 §4 B.2): 날짜 상수 3건(trading_calendar.backfill_end · security.backfill_end · adj_factor.asof_for_jump_check)을 **등재 해제**하고 유도값으로 바꿨다 — 사유는 _derived[] 에 남긴다. price_daily 에 저녁 잠정판 상수 3건(evening_jump_abs_max · recent_session_window · recent_session_row_ratio_min)을 새로 등재했다. server_evidence 는 첫 서버 빌드 뒤 오케스트레이터가 채운다. 2026-09-19(감사 수정): EG21(최신 구간 행수 완결성, DEFECT-C06) 상수 16건을 flow_daily·short_daily·credit_daily·opinion_daily 에, fin_std 에 `fin_std_inferred_recent_ratio_max`(DEFECT-F01) 를 새로 등재했다 — **서버 data/equity/baseline.json 을 이 파일로 덮어써야 EG21·EG3_fin_std 가 skip(no_baseline) 를 벗어난다**.",
+  "_lock": "S22 확정본 (2026-09-06). 서버 data/equity/baseline.json 과 **바이트 동일**해야 한다 — 검사는 database/scripts/check_baseline_lock.py, 설치는 이 파일을 그대로 scp 로 덮어쓰기. baseline_seed_s*.json 은 슬라이스별 제안 시드이고 정본이 아니다. _measured[] 는 등재된 상수 전건의 근거이며 server_evidence 는 그 표의 커밋된 current_build 게이트 metrics 에서 그대로 읽은 값이다. 2026-09-11(규칙 e1.15.0 · 플랜 v2 §4 B.2): 날짜 상수 3건(trading_calendar.backfill_end · security.backfill_end · adj_factor.asof_for_jump_check)을 **등재 해제**하고 유도값으로 바꿨다 — 사유는 _derived[] 에 남긴다. price_daily 에 저녁 잠정판 상수 3건(evening_jump_abs_max · recent_session_window · recent_session_row_ratio_min)을 새로 등재했다. server_evidence 는 첫 서버 빌드 뒤 오케스트레이터가 채운다. 2026-09-19(감사 수정): EG21(최신 구간 행수 완결성, DEFECT-C06) 상수 16건을 flow_daily·short_daily·credit_daily·opinion_daily 에, fin_std 에 `fin_std_inferred_recent_ratio_max`(DEFECT-F01) 를 새로 등재했다 — **서버 data/equity/baseline.json 을 이 파일로 덮어써야 EG21·EG3_fin_std 가 skip(no_baseline) 를 벗어난다**. 2026-10-28(연구 DB S1-c, equity e1.32.0): fin_std 에 `unit_scale_log10_min`(2.0)·`unit_scale_min_rows`(3) 을 새로 등재했다 — e1.32.0 코드는 이 둘을 `_const` 로 읽으므로 **배포와 같은 날 다음 체인 전에 서버 data/equity/baseline.json 을 이 파일로 덮어써야 한다**(없으면 fin_std 빌드가 `baseline constant not found` 로 멈춘다). 옛 코드는 새 키를 읽지 않아 먼저 설치해도 해가 없다.",
   "_locked_at": "2026-09-11",
   "_measured": [
     {
@@ -1227,6 +1227,28 @@
       "table": "fin_std",
       "used_by": "rules_s12.eg3_fin_std n_period_end_inferred_recent_over_max (EQUITY_GATES §11-4)",
       "value": 30
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "unit_scale_log10_min",
+      "seed": "baseline_seed_s12.json",
+      "seed_note": "2026-10-28 연구 DB S1-c(사용자 10-27 Q2 결정)로 신설. 단위 의심 격리의 문턱 — 같은 (법인, fs_div) 자산총계 양수 시계열의 앞뒤 4칸(자기 포함 최대 9칸) 이동중앙값 대비 |log10(자산 ÷ 중앙값)| 이 이 값 이상이면 `unit_scale_suspect` 로 행째 격리한다. 10-27 서버 실측(fin_std e1.29.0 판 94,243행 중 자산 양수 94,197행): 2.0(100배)에서 25행을 잡아 10-19 재무 검토의 단위 오류 25행과 같고 오탐 0. 오류가 아닌 행의 최대 |편차| 1.57(디에스앤엘 FY2020 OFS) · 오류 행 최소 2.28(하나머스트7호 FY2020) — 양쪽과 0.3~0.4자리 떨어져 있다. 2.5 면 하나머스트7호 FY2020 을 놓치고 1.5 면 디에스앤엘을 오탐한다. 바꾸면 fin_std 재빌드.",
+      "sql": "SELECT count(*) FILTER (WHERE n9 >= 3 AND abs(log10(ta / med9)) >= 2.0) FROM (SELECT CAST(total_asset AS DOUBLE) ta, median(CAST(total_asset AS DOUBLE)) OVER w9 med9, count(*) OVER w9 n9 FROM fin_std WHERE total_asset > 0 WINDOW w9 AS (PARTITION BY corp_code, fs_div ORDER BY period_end, report_code ROWS BETWEEN 4 PRECEDING AND 4 FOLLOWING))",
+      "table": "fin_std",
+      "used_by": "sql/fin_std.sql scale·judged — EG7 unit_scale_suspect 격리 (_const)",
+      "value": 2.0
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "unit_scale_min_rows",
+      "seed": "baseline_seed_s12.json",
+      "seed_note": "2026-10-28 연구 DB S1-c 로 신설. convention — 단위 의심 판정에 필요한 창 행 수(자기 포함)의 하한. 자기 말고 둘 이상이 있어야 중앙값이 '다수의 수준'을 말한다. 2행이면 어느 쪽이 틀렸는지 못 가르므로 판정하지 않는다 — 10-27 서버 실측으로 자산 양수 행이 2행 이하인 시계열 240개(342행)가 이 사각지대다. 바꾸면 fin_std 재빌드.",
+      "sql": "SELECT count(*) FILTER (WHERE n9 >= 3 AND abs(log10(ta / med9)) >= 2.0) FROM (SELECT CAST(total_asset AS DOUBLE) ta, median(CAST(total_asset AS DOUBLE)) OVER w9 med9, count(*) OVER w9 n9 FROM fin_std WHERE total_asset > 0 WINDOW w9 AS (PARTITION BY corp_code, fs_div ORDER BY period_end, report_code ROWS BETWEEN 4 PRECEDING AND 4 FOLLOWING))",
+      "table": "fin_std",
+      "used_by": "sql/fin_std.sql scale·judged — EG7 unit_scale_suspect 격리 (_const)",
+      "value": 3
     }
   ],
   "_pending": {
@@ -1311,7 +1333,9 @@
     "three_quarter_months": 9,
     "thresholds": {
       "EG7": 0.03
-    }
+    },
+    "unit_scale_log10_min": 2.0,
+    "unit_scale_min_rows": 3
   },
   "flow_daily": {
     "investor_sum_tol_krw": 6000000,

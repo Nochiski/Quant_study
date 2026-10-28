@@ -12,7 +12,9 @@
   "inferred_recent_days": 30,
   "quarter_months": 3,
   "half_months": 6,
-  "three_quarter_months": 9
+  "three_quarter_months": 9,
+  "unit_scale_log10_min": 2.0,
+  "unit_scale_min_rows": 3
  },
  "_measured": [
   {
@@ -141,6 +143,34 @@
    "growing": false,
    "used_by": "rules_s12.eg3_fin_std n_period_end_inferred_recent_over_max (EQUITY_GATES §11-4)",
    "note": "2026-09-19 감사 DEFECT-F01 로 신설. 비율을 재는 창의 길이(캘린더일). 상한은 max(available_date) 에서 유도한다 — 날짜 상수를 박으면 매일 사람이 올려야 한다(규칙 e1.15.0). **배포 순서**: 문서층 따라잡기 뒤에 반영할 것 — 뒤처진 상태에서 켜면 fin_std 가 매일 폐기된다."
+  },
+  {
+   "table": "fin_std",
+   "metric": "unit_scale_log10_min",
+   "value": 2.0,
+   "kind": "measured",
+   "sql": "SELECT count(*) FILTER (WHERE n9 >= 3 AND abs(log10(ta / med9)) >= 2.0) FROM (SELECT CAST(total_asset AS DOUBLE) ta, median(CAST(total_asset AS DOUBLE)) OVER w9 med9, count(*) OVER w9 n9 FROM fin_std WHERE total_asset > 0 WINDOW w9 AS (PARTITION BY corp_code, fs_div ORDER BY period_end, report_code ROWS BETWEEN 4 PRECEDING AND 4 FOLLOWING))",
+   "inputs": {
+    "stg_fin": "server",
+    "stg_doc_meta": "server",
+    "stg_disclosure": "server"
+   },
+   "measured_at": "2026-10-27",
+   "growing": false,
+   "used_by": "sql/fin_std.sql scale·judged — EG7 unit_scale_suspect 격리 (_const)",
+   "note": "2026-10-28 연구 DB S1-c(사용자 10-27 Q2 결정)로 신설. 단위 의심 격리의 문턱 — 같은 (법인, fs_div) 자산총계 양수 시계열의 앞뒤 4칸(자기 포함 최대 9칸) 이동중앙값 대비 |log10(자산 ÷ 중앙값)| 이 이 값 이상이면 `unit_scale_suspect` 로 행째 격리한다. 10-27 서버 실측(fin_std e1.29.0 판 94,243행 중 자산 양수 94,197행): 2.0(100배)에서 25행을 잡아 10-19 재무 검토의 단위 오류 25행과 같고 오탐 0. 오류가 아닌 행의 최대 |편차| 1.57(디에스앤엘 FY2020 OFS) · 오류 행 최소 2.28(하나머스트7호 FY2020) — 양쪽과 0.3~0.4자리 떨어져 있다. 2.5 면 하나머스트7호 FY2020 을 놓치고 1.5 면 디에스앤엘을 오탐한다. 바꾸면 fin_std 재빌드."
+  },
+  {
+   "table": "fin_std",
+   "metric": "unit_scale_min_rows",
+   "value": 3,
+   "kind": "convention",
+   "sql": "SELECT count(*) FILTER (WHERE n9 >= 3 AND abs(log10(ta / med9)) >= 2.0) FROM (SELECT CAST(total_asset AS DOUBLE) ta, median(CAST(total_asset AS DOUBLE)) OVER w9 med9, count(*) OVER w9 n9 FROM fin_std WHERE total_asset > 0 WINDOW w9 AS (PARTITION BY corp_code, fs_div ORDER BY period_end, report_code ROWS BETWEEN 4 PRECEDING AND 4 FOLLOWING))",
+   "inputs": {},
+   "measured_at": "2026-10-27",
+   "growing": false,
+   "used_by": "sql/fin_std.sql scale·judged — EG7 unit_scale_suspect 격리 (_const)",
+   "note": "2026-10-28 연구 DB S1-c 로 신설. convention — 단위 의심 판정에 필요한 창 행 수(자기 포함)의 하한. 자기 말고 둘 이상이 있어야 중앙값이 '다수의 수준'을 말한다. 2행이면 어느 쪽이 틀렸는지 못 가르므로 판정하지 않는다 — 10-27 서버 실측으로 자산 양수 행이 2행 이하인 시계열 240개(342행)가 이 사각지대다. 바꾸면 fin_std 재빌드."
   }
  ]
 }

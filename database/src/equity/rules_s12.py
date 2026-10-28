@@ -66,9 +66,13 @@ F-A4 로 자산별 합은 `agg='sum_abs'`(크기의 합 — 한 표 안에서 �
 기록하고 직전 판과 견준다 — DQ-6·DQ-8 이 전 게이트를 통과한 이유는 분모가 「만들어진 행」이었기
 때문이다.
 
-격리 4종(EG7): `non_krw`(`is_krw` 아님 — 원 단위 축 밖) · `period_unresolved` ·
-`rcept_lag_out_of_range` · `duplicate_vintage`(서로 다른 (bsns_year, reprt_code) 가 같은 grain 으로
-접힘 — 어느 쪽이 옳은지 규칙이 못 고르므로 둘 다 격리한다).
+격리 6종(EG7): `non_krw`(`is_krw` 아님 — 원 단위 축 밖) · `period_unresolved` ·
+`rcept_lag_out_of_range`(기간 말일 → 정정 사슬의 **원본** 접수일이 0~`rcept_lag_p99_days` 밖, e1.32.0 연구 DB
+S1-c — 원본을 제때 낸 보고서의 늦은 정정은 통과) · `total_asset_nonpositive`(자산총계 ≤ 0) ·
+`unit_scale_suspect`(같은 (법인, fs_div) 자산총계 양수 시계열의 앞뒤 4칸 이동중앙값 대비
+|log10| ≥ `unit_scale_log10_min` · 창 행 수 ≥ `unit_scale_min_rows` — XBRL 단위 오류, 되돌리지 않고 격리) ·
+`duplicate_vintage`(서로 다른 (bsns_year, reprt_code) 가 같은 grain 으로 접힘 — 어느 쪽이 옳은지 규칙이 못
+고르므로 둘 다 격리한다). 가운데 둘(값 품질)은 S1-c 에서 더했고, 격리 행은 파생의 구성에서도 빠진다.
 """
 from __future__ import annotations
 
@@ -105,6 +109,7 @@ CAPEX_BASIS_VOCAB: tuple[str, ...] = ("standard", "ppe_parts", "ppe_incl_invprop
 REPORT_CODE_VOCAB: tuple[str, ...] = ("11011", "11012", "11013", "11014")
 FS_DIV_VOCAB: tuple[str, ...] = ("CFS", "OFS")
 REJECT_REASONS: tuple[str, ...] = ("non_krw", "period_unresolved", "rcept_lag_out_of_range",
+                                   "total_asset_nonpositive", "unit_scale_suspect",
                                    "duplicate_vintage")
 
 # ── 계정 (fin_map 21 + DESIGN §4-4 추가 3 = 24) ────────────────────────────────
@@ -402,6 +407,9 @@ def _coverage(ctx: EquityGateContext, columns: tuple[str, ...]) -> dict[str, flo
 
 
 _INFERRED_RECENT_DAYS_DEFAULT = 30
+# 대차 항등식 어긋남 기록(`n_bs_identity_gap_gt_1pct`)의 상대 폭 — 지표 이름이 못박은 값이고 판정에 쓰지 않는
+# 기록형이라 baseline 에 등재하지 않는다(`_INFERRED_RECENT_DAYS_DEFAULT` 와 같은 취급).
+_BS_IDENTITY_GAP_RATIO = 0.01
 
 
 def _inferred_recent(ctx: EquityGateContext) -> dict[str, object]:
@@ -491,6 +499,10 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
                  "THEN '11013' ELSE '11014' END))"),
         "n_period_end_after_rcept": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                             "WHERE period_end > rcept_dt"),
+        # 자산총계 0 이하 행은 산출에 남지 않는다(e1.32.0 연구 DB S1-c `total_asset_nonpositive` 격리) —
+        # 자산을 분모로 쓰는 비율이 무한대·NULL 이 되고 손익 0 이 TTM 에 섞인다.
+        "n_total_asset_nonpositive": _n(ctx, f'SELECT count(*) FROM "{v}" '
+                                             "WHERE total_asset <= 0"),
         # 공개일 = 판 접수번호의 stage 공개일(`stg_disclosure.available_date` — 원천 rcept_dt 와
         # 접수번호 날짜 중 늦은 쪽, E08·J-41). 예외는 원본 공시일을 승계한 정정본(09-30) 하나이고
         # 그 행은 공개일이 더 이르다 — 늦거나 NULL 이 갈리면 규칙이 어긋난 것이다.
@@ -560,6 +572,14 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
             ctx, f'SELECT count(*) FROM "{v}" o JOIN corp c USING (corp_code) '
                  "WHERE o.report_code = '11011' AND c.fiscal_month IS NOT NULL "
                  "AND month(o.period_end) <> c.fiscal_month"),
+        # **기록형**. 자산 = 부채 + 자본 이 1% 넘게 어긋난 행(e1.32.0 연구 DB S1-c). 격리하지 않고 판정에도
+        # 쓰지 않는다 — 삼성생명 2025 3Q −3% 같은 대형사의 TTM 을 네 분기 지우는 비용이 오차보다 크다.
+        "n_bs_identity_gap_gt_1pct": _n(
+            ctx, f'SELECT count(*) FROM "{v}" WHERE total_asset > 0 '
+                 "AND total_liab IS NOT NULL AND total_equity IS NOT NULL "
+                 "AND abs(CAST(total_asset AS DOUBLE) - CAST(total_liab AS DOUBLE) "
+                 "- CAST(total_equity AS DOUBLE)) "
+                 f"> {_BS_IDENTITY_GAP_RATIO} * CAST(total_asset AS DOUBLE)"),
         # 재수집 판본 접힌 수(기록형) — 0 이 아니면 stage 가 같은 자연키를 여러 번 실었다.
         "n_stg_fin_dup_natural_key": _n(
             ctx, "SELECT coalesce(sum(c - 1), 0) FROM (SELECT count(*) AS c FROM stg_fin "
@@ -1088,7 +1108,7 @@ FIN_STD = register(EquityTable(
     content_date_column="period_end",
     reject_reasons=REJECT_REASONS,
     consts=("period_end_lag_max_days", "rcept_lag_p99_days", "quarter_months",
-            "half_months", "three_quarter_months"),
+            "half_months", "three_quarter_months", "unit_scale_log10_min", "unit_scale_min_rows"),
     extra_gates=(eg3_fin_std, eg8_fin_std_coverage, eg6_fin_std),
     field_profiles=FIELDS_FIN,
 ))

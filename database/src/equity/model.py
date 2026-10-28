@@ -347,6 +347,10 @@ RULES_VERSION = "e1.32.0"                # BuildRecord.rules_version 에 실린�
 #          다중집합으로 같을 때만 원본 공시일을 잇는다(링크·첫 장 날짜 확인 그대로, 낱말 `corr_has_fin_item`
 #          은 안 읽는다). 원본 줄 없는 백필 구간은 정정일로 늦춰지고 값이 같은 재작성·재감사 정정은 앞당겨진다
 #          (공개일 셋만 — 값·행 불변). EG3 `n_orig_filing_unwitnessed` 는 링크·날짜 + 양방향 EXCEPT ALL 로 재증언.
+#          S1-c `fin_std` 값 품질 격리 2종(`total_asset_nonpositive` · `unit_scale_suspect` — 자산총계 양수 시계열 앞뒤
+#          4칸 이동중앙값 대비 100배, baseline `unit_scale_log10_min`·`unit_scale_min_rows`)과 접수 지연 상한을 정정
+#          사슬의 원본 접수일로(원본을 제때 낸 늦은 정정이 돌아온다). 격리 행은 4분기·현금흐름 분기 파생에서도 빠진다.
+#          EG3 `n_total_asset_nonpositive`(불변식) · `n_bs_identity_gap_gt_1pct`(기록형).
 
 # 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a, 규약은 `stage.model.RULES_CHANGED`) — 판본을 올리면 한 줄을 더한다.
 # 그 표를 입력으로 읽는 하류 표는 적지 않는다(읽는 쪽이 `RULES[t].inputs` 를 따라 닫는다). 선언 시작은 e1.31.0 이다 —
@@ -357,7 +361,8 @@ RULES_VERSION = "e1.32.0"                # BuildRecord.rules_version 에 실린�
 RULES_CHANGED: dict[str, frozenset[str]] = {
     "e1.31.0": frozenset({"corp_event", "consensus_matrix", "consensus_annual", "fin_ratio_wise",
                           "dataset_profile", "factor_readiness"}),
-    # 연구 DB S1 묶음 — S1-b fin_std(정정 승계 값 판정). 같은 판본의 뒤 PR(S1-c·d·e)이 표를 더한다.
+    # 연구 DB S1 묶음 — S1-b fin_std(정정 승계 값 판정) · S1-c 도 fin_std(값 품질 격리·원본 접수일 지연).
+    # 같은 판본의 뒤 PR(S1-d·e)이 표를 더한다.
     "e1.32.0": frozenset({"fin_std"}),
 }
 

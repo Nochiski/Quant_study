@@ -320,7 +320,7 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 | `disclosure_version.date_check_near_days` | 7 | `off_2_7d` 판정 창 | `disclosure_version` |
 | `fin_std.quarter_months` / `half_months` / `three_quarter_months` | 3 / 6 / 9 | `period_from→period_to` 개월 수로 1Q/반기/3Q 판정 | `fin_std` |
 | `fin_std.period_end_lag_max_days` | 200 | `period_end` 대 접수일 최대 지연 | `fin_std` |
-| `fin_std.rcept_lag_p99_days` | 1826 | 접수 지연 허용 범위 상한(EG7-P04 격리 경계). 지연은 기간 말일 → 정정 사슬의 원본 접수일(e1.32.0 연구 DB S1-c) | `fin_std` |
+| `fin_std.rcept_lag_p99_days` | 1826 | 접수 지연 허용 범위 상한(EG7-P04 격리 경계). 지연은 기간 말일 → 정정 사슬의 원본 접수일(링크가 확인된 정정만, 그 밖은 자기 접수일 — e1.32.0 연구 DB S1-c) | `fin_std` |
 | `fin_std.unit_scale_log10_min` | 2.0 | 단위 의심 격리 문턱 — 자산총계가 앞뒤 4칸 이동중앙값에서 10^이 값 배 이상 벗어나면 `unit_scale_suspect`(EG7-P10, e1.32.0 S1-c) | `fin_std` |
 | `fin_std.unit_scale_min_rows` | 3 | 단위 의심 판정에 필요한 창 행 수(자기 포함) 하한 — 2행 시계열은 판정하지 않는다(EG7-P10, e1.32.0 S1-c) | `fin_std` |
 | `ownership_snapshot.pct_min` / `pct_max` | 0 / 100 | 지분율 범위(EG7-P07) | `ownership_snapshot` |

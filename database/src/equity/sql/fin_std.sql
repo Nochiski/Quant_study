@@ -429,9 +429,12 @@ judged0 AS (
     -- S1-c). DART API 는 정정이 있으면 정정본 하나를 돌려줘 판의 `rcept_dt` 가 정정 접수일이므로, 정정일로
     -- 재면 원본을 제때 낸 보고서의 늦은 정정(정원엔시스 FY2015 원본 2016-03-30 · 2023-01-18 지분표 정정)이
     -- 버려진다. 이 상한이 잡을 것은 `period_end` 오판(1년 어긋나면 지연이 365일 넘게 튄다)과 음수 지연(결산 전
-    -- 접수)이다 — 원본 자체가 상한 밖이거나 결산 전이면 여전히 격리한다. 원본 링크(`disclosure_version.
-    -- orig_rcept_no`, 사슬을 평평하게 접어 언제나 원본)가 없으면 자기 접수일이다. 날짜는 원천 `rcept_dt`(지연
-    -- 축)이고, 공개일 승계(`redate`)와는 따로 본다 — 값이 바뀐 정정은 정정일 공개로 남는다.
+    -- 접수)이다 — 원본 자체가 상한 밖이거나 결산 전이면 여전히 격리한다. 원본 접수일은 **링크가 확인된
+    -- 정정**에만 쓴다: `disclosure_version` 이 정정이고 첫 장의 원본 제출일이 링크된 원본 접수일과 1일 안
+    -- (`date_check` exact·off_1d)일 때 `orig_rcept_no`(사슬을 평평하게 접어 언제나 원본)의 접수일. S1-b 승계
+    -- (`ver`)와 같은 링크 조건이다 — 한 그룹에 다른 보고서가 묶이는 경우(한화리츠 01669226)를 막는다. 그 밖
+    -- (정정 아님 · 링크 없음 · 날짜 확인 안 됨)은 자기 접수일이다. 날짜는 원천 `rcept_dt`(지연 축)이고, 공개일
+    -- 승계(`redate` — 값 대조까지 요구)와는 따로 본다 — 값이 바뀐 정정은 정정일 공개로 남는다.
     SELECT r.*,
            CASE WHEN NOT coalesce(r.is_krw_group, FALSE)         THEN 'non_krw'
                 WHEN r.period_end IS NULL                        THEN 'period_unresolved'
@@ -442,7 +445,8 @@ judged0 AS (
            END                                                   AS pre_reject
     FROM resolved r
     CROSS JOIN _const k
-    LEFT JOIN disclosure_version c ON c.rcept_no = r.rcept_no
+    LEFT JOIN disclosure_version c
+      ON c.rcept_no = r.rcept_no AND c.is_correction AND c.date_check IN ('exact', 'off_1d')
     LEFT JOIN dt od ON od.rcept_no = c.orig_rcept_no
 ),
 ta AS (

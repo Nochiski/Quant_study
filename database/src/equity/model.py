@@ -349,7 +349,8 @@ RULES_VERSION = "e1.32.0"                # BuildRecord.rules_version 에 실린�
 #          (공개일 셋만 — 값·행 불변). EG3 `n_orig_filing_unwitnessed` 는 링크·날짜 + 양방향 EXCEPT ALL 로 재증언.
 #          S1-c `fin_std` 값 품질 격리 2종(`total_asset_nonpositive` · `unit_scale_suspect` — 자산총계 양수 시계열 앞뒤
 #          4칸 이동중앙값 대비 100배, baseline `unit_scale_log10_min`·`unit_scale_min_rows`)과 접수 지연 상한을 정정
-#          사슬의 원본 접수일로(원본을 제때 낸 늦은 정정이 돌아온다). 격리 행은 4분기·현금흐름 분기 파생에서도 빠진다.
+#          사슬의 원본 접수일로(링크가 확인된 정정만 — S1-b 승계와 같은 `date_check` 조건. 원본을 제때 낸 늦은 정정이
+#          돌아온다). 격리 행은 4분기·현금흐름 분기 파생에서도 빠진다.
 #          EG3 `n_total_asset_nonpositive`(불변식) · `n_bs_identity_gap_gt_1pct`(기록형).
 
 # 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a, 규약은 `stage.model.RULES_CHANGED`) — 판본을 올리면 한 줄을 더한다.

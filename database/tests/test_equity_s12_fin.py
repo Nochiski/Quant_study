@@ -1962,9 +1962,10 @@ _LATE_CORR = ("20230118000147", date(2023, 1, 18))     # 기간 말일에서 2,5
 
 
 def _late_correction(make_stage_tree, tmp_path: Path, orig: tuple[str, date],
-                     amounts: tuple[float, float]) -> build.BuildResult:
-    """FY2015 사업보고서 원본 `orig` 뒤 `_LATE_CORR` 정정(첫 장 항목 비재무, 원본 제출일 일치). 두 판 줄이
-    원장에 있고 매출은 (원본, 정정) = `amounts`. 대조군 법인(00000001, 제때 낸 원본)이 EG4 픽스처를 맡는다."""
+                     amounts: tuple[float, float], filed: date | None = None) -> build.BuildResult:
+    """FY2015 사업보고서 원본 `orig` 뒤 `_LATE_CORR` 정정(첫 장 항목 비재무). 첫 장의 원본 제출일 `filed` 는
+    기본이 원본 접수일(`date_check` exact). 두 판 줄이 원장에 있고 매출은 (원본, 정정) = `amounts`.
+    대조군 법인(00000001, 제때 낸 원본)이 EG4 픽스처를 맡는다."""
     corps = [(_LATE_CORP, "12"), ("00000001", "12")]
     ctl = ("20160330000001", date(2016, 3, 30))
     reports = [(rc, _LATE_CORP, "2015", "11011", dt, _LATE_FY, "11011")
@@ -1975,7 +1976,8 @@ def _late_correction(make_stage_tree, tmp_path: Path, orig: tuple[str, date],
            for (rc, _dt), amt in zip((orig, _LATE_CORR), amounts, strict=True)]
     fin.append(_fin_row("00000001", "2015", "11011", ctl[0], sj="IS",
                         account_id="ifrs-full_Revenue", account_nm="매출액", amount=50.0))
-    corrections = [{"rcept_no": _LATE_CORR[0], "page_found": True, "filed_date": orig[1],
+    corrections = [{"rcept_no": _LATE_CORR[0], "page_found": True,
+                    "filed_date": orig[1] if filed is None else filed,
                     "filed_date_status": "parsed", "reason_raw": "기재정정",
                     "items": json.dumps([{"항목": _NONFIN}], ensure_ascii=False)}]
     r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin, (ctl[0], "rcept_no", ctl[0]),
@@ -2024,6 +2026,20 @@ def test_원본부터_5년_넘게_늦으면_여전히_격리된다(make_stage_tr
                          (100.0, 100.0))
     assert _late_row(r) is None
     assert [(x["corp_code"], x["reject_reason"]) for x in _rejects(r.out_dir)] == [  # type: ignore[arg-type]
+        (_LATE_CORP, "rcept_lag_out_of_range")]
+
+
+def test_부정_원본_제출일이_확인되지_않은_링크는_자기_접수일로_잰다(make_stage_tree,
+                                                                tmp_path: Path) -> None:
+    """링크 방어 — 정정 첫 장의 원본 제출일(2016-02-01)이 링크된 원본 접수일(2016-03-30)과 어긋나면
+    (`date_check` mismatch) 그 원본이 같은 보고서라는 확인이 없다(한 그룹에 다른 보고서가 묶이는 경우,
+    한화리츠 01669226). S1-b 승계와 같은 조건으로 원본 접수일을 쓰지 않고 자기 접수일(2,575일)로 재므로
+    상한 밖이다."""
+    r = _late_correction(make_stage_tree, tmp_path, ("20160330000147", date(2016, 3, 30)),
+                         (100.0, 100.0), filed=date(2016, 2, 1))
+    assert _late_row(r) is None
+    rej = _rejects(r.out_dir) if r.n_reject else []                 # type: ignore[arg-type]
+    assert [(x["corp_code"], x["reject_reason"]) for x in rej] == [
         (_LATE_CORP, "rcept_lag_out_of_range")]
 
 

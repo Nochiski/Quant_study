@@ -68,7 +68,8 @@ F-A4 로 자산별 합은 `agg='sum_abs'`(크기의 합 — 한 표 안에서 �
 
 격리 6종(EG7): `non_krw`(`is_krw` 아님 — 원 단위 축 밖) · `period_unresolved` ·
 `rcept_lag_out_of_range`(기간 말일 → 정정 사슬의 **원본** 접수일이 0~`rcept_lag_p99_days` 밖, e1.32.0 연구 DB
-S1-c — 원본을 제때 낸 보고서의 늦은 정정은 통과) · `total_asset_nonpositive`(자산총계 ≤ 0) ·
+S1-c — 원본을 제때 낸 보고서의 늦은 정정은 통과. 원본 접수일은 링크가 확인된 정정(`date_check` exact·off_1d,
+S1-b 승계와 같은 조건)에만 쓰고 그 밖은 자기 접수일) · `total_asset_nonpositive`(자산총계 ≤ 0) ·
 `unit_scale_suspect`(같은 (법인, fs_div) 자산총계 양수 시계열의 앞뒤 4칸 이동중앙값 대비
 |log10| ≥ `unit_scale_log10_min` · 창 행 수 ≥ `unit_scale_min_rows` — XBRL 단위 오류, 되돌리지 않고 격리) ·
 `duplicate_vintage`(서로 다른 (bsns_year, reprt_code) 가 같은 grain 으로 접힘 — 어느 쪽이 옳은지 규칙이 못

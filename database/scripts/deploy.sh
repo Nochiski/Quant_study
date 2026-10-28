@@ -63,7 +63,8 @@ SRC_KEEP=(--exclude '.kw_token.json' --exclude '.kis_token.json'
 
 # equity contract(EGC) 가 부르는 워크벤치 사본(#372 — 전에는 커널 `_engine/backtest_engine` 을
 # 불렀다). 사본은 2026-09-05 판에서 멈춰 있었고 갱신 경로가 어디에도 없었다(DEFECT-C05) — 배포가
-# 같이 민다. 계약이 읽는 facade 는 제3자 패키지 없이 import 되고 어댑터는 duckdb 만 쓴다.
+# 같이 민다. 계약이 읽는 facade 는 import 때 numpy 가 필요하고(어댑터 끝의 `_raw_panel` 이 맨 위에서
+# import 한다) 어댑터는 duckdb 를 쓴다 — 서버 `.venv` 에 둘 다 있어야 계약이 돈다.
 ENGINE_SRC="$WORKTREE/backend/src/strategy_workbench"
 [ -d "$ENGINE_SRC" ] || { echo "거부: $ENGINE_SRC 가 없다 — 엔진 사본을 밀 수 없다." >&2; exit 2; }
 # 비었거나 sparse-checkout 인 소스를 --delete 로 밀면 서버 _engine 이 전멸하고 contract 는 기록형이라 묻힌다(리뷰 REC-9)

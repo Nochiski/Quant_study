@@ -505,6 +505,20 @@ def test_live_switch_sends_and_reflects_in_place_with_daily_post(tmp_path: Path)
     assert f"--builds-from {H_PREV} --v3-post-cmd echo post |" in v3
 
 
+def test_server_local_conf_is_read_last_and_wins(tmp_path: Path) -> None:
+    """배포가 덮지 않는 서버 전용 `local/postclose_chain.env` 를 저장소 설정 다음에 읽어 마지막 대입이 이긴다.
+    v3 daily_post 명령을 비우면 제자리 반영·엑셀 발송은 그대로 두고 daily_post 만 넘기지 않는다(D9)."""
+    root = _root(tmp_path, conf=LIVE_CONF)
+    (root / "local").mkdir()
+    (root / "local/postclose_chain.env").write_text("POSTCLOSE_V3_POST_CMD=''\n", encoding="utf-8")
+    r = _chain(tmp_path, "close", "--date", T)
+    assert r.rc == 0, r.out + r.log
+    assert r.call("deliver").endswith("--send")
+    v3 = r.call("v3_post.sh")
+    assert "--shadow" not in v3 and "--v3-post-cmd" not in v3
+    assert "local/postclose_chain.env" in r.log
+
+
 @pytest.mark.parametrize("mode", ["close", "refill", "morning"])
 def test_in_place_without_send_is_refused(tmp_path: Path, mode: str) -> None:
     """NIT — 제자리 반영인데 발송이 꺼져 있으면 보내지 않은 점수가 v3 에 들어간다 — rc 5 로 거부(crit),

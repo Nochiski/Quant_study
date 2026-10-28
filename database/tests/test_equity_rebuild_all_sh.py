@@ -26,7 +26,8 @@ if [ "$1" = "-" ]; then
   code=$(cat)
   if [ -n "${RC_BEFORE:-}" ]; then exit "$RC_BEFORE"; fi
   shift
-  exec "$REAL_PY" - "$@" <<<"$code"
+  # 스크립트의 LC_ALL=C 를 풀어 준다 — 개발 venv 의 편집 설치 .pth 에 비ASCII 경로가 있으면 C 로캘 파이썬이 시작 때 죽는다
+  LC_ALL=C.UTF-8 exec "$REAL_PY" - "$@" <<<"$code"
 fi
 if [ "$1" = "scripts/equity_manifest_row.py" ]; then echo "1:x"; exit 0; fi
 if [ "$1" = "-m" ] && [ "$2" = "equity" ]; then

@@ -39,7 +39,8 @@ backfill_end 이고 시작은 달력 첫 세션이다(④만 사건일부터).
 **이 모듈 하나**다 — `load_adapter(engine_src)` 가 그 경로를 `sys.path` 에 얹고 워크벤치 facade 만
 import 한다. 기본 경로는 `<repo>/backend/src`(이 파일에서 4단계 위) 또는 `$QL_ENGINE_SRC`. 서버처럼
 backend 체크아웃이 없는 곳은 `--engine-src` 로 준다(`deploy.sh` 가 `_engine/strategy_workbench` 를
-민다). facade 는 import 때 제3자 패키지를 읽지 않고 어댑터가 duckdb 만 지연 import 한다. 엔진이
+민다). facade 는 import 때 numpy 를 읽고(어댑터 끝의 `_raw_panel` 이 맨 위에서 import 한다) 어댑터가
+duckdb 를 지연 import 한다 — 서버 `.venv` 에 둘 다 있어야 한다. 엔진이
 없거나 어댑터를 세울 수 없으면(필수 테이블 미빌드 등) skip 이 아니라 예외다(GATES §9 A13: 같은
 모노레포라 `skip(engine_absent)` 를 두지 않는다). 사건은 카탈로그 뷰 `v_unfolded_event` 를 함께
 읽어 catalog 단계 뒤에 돈다.

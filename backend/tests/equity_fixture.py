@@ -326,6 +326,14 @@ def fin_std_table(rows: list[dict[str, object]]) -> pa.Table:
     for account in FIN_Q4_ACCOUNTS:
         key = f"{account}_q4_derived"
         columns[key] = _dec4([r.get(key) for r in rows])  # pyright: ignore[reportArgumentType]  # reason: 위와 같다
+    # 4분기 공개일(구성 행 max)과 누계 칸 분기 표식 — 뷰가 4분기를 fin_std 에서 읽는다
+    # (원장 e1.32.0 연구 DB S1-d)
+    columns["q4_derived_available_date"] = pa.array(
+        [r.get("q4_derived_available_date") for r in rows], type=pa.date32()
+    )
+    columns["flow_3m_is_ytd"] = pa.array(
+        [r.get("flow_3m_is_ytd", False) for r in rows], type=pa.bool_()
+    )
     columns["available_date"] = pa.array([r["available_date"] for r in rows], type=pa.date32())
     columns["available_basis"] = pa.array(["derived"] * len(rows), type=pa.string())
     return pa.table(columns)
@@ -771,10 +779,12 @@ WB_FIN_RCEPT = {  # (corp, period_end) → 접수번호. `disclosure_version` �
     ("C36220", date(2023, 12, 31)): "R36220FY",
 }
 # 005930 2023 4분기 = 연간 − 3분기 누계. 연간 460 = 100 + 110 + 120 + 130 이라 TTM 이 연간과 같다.
-# 2022 4분기는 뷰가 연간 − 2022 1~3분기로 세운다(매출 400 − 305 = 95 · 순이익 80 − 62 = 18 ·
-# 영업현금 누계 90 − 70 = 20). 그래서 2023 3분기 행에서도 TTM(2022 4분기 ~ 2023 3분기)이 선다 —
-# 매출 95 + 100 + 110 + 120 = 425, 순이익 18 + 20 + 22 + 24 = 84, 영업현금 20 + 25 + 35 + 40 = 120.
-# `*_q4_derived`·`cf_operating_q` 는 fin_std 파생 블록이고 뷰는 읽지 않는다(#227 리뷰 P1-1·P1-2).
+# 2022 4분기는 뷰가 fin_std 4분기(`*_q4_derived` — 연간 − 3분기 9개월 누계, 원장 e1.32.0
+# 연구 DB S1-d)를 그 공개일(`q4_derived_available_date`)부터 읽는다(매출 400 − 305 = 95 ·
+# 순이익 80 − 62 = 18). 영업현금 분기값은 뷰가 누계 차로 세운다(90 − 70 = 20,
+# `cf_operating_q` 는 읽지 않는다). 그래서 2023 3분기 행에서도 TTM(2022 4분기 ~ 2023 3분기)이
+# 선다 — 매출 95 + 100 + 110 + 120 = 425, 순이익 18 + 20 + 22 + 24 = 84,
+# 영업현금 20 + 25 + 35 + 40 = 120.
 WB_FIN_ROWS: list[dict[str, object]] = [
     {"corp_code": "C05930", "period_end": date(2022, 3, 31), "report_code": "11013",
      "bsns_year": "2022", "rcept_no": "R05930Q1_22", "available_date": date(2022, 5, 16),
@@ -797,7 +807,8 @@ WB_FIN_ROWS: list[dict[str, object]] = [
      "total_asset": 990, "total_liab": 395, "total_equity": 595,
      "cf_operating_ytd": 90, "cf_operating_q": 20,
      "revenue_q4_derived": 95, "gross_profit_q4_derived": 38,
-     "op_profit_q4_derived": 28, "net_income_q4_derived": 18},
+     "op_profit_q4_derived": 28, "net_income_q4_derived": 18,
+     "q4_derived_available_date": date(2023, 3, 14)},
     {"corp_code": "C05930", "period_end": date(2023, 3, 31), "report_code": "11013",
      "bsns_year": "2023", "rcept_no": "R05930Q1", "available_date": date(2023, 5, 15),
      "revenue": 100, "gross_profit": 40, "op_profit": 30, "net_income": 20,
@@ -819,7 +830,8 @@ WB_FIN_ROWS: list[dict[str, object]] = [
      "total_asset": 1030, "total_liab": 415, "total_equity": 615,
      "cf_operating_ytd": 150, "cf_operating_q": 50,
      "revenue_q4_derived": 130, "gross_profit_q4_derived": 52,
-     "op_profit_q4_derived": 39, "net_income_q4_derived": 26},
+     "op_profit_q4_derived": 39, "net_income_q4_derived": 26,
+     "q4_derived_available_date": date(2024, 1, 4)},
     # 000660 — 같은 grain 에 CFS·OFS 2행. v_fin_latest 는 CFS 를 고른다(OFS 값은 나오면 안 된다).
     {"corp_code": "C00660", "period_end": date(2023, 6, 30), "report_code": "11012",
      "bsns_year": "2023", "rcept_no": "R00660Q2", "available_date": date(2023, 8, 14),

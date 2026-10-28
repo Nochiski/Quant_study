@@ -24,7 +24,8 @@ _FIN_COLUMNS = (
     "total_equity DECIMAL(24,4), cf_operating_ytd DECIMAL(24,4), cf_operating_q DECIMAL(24,4), "
     "revenue_q4_derived DECIMAL(24,4), gross_profit_q4_derived DECIMAL(24,4), "
     "op_profit_q4_derived DECIMAL(24,4), net_income_q4_derived DECIMAL(24,4), "
-    "available_date DATE, available_basis VARCHAR, vintage_kind VARCHAR"
+    "available_date DATE, available_basis VARCHAR, vintage_kind VARCHAR, "
+    "q4_derived_available_date DATE, flow_3m_is_ytd BOOLEAN"
 )
 _REPORT_BY_MONTH = {3: "11013", 6: "11012", 9: "11014", 12: "11011"}
 _AS_OF = date(2023, 12, 29)
@@ -36,13 +37,13 @@ def _row(corp: str, period_end: date, available: date) -> tuple[object, ...]:
     return (corp, period_end, report, "CFS", str(period_end.year), f"R{corp}{period_end}",
             None, "KRW", None, "standard", None, None, None,
             period_end.year * 100 + period_end.month, None, None, None, None,
-            None, None, None, None, available, "derived", "api_restated")
+            None, None, None, None, available, "derived", "api_restated", None, False)
 
 
 def _connect(rows: list[tuple[object, ...]]) -> duckdb.DuckDBPyConnection:
     con = duckdb.connect()
     con.execute(f"CREATE TEMP TABLE fin_std ({_FIN_COLUMNS})")
-    con.executemany(f"INSERT INTO fin_std VALUES ({', '.join('?' * 25)})", rows)
+    con.executemany(f"INSERT INTO fin_std VALUES ({', '.join('?' * 27)})", rows)
     con.execute("CREATE TEMP TABLE disclosure_version (rcept_no VARCHAR, first_correction_dt DATE)")
     start = date(2021, 1, 1)
     days = [start + timedelta(days=n) for n in range(365 * 3)]

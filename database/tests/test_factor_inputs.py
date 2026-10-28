@@ -1187,6 +1187,30 @@ def test_fin_summary_q4_derived_row_dates_from_the_derived_values(tmp_path: Path
             *first3, ("2025/12", 800_000, 110_000, 90_000, 200_000, q4_day)], d
 
 
+def test_fin_summary_q4_row_stays_null_when_equity_gated_the_q4(tmp_path: Path) -> None:
+    """equity e1.32.0 연구 DB S1-d 회귀(fi SQL 불변): equity 가 4분기를 게이트로 비운 사업보고서(같은 기준인데 매출
+    4분기 < 0 → 손익 4분기 전부 NULL, 구성 공개일 `q4_derived_available_date` 는 그대로)는 4Q 분기 행의 매출·영업이익·
+    순이익·매출총이익이 NULL 이다 — 0 이나 사업보고서 연간 값으로 채우지 않는다. available_date 규칙(T-43 — 파생
+    공개일 ≤ asof 면 max(사업보고서, 파생 공개일))과 1~3Q 행은 그대로다."""
+    y = dt.date
+    q4_day = FETCH[2]
+    gated = dict.fromkeys(("revenue_q4_derived", "op_profit_q4_derived", "net_income_q4_derived",
+                           "gross_profit_q4_derived"))
+    fin = [_fin_std_row(E, y(2025, 3, 31), "11013", y(2025, 5, 15), scale=0.25),
+           _fin_std_row(E, y(2025, 6, 30), "11012", y(2025, 8, 14), scale=0.26),
+           _fin_std_row(E, y(2025, 9, 30), "11014", y(2025, 11, 14), scale=0.27),
+           _fin_std_row(E, y(2025, 12, 31), "11011", y(2026, 3, 20),
+                        q4_derived_available_date=q4_day, **gated)]
+    roots = make_roots(tmp_path / "src", extra={"fin_std": fin})
+    sql = ("SELECT period, revenue, op, ni, gross_profit, available_date FROM _fi_fin_summary "
+           f"WHERE ticker = '{E}' AND period_type = 'quarter' ORDER BY period")
+    got = _fin_summary_at(roots, D, sql)
+    assert [r[0] for r in got] == ["2025/03", "2025/06", "2025/09", "2025/12"]
+    assert got[2] == ("2025/09", round(70 * 0.27 * 1e4), round(10 * 0.27 * 1e4),
+                      round(40 * 0.27 * 1e4), round(50 * 0.27 * 1e4), y(2025, 11, 14))
+    assert got[3] == ("2025/12", None, None, None, None, q4_day)
+
+
 def test_fg1_wise_income_statement_ratio_on_the_full_tree(built) -> None:
     """FG1 손익 비율(7-2 D7-8, 기록형) — 기본 합성 트리에서 손익(op·ni)이 있는 eligible 은
     per·eps 가 있는 eligible 과 같은 9곳(eligible 10 중 C 는 3월 결산이라 연간 행이 없다)."""

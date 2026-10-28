@@ -250,7 +250,7 @@ asof = D' 다(§2-1). 창의 끝(D 포함 550 달력일 · D 까지 60 세션)�
 | `fi_credit` | `credit_daily.whol_loan_rmnd_stcn_shr`·`whol_loan_rmnd_rate_pct` | D 까지 60 세션, `available_date ≤ D` | 주 · % · `available_date` = 그날 + 3 세션(KIS 실입수, equity FieldProfile) |
 | `fi_consensus` | `stg_consensus_matrix`(c1050001 T4) — **한시 예외**(§7) | 신선·유예 종목의 마지막 신선일 판 × 결산기 3 × horizon cur/1w/1m/3m | 억원·원·배·% 원값(eps·bps 는 정수 — compat 과 같다). 판에 있는 (종목, 결산기)마다 네 horizon 행을 값이 NULL 이어도 만든다 |
 | `fi_consensus_annual` (v2 전용) | `stg_consensus_annual`(WISE c1050001 T2Y — v2 원천) | 종목별 fetched_date ≤ D(장 마감 판은 asof=D', §2-1) **최신 한 판**, 전년·당해·차년 12월기(Y−1/12 · Y/12 · Y+1/12, Y = D 의 연도 — 장 마감 판은 T 의 연도), 추정 E·확정 A 둘 다 | 억원·원·배 원값(eps 정수 — compat `consensus_annual` 과 같다). 원천 행이 있으면 값이 전부 NULL 이어도 싣는다(v2 에게는 행 존재가 뜻이 있다) |
-| `fi_fin_summary` | 연간: `stg_fin_wise`(WISE cF3002·cF4002, 계정명+최상위 선택 DQ-6 — **(종목, ep) 단위** fetched_date ≤ D(장 마감 판은 asof=D', §2-1) 최신 판, fi1.4.0) + `fin_std`(사업보고서, 연결 우선, PIT) + `dividend_event`(보통주 dps) · 분기: `fin_std`(1Q·반기·3Q 3개월 값, 4Q = 사업보고서 − 1~3Q) | 연간 최신 2기 · 분기 최신 5기 | 금액 **정수 억원**(compat 식 그대로) · 비율 % · dps 원 |
+| `fi_fin_summary` | 연간: `stg_fin_wise`(WISE cF3002·cF4002, 계정명+최상위 선택 DQ-6 — **(종목, ep) 단위** fetched_date ≤ D(장 마감 판은 asof=D', §2-1) 최신 판, fi1.4.0) + `fin_std`(사업보고서, 연결 우선, PIT) + `dividend_event`(보통주 dps) · 분기: `fin_std`(1Q·반기·3Q 3개월 값, 4Q = `fin_std.<계정>_q4_derived` — 사업보고서 − 3분기 9개월 누계, equity e1.32.0 연구 DB S1-d) | 연간 최신 2기 · 분기 최신 5기 | 금액 **정수 억원**(compat 식 그대로) · 비율 % · dps 원 |
 
 `fi_consensus` 와 `fi_consensus_annual` 을 나눈 이유(계약 09-29 W1-d): 같은 기·같은 항목이어도
 v3 원천(매트릭스 T4 · cF3002)과 v2 원천(c1050001 T2Y)의 값이 다르다(09-28 골든: 당해 추정 op 318 ·
@@ -278,10 +278,12 @@ compat 은 한 기에 E 하나(E 우선)만 남기지만 이 표는 E·A 를 둘
   fs_basis)이 조용히 빈다(fi1.2.0 까지의 쿼리). 한쪽 ep 가 그날 수집되지 않았으면 그 ep 의 직전 판을
   잇는다(결손 자체는 WISE 부분 실패 알림 — N-30 ③ — 이 따로 알린다). compat `financial_summary` 도 같은 규칙.
 - `available_date` = 행을 이룬 원천의 max(WISE fetched_date, DART·배당 available_date). 연간 행의
-  WISE 날짜는 두 ep 판 중 늦은 날, 분기 WISE 행은 Q:IS 판 날짜다. DART 4Q 행(사업보고서 − 1~3Q)은
-  파생값(`q4_derived_available_date` ≤ asof)을 실었으면 max(사업보고서 available_date,
-  `q4_derived_available_date`), 못 실었으면(값 NULL) 사업보고서 날짜다(fi1.8.0, 컷오버 F-1 · T-43 —
-  1~3Q 정정이 뒤에 들어오면 파생값이 그날 처음 선다). stage 2.7.0 부터 WISE fetched_date 는
+  WISE 날짜는 두 ep 판 중 늦은 날, 분기 WISE 행은 Q:IS 판 날짜다. DART 4Q 행(`fin_std` 4분기 파생 —
+  사업보고서 − 3분기 9개월 누계)은 파생값(`q4_derived_available_date` ≤ asof)을 실었으면 max(사업보고서
+  available_date, `q4_derived_available_date`), 못 실었으면(값 NULL) 사업보고서 날짜다(fi1.8.0, 컷오버 F-1 ·
+  T-43 — 1~3Q 정정이 뒤에 들어오면 파생값이 그날 처음 선다). equity 가 매출 기준 불일치·음수 매출로 4분기를
+  비운 행(e1.32.0 S1-d, 값 NULL · 파생 공개일은 그대로)은 날짜 규칙이 같아 max 쪽이고 값은 NULL 이다. fi 는
+  `flow_3m_is_ytd`(반기·3분기 '3개월' 칸이 누계)를 읽지 않아 그런 분기 행은 원 값 그대로 실린다(fi SQL 불변). stage 2.7.0 부터 WISE fetched_date 는
   '그 원문을 처음 본 날'(그 전엔 '마지막으로 확인한 날')이라 원문이 그대로인 종목은 D 보다 이르다 —
   '알게 된 날' 뜻은 그대로이고 ≤ D(장 마감 판은 asof=D', §2-1) 다(FG1). 엔진은 읽지 않는다.
 - 연간 매출은 분기와 같은 계정(최상위 '매출액(수익)' → 보험 '영업수익' → 은행·증권·금융지주

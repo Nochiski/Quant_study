@@ -13,7 +13,8 @@
 손계산(삼성전자 2018 사업보고서 20190401004781, 단위 원):
   매출 243,771,415,000,000 · 영업이익 58,886,669,000,000 · 매출총이익 111,377,004,000,000 ·
   순이익 44,344,857,000,000 · 자산총계 339,357,244,000,000.
-  4분기 파생 영업이익 = 58,886,669 − (15,642,170 + 14,869,035 + 17,574,865) = 10,800,599(백만원).
+  4분기 파생 영업이익 = 58,886,669 − 3분기 9개월 누계 48,086,070(= 15,642,170 + 14,869,035 + 17,574,865)
+  = 10,800,599(백만원).
 """
 from __future__ import annotations
 
@@ -202,7 +203,9 @@ def test_손익은_분기_3개월_사업보고서_12개월(rows: dict[str, dict[
     assert q1 + q2 == Decimal("30511205000000")
 
 
-def test_4분기_파생은_연간에서_3분기를_뺀다(rows: dict[str, dict[str, object]]) -> None:
+def test_4분기_파생은_연간에서_3분기_누계를_뺀다(rows: dict[str, dict[str, object]]) -> None:
+    """4분기 = 연간 − 3분기 보고서 9개월 누계(e1.32.0 연구 DB S1-d). 삼성전자 2018 은 재분류가 없어 3분기 누계
+    (원장 `thstrm_add_amount` 48,086,070 · 184,506,365 백만원)가 1~3분기 3개월 값 합과 같다 — 옛 식과 값이 같다."""
     r = rows[SEC]
     q_sum = (_num(rows[SEC_1Q]["op_profit"]) + _num(rows[SEC_2Q]["op_profit"])
              + _num(rows[SEC_3Q]["op_profit"]))
@@ -211,9 +214,12 @@ def test_4분기_파생은_연간에서_3분기를_뺀다(rows: dict[str, dict[s
     assert _num(r["revenue_q4_derived"]) == Decimal("59265050000000")
     assert r["q4_derived_n_rows"] == 4
     assert r["q4_derived_available_date"] == date(2019, 4, 1)
+    assert r["q4_derived_basis"] == "ytd_9m"
     # 분기 행에는 q4 파생이 붙지 않는다
     assert rows[SEC_2Q]["op_profit_q4_derived"] is None
     assert rows[SEC_2Q]["q4_derived_n_rows"] is None
+    assert rows[SEC_2Q]["q4_derived_basis"] is None
+    assert rows[SEC_2Q]["flow_3m_is_ytd"] is False
 
 
 def test_구성_분기가_모자라면_부분합을_만들지_않는다(rows: dict[str, dict[str, object]]) -> None:
@@ -423,15 +429,18 @@ def _stage_available(rcept: str, rcept_dt: date) -> date:
 def _fin_row(corp: str, year: str, reprt: str, rcept: str, *, sj: str, account_id: str,
              account_nm: str, amount: float | None, is_krw: bool = True, currency: str = "KRW",
              ord_: int = 1, observed: date = OBSERVED,
-             account_std: bool = True) -> dict[str, object]:
+             account_std: bool = True, add_amount: float | None = None) -> dict[str, object]:
     # `account_std` = stage 의 `account_id <> '-표준계정코드 미사용-'`(rules_dart). 비표준 이름
     # 폴백(capex 자산별 합)을 시험하려면 이 축을 손으로 내려야 한다.
     # `account_nm_norm` 도 stage 파생 컬럼(T-E)이라 같은 규칙(공백 제거)으로 여기서 만든다.
+    # `add_amount` = 원천 누계 칸 `thstrm_add_amount`(분기 손익의 연초 누계 — 4분기 파생의 9개월 누계 축,
+    # e1.32.0 연구 DB S1-d). 사업보고서·재무상태표·현금흐름표 줄은 원천에서도 비어 있다.
     return {"corp_code": corp, "bsns_year": year, "reprt_code": reprt, "fs_div": "CFS",
             "sj_div": sj, "account_id": account_id, "account_detail": "",
             "ord": ord_, "account_nm": account_nm,
             "account_nm_norm": re.sub(r"\s+", "", account_nm),
-            "thstrm_amount": amount, "account_std": account_std, "is_krw": is_krw,
+            "thstrm_amount": amount, "thstrm_add_amount": add_amount,
+            "account_std": account_std, "is_krw": is_krw,
             "currency": currency, "rcept_no": rcept, "observed_date": observed}
 
 
@@ -494,7 +503,10 @@ def _hand_build(make_stage_tree, tmp_path: Path, corps: list[tuple[str, str | No
                       "period_to": pt}
                      for r, _c, _y, _rc, _dt, pt, ac in reports],
                     partition_class="receipt_axis")
-    make_stage_tree(tmp_path, "stg_fin", fin, partition_class="receipt_axis")
+    # 누계 칸은 대부분의 손 트리에서 전부 비어 있다 — 값으로 추론하면 VARCHAR 라 `thstrm_amount`(float)와
+    # 같은 수치 타입으로 못박는다
+    make_stage_tree(tmp_path, "stg_fin", fin, partition_class="receipt_axis",
+                    types={"thstrm_add_amount": "DOUBLE"})
 
     equity_root = tmp_path / "equity"
     base = _with(_seed(), **bl)
@@ -1765,32 +1777,33 @@ def _march_fy(rcept_dt: dict[str, date] | None = None,
     2021 이다(실원장 비12월 결산 전부 같은 규칙). 같은 회계연도의 분기는 2020-06·09·12 다.
     """
     corp = "00000009"
-    # (rcept, 연도, API 보고서, 접수일, 기간 말일, 문서 종류, 기간 시작, 영업이익, 영업현금 누계)
+    # (rcept, 연도, API 보고서, 접수일, 기간 말일, 문서 종류, 기간 시작, 영업이익, 영업이익 누계,
+    #  영업현금 누계). 영업이익 누계는 분기 보고서의 원천 누계 칸(`thstrm_add_amount`) — 사업보고서는 비어 있다.
     spec = [
         ("20200814000901", "2020", "11013", date(2020, 8, 14), date(2020, 6, 30), "11013",
-         date(2020, 4, 1), 10.0, 5.0),
+         date(2020, 4, 1), 10.0, 10.0, 5.0),
         ("20201113000901", "2020", "11012", date(2020, 11, 13), date(2020, 9, 30), "11012",
-         date(2020, 4, 1), 11.0, 11.0),
+         date(2020, 4, 1), 11.0, 21.0, 11.0),
         ("20210215000901", "2020", "11014", date(2021, 2, 15), date(2020, 12, 31), "11013",
-         date(2020, 4, 1), 12.0, 18.0),
+         date(2020, 4, 1), 12.0, 33.0, 18.0),
         ("20210621000901", "2021", "11011", date(2021, 6, 21), date(2021, 3, 31), "11011",
-         date(2020, 4, 1), 46.0, 30.0),
+         date(2020, 4, 1), 46.0, None, 30.0),
         ("20210813000901", "2021", "11013", date(2021, 8, 13), date(2021, 6, 30), "11013",
-         date(2021, 4, 1), 20.0, 7.0),
+         date(2021, 4, 1), 20.0, 20.0, 7.0),
         ("20211115000901", "2021", "11012", date(2021, 11, 15), date(2021, 9, 30), "11012",
-         date(2021, 4, 1), 21.0, 15.0),
+         date(2021, 4, 1), 21.0, 41.0, 15.0),
         ("20220214000901", "2021", "11014", date(2022, 2, 14), date(2021, 12, 31), "11013",
-         date(2021, 4, 1), 22.0, 24.0),
+         date(2021, 4, 1), 22.0, 63.0, 24.0),
     ]
     reports = [(r, corp, y, rc, (rcept_dt or {}).get(r, dt), pt, ac)
-               for r, y, rc, dt, pt, ac, _f, _o, _c in spec]
-    fin = [row for r, y, rc, _dt, _pt, _ac, _f, op, cf in spec for row in (
+               for r, y, rc, dt, pt, ac, _f, _o, _y, _c in spec]
+    fin = [row for r, y, rc, _dt, _pt, _ac, _f, op, op_ytd, cf in spec for row in (
         _fin_row(corp, y, rc, r, sj="IS", account_id="ifrs-full_OperatingIncomeLoss",
-                 account_nm="영업이익", amount=op),
+                 account_nm="영업이익", amount=op, add_amount=op_ytd),
         _fin_row(corp, y, rc, r, sj="CF",
                  account_id="ifrs-full_CashFlowsFromUsedInOperatingActivities",
                  account_nm="영업활동현금흐름", amount=cf, ord_=2))]
-    return [(corp, "03")], reports, fin, {r: f for r, *_x, f, _o, _c in spec}
+    return [(corp, "03")], reports, fin, {r: f for r, *_x, f, _o, _y, _c in spec}
 
 
 def test_비12월_결산은_같은_회계연도_분기로_4분기와_현금흐름_분기값을_만든다(make_stage_tree,
@@ -2104,3 +2117,169 @@ def test_대차_항등식이_1퍼센트_넘게_어긋나면_기록만_한다(mak
     g = _eg3_on(tmp_path, r, "100 AS total_asset, 50 AS total_liab, 48 AS total_equity")
     assert g.status is GateStatus.PASS, g.detail
     assert g.metrics["n_bs_identity_gap_gt_1pct"] == 1
+
+
+# ── 4분기 = 연간 − 3분기 9개월 누계 (e1.32.0 연구 DB S1-d) ─────────────────────────────────────────
+# 사업보고서 행의 4분기 = 연간 − 같은 회계연도 3분기 보고서의 9개월 누계(그 행의 3개월 값을 고른 바로 그 줄들의
+# `thstrm_add_amount`). 1분기·반기 '3개월' 칸을 더하던 옛 식은 3분기가 재분류로 다시 적은 9개월과 기준이 섞였다.
+# 연간과 3분기의 매출 기준이 다르면 매출 4분기만, 기준이 같은데 매출 4분기 < 0 이면 그 행의 손익 4분기를 전부
+# 비우고 `q4_derived_basis` 가 사유를 남긴다. 반기·3분기 '3개월' 칸이 누계인 분기 행은 `flow_3m_is_ytd` 표식.
+_FY_CORP = "00000031"
+_FY_ANNUAL = "20260310003101"
+_FY_HALF = "20250814003101"
+# 보고서 → (rcept, 접수일, 기간 말일, 문서 종류) — 12월 결산 2025 회계연도. 3분기 문서는 1분기와 같은 11013 이고
+# 개월 수(9)가 11014 로 가른다.
+_FY_REPORTS: dict[str, tuple[str, date, date, str]] = {
+    "11013": ("20250515003101", date(2025, 5, 15), date(2025, 3, 31), "11013"),
+    "11012": (_FY_HALF, date(2025, 8, 14), date(2025, 6, 30), "11012"),
+    "11014": ("20251114003101", date(2025, 11, 14), date(2025, 9, 30), "11013"),
+    "11011": (_FY_ANNUAL, date(2026, 3, 10), date(2025, 12, 31), "11011"),
+}
+_IS_LINE: dict[str, tuple[str, str]] = {
+    "revenue": ("ifrs-full_Revenue", "매출액"),
+    "op_profit": ("ifrs-full_OperatingIncomeLoss", "영업이익"),
+    "net_income": ("ifrs-full_ProfitLoss", "당기순이익"),
+    "interest": ("ifrs-full_RevenueFromInterest", "이자수익"),      # 금융업 매출 대체(banking_gross)
+    "fee": ("ifrs-full_FeeAndCommissionIncome", "수수료수익"),
+}
+_FyLines = dict[str, list[tuple[str, float | None, float | None]]]
+
+
+def _fy_build(make_stage_tree, tmp_path: Path, lines: _FyLines
+              ) -> tuple[build.BuildResult, dict[str, dict[str, object]]]:
+    """한 법인의 2025 회계연도 — `lines` = {API 보고서: [(계정 키, 3개월(연간) 값, 누계 칸)]}. 키에 있는 보고서만
+    싣는다. (빌드 결과, 접수번호 → 산출 행)."""
+    reports = [(rc_no, _FY_CORP, "2025", reprt, filed, pt, ac)
+               for reprt, (rc_no, filed, pt, ac) in _FY_REPORTS.items() if reprt in lines]
+    fin = [_fin_row(_FY_CORP, "2025", reprt, _FY_REPORTS[reprt][0], sj="IS",
+                    account_id=_IS_LINE[key][0], account_nm=_IS_LINE[key][1], amount=amount,
+                    add_amount=ytd, ord_=i + 1)
+           for reprt, items in lines.items() for i, (key, amount, ytd) in enumerate(items)]
+    r = _hand_build(make_stage_tree, tmp_path, [(_FY_CORP, "12")], reports, fin,
+                    (reports[0][0], "period_end_basis", "document"))
+    assert r.ok and r.out_dir is not None, [(g.name, g.status.value, g.detail) for g in r.gates]
+    return r, {str(x["rcept_no"]): x for x in _rows(r.out_dir)}
+
+
+def test_4분기는_연간에서_3분기_누계를_뺀다(make_stage_tree, tmp_path: Path) -> None:
+    """동진쎄미켐 FY2025 CFS 매출 모양(억원) — 3분기 보고서가 9개월을 새 기준으로 다시 적어 누계 8,849 가 1분기·반기·
+    3분기 '3개월' 칸 합 10,448 과 다르다. 4분기 = 11,941 − 8,849 = 3,092(WISE 3,092)이지 옛 식 11,941 − 10,448
+    = 1,493 이 아니다."""
+    _r, rows = _fy_build(make_stage_tree, tmp_path, {
+        "11013": [("revenue", 3681.0, 3681.0)],
+        "11012": [("revenue", 3768.0, 7449.0)],
+        "11014": [("revenue", 2999.0, 8849.0)],
+        "11011": [("revenue", 11941.0, None)]})
+    annual = rows[_FY_ANNUAL]
+    assert _num(annual["revenue_q4_derived"]) == Decimal(3092)
+    assert annual["q4_derived_basis"] == "ytd_9m"
+    assert annual["q4_derived_n_rows"] == 4
+    assert annual["q4_derived_available_date"] == date(2026, 3, 10)
+
+
+def test_같은_기준에서_매출_4분기가_음수면_손익_4분기를_전부_비운다(make_stage_tree,
+                                                                tmp_path: Path) -> None:
+    """연간 매출 100 < 3분기 9개월 누계 130 — 3분기 뒤 사업보고서에서 사업을 중단영업으로 옮긴 회사(큐브엔터형).
+    매출 음수는 기준 단절 신호이고 같은 신호가 영업이익·순이익 4분기도 흔드므로 손익 4분기를 전부 비운다.
+    원 계정·구성 수는 그대로이고 비운 이유는 라벨이 말한다."""
+    _r, rows = _fy_build(make_stage_tree, tmp_path, {
+        "11013": [("revenue", 40.0, 40.0), ("op_profit", 4.0, 4.0), ("net_income", 3.0, 3.0)],
+        "11012": [("revenue", 45.0, 85.0), ("op_profit", 5.0, 9.0), ("net_income", 4.0, 7.0)],
+        "11014": [("revenue", 45.0, 130.0), ("op_profit", 6.0, 15.0), ("net_income", 5.0, 12.0)],
+        "11011": [("revenue", 100.0, None), ("op_profit", 20.0, None), ("net_income", 16.0, None)]})
+    annual = rows[_FY_ANNUAL]
+    assert annual["revenue_q4_derived"] is None
+    assert all(annual[c] is None for c in rules_s12.Q4_COLUMNS)
+    assert annual["q4_derived_basis"] == "negative_revenue"
+    assert annual["q4_derived_n_rows"] == 4
+    assert _num(annual["revenue"]) == Decimal(100)
+
+
+def test_영업손실_4분기는_그대로_둔다(make_stage_tree, tmp_path: Path) -> None:
+    """과잉 방지(회귀) — 매출 4분기가 양수면 영업이익 4분기 음수는 실제 4분기 손실이다(실원장 영업이익 4분기의 36%).
+    부호만 보고 지우지 않는다."""
+    _r, rows = _fy_build(make_stage_tree, tmp_path, {
+        "11013": [("revenue", 100.0, 100.0), ("op_profit", 8.0, 8.0)],
+        "11012": [("revenue", 100.0, 200.0), ("op_profit", 8.0, 16.0)],
+        "11014": [("revenue", 100.0, 300.0), ("op_profit", 9.0, 25.0)],
+        "11011": [("revenue", 410.0, None), ("op_profit", 10.0, None)]})
+    annual = rows[_FY_ANNUAL]
+    assert _num(annual["op_profit_q4_derived"]) == Decimal(-15)
+    assert _num(annual["revenue_q4_derived"]) == Decimal(110)
+
+
+def test_연간과_3분기_매출_기준이_다르면_매출_4분기만_비운다(make_stage_tree,
+                                                            tmp_path: Path) -> None:
+    """메리츠금융지주형 — 연간은 `banking_gross`(이자수익 + 수수료수익), 3분기는 `standard`. 기준이 다른 두 매출의
+    차는 4분기 매출이 아니다. 영업이익은 매출 기준과 무관해 그대로 선다."""
+    _r, rows = _fy_build(make_stage_tree, tmp_path, {
+        "11013": [("revenue", 100.0, 100.0), ("op_profit", 10.0, 10.0)],
+        "11012": [("revenue", 100.0, 200.0), ("op_profit", 10.0, 20.0)],
+        "11014": [("revenue", 100.0, 300.0), ("op_profit", 10.0, 30.0)],
+        "11011": [("interest", 300.0, None), ("fee", 100.0, None), ("op_profit", 45.0, None)]})
+    annual = rows[_FY_ANNUAL]
+    assert annual["revenue_basis"] == "banking_gross"
+    assert annual["revenue_q4_derived"] is None
+    assert _num(annual["op_profit_q4_derived"]) == Decimal(15)
+    assert annual["q4_derived_basis"] == "revenue_basis_mismatch"
+
+
+@pytest.mark.parametrize("fee_ytd, expect", [(90.0, Decimal(130)), (None, None)],
+                         ids=["누계_다_있음", "한_줄_누계_없음"])
+def test_합산_기준_매출은_누계도_합산하고_한_줄이라도_비면_비운다(make_stage_tree, tmp_path: Path,
+                                                                fee_ytd: float | None,
+                                                                expect: Decimal | None) -> None:
+    """금융업 대체(`banking_gross`)는 줄 합이다 — 9개월 누계도 같은 줄들의 누계를 더한다(이자 300 + 수수료 90).
+    수수료수익 줄의 누계가 비었는데 이자 누계만 빼면 4분기가 수수료 9개월만큼 부푼다(부분합) — 비운다."""
+    _r, rows = _fy_build(make_stage_tree, tmp_path, {
+        "11013": [("interest", 100.0, 100.0), ("fee", 30.0, 30.0)],
+        "11012": [("interest", 100.0, 200.0), ("fee", 30.0, 60.0)],
+        "11014": [("interest", 100.0, 300.0), ("fee", 30.0, fee_ytd)],
+        "11011": [("interest", 400.0, None), ("fee", 120.0, None)]})
+    annual = rows[_FY_ANNUAL]
+    assert annual["revenue_basis"] == "banking_gross"
+    assert (None if annual["revenue_q4_derived"] is None
+            else _num(annual["revenue_q4_derived"])) == expect
+    assert annual["q4_derived_basis"] == "ytd_9m"
+
+
+def test_반기_3개월_칸이_누계면_표식을_싣고_직전_보고서가_없으면_싣지_않는다(make_stage_tree,
+                                                                     tmp_path: Path) -> None:
+    """바이오비쥬 2026 반기형 — 반기 '3개월' 칸에 6개월 누계를 적었다(3개월 값 = 누계 ≠ 0, 같은 회계연도 1분기 있음).
+    값은 고치지 않고 `flow_3m_is_ytd` 만 싣는다(4분기는 9개월 누계 식이라 이 칸의 영향을 받지 않는다). 리츠처럼
+    반기만 내는 회사는 직전 보고서가 없어 3개월 = 누계가 정상이고 표식이 없다."""
+    _r, rows = _fy_build(make_stage_tree, tmp_path / "ytd", {
+        "11013": [("revenue", 50.0, 50.0)],
+        "11012": [("revenue", 100.0, 100.0)],
+        "11014": [("revenue", 60.0, 160.0)],
+        "11011": [("revenue", 220.0, None)]})
+    assert {k: rows[k]["flow_3m_is_ytd"] for k in rows} == {
+        "20250515003101": False, _FY_HALF: True, "20251114003101": False, _FY_ANNUAL: False}
+    assert _num(rows[_FY_ANNUAL]["revenue_q4_derived"]) == Decimal(60)
+    _r, reit = _fy_build(make_stage_tree, tmp_path / "reit", {"11012": [("revenue", 100.0, 100.0)]})
+    assert reit[_FY_HALF]["flow_3m_is_ytd"] is False
+
+
+@pytest.mark.parametrize("replace, metric", [
+    ("CASE WHEN report_code = '11011' THEN -1 END AS revenue_q4_derived",
+     "n_q4_negative_revenue"),
+    ("CASE WHEN report_code = '11011' THEN 'negative_revenue' END AS q4_derived_basis",
+     "n_q4_basis_label_conflict"),
+    ("CASE WHEN report_code = '11011' THEN 'revenue_basis_mismatch' END AS q4_derived_basis",
+     "n_q4_basis_label_conflict"),
+    ("CAST(NULL AS VARCHAR) AS q4_derived_basis", "n_q4_basis_label_conflict"),
+], ids=["negative_revenue_kept", "negative_label_values_kept", "mismatch_label_revenue_kept",
+        "label_missing"])
+def test_부정_매출_4분기_음수와_라벨이_NULL_모양과_어긋나면_EG3_가_잡는다(make_stage_tree, tmp_path: Path,
+                                                                      replace: str, metric: str) -> None:
+    """`.sql` 회귀를 심는다 — 음수 매출 4분기를 남기거나, 라벨은 비웠다고 말하는데 값이 남았거나, 성립한 4분기에
+    라벨이 없으면 EG3_fin_std 가 폐기한다."""
+    r, rows = _fy_build(make_stage_tree, tmp_path, {
+        "11013": [("revenue", 100.0, 100.0), ("op_profit", 10.0, 10.0)],
+        "11012": [("revenue", 100.0, 200.0), ("op_profit", 10.0, 20.0)],
+        "11014": [("revenue", 100.0, 300.0), ("op_profit", 10.0, 30.0)],
+        "11011": [("revenue", 420.0, None), ("op_profit", 45.0, None)]})
+    assert rows[_FY_ANNUAL]["q4_derived_basis"] == "ytd_9m"
+    g = _eg3_on(tmp_path, r, replace)
+    assert g.status is GateStatus.FAIL
+    assert g.metrics[metric] == 1

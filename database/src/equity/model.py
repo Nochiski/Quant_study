@@ -352,6 +352,10 @@ RULES_VERSION = "e1.32.0"                # BuildRecord.rules_version 에 실린�
 #          사슬의 원본 접수일로(링크가 확인된 정정만 — S1-b 승계와 같은 `date_check` 조건. 원본을 제때 낸 늦은 정정이
 #          돌아온다). 격리 행은 4분기·현금흐름 분기 파생에서도 빠진다.
 #          EG3 `n_total_asset_nonpositive`(불변식) · `n_bs_identity_gap_gt_1pct`(기록형).
+#          S1-d `fin_std` 4분기 = 연간 − 3분기 9개월 누계(3개월 값을 고른 그 줄들의 `thstrm_add_amount`, 성립 조건·
+#          공개일 축 불변) · 매출 기준 불일치면 매출 4분기만, 음수 매출 4분기면 손익 4분기 전부 NULL · 새 열
+#          `q4_derived_basis`·`flow_3m_is_ytd` · EG3 `n_q4_negative_revenue`·`n_q4_basis_label_conflict`. 카탈로그
+#          `v_fin_latest` 는 사업보고서 분기값을 fin_std 4분기로 읽고 누계 칸 분기를 품은 TTM 을 비운다(연간 행 TTM 불변).
 
 # 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a, 규약은 `stage.model.RULES_CHANGED`) — 판본을 올리면 한 줄을 더한다.
 # 그 표를 입력으로 읽는 하류 표는 적지 않는다(읽는 쪽이 `RULES[t].inputs` 를 따라 닫는다). 선언 시작은 e1.31.0 이다 —
@@ -362,8 +366,9 @@ RULES_VERSION = "e1.32.0"                # BuildRecord.rules_version 에 실린�
 RULES_CHANGED: dict[str, frozenset[str]] = {
     "e1.31.0": frozenset({"corp_event", "consensus_matrix", "consensus_annual", "fin_ratio_wise",
                           "dataset_profile", "factor_readiness"}),
-    # 연구 DB S1 묶음 — S1-b fin_std(정정 승계 값 판정) · S1-c 도 fin_std(값 품질 격리·원본 접수일 지연).
-    # 같은 판본의 뒤 PR(S1-d·e)이 표를 더한다.
+    # 연구 DB S1 묶음 — S1-b fin_std(정정 승계 값 판정) · S1-c 도 fin_std(값 품질 격리·원본 접수일 지연) ·
+    # S1-d 도 fin_std(4분기 9개월 누계 식·게이트·새 열 둘). 카탈로그 `v_fin_latest` 는 표가 아니라 선언 밖이다.
+    # 같은 판본의 뒤 PR(S1-e)이 표를 더한다.
     "e1.32.0": frozenset({"fin_std"}),
 }
 

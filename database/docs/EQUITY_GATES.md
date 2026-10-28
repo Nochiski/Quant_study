@@ -2890,3 +2890,34 @@ metrics 는 그대로 실린다(묶음 지표는 판정 밖).
 - **판 대 판 diff**: `docs/equity_diff/expect_e1_32_fin_std.json`(S1-b 몫 — 늦춰지면 자기 접수 stage 공개일, 앞당겨지면 rcept_dt
   보다 이름, 파생 공개일 둘은 양방향). 앞당겨진 행의 '값 증거 있음'은 stg_fin 을 읽어야 해 expect 술어로 쓸 수 없고 이 게이트가
   맡는다.
+
+## 16. 연구 DB S1-d — 4분기 = 연간 − 3분기 9개월 누계 (규칙 e1.32.0, 2026-10-28)
+
+플랜 `docs/plans/2026-10-28-research-db-s1.md` S1-d. 규칙의 정본은 `sql/fin_std.sql` 의 `val`(`v_ytd`)·`q4src`·`q4`·`ytd3m`·
+`q4gate` CTE 머리말이고, 여기에는 `EG3_fin_std` 의 4분기 축만 적는다.
+
+- **규칙**: `<계정>_q4_derived` = 연간 − 같은 회계연도 3분기 보고서의 9개월 누계(그 행의 3개월 값을 고른 바로 그 줄들의
+  `thstrm_add_amount` — `pick` 은 하나로 모일 때만, `sum`·`sum_abs` 는 한 줄이라도 비면 NULL). 성립 조건(1Q·반기·3Q 3개월 값 셋)·
+  `q4_derived_n_rows`·`q4_derived_available_date` 는 그대로라 `n_q4_partial_sum`·`n_q4_on_non_annual`·
+  `n_derived_available_before_row` 의 뜻이 바뀌지 않는다. 연간·3분기 `revenue_basis` 가 다르면 매출 4분기만, 같은데 매출
+  4분기 < 0 이면 손익 4분기 10계정 전부 NULL 이고 라벨 `q4_derived_basis` ∈ {`ytd_9m`, `revenue_basis_mismatch`,
+  `negative_revenue`}(`rules_s12.Q4_DERIVED_BASIS_VOCAB`)가 사유를 남긴다. 반기·3분기 '3개월' 칸이 누계인 분기 행은
+  `flow_3m_is_ytd` 표식(값은 고치지 않는다 — 카탈로그 `v_fin_latest` 가 그 분기를 품은 TTM 을 비운다).
+- **결함(옛 식)**: 4분기 = 재작성 연간 − 원래 공시 1~3분기 '3개월' 칸 합이라 3분기가 재분류로 다시 적은 9개월과 기준이
+  섞였고(P3 실측 매출 1,014행), 부호·기준 검사가 없어 음수 4분기 매출 261행이 TTM 140행에 번졌다(조용한 값 오류).
+
+| 게이트 축 | 술어 |
+|---|---|
+| `n_q4_negative_revenue`(폐기형, 0 필수) | `revenue_q4_derived < 0` — 같은 기준인데 음수면 `.sql` 이 손익 4분기를 비운다 |
+| `n_q4_basis_label_conflict`(폐기형, 0 필수) | 라벨과 NULL 모양 — ① 라벨이 있음 ≠ (사업보고서 ∧ `q4_derived_n_rows` = 4) ② 라벨이 어휘 밖 ③ `revenue_basis_mismatch` 인데 매출 4분기가 남음 ④ `negative_revenue` 인데 손익 4분기가 하나라도 남음 |
+| `n_by_q4_derived_basis`(기록형) | 라벨 분포 — 게이트가 비운 묶음의 크기 |
+| `n_flow_3m_is_ytd`(기록형) | 누계 칸 분기 행 수 |
+
+- **부정 픽스처**: `test_equity_s12_fin.py::test_부정_매출_4분기_음수와_라벨이_NULL_모양과_어긋나면_EG3_가_잡는다` — 음수 매출
+  4분기를 남김 · `negative_revenue` 라벨인데 값이 남음 · `revenue_basis_mismatch` 라벨인데 매출이 남음 · 성립한 4분기에 라벨
+  없음 네 갈래.
+- **판 대 판 diff**: `docs/equity_diff/expect_e1_32_fin_std.json`(S1-d 몫 — 값 변경·값→NULL 을 라벨 범위로 설명). 새 값이
+  연간 − 9개월 누계인지는 누계가 산출에 없어 expect 술어로 쓸 수 없고, 새 열 둘은 before 판에 없어 비교 대상이 아니다.
+- **카탈로그**: `v_fin_latest` 는 사업보고서 분기값을 `fin_std.<계정>_q4_derived` 로 읽는다(`annual_ok` ∧
+  `q4_derived_available_date` ≤ 컷오프). 사업보고서 행 TTM 은 연간 값 그대로(항등식)이고 `_asof/`·EG5c 대상이 아니다 —
+  그림자 빌드 G5 가 옛/새 카탈로그를 따로 견준다.

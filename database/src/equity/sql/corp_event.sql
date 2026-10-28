@@ -26,8 +26,9 @@
 --                    계열인데 법인에 상장 우선주가 없음, 결정공시의 기타주식도 같은 규칙. 자사주 취득의
 --                    기타주식분은 결정일에 상장돼 있던 우선주가 없을 때)
 --   class_unknown    종류 어휘 밖('-' 포함) — 어느 티커의 사건인지 정할 수 없다
---   class_ambiguous  금액을 나르는 기타주식 class-row 인데 결정일에 상장돼 있던 우선주 티커가 둘 이상 —
---                    금액은 나눠 붙일 수 없어 어느 우선주의 금액인지 정할 수 없다(자사주 취득, #589)
+--   class_ambiguous  금액을 나르는 기타주식 class-row 인데 결정일에 상장돼 있던 우선주 티커가 둘 이상이거나,
+--                    하나라도 결정일 전에 폐지된 우선주가 법인에 있다(연구 DB S1-e) — 금액은 나눠 붙일 수
+--                    없어 어느 우선주의 금액인지 정할 수 없다(자사주 취득, #589)
 --   pre_listing      티커는 있으나 효력일이 그 티커의 security_span 첫 존재일 이전
 --   krx_par_only     KRX 액면가 변경인데 주식수가 사실상 불변(|ratio−1| ≤ krx_share_change_tol)
 --   share_unchanged  결정공시·자본변동인데 전후 주식수 불변(액면감액 감자 등) — 같은 허용치
@@ -184,25 +185,40 @@ capital AS (
 --   preferred 기타주식분 — 기타주식 = 상장 우선주 leg 라는 규칙은 결정공시 estk leg · 종류 대응표
 --             '기타주식'(rules_s05.PREFERRED_KINDS)과 같다. **금액은 나눠 붙일 수 없다** — 비율 사건은
 --             1주당 배수라 모든 우선주 leg 에 같은 값이 맞지만 금액은 합이다. 그래서 기타주식분은
---             **결정일에 상장돼 있던 우선주 leg 가 정확히 하나일 때만** 그 티커(`leg_ticker`)에 싣는다
---             (#590 리뷰 P3-1 — 결정일 전에 폐지된 우선주는 그날의 매입 대상이 아니다). 0 → 'unlisted'
---             (범위 밖 unlisted_class) · 2 이상 → 'ambiguous'(범위 밖 class_ambiguous, 공시가 어느
---             우선주인지 말하지 않는다).
+--             **결정일에 상장돼 있던 우선주 leg 가 정확히 하나이고 결정일 전에 폐지된 우선주가 없을
+--             때만** 그 티커(`leg_ticker`)에 싣는다. 0 → 'unlisted'(범위 밖 unlisted_class — 폐지
+--             우선주가 있어도 고를 상장 티커가 없다) · 그 밖 → 'ambiguous'(범위 밖 class_ambiguous,
+--             공시가 어느 우선주인지 말하지 않는다).
+--             폐지 우선주 조건은 연구 DB S1-e(e1.32.0)가 #590 리뷰 P3-1("결정일 전에 폐지된 우선주는 그날의
+--             매입 대상이 아니다")을 뒤집은 것이다 — 한화 2026-01-14 기타주식분 매입의 취득목적이 2025-07-15
+--             에 폐지된 제1우선주의 소액주주 주식 매입이었고, 옛 규칙은 그것을 남은 상장 우선주에 붙였다.
+--             시간 창은 두지 않는다. 같은 티커가 결정일에 다시 상장돼 있으면(재상장) 그 티커는 폐지로
+--             세지 않는다 — 공시가 가리킬 수 있는 종목이 그 티커 하나라 모호하지 않다.
 --             「그날 상장」은 universe_daily 와 같은 security_span 구간 규칙(first_date ≤ 날짜 ≤ last_date)
---             이고, 끝이 coverage_gap 인 구간(원천 끝까지 상장)은 열린 끝이다. 결정일이 없으면 시점을 못
---             정하므로 전 기간으로 세고, 그 결과가 1개일 때만 뒤 판정이 effective_unresolved 로
---             격리한다(0개면 unlisted_class, 2개 이상이면 class_ambiguous).
+--             이고, 끝이 coverage_gap 인 구간(원천 끝까지 상장)은 열린 끝이다. 「결정일 전에 폐지」는 그
+--             여집합 쪽 — 끝이 coverage_gap 이 아닌 구간이 결정일 전에 끝났다(last_date < 결정일).
+--             결정일이 없으면 시점을 못 정하므로 상장은 전 기간으로 세고 폐지는 세지 않는다(n_dead 0).
+--             그 결과가 1개일 때만 뒤 판정이 effective_unresolved 로 격리한다(0개면 unlisted_class,
+--             2개 이상이면 class_ambiguous).
 tsstk_estk AS (
     SELECT t.*,
-           (SELECT {'n': count(DISTINCT l.ticker), 'ticker': min(l.ticker)}
-            FROM legs l
-            WHERE l.corp_code = t.corp_code AND l.cls = 'preferred'
-              AND (t.aq_dd IS NULL OR EXISTS (
-                   SELECT 1 FROM security_span s
-                   WHERE s.ticker = l.ticker AND t.aq_dd >= s.first_date
-                     -- coverage_gap 열린 끝은 입력 판본이 어긋날 때(구간이 캘린더보다 먼저 끝난
-                     -- 판)만 의미 있는 방어다 — 정상 빌드에서는 out_of_calendar 가 먼저 거른다.
-                     AND (t.aq_dd <= s.last_date OR s.end_reason = 'coverage_gap')))) AS pref
+           (SELECT {'n': count(DISTINCT p.ticker) FILTER (WHERE p.live),
+                    'ticker': min(p.ticker) FILTER (WHERE p.live),
+                    'n_dead': count(DISTINCT p.ticker) FILTER (WHERE p.dead AND NOT p.live)}
+            FROM (SELECT l.ticker,
+                         t.aq_dd IS NULL OR EXISTS (
+                             SELECT 1 FROM security_span s
+                             WHERE s.ticker = l.ticker AND t.aq_dd >= s.first_date
+                               -- coverage_gap 열린 끝은 입력 판본이 어긋날 때(구간이 캘린더보다 먼저
+                               -- 끝난 판)만 의미 있는 방어다 — 정상 빌드에서는 out_of_calendar 가 먼저 거른다.
+                               AND (t.aq_dd <= s.last_date OR s.end_reason = 'coverage_gap')) AS live,
+                         -- 결정일이 NULL 이면 비교가 NULL 이라 EXISTS 가 거짓이다(폐지를 세지 않는다).
+                         EXISTS (
+                             SELECT 1 FROM security_span s
+                             WHERE s.ticker = l.ticker AND s.last_date < t.aq_dd
+                               AND s.end_reason <> 'coverage_gap') AS dead
+                  FROM legs l
+                  WHERE l.corp_code = t.corp_code AND l.cls = 'preferred') p) AS pref
     FROM stg_event_tsstk_aq t
     WHERE coalesce(t.aqpln_prc_estk, 0) > 0 OR coalesce(t.aqpln_stk_estk, 0) > 0
 ),
@@ -217,11 +233,12 @@ tsstk_aq AS (
        OR NOT (coalesce(aqpln_prc_estk, 0) > 0 OR coalesce(aqpln_stk_estk, 0) > 0)
     UNION ALL
     SELECT rcept_no, corp_code, 'event_tsstk_aq', 'treasury_buy',
-           CASE WHEN pref.n = 0 THEN 'unlisted' WHEN pref.n = 1 THEN 'preferred'
+           CASE WHEN pref.n = 0 THEN 'unlisted'
+                WHEN pref.n = 1 AND pref.n_dead = 0 THEN 'preferred'
                 ELSE 'ambiguous' END,
            aq_dd, NULL::DOUBLE, FALSE, available_date, available_basis,
            aqpln_prc_estk, (aqpln_prc_estk IS NOT NULL),
-           CASE WHEN pref.n = 1 THEN pref.ticker END
+           CASE WHEN pref.n = 1 AND pref.n_dead = 0 THEN pref.ticker END
     FROM tsstk_estk
 ),
 cvbd_is AS (

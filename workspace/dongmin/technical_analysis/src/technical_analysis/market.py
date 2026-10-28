@@ -138,12 +138,12 @@ def _cache_dir() -> Path:
     return Path("~/quant-data/technical-analysis/cache").expanduser()
 
 
-def snapshot(root: Path) -> Snapshot:
-    """연구 DB 마지막 날의 단면. 같은 날·같은 빌드면 캐시를 읽는다."""
+def snapshot(root: Path, date: str | None = None) -> Snapshot:
+    """연구 DB 그날(기본 마지막 날)의 단면 — 모든 조회가 그날까지만 읽는다. 같은 날·같은 빌드면 캐시를 읽는다."""
     con = duckdb.connect()
     prices = data.current_files(root, "price_adj_daily")
     build = json.loads((root / "price_adj_daily" / "MANIFEST.json").read_text())["current_build"]
-    last = str(con.execute("SELECT max(date) FROM read_parquet(?)", [prices]).fetchone()[0])
+    last = date or str(con.execute("SELECT max(date) FROM read_parquet(?)", [prices]).fetchone()[0])
     cache = _cache_dir() / f"market_v3_{last}_{build}.npz"
     if cache.exists():
         z = np.load(cache, allow_pickle=False)
@@ -308,6 +308,35 @@ def observe_rows(snap: Snapshot) -> list[tuple[str, list[str]]]:
         ("D08", pick(np.nan_to_num(snap.rsi, nan=50) < 30) if snap.panic > PANIC_BUY_FRACTION else []),
         ("F01", pick(np.nan_to_num(snap.flow_rank, nan=1) <= FLOW_BOTTOM)),
     ]
+
+
+def logged_dates(path: Path) -> set[str]:
+    """전진 관찰 기록에 이미 있는 날짜들(파일이 없으면 빈 집합)."""
+    if not path.exists():
+        return set()
+    with path.open() as f:
+        return {row["date"] for row in csv.DictReader(f)}
+
+
+def fill_days(calendar: list[str], logged: set[str], latest: str) -> list[str]:
+    """적을 날 — 기록이 없으면 latest 하나, 있으면 첫 기록일부터 latest 까지 거래일 중 빠진 날 전부(날짜순)."""
+    if not logged:
+        return [latest]
+    first = min(logged)
+    return sorted(({d for d in calendar if first <= d <= latest} | {latest}) - logged)
+
+
+def days_to_observe(root: Path, logged: set[str]) -> list[str]:
+    """연구 DB 기준으로 전진 관찰 기록에 빠진 거래일(동기화가 건너뛴 날 포함)."""
+    con = duckdb.connect()
+    latest = str(con.execute(
+        "SELECT max(date) FROM read_parquet(?)", [data.current_files(root, "price_adj_daily")]
+    ).fetchone()[0])
+    cal = [str(r[0]) for r in con.execute(
+        "SELECT date FROM read_parquet(?) WHERE date >= ? AND date <= ? ORDER BY date",
+        [data.current_files(root, "trading_calendar"), min(logged, default=latest), latest],
+    ).fetchall()]
+    return fill_days(cal, logged, latest)
 
 
 def log_observe(path: Path, date: str, rows: list[tuple[str, list[str]]]) -> bool:

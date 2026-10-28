@@ -26,7 +26,8 @@ uv run ta channel set 코스피 2019-08-06:low 2022-09-30:low 2024-07-11:high
 uv run ta channel list
 uv run ta channel rm 코스피
 
-# 연구 6차 검증 신호의 오늘 해당 종목을 전진 관찰 기록(~/quant-data/technical-analysis/forward_r6.csv)에
+# 연구 6차 검증 신호의 해당 종목을 전진 관찰 기록(~/quant-data/technical-analysis/forward_r6.csv)에.
+# 첫 기록일부터 연구 DB 마지막 날까지 빠진 거래일(동기화가 건너뛴 날)을 모두 채우고, 그중 투매일은 투매 기록에도 적는다
 uv run ta observe
 
 # 오늘 시장 투매 비율(유니버스 중 RSI 30 아래). 25% 이상이면 전진 관찰 기록에 한 줄

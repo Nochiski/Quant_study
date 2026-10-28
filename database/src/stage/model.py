@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -21,7 +23,40 @@ from datetime import UTC, datetime
 #        W 계보(feat/equity-wise-fields)에서 2.9.0 으로 매겼던 것을 갈래 병합 때 다시 매김 — 서버 임시 빌드
 #        snap_20261022T232524Z 의 2.9.0 은 이 변경이다(운영 빌드 기록의 2.9.0 은 위 ka10060 줄)
 RULES_VERSION = "2.10.0"
+# 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a) — 판본을 올리면 여기 한 줄을 더한다(규율 테스트가 현재 판본이
+# 키에 있는지 본다). 건전성 C4·조용한 손실 검사는 판본이 바뀐 날 이 선언과 그 전파(공개일 참조표 `rules.affected_between`,
+# equity 는 표 입력)에 든 표만 '규칙 변경'으로 빼고 나머지는 판본을 넘어 대조한다. 맨 앞 판본이 선언 시작이다 —
+# 그 앞 판본에서 넘어오는 대조는 None(전부 바뀜, 선언 전 동작)이라 맨 앞 판본의 집합은 기록으로만 남는다.
+RULES_CHANGED: dict[str, frozenset[str]] = {
+    "2.9.0": frozenset({"stg_flow_daily_kiwoom"}),
+    "2.10.0": frozenset({"stg_analyst_broker", "stg_analyst_summary", "stg_consensus_annual",
+                         "stg_consensus_matrix", "stg_consensus_quarterly", "stg_fin_wise",
+                         "stg_fin_wise_q"}),
+}
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
+
+
+def declared_changes(declared: Mapping[str, frozenset[str]], prev: str, cur: str) -> frozenset[str] | None:
+    """판본 (prev, cur] 사이 선언의 합집합 — stage·equity `RULES_CHANGED` 가 함께 쓴다. prev == cur 면 빈 집합.
+
+    prev·cur 가 선언에 없거나(선언 시작 전 판본 · 선언 밖 갈래 판본) prev 가 cur 보다 뒤면(되돌림) None 이다 —
+    읽는 쪽은 그 층 표가 전부 바뀐 것으로 본다(fail-safe). 판본 순서는 숫자 마디로 정한다(문자열로는 2.9.0 > 2.10.0).
+    """
+    if prev == cur:
+        return frozenset()
+    if prev not in declared or cur not in declared:
+        return None
+    order = sorted(declared, key=lambda v: tuple(int(n) for n in re.findall(r"\d+", v)))
+    lo, hi = order.index(prev), order.index(cur)
+    if lo > hi:
+        return None
+    return frozenset().union(*(declared[v] for v in order[lo + 1:hi + 1]))
+
+
+def changed_between(prev: str, cur: str) -> frozenset[str] | None:
+    """stage 판본 (prev, cur] 이 산출을 직접 바꾼 표. None = 선언이 없어 전부 바뀐 것으로 본다."""
+    return declared_changes(RULES_CHANGED, prev, cur)
+
 
 # 빌드 basis — 하루 2판 규약 (플랜 v2 §4 Task B.1). 빌드 id 접두어가 판을 구분한다:
 # 저녁 잠정판 `e_`(키움 종가 축) · 아침 확정판 `m_`(KRX 축) · 사람이 돌린 판 `b_`.

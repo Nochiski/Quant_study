@@ -348,7 +348,7 @@ ka10099 로 적립) ⓑ 08-21~31 상장·폐지 재구성 불가.
 | C1 | 선언 표 전부가 **체인 시작(`--started-at`) 이후** 커밋된 판이고 basis 일치 | 자정을 넘긴 체인이 날짜 기준에서 갈라졌다(09-17 00:14 실측) |
 | C2 | 체인 시작 이후 `_failed/` 0건 | 같은 날 앞선 실행의 폐기 파일을 세면 재실행이 영영 통과 못 한다(09-12 실측) |
 | C3 | append_only 는 표 전체 행수, **upsert 는 닫힌 연도 파티션 · first_write_wins 는 전 파티션** 비감소 | 09-19 감사 DEFECT-B03 — append_only 46표만 보던 탓에 `stg_price_daily` 등 16표의 과거 구간 손실이 무검출이었다. G1·G5 는 등식이라 Δsrc=Δstage 감소를 정상 처리한다 |
-| C4 | 소스 계수(n_src·n_dedup·n_reject) 동결 표는 `content_hash` 도 동결 | 재빌드 없는 재현성 검사. `stg_doc_parse_log`·`stg_wise_coverage` 와 `versioned=False` 표는 제외(계수 불변·내용 가변이 정상) |
+| C4 | 소스 계수(n_src·n_dedup·n_reject) 동결 표는 `content_hash` 도 동결 | 재빌드 없는 재현성 검사. `stg_doc_parse_log`·`stg_wise_coverage` 와 `versioned=False` 표는 제외(계수 불변·내용 가변이 정상). 규칙 판본이 다른 판은 그 판본 사이 선언(`model.RULES_CHANGED` + 공개일 참조표 전파)에 든 표만 제외하고 나머지는 판본을 넘어 대조한다 — 그 불일치는 첫 적용 동안 warn(연구 DB S1-a) |
 | C5 | 소요 ≤ 예산(기본 40분) — **기록형**(`over_budget`) | 2026-09-12 계약 변경: 느린 것은 슬롯을 놓친 것이지 판이 틀린 것이 아니다. 실측 아침 43~54분·저녁 61~70분으로 상시 초과이고, 시각 판정은 워치독이 한다 |
 | C6 | 판이 담은 최신 사실(`max_available_date`)이 `D − 허용지연` 이상 | 09-19 감사 DEFECT-B01 — C1~C5 는 "언제 지었나" 만 봐서 KIS 3표 5주·v3 4표 2주 정지에도 5/5 OK 였다 |
 

@@ -25,7 +25,9 @@ stage 판 기록에는 파티션 해시가 없어 표 전체를 조인한다.
   · 새 행(rows_added)·NULL→값 — 정상(수만 남긴다).
   · 재수집 창 — 날짜 열이 있는 표(date_axis 파티션의 날짜형 키 열)에서 D 와 그 앞 `KRX_RECHECK_SESSIONS`(10)세션
     (`daily.ledger_health` — 08:10 이 다시 받는 창) 안 행의 값 변경·값→NULL. 설명됨으로 보되 수는 남긴다.
-  · 규칙 변경 — 두 판의 rules_version(equity `e*` · stage 판본)이 다른 표. 아래 미설명 후보 전부가 이 갈래로 간다.
+  · 규칙 변경 — 판본 차이 ∧ 전파 집합 안인 표(`rules_scope`, 연구 DB S1-a). 아래 미설명 후보 전부가 이 갈래로 간다.
+    전파 집합은 그날 두 판의 판본 쌍으로 한 번 정한다 — 판본 사이 선언(stage·equity `RULES_CHANGED`)에 든 표와 그것을
+    공개일 참조표·입력으로 읽는 표. 선언이 없는 판본 쌍은 그 층 표가 전부 바뀐 것으로 본다(선언 전 동작).
   · 미설명 — 그 밖의 값→NULL(창 밖) · 행 삭제(창 안 포함) · available_date 계열 변경(창 안 포함 — 공개시점 축은 창으로
     설명하지 않는다). 창 밖 값 변경은 보고만 한다(equity_diff 게이트와 같은 세 축).
   날짜 열이 없는 표(마스터·접수 축)는 grain 으로 비교하고 재수집 창 없이 같은 규칙이다.
@@ -131,6 +133,49 @@ def closure_tables() -> list[tuple[str, str]]:
     return sorted((STAGE if t.startswith(STAGE_PREFIX) else EQUITY, t) for t in seen)
 
 
+def rules_scope(versions: dict[tuple[str, str], tuple[str, str]]) -> frozenset[str]:
+    """'규칙 변경' 갈래에 드는 표 — 그날 대조하는 두 판의 판본 쌍((층, 표) → (직전, 오늘))으로 한 번 정한다(연구 DB S1-a).
+
+    판본이 바뀐 층의 선언(stage 는 공개일 참조표까지 `stage.rules.affected_between`, equity 는
+    `equity.model.changed_between`)에서 출발해, 그 표를 입력으로 읽는 equity 표를 하류로 닫는다(폐포와 같은 선언
+    `RULES[t].inputs`). 선언이 없는 판본 쌍(None)은 그 층 표가 전부 바뀐 것으로 본다(fail-safe). 그중 판본 차이가
+    있는 표만 남긴다 — stage 표는 자기 판본, equity 표는 자기 판본이나 그날 stage 판본.
+    """
+    from equity import model as equity_model
+    from stage import rules as stage_rules
+
+    rules = _ed().load_equity_rules()
+    moved = {lt for lt, (b, a) in versions.items() if b != a}
+    hit: set[str] = set()
+    for layer, (b, a) in {(la, versions[(la, t)]) for la, t in moved}:
+        got = stage_rules.affected_between(b, a) if layer == STAGE else equity_model.changed_between(b, a)
+        if got is None:
+            got = frozenset(stage_rules.RULES if layer == STAGE else rules)
+        hit |= got
+    while True:                             # 하류로 닫는다 — 바뀐 표를 입력으로 읽는 equity 표
+        more = {t for t, r in rules.items() if t not in hit and not hit.isdisjoint(r.inputs)}
+        if not more:
+            break
+        hit |= more
+    stage_moved = any(la == STAGE for la, _ in moved)
+    return frozenset(t for la, t in versions
+                     if t in hit and ((la, t) in moved or (la == EQUITY and stage_moved)))
+
+
+def _rules_versions(home: Path, layer: str, table: str, before: str | None,
+                    after: str | None) -> tuple[str, str] | None:
+    """두 판의 rules_version. 판·MANIFEST 기록이 없으면 None — 그 표는 `compare_table` 이 판정 불가로 남긴다."""
+    if before is None or after is None:
+        return None
+    ed = _ed()
+    try:
+        mf = ed.load_manifest(home / ROOTS[layer] / table)
+    except ed.UsageError:
+        return None
+    got = {str(b.get("build_id")): str(b.get("rules_version")) for b in mf.get("builds") or []}
+    return (got[before], got[after]) if before in got and after in got else None
+
+
 def block_enabled(home: Path) -> tuple[bool, str]:
     """차단 스위치 — `config/silent_loss.env` 의 `SILENT_LOSS_BLOCK=1` 일 때만 켜짐(마지막 대입이 이긴다). 그 밖은 기록형."""
     path = home / CONF
@@ -223,9 +268,11 @@ def _empty_counts() -> dict[str, int]:
 
 
 def compare_table(home: Path, layer: str, table: str, before: str | None, after: str | None, *,
-                  window: tuple[dt.date, dt.date], threads: int = THREADS,
+                  window: tuple[dt.date, dt.date], scope: frozenset[str], threads: int = THREADS,
                   memory_limit: str = MEMORY_LIMIT, samples: int = SAMPLE_N) -> dict:
-    """표 하나의 두 판을 대조해 갈래 수를 낸다. 판정할 수 없으면 status undecidable + 사유(예외를 올리지 않는다)."""
+    """표 하나의 두 판을 대조해 갈래 수를 낸다. 판정할 수 없으면 status undecidable + 사유(예외를 올리지 않는다).
+
+    `scope` 는 그날의 규칙 변경 표(`rules_scope`) — 여기 든 표의 미설명 후보는 규칙 변경 갈래로 간다."""
     t0 = time.monotonic()
     out: dict = {"table": table, "layer": layer, "before": before, "after": after, "status": None,
                  "reason": "", "rules_before": None, "rules_after": None, "rules_changed": False,
@@ -258,7 +305,7 @@ def compare_table(home: Path, layer: str, table: str, before: str | None, after:
             return done(TABLE_UNDECIDABLE, f"{side} 판 {bid} 이 디스크에 없다(GC) — {troot / f'v={bid}'}")
     rb, ra = recs[before], recs[after]
     out["rules_before"], out["rules_after"] = rb.get("rules_version"), ra.get("rules_version")
-    out["rules_changed"] = out["rules_before"] != out["rules_after"]
+    out["rules_changed"] = table in scope
     if rb.get("content_hash") and rb.get("content_hash") == ra.get("content_hash") \
             and rb.get("n_rows") == ra.get("n_rows"):
         return done(SAME_CONTENT)
@@ -446,16 +493,24 @@ def check(home: Path, d: str, *, prev: str | None = None, tables: Sequence[tuple
             raise handoff.HandoffError(f"오늘 인계 이력 {today.path} 이 쓸 수 있는 판이 아니다 — "
                                        f"date={today.date} health={today.health}")
         res.closure = list(tables) if tables is not None else closure_tables()
-        for layer, table in res.closure:
+
+        def ids(layer: str, table: str) -> tuple[str | None, str | None]:
             b_builds, a_builds = ((before.equity_builds, today.equity_builds) if layer == EQUITY
                                   else (before.stage_builds, today.stage_builds))
+            return b_builds.get(table), a_builds.get(table)
+
+        versions = {(la, t): v for la, t in res.closure
+                    if (v := _rules_versions(home, la, t, *ids(la, t))) is not None}
+        scope = rules_scope(versions)
+        for layer, table in res.closure:
             try:
                 res.tables.append(compare_table(
-                    home, layer, table, b_builds.get(table), a_builds.get(table),
-                    window=res.window, threads=threads, memory_limit=memory_limit, samples=samples))
+                    home, layer, table, *ids(layer, table), window=res.window, scope=scope,
+                    threads=threads, memory_limit=memory_limit, samples=samples))
             except Exception as e:  # noqa: BLE001  # reason: 표 하나의 예상 밖 예외가 나머지 표 판정을 막지 않게(그 표는 판정 불가)
                 traceback.print_exc()
-                res.tables.append({**compare_table(home, layer, table, None, None, window=res.window),
+                res.tables.append({**compare_table(home, layer, table, None, None, window=res.window,
+                                                   scope=scope),
                                    "reason": f"예상 밖 예외 {type(e).__name__}: {e}"})
     except (handoff.HandoffError, cal_mod.CalendarUnavailable, KeyError, ValueError, LookupError,
             OSError) as e:

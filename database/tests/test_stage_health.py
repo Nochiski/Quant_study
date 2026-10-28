@@ -25,9 +25,9 @@ TABLES = {"stg_a": "append_only", "stg_b": "upsert"}
 def _commit(table_root: Path, build_id: str, *, n_rows: int, content_hash: str, n_src: int,
             built_at_utc: str, n_dedup: int = 0, n_reject: int = 0,
             max_available_date: str | None = None, max_observed_date: str | None = None,
-            partitions: list[dict[str, object]] | None = None) -> None:
+            partitions: list[dict[str, object]] | None = None, rules_version: str = "2.2.3") -> None:
     manifest.commit(table_root, manifest.BuildRecord(
-        build_id=build_id, snapshot_id="snap_t", rules_version="2.2.3",
+        build_id=build_id, snapshot_id="snap_t", rules_version=rules_version,
         built_at_utc=built_at_utc, n_rows=n_rows, content_hash=content_hash,
         partitions=partitions or [],
         gates=[{"name": "G1", "status": "pass", "detail": "",
@@ -489,6 +489,63 @@ def test_c4_skips_tables_whose_rules_version_changed(tmp_path: Path, make_stage_
     c4 = _check(_run(root), "C4")
     assert c4.status is health.Status.PASS
     assert c4.metrics["rules_changed"] == ["stg_a"] and c4.metrics["mismatched"] == []
+
+
+def _versioned(tmp_path: Path, make_stage_tree, table: str, prev_v: str, cur_v: str,
+               cur_hash: str) -> Path:
+    """표 하나에 판본 prev_v 판 → cur_v 판. 소스 계수는 그대로(동결)이고 현재 판 해시만 cur_hash."""
+    t = make_stage_tree(tmp_path, table, [{"k": "1"}], build_id="b_seed")
+    _commit(t.table_root, PREV_BID, n_rows=10, content_hash="10:aa", n_src=10,
+            built_at_utc="2026-09-10T23:30:00+00:00", rules_version=prev_v)
+    _commit(t.table_root, CUR_BID, n_rows=10, content_hash=cur_hash, n_src=10,
+            built_at_utc=CUR_BUILT_AT, rules_version=cur_v)
+    return t.stage_root
+
+
+def test_c4_판본이_바뀌어도_선언_밖_표는_대조하고_해시가_다르면_경고다(tmp_path: Path,
+                                                         make_stage_tree) -> None:
+    """10-28 꼴(2.9.0 → 2.10.0, 바뀐 표는 WISE 7개 — 실제 선언). 선언 밖 표는 판본을 넘어 대조한다(연구 DB S1-a).
+    계수가 그대로인데 해시가 다르면 의도 밖 규칙 효과다 — 첫 적용은 warn 이라 판(ok)·체인(rc 0)을 막지 않는다."""
+    root = _tree(tmp_path, make_stage_tree, "stg_a")
+    _versioned(tmp_path, make_stage_tree, "stg_b", "2.9.0", "2.10.0", "10:zz")
+    r = _run(root)
+    c4 = _check(r, "C4")
+    assert c4.status is health.Status.WARN
+    assert c4.metrics["rules_changed"] == [] and c4.metrics["cross_version"] == ["stg_b"]
+    assert c4.metrics["cross_version_mismatched"] == [{"table": "stg_b", "previous": "10:aa",
+                                                       "current": "10:zz"}]
+    assert c4.metrics["mismatched"] == []
+    assert r.ok and "경고: C4" in r.summary()
+
+
+def test_c4_선언에_든_표는_판본이_바뀌면_대조에서_뺀다(tmp_path: Path, make_stage_tree) -> None:
+    """2.10.0 이 바꾼 WISE 표(`model.RULES_CHANGED`)는 지금처럼 `rules_changed` 로 빠진다. 선언 밖 표는 판본을
+    넘어 대조하고, 해시가 그대로면 통과하며 `cross_version` 에 이름이 남는다."""
+    root = _versioned(tmp_path, make_stage_tree, "stg_fin_wise", "2.9.0", "2.10.0", "10:zz")
+    _versioned(tmp_path, make_stage_tree, "stg_b", "2.9.0", "2.10.0", "10:aa")
+    c4 = _check(_run(root, tables={"stg_fin_wise": "append_only", "stg_b": "upsert"}), "C4")
+    assert c4.status is health.Status.PASS
+    assert c4.metrics["rules_changed"] == ["stg_fin_wise"] and c4.metrics["cross_version"] == ["stg_b"]
+    assert c4.metrics["n_frozen"] == 1
+
+
+def test_c4_선언_시작_전_판본에서_넘어오면_지금처럼_전부_뺀다(tmp_path: Path, make_stage_tree) -> None:
+    """2.8.0 은 선언 시작(2.9.0) 앞이다 — 그 사이 판본의 선언이 없으니 전부 바뀐 것으로 본다(fail-safe)."""
+    root = _versioned(tmp_path, make_stage_tree, "stg_b", "2.8.0", "2.10.0", "10:zz")
+    c4 = _check(_run(root, tables={"stg_b": "upsert"}), "C4")
+    assert c4.status is health.Status.PASS
+    assert c4.metrics["rules_changed"] == ["stg_b"] and c4.metrics["cross_version"] == []
+
+
+def test_c4_공개일_참조표가_바뀌면_그_표를_쓰는_표도_뺀다(tmp_path: Path, make_stage_tree,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """stg_fin 의 공개일은 stg_rcept_dt_map 룩업이다 — 참조표만 바뀌었다고 선언해도 stg_fin 산출이 따라 바뀐다."""
+    # fake 선언: 참조표를 바꾼 판본은 아직 없다 — 다음 판본 하나를 선언에 잠시 더한다
+    monkeypatch.setitem(model.RULES_CHANGED, "2.11.0", frozenset({"stg_rcept_dt_map"}))
+    root = _versioned(tmp_path, make_stage_tree, "stg_fin", "2.10.0", "2.11.0", "10:zz")
+    _versioned(tmp_path, make_stage_tree, "stg_b", "2.10.0", "2.11.0", "10:aa")
+    c4 = _check(_run(root, tables={"stg_fin": "append_only", "stg_b": "upsert"}), "C4")
+    assert c4.metrics["rules_changed"] == ["stg_fin"] and c4.metrics["cross_version"] == ["stg_b"]
 
 
 # ── CLI --tables — 장 마감 체인의 표 한 개 단독 판정(컷오버 PR-8) ──────────────────

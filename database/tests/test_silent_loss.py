@@ -203,6 +203,71 @@ def test_규칙_판본이_바뀐_표는_규칙_갈래(tmp_path: Path) -> None:
     assert res.verdict == "ok"
 
 
+def test_선언_밖_표는_판본이_바뀌어도_미설명으로_센다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """연구 DB S1-a — 판본 e1.32.0 이 fin_std 만 바꾼다고 선언했으면 price_daily 의 값→NULL·행 삭제·공개일 변경은
+    규칙 변경이 아니라 미설명이다(옛 코드는 판본 차이만 보고 전부 규칙 갈래로 보냈다)."""
+    from equity import model as em
+
+    # fake 선언: 아직 없는 다음 판본 — 실제 equity 선언은 시작점 하나라 판본 쌍을 만들 수 없다
+    monkeypatch.setitem(em.RULES_CHANGED, "e1.32.0", frozenset({"fin_std"}))
+    home = _home(tmp_path)
+    after = [_px("A", WIN_OUT, None), _px("A", WIN_IN, 101.0),
+             _px("A", "2026-10-07", 102.0, avail="2026-10-08")]
+    _equity_pair(home, after, rules_before="e1.31.0", rules_after="e1.32.0")
+    res = sl.check(home, D, tables=EQ_PD)
+    t = _tbl(res, "price_daily")
+    assert not t["rules_changed"] and t["counts"]["rules_change"] == 0
+    assert t["counts"]["unexplained"] == 3 and res.verdict == "unexplained"
+
+
+def test_선언된_표와_그것을_읽는_equity_표는_규칙_갈래(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """판본이 price_daily 를 바꿨다고 선언하면 그것을 입력으로 읽는 price_adj_daily 도 규칙 변경이다
+    (equity 선언 `RULES[t].inputs` 를 따라 하류로 닫는다)."""
+    from equity import model as em
+
+    # fake 선언: 아직 없는 다음 판본 — 실제 equity 선언은 시작점 하나라 판본 쌍을 만들 수 없다
+    monkeypatch.setitem(em.RULES_CHANGED, "e1.32.0", frozenset({"price_daily"}))
+    home = _home(tmp_path)
+    pair = [("equity", "price_daily"), ("equity", "price_adj_daily")]
+    for _, table in pair:
+        _build(home, "equity", table, "m_b", BASE, schema=EQ_SCHEMA, rules="e1.31.0")
+        _build(home, "equity", table, "m_a", BASE[1:], schema=EQ_SCHEMA, rules="e1.32.0")   # 행 삭제 1
+    _handoff(home, DP, stage={}, equity={t: "m_b" for _, t in pair})
+    _handoff(home, D, stage={}, equity={t: "m_a" for _, t in pair})
+    res = sl.check(home, D, tables=pair)
+    for _, table in pair:
+        t = _tbl(res, table)
+        assert t["rules_changed"] and (t["counts"]["rules_change"], t["counts"]["unexplained"]) == (1, 0)
+    assert res.verdict == "ok"
+
+
+def test_stage_판본_상승은_선언된_표와_그것을_읽는_equity_표만_규칙_갈래(tmp_path: Path) -> None:
+    """10-28 꼴(stage 2.9.0 → 2.10.0, 바뀐 표는 WISE 7개 — 실제 선언). 선언 안 stg_analyst_summary 를 읽는
+    coverage_daily 는 equity 판본이 그대로여도 규칙 변경이다. 선언 밖 stg_price_daily 와 그것을 읽는 price_daily 는
+    판본을 넘어 대조해 행 삭제를 미설명으로 센다."""
+    home = _home(tmp_path)
+    same = [_st("A", WIN_OUT, 1.0, WIN_OUT)]
+    _build(home, "stage", "stg_analyst_summary", "m_b", same, schema=ST_SCHEMA, rules="2.9.0")
+    _build(home, "stage", "stg_analyst_summary", "m_a", same, schema=ST_SCHEMA, rules="2.10.0")
+    px = [_st("A", WIN_OUT, 10.0, WIN_OUT), _st("B", WIN_OUT, 11.0, WIN_OUT)]
+    _build(home, "stage", "stg_price_daily", "m_b", px, schema=ST_SCHEMA, rules="2.9.0")
+    _build(home, "stage", "stg_price_daily", "m_a", px[:1], schema=ST_SCHEMA, rules="2.10.0")   # 행 삭제 1
+    for table in ("coverage_daily", "price_daily"):
+        _build(home, "equity", table, "m_b", BASE, schema=EQ_SCHEMA, rules="e1.31.0")
+        _build(home, "equity", table, "m_a", BASE[1:], schema=EQ_SCHEMA, rules="e1.31.0")   # 행 삭제 1
+    stage, equity = ("stg_analyst_summary", "stg_price_daily"), ("coverage_daily", "price_daily")
+    _handoff(home, DP, stage={t: "m_b" for t in stage}, equity={t: "m_b" for t in equity})
+    _handoff(home, D, stage={t: "m_a" for t in stage}, equity={t: "m_a" for t in equity})
+    res = sl.check(home, D, tables=[*(("stage", t) for t in stage), *(("equity", t) for t in equity)])
+    assert _tbl(res, "stg_analyst_summary")["rules_changed"]
+    cov = _tbl(res, "coverage_daily")
+    assert cov["rules_changed"] and (cov["counts"]["rules_change"], cov["counts"]["unexplained"]) == (1, 0)
+    for table in ("stg_price_daily", "price_daily"):
+        t = _tbl(res, table)
+        assert not t["rules_changed"] and t["counts"]["unexplained"] == 1, table
+    assert res.verdict == "unexplained"
+
+
 @pytest.mark.parametrize("gone", ["disk", "manifest"])
 def test_판이_GC_되면_판정_불가(tmp_path: Path, gone: str) -> None:
     home = _home(tmp_path)

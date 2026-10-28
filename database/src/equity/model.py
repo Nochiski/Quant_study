@@ -343,6 +343,23 @@ RULES_VERSION = "e1.31.0"                # BuildRecord.rules_version 에 실린�
 #          evidence 와 S20 문구. 브랜치 쪽 규칙은 그대로 들어온다. 판본이 바뀌어 첫 빌드는 EG5a 가
 #          skip 이므로 같은 입력으로 두 번 지어 재현성을 확인한다(EQUITY_HANDOFF §6).
 
+# 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a, 규약은 `stage.model.RULES_CHANGED`) — 판본을 올리면 한 줄을 더한다.
+# 그 표를 입력으로 읽는 하류 표는 적지 않는다(읽는 쪽이 `RULES[t].inputs` 를 따라 닫는다). 선언 시작은 e1.31.0 이다 —
+# 그 앞 판본에서 넘어오는 대조는 None(전부 바뀜)이라 e1.31.0 의 집합은 기록으로만 남는다.
+# e1.31.0: 운영 직전 판 e1.29.0 대비 — `corp_event`(자사주 class-row, #589·#590 `sql/corp_event.sql`) · S26 새 표 3개
+#          (e1.30.0) · `dataset_profile`(분모 row_filter #592 · S26·사모 필드 선언 · E05 근거 문구) ·
+#          `factor_readiness`(`rules_s20` E05 문구 #588·#590 · main 판본 번호 문구)
+RULES_CHANGED: dict[str, frozenset[str]] = {
+    "e1.31.0": frozenset({"corp_event", "consensus_matrix", "consensus_annual", "fin_ratio_wise",
+                          "dataset_profile", "factor_readiness"}),
+}
+
+
+def changed_between(prev: str, cur: str) -> frozenset[str] | None:
+    """equity 판본 (prev, cur] 이 산출을 직접 바꾼 표. None = 선언이 없어 전부 바뀐 것으로 본다."""
+    return stage_model.declared_changes(RULES_CHANGED, prev, cur)
+
+
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은
 # `_pinned` 규약으로 서로의 MANIFEST 를 읽으므로 접두어 대응표가 갈리면 판이 조용히 어긋난다.

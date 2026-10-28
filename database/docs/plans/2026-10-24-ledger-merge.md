@@ -63,6 +63,9 @@ M 에만 있는 상목 수정(#589·#590·#592 등)은 S 가 같은 결함을 �
 - equity EG5a: 첫 판은 `rules_changed` skip(허용표에 있음). 재현성은 그림자 빌드에서 같은 입력으로 두 번 지어 본다.
 - stage health C4: 배포 뒤 첫 판은 전 표 `rules_changed`. 아침 재사용 7-3 은 판본·code_rev 가 달라 거절 → WISE blob 표 전량
   재빌드.
+  - (2026-10-28 정정, 전수 조사 하12) 거절은 배포 때문에 새로 생기는 것이 아니다. 10-14 저녁 체인을 끈 뒤로 아침 재사용은
+    매일 그 앞 단계에서 `reuse_declined reason=current_not_evening` 으로 거절돼(`stage/reuse.py`), WISE 7표는 이미 매일
+    다시 지어진다(10-23·10-24 아침 6.4~6.6분). 배포 뒤 첫 판(10-28)의 7표 합은 8.1분이었다.
 - `deploy.sh` ⑦: 서버 DEPLOYED rev(fc6c91eb)가 HEAD 의 조상이어야 한다 → **merge commit 으로만 머지**(스쿼시·리베이스 금지).
 - EG-C 계약은 서버 `_engine` 으로 병합판 backend facade 를 import 한다 — main 의 columnar 작업이 numpy 를 끌어들인다.
   원장 venv 의 numpy 와 계약 단계 인터프리터를 그림자 빌드에서 확인한다.

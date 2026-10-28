@@ -6,7 +6,8 @@
     ta channel list
     ta channel rm 코스피
     ta panic                    # 오늘 시장 투매 비율, 투매일이면 전진 관찰 기록에 한 줄
-    ta observe                  # 연구 6차 검증 신호(국면 점수·피해야 할 상태·투매·수급)의 오늘 해당 종목을 전진 관찰 기록에
+    ta observe                  # 연구 6차 검증 신호(국면 점수·피해야 할 상태·투매·수급)의 해당 종목을 전진 관찰 기록에
+                                # (동기화가 건너뛴 날까지 빠진 거래일을 모두 채우고, 그중 투매일은 투매 기록에도)
 """
 
 import argparse
@@ -18,6 +19,9 @@ from .. import data
 from .. import market as mk
 from . import channels as chs
 from . import render, report
+
+P2_LOG = Path("~/quant-data/technical-analysis/forward_p2.csv").expanduser()
+R6_LOG = Path("~/quant-data/technical-analysis/forward_r6.csv").expanduser()
 
 
 def _find(root: Path, query: str) -> data.Match | None:
@@ -79,19 +83,29 @@ def _panic() -> int:
     print(f"{snap.date} 유니버스 {int(snap.in_universe.sum())}종목 중 RSI 30 아래 {len(tickers)}종목 = {snap.panic * 100:.1f}%"
           f" (투매일 기준 {mk.PANIC_FRACTION * 100:.0f}%)")
     if snap.panic >= mk.PANIC_FRACTION:
-        log = Path("~/quant-data/technical-analysis/forward_p2.csv").expanduser()
-        new = mk.log_panic(log, snap.date, snap.panic, tickers)
-        print(f"투매일 — 전진 관찰 기록 {'추가' if new else '이미 있음'}: {log}")
+        new = mk.log_panic(P2_LOG, snap.date, snap.panic, tickers)
+        print(f"투매일 — 전진 관찰 기록 {'추가' if new else '이미 있음'}: {P2_LOG}")
     return 0
 
 
 def _observe() -> int:
-    snap = mk.snapshot(data.equity_root())
-    rows = mk.observe_rows(snap)
-    log = Path("~/quant-data/technical-analysis/forward_r6.csv").expanduser()
-    new = mk.log_observe(log, snap.date, rows)
-    print(f"{snap.date} " + " · ".join(f"{n} {len(t)}" if n != "REGIME" else " ".join(t) for n, t in rows))
-    print(f"전진 관찰 기록 {'추가' if new else '이미 있음'}: {log}")
+    root = data.equity_root()
+    days = mk.days_to_observe(root, mk.logged_dates(R6_LOG))
+    if not days:
+        print(f"전진 관찰 기록 이미 최신: {R6_LOG}")
+        return 0
+    added = 0
+    for d in days:
+        snap = mk.snapshot(root, d)
+        if not snap.in_universe.any():
+            print(f"{d} 유니버스 0종목(연구 DB 에 그날 자료 없음) — 적지 않음")
+            continue
+        rows = mk.observe_rows(snap)
+        added += mk.log_observe(R6_LOG, snap.date, rows)
+        print(f"{snap.date} " + " · ".join(f"{n} {len(t)}" if n != "REGIME" else " ".join(t) for n, t in rows))
+        if snap.panic >= mk.PANIC_FRACTION and mk.log_panic(P2_LOG, snap.date, snap.panic, snap.panic_tickers()):
+            print(f"  투매일 — 투매 기록에도 추가: {P2_LOG}")
+    print(f"전진 관찰 기록 {added}일 추가: {R6_LOG}")
     return 0
 
 

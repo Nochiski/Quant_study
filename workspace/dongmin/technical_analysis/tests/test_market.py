@@ -105,3 +105,19 @@ def test_trailing_pct_last_counts_ties_half_and_needs_min_points() -> None:
     assert mk.trailing_pct_last(x, win=750, minp=3) == (1 + 0.5 * 2) / 4  # 작은 값 1개 + 같은 값 2개(자신 포함) 절반
     assert np.isnan(mk.trailing_pct_last(x, win=750, minp=5))
     assert mk.trailing_pct_last(np.array([9.0, 1.0, 2.0]), win=2, minp=2) == 0.75  # 창 밖(9)은 안 셈
+
+
+def test_fill_days_fills_gaps_from_first_logged_day() -> None:
+    cal = ["2026-10-22", "2026-10-23", "2026-10-26", "2026-10-27", "2026-10-28"]
+    assert mk.fill_days(cal, set(), "2026-10-27") == ["2026-10-27"]  # 첫 기록은 마지막 날 하나
+    assert mk.fill_days(cal, {"2026-10-23", "2026-10-27"}, "2026-10-28") == ["2026-10-26", "2026-10-28"]
+    assert mk.fill_days(cal, {"2026-10-23", "2026-10-26", "2026-10-27"}, "2026-10-27") == []
+    assert mk.fill_days(["2026-10-23"], {"2026-10-23"}, "2026-10-27") == ["2026-10-27"]  # 달력이 늦어도 마지막 날은 적는다
+
+
+def test_logged_dates_reads_back_log_observe(tmp_path: Path) -> None:
+    path = tmp_path / "forward_r6.csv"
+    assert mk.logged_dates(path) == set()
+    mk.log_observe(path, "2026-10-23", [("REGIME", ["bear"]), ("A06", ["000001"])])
+    mk.log_observe(path, "2026-10-27", [("REGIME", ["bear"]), ("A06", [])])
+    assert mk.logged_dates(path) == {"2026-10-23", "2026-10-27"}

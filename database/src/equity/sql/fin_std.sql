@@ -58,7 +58,8 @@
 --
 -- PIT: `available_date` = 판 접수번호의 stage 공개일(`stg_disclosure.available_date`, derived — 원천
 -- `rcept_dt` 와 접수번호 날짜 중 늦은 쪽. 재제출본은 원천 rcept_dt 가 접수번호보다 이르다, J-41) — 단
--- 재무를 안 건드린 정정본은 원본 공개일(`redate` CTE — 그 행만 `available_date < rcept_dt`, basis 는 둘 다
+-- 값이 원본과 같다는 증거가 있는 정정본은 원본 공개일(`redate` CTE, e1.32.0 연구 DB S1-b — 원장에 남은
+-- 원본 판 줄과 정정 판 줄이 네 표에서 같을 때만. 그 행만 `available_date < rcept_dt`, basis 는 둘 다
 -- derived). `stg_rcept_dt_map` 은 stage 에 실재하지 않는다(GATES §9). 판본은 `api_restated` 하나 ·
 -- `restated_unknown = true`(4A).
 -- 격리 4종: non_krw · period_unresolved · rcept_lag_out_of_range · duplicate_vintage.
@@ -175,28 +176,73 @@ dt AS (
     QUALIFY row_number() OVER (PARTITION BY rcept_no
                                ORDER BY observed_date NULLS LAST, rcept_dt NULLS LAST) = 1
 ),
-redate AS (
-    -- 정정본의 원본 공시일 승계(09-30, `docs/research/2026-09-30-gpt-layer-debate.md` ③).
-    -- DART API 는 정정이 있으면 정정본만 돌려주므로 이 판의 값은 정정본이다. 원본부터 이 판까지의
-    -- **모든 정정**이 재무를 건드리지 않았으면(`corr_has_fin_item = false` — 첫 장 미해석·빈 항목 표
-    -- NULL 은 건드린 것으로 본다) 재무 수치는 원본과 같으므로 공개일은 원본 접수일이다. 정정 첫 장의 원본
-    -- 제출일이 연결된 원본 접수일과 1일 안(`date_check` exact·off_1d)일 때만 — 연결이 흔들리면
-    -- 정정 접수일을 지킨다. `disclosure_version` 은 rcept_no grain(유일)이다.
-    -- 재무 정정 판정은 disclosure_version 한 곳이다 — 사유가 재작성·재감사 류이거나 항목 표가 빈 정정은
-    -- TRUE·NULL 이라 승계하지 않는다(C-11, N-25 Q1). 날짜는 두 판 모두 stage 공개일(`dt`)로 잇는다 —
-    -- 원본이 재제출본이면 원천 rcept_dt 가 접수번호보다 이르다(J-41).
-    SELECT c.rcept_no, od.available_date                         AS orig_avail_dt
-    FROM disclosure_version c
+ver AS (
+    -- 정정본의 원본 공시일 승계 — **값으로 판정**(e1.32.0 연구 DB S1-b. 09-30 e1.22.0 의 낱말 판정 대체).
+    -- 공개일 = 그 값이 처음 공개된 날이다. DART API 는 정정이 있으면 정정본만 돌려주므로 이 판의 값은
+    -- 정정본이고, 원본과 값이 같다는 **증거가 있을 때만** 원본 공시일을 잇는다.
+    -- 대상 = 그룹의 판(최신 접수)이 정정이고 링크된 원본이 있으며, 정정 첫 장의 원본 제출일이 원본 접수일과
+    -- 1일 안(`date_check` exact·off_1d)이고 원본 공개일이 정정 공개일보다 이른 그룹. 링크·날짜 조건은
+    -- e1.22.0 그대로다 — 한 그룹에 다른 보고서가 묶이는 경우(한화리츠 01669226)를 막는다. 날짜는 두 판
+    -- 모두 stage 공개일(`dt`) — 원본이 재제출본이면 원천 rcept_dt 가 접수번호보다 이르다(J-41).
+    -- 정정 첫 장 항목 낱말(`disclosure_version.corr_has_fin_item`)은 보지 않는다 — 값을 볼 수 있으면 낱말은
+    -- 대리 지표이고, 볼 수 없으면 승계하지 않으므로 쓸 곳이 없다(낱말이 놓친 계정명 나열·오타·
+    -- '회계오류수정' 정정이 정정일보다 최대 1,765일 일찍 보였다). 값이 같으면 사유가 재작성·재감사여도 잇는다.
+    -- **값 대조는 이 그룹들로 먼저 좁힌 뒤 stg_fin 을 읽는다**(`vside` 등호 조인) — fin_std 빌드의 메모리
+    -- 상한이 빠듯하다(서버 최대 RSS 7.2GB / 8GB).
+    SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div, g.rcept_no, c.orig_rcept_no,
+           od.available_date                                    AS orig_avail_dt
+    FROM grp g
+    JOIN disclosure_version c ON c.rcept_no = g.rcept_no
     JOIN dt od ON od.rcept_no = c.orig_rcept_no
-    JOIN dt cd ON cd.rcept_no = c.rcept_no
+    JOIN dt cd ON cd.rcept_no = g.rcept_no
     WHERE c.is_correction
       AND c.date_check IN ('exact', 'off_1d')
       AND od.available_date < cd.available_date
-      AND NOT EXISTS (
-          SELECT 1 FROM disclosure_version x
-          WHERE x.orig_rcept_no = c.orig_rcept_no AND x.is_correction
-            AND x.rcept_no <= c.rcept_no
-            AND x.corr_has_fin_item IS NOT FALSE)
+),
+vside AS (
+    -- 대조할 두 판의 접수번호와 부호 — 정정 판(그룹의 판) +1 · 원본 판 −1
+    SELECT corp_code, bsns_year, reprt_code, fs_div, rcept_no, 1 AS side FROM ver
+    UNION ALL
+    SELECT corp_code, bsns_year, reprt_code, fs_div, orig_rcept_no, -1 FROM ver
+),
+vline AS (
+    -- 두 판의 줄. fin_std 가 읽는 네 표만(`_acct` 의 sjs) — 자본변동표 구성요소 표기 변경은 값과 무관하다.
+    -- 같은 판 재수집 줄은 `fin` 과 같은 자연키 + first_write_wins 로 접는다. 원본 줄은 같은 그룹
+    -- (corp_code · bsns_year · reprt_code · fs_div)에 있어야 한다.
+    SELECT s.corp_code, s.bsns_year, s.reprt_code, s.fs_div, s.side,
+           f.sj_div, f.account_id, f.account_detail, f.account_nm, f.thstrm_amount, f.currency
+    FROM stg_fin f
+    JOIN vside s
+      ON s.corp_code = f.corp_code AND s.bsns_year = f.bsns_year
+     AND s.reprt_code = f.reprt_code AND s.fs_div = f.fs_div AND s.rcept_no = f.rcept_no
+    WHERE f.sj_div IN ('BS', 'IS', 'CIS', 'CF')
+    QUALIFY row_number() OVER (
+        PARTITION BY f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.rcept_no, f.sj_div,
+                     f.account_id, f.account_detail, f.ord
+        ORDER BY f.observed_date NULLS LAST, f.thstrm_amount NULLS LAST) = 1
+),
+same_val AS (
+    -- 값이 같다 = 줄 (sj_div, account_id, account_detail, account_nm, thstrm_amount, currency) 의
+    -- 다중집합이 두 판에서 같다: 줄마다 (정정 판 수 − 원본 판 수)가 전부 0. 오차 0(원 단위 DECIMAL),
+    -- NULL 은 NULL 끼리만 같고(GROUP BY 가 한 묶음으로 본다), 단위는 보정하지 않으며(×1000 은 다름),
+    -- 줄 순서(ord)는 보지 않는다. 원본 줄이 없으면(백필 구간) 정정 줄의 +1 이 남아 빠지고, 두 판 모두
+    -- 네 표 줄이 없으면 그룹이 여기 없다 — 증거가 없으면 정정일이다.
+    SELECT corp_code, bsns_year, reprt_code, fs_div
+    FROM (SELECT corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_detail,
+                 account_nm, thstrm_amount, currency, sum(side) AS d
+          FROM vline
+          GROUP BY corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_detail,
+                   account_nm, thstrm_amount, currency) x
+    GROUP BY corp_code, bsns_year, reprt_code, fs_div
+    HAVING bool_and(d = 0)
+),
+redate AS (
+    -- 승계 그룹과 원본 공개일. 그룹 축이다 — 같은 정정의 CFS 는 같고 OFS 는 다를 수 있다.
+    SELECT v.corp_code, v.bsns_year, v.reprt_code, v.fs_div, v.orig_avail_dt
+    FROM ver v
+    SEMI JOIN same_val s
+      ON s.corp_code = v.corp_code AND s.bsns_year = v.bsns_year
+     AND s.reprt_code = v.reprt_code AND s.fs_div = v.fs_div
 ),
 req AS (
     -- 대체 규칙의 발동 조건(fin_map.REVENUE_FALLBACK.require) — 태그 존재 여부
@@ -321,7 +367,9 @@ head AS (
            c.fiscal_month
     FROM grp g
     LEFT JOIN dt d ON d.rcept_no = g.rcept_no
-    LEFT JOIN redate rd ON rd.rcept_no = g.rcept_no
+    LEFT JOIN redate rd
+      ON rd.corp_code = g.corp_code AND rd.bsns_year = g.bsns_year
+     AND rd.reprt_code = g.reprt_code AND rd.fs_div = g.fs_div
     LEFT JOIN doc m ON m.rcept_no = g.rcept_no
     LEFT JOIN chain_doc cd
       ON cd.corp_code = g.corp_code AND cd.bsns_year = g.bsns_year

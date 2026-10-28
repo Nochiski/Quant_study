@@ -2856,3 +2856,26 @@ metrics 는 그대로 실린다(묶음 지표는 판정 밖).
   bonus 2023-03-31)의 보유 수량 경로 누락.
 - 가격제한폭·인접 세션 상수의 단일 정본 — fi queries 가 `rules_s06` 상수를 import 하게 바꾼다(fi 규칙
   파일 변경이라 fi 판본 상향을 동반 — fi 를 고치는 다음 PR 에).
+
+## 15. 연구 DB S1-b — 정정 승계를 값으로 판정 (규칙 e1.32.0, 2026-10-28)
+
+플랜 `docs/plans/2026-10-28-research-db-s1.md` S1-b. 규칙의 정본은 `sql/fin_std.sql` 의 `ver`~`redate` CTE 머리말이고,
+여기에는 `EG3_fin_std` 의 승계 증언 축만 적는다.
+
+- **규칙**: 그룹의 판이 정정이고 링크·첫 장 원본 제출일이 확인된 그룹(e1.22.0 조건 그대로)에서, 원장 `stg_fin` 의 원본
+  판 줄과 정정 판 줄이 네 표(BS·IS·CIS·CF) 다중집합으로 같을 때만 원본 공시일을 잇는다. 원본 줄이 없으면(백필 구간)
+  정정일이다. 정정 첫 장 낱말 `disclosure_version.corr_has_fin_item` 은 fin_std 가 읽지 않는다(입력 선언에서도 뺐다).
+- **결함(옛 증언)**: e1.22.0 의 `n_orig_filing_unwitnessed` 는 `.sql` 과 **같은 낱말 조건**으로 다시 증언해, 낱말이 놓친
+  값 변경 정정(디와이에이 2026 반기 ×1000 등)을 그대로 통과시켰다 — 같은 판단을 두 번 한 것이다.
+
+| 게이트 축 | 바뀐 것 |
+|---|---|
+| `n_orig_filing_unwitnessed`(폐기형, 0 필수) | 승계 행(공개일 < 자기 접수의 stage 공개일 하한)마다 ① 이 판이 정정 · `date_check` exact·off_1d · 연결된 원본의 stage 공개일 = 공개일 ② 원본 판의 네 표 줄이 원장에 있다 ③ (정정 줄 EXCEPT ALL 원본 줄)과 (원본 줄 EXCEPT ALL 정정 줄)이 둘 다 비었다 — 셋 중 하나라도 아니면 센다. `.sql` 의 부호 합(`same_val`)을 베끼지 않는다. 같은 접수 재수집 줄은 자연키마다 처음 관측 하나(`DISTINCT ON`). 상관 서브쿼리 없이 파생 표 조인만 쓴다(`rules_s12._WITNESS_DOCS` 와 같은 선형 시간 규약). 두 판의 줄은 산출 행의 (corp_code, bsns_year, fs_div) 와 접수번호로 찾는다 — 산출에 API `reprt_code` 가 없다 |
+| `n_available_ne_rcept_dt` | 술어 불변(공개일이 자기 접수 stage 공개일보다 늦거나 NULL 이 갈리면 FAIL) |
+| `n_available_orig_filing`(기록형) | 술어 불변. 값이 '값 증거 있는 승계 수'로 바뀐다(10-27 입력 모사 3,860 → 192). 절단본은 백필 표본이라 8 → 0 |
+
+- **부정 픽스처**: `test_equity_s12_fin.py::test_부정_값_증거_없이_승계하면_EG3_가_잡는다` — 정정일로 지은 산출의 공개일을
+  원본 접수일로 바꿔 심는다(값이 다름 · 링크 증언 없음 · 두 판 모두 네 표 줄 없음 세 갈래).
+- **판 대 판 diff**: `docs/equity_diff/expect_e1_32_fin_std.json`(S1-b 몫 — 늦춰지면 자기 접수 stage 공개일, 앞당겨지면 rcept_dt
+  보다 이름, 파생 공개일 둘은 양방향). 앞당겨진 행의 '값 증거 있음'은 stg_fin 을 읽어야 해 expect 술어로 쓸 수 없고 이 게이트가
+  맡는다.

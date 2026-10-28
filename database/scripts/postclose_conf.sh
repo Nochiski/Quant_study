@@ -1,4 +1,5 @@
-# 장 마감 체인 설정 읽기 — config/postclose_chain.env 를 읽어 스위치를 정하는 공용 조각(컷오버 PR-8 · PR-9).
+# 장 마감 체인 설정 읽기 — config/postclose_chain.env(+ 서버 전용 local/postclose_chain.env)를 읽어 스위치를 정하는
+# 공용 조각(컷오버 PR-8 · PR-9).
 #   쓰는 곳: postclose_chain.sh(세 모드) · model_daily.sh(아침 발송 — 전환 뒤 짓기만·대체 발송 · fi 게이트 경고) ·
 #            watchdog.sh morning_build(B-57 발송 장부 — 전환 뒤 두 장부) · daily_ledger.sh·daily_evening.sh(휴장 파일
 #            내보내기 스위치 calendar_export_v3_on 만 — T-48) · daily_ledger.sh·daily_build.sh·weekend_supplement.sh(주말
@@ -19,6 +20,10 @@
 #                 POSTCLOSE_SEND=0 하나(아침이 다시 보낸다 — CUTOVER_ROLLBACK.md 4-1)
 #     CONF_NOTE   사람이 읽을 설정 출처 한 줄(파일 없음·읽기 오류 표시)
 CONF=config/postclose_chain.env
+# 서버 전용 덮어쓰기 — 배포(deploy.sh 의 config/ --delete)가 건드리지 않는 자리다. 발송 켜고 끄기처럼 공개 저장소에
+# 올리지 않는 값은 서버의 이 파일에서만 바꾼다(2026-10-27 사용자 결정 "발송·엑셀은 깃헙에 올리지 않는다", D9).
+# 저장소 설정 다음에 읽어 마지막 대입이 이긴다. 같은 셸 대입 형식이다. 파일이 없으면 저장소 값 그대로다
+CONF_LOCAL=local/postclose_chain.env
 postclose_conf_load() {
   POSTCLOSE_ENABLED=""; POSTCLOSE_SEND=""; POSTCLOSE_V3=""; POSTCLOSE_V3_POST_CMD=""
   CONF_NOTE="설정 $CONF"
@@ -29,6 +34,13 @@ postclose_conf_load() {
     set -u
   else
     CONF_NOTE="설정 $CONF 없음 — 꺼짐·그림자 기본값"
+  fi
+  if [ -f "$CONF_LOCAL" ]; then
+    set +u
+    # shellcheck source=/dev/null  # reason: 서버에만 있는 설정 파일(변수 대입만)이라 정적 분석 대상이 아니다
+    if . "$CONF_LOCAL"; then CONF_NOTE="$CONF_NOTE + 서버 전용 $CONF_LOCAL"
+    else CONF_NOTE="$CONF_NOTE + 서버 전용 $CONF_LOCAL 읽기 오류 — 읽힌 값만 쓴다"; fi
+    set -u
   fi
   ENABLED=""; [ "${POSTCLOSE_ENABLED:-}" = 1 ] && ENABLED=1
   SEND=""; [ "${POSTCLOSE_SEND:-}" = 1 ] && SEND=1

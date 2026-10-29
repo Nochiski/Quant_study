@@ -9,7 +9,8 @@
   C1  선언된 표 전부가 오늘(KST) 판이고 basis 가 일치한다
   C2  오늘 날짜의 `_failed/<build_id>.json` 이 0건이다
   C3  행수가 직전 판보다 줄지 않았다 — append_only 는 표 전체, 그 밖은 파티션 축
-  C4  소스 계수가 동결된 표는 content_hash 도 동결이다(규칙 판본이 바뀐 판은 대조 제외)
+  C4  소스 계수가 동결된 표는 content_hash 도 동결이다(판본이 바뀐 판은 그 판본이 바꾼 표만 대조 제외 —
+      나머지는 판본을 넘어 대조하고, 그 불일치는 warn)
   C5  빌드 소요가 예산(기본 40분) 안이다
   C6  판이 담은 최신 사실(`max_available_date`)이 대상일 D 의 허용 지연 안이다
 
@@ -46,6 +47,7 @@ class Status(str, Enum):
     PASS = "pass"
     FAIL = "fail"
     SKIP = "skip"
+    WARN = "warn"       # 판을 버리지 않는다(ok 는 FAIL 만 본다) — 요약 줄에만 남긴다
 
 
 @dataclass(frozen=True)
@@ -77,9 +79,12 @@ class StageHealth:
         head = (f"stage 건전성 {self.date}/{self.basis}: {'OK' if self.ok else 'FAIL'} "
                 f"pass {n_pass}/{len(self.checks)}")
         bad = [f"{c.name} {c.detail}" for c in self.checks if c.status is Status.FAIL]
+        warned = [f"{c.name} {c.detail}" for c in self.checks if c.status is Status.WARN]
         skipped = [c.name for c in self.checks if c.status is Status.SKIP]
         if bad:
             head += " | 실패: " + "; ".join(bad)
+        if warned:
+            head += " | 경고: " + "; ".join(warned)
         if skipped:
             head += " | 건너뜀: " + ", ".join(skipped)
         return head
@@ -264,37 +269,52 @@ def _c4_frozen(pairs: list[_Pair], unversioned: Collection[str] = ()) -> Check:
     `unversioned`(콜·유닛 로그, `versioned=False`)는 대조하지 않는다 — 원장 로그는 행이 늘지 않아도
     상태 컬럼이 제자리에서 바뀐다(`ingest_log` 유닛 status). 09-12 아침 `stg_units_dart` 가 계수 동일·
     해시 상이로 C4 를 깨뜨렸다.
+
+    판본이 다른 판은 그 판본 사이 선언(`rules.affected_between`)에 든 표만 뺀다(`rules_changed`). 나머지는 판본을
+    넘어 대조하고 `cross_version` 에 이름을 남긴다 — 그 해시 불일치(`cross_version_mismatched`)는 선언 밖 규칙
+    효과이지만 첫 적용은 warn 이다(연구 DB S1-a, 사용자 Q5 — FAIL 전환은 판본 상승을 한 번 지나 본 뒤).
     """
     keys = ("n_src", "n_dedup", "n_reject")
     mismatched: list[dict[str, object]] = []
+    cross_mismatched: list[dict[str, object]] = []
     rules_changed: list[str] = []
+    cross_version: list[str] = []
     n_frozen = n_compared = 0
     for p in pairs:
         if p.table in C4_EXCLUDE or p.table in unversioned or p.current is None or p.previous is None:
             continue
-        if p.current.rules_version != p.previous.rules_version:
+        cross = p.current.rules_version != p.previous.rules_version
+        if cross:
             # 규칙(SQL·available 규칙)이 바뀐 판은 같은 소스여도 산출이 달라지는 것이 정상이다 —
-            # 비교 대상은 같은 규칙 판본의 직전 판뿐(equity EG5a 와 같은 규약). 09-20 00:35 실측:
-            # E08 `available_date=greatest(...)` 가 stg_disclosure 12,697행을 바꿨는데 판본을 안 올려
-            # C4 가 확정 빌드를 세웠다 — 그 자체는 C4 가 맞게 잡은 것이고, 판본을 올리면 여기서 건너뛴다.
-            rules_changed.append(p.table)
-            continue
+            # 그 판본이 바꾼 표는 같은 규칙 판본의 직전 판하고만 비교한다(equity EG5a 와 같은 규약). 09-20 00:35
+            # 실측: E08 `available_date=greatest(...)` 가 stg_disclosure 12,697행을 바꿨는데 판본을 안 올려
+            # C4 가 확정 빌드를 세웠다 — 그 자체는 C4 가 맞게 잡은 것이고, 판본을 올리고 선언하면 여기서 건너뛴다.
+            scope = rules.affected_between(p.previous.rules_version, p.current.rules_version)
+            if scope is None or p.table in scope:
+                rules_changed.append(p.table)
+                continue
         cur_g1, prev_g1 = _g1(p.current), _g1(p.previous)
         if cur_g1 is None or prev_g1 is None:
             continue                       # G1 계수가 없는 판(구 레코드) — 판정 불가
         n_compared += 1
+        if cross:
+            cross_version.append(p.table)
         if any(cur_g1.get(k) != prev_g1.get(k) for k in keys):
             continue                       # 소스가 자랐다 — 해시가 달라야 정상
         n_frozen += 1
         if p.current.content_hash != p.previous.content_hash:
-            mismatched.append({"table": p.table, "previous": p.previous.content_hash,
-                               "current": p.current.content_hash})
-    detail = (f"소스 동결 {n_frozen}표 / 대조 {n_compared}표"
+            (cross_mismatched if cross else mismatched).append(
+                {"table": p.table, "previous": p.previous.content_hash, "current": p.current.content_hash})
+    detail = (f"소스 동결 {n_frozen}표 / 대조 {n_compared}표(판본 넘음 {len(cross_version)}표)"
               + _listed("해시 불일치", [f"{d['table']} {d['previous']}→{d['current']}" for d in mismatched])
+              + _listed("판본 넘은 해시 불일치(경고)",
+                        [f"{d['table']} {d['previous']}→{d['current']}" for d in cross_mismatched])
               + _listed("규칙 판본 변경(대조 제외)", rules_changed))
-    return Check("C4", Status.FAIL if mismatched else Status.PASS, detail,
+    status = Status.FAIL if mismatched else (Status.WARN if cross_mismatched else Status.PASS)
+    return Check("C4", status, detail,
                  {"n_frozen": n_frozen, "n_compared": n_compared, "mismatched": mismatched,
-                  "rules_changed": rules_changed})
+                  "rules_changed": rules_changed, "cross_version": cross_version,
+                  "cross_version_mismatched": cross_mismatched})
 
 
 def _c5_elapsed(pairs: list[_Pair], date_kst: str, started_at: str | None,

@@ -224,7 +224,8 @@ SELECT
     CASE WHEN v.is_correction THEN v.page_found END                   AS corr_page_found,
     CASE WHEN v.is_correction THEN v.filed_date END                   AS filed_date,
     CASE WHEN v.is_correction THEN nullif(trim(v.reason_raw), '') END AS reason_raw,
-    -- 재무 정정인가 — fin_std 의 원본 공시일 승계가 읽는다(FALSE 만 승계, TRUE·NULL 은 정정일).
+    -- 재무 정정인가 — 정정 첫 장 낱말로 본 사실 기록이다. fin_std 의 원본 공시일 승계는 e1.32.0(연구 DB
+    -- S1-b)부터 이 열을 읽지 않고 원장의 두 판 값을 직접 대조한다(e1.22.0~e1.31.0 은 FALSE 만 승계했다).
     -- 키워드 정본은 rules_s11 의 FIN_REASON_KEYWORDS(정정 사유, 공백을 떼고 대조)·FIN_ITEM_KEYWORDS
     -- (항목 이름). C-11(N-25 Q1): 사유가 재작성·재감사 류면 항목 이름과 무관하게 TRUE(00287812
     -- FY2015 — 항목은 배당 지표인데 사유가 연결재무제표 재작성), 항목 표가 비었으면('[]') 판단할 수

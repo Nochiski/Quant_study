@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.31.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.32.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -342,6 +342,11 @@ RULES_VERSION = "e1.31.0"                # BuildRecord.rules_version 에 실린�
 #          ② `dataset_profile` `table_rows` 커버율 분모의 `row_filter`(main e1.21.0) · 그
 #          evidence 와 S20 문구. 브랜치 쪽 규칙은 그대로 들어온다. 판본이 바뀌어 첫 빌드는 EG5a 가
 #          skip 이므로 같은 입력으로 두 번 지어 재현성을 확인한다(EQUITY_HANDOFF §6).
+# e1.32.0: 연구 DB 재무 묶음 S1(플랜 `2026-10-28-research-db-s1`, 다섯 PR 을 한 판본·한 번에 배포).
+#          S1-b `fin_std` 정정 승계를 값으로 판정 — 원장에 남은 원본 판 줄과 정정 판 줄이 네 표(BS·IS·CIS·CF)
+#          다중집합으로 같을 때만 원본 공시일을 잇는다(링크·첫 장 날짜 확인 그대로, 낱말 `corr_has_fin_item`
+#          은 안 읽는다). 원본 줄 없는 백필 구간은 정정일로 늦춰지고 값이 같은 재작성·재감사 정정은 앞당겨진다
+#          (공개일 셋만 — 값·행 불변). EG3 `n_orig_filing_unwitnessed` 는 링크·날짜 + 양방향 EXCEPT ALL 로 재증언.
 
 # 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a, 규약은 `stage.model.RULES_CHANGED`) — 판본을 올리면 한 줄을 더한다.
 # 그 표를 입력으로 읽는 하류 표는 적지 않는다(읽는 쪽이 `RULES[t].inputs` 를 따라 닫는다). 선언 시작은 e1.31.0 이다 —
@@ -352,6 +357,8 @@ RULES_VERSION = "e1.31.0"                # BuildRecord.rules_version 에 실린�
 RULES_CHANGED: dict[str, frozenset[str]] = {
     "e1.31.0": frozenset({"corp_event", "consensus_matrix", "consensus_annual", "fin_ratio_wise",
                           "dataset_profile", "factor_readiness"}),
+    # 연구 DB S1 묶음 — S1-b fin_std(정정 승계 값 판정). 같은 판본의 뒤 PR(S1-c·d·e)이 표를 더한다.
+    "e1.32.0": frozenset({"fin_std"}),
 }
 
 

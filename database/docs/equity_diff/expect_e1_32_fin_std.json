@@ -1,0 +1,16 @@
+{
+ "_note": [
+  "e1.32.0 — 연구 DB 재무 묶음 S1(docs/plans/2026-10-28-research-db-s1.md). S1-b·S1-c·S1-d 가 한 판본으로 배포되므로 fin_std 기대 파일도 하나다 — 뒤 PR 이 자기 몫 항목을 이 목록에 더한다.",
+  "S1-b 몫 — 정정 승계를 값으로 판정. 바뀌는 것은 공개일 셋(available_date · q4_derived_available_date · cf_q_available_date)뿐이고 값·행·rcept_dt 는 불변이다.",
+  "늦춰짐 = 값 증거 없는 승계(원본 판 줄이 원장에 없는 백필 구간 · 값이 바뀐 정정)가 자기 접수의 stage 공개일(원천 rcept_dt 와 접수번호 날짜 중 늦은 쪽, E08)로 돌아간다. 앞당겨짐 = 값이 같은 재작성·재감사 정정이 원본 공시일을 잇는다.",
+  "앞당겨진 행의 '값 증거 있음'은 stg_fin 을 읽어야 해 이 술어로 쓸 수 없다 — 같은 판의 EG3_fin_std n_orig_filing_unwitnessed = 0 이 그 몫이다. 파생 공개일 둘은 구성 판 공개일의 max 라 구성 판이 어느 쪽으로 움직였는지 이 표만으로 가를 수 없어 양방향을 다 받는다."
+ ],
+ "expect": [
+  {"column": "available_date", "kind": "value_changed", "where": "available_date > before_available_date AND available_date = greatest(rcept_dt, TRY_CAST(try_strptime(substr(rcept_no, 1, 8), '%Y%m%d') AS DATE))", "note": "S1-b 늦춰짐 — 값 증거 없는 승계를 끊고 자기 접수의 stage 공개일로"},
+  {"column": "available_date", "kind": "value_changed", "where": "available_date < before_available_date AND available_date < rcept_dt", "note": "S1-b 앞당김 — 값이 같은 재작성·재감사 정정이 원본 공시일을 잇는다(값 증거는 EG3)"},
+  {"column": "q4_derived_available_date", "kind": "value_changed", "where": "q4_derived_available_date > before_q4_derived_available_date", "note": "S1-b 구성 판(사업보고서 + 같은 회계연도 분기) 공개일 max — 늦춰진 판이 끼면 늦춰진다"},
+  {"column": "q4_derived_available_date", "kind": "value_changed", "where": "q4_derived_available_date < before_q4_derived_available_date", "note": "S1-b 같은 축 — 앞당겨진 판이 끼면 앞당겨진다"},
+  {"column": "cf_q_available_date", "kind": "value_changed", "where": "cf_q_available_date > before_cf_q_available_date", "note": "S1-b 자기·직전 판 공개일 greatest — 늦춰진 판이 끼면 늦춰진다"},
+  {"column": "cf_q_available_date", "kind": "value_changed", "where": "cf_q_available_date < before_cf_q_available_date", "note": "S1-b 같은 축 — 앞당겨진 판이 끼면 앞당겨진다"}
+ ]
+}

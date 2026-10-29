@@ -1,6 +1,5 @@
 -- price_daily (S04) — 가격 정본. DESIGN v1.2 §4-2 · GATES v1.0 §3 ⑧ · EG7-P01 · EG20 · EG14.
--- grain (ticker, date). 원천 stg_price_daily(주식) UNION ALL stg_etf_price_daily(ETF)
---                        UNION ALL stg_flow_daily_kiwoom(저녁 잠정 T 행, e1.15.0).
+-- grain (ticker, date). 원천 stg_price_daily(주식) UNION ALL stg_etf_price_daily(ETF).
 -- 두 원천의 (ticker, date) 교집합은 0 이어야 한다(P8) — 겹쳐도 dedup 하지 않는다. 겹치면 키가
 -- 중복돼 EG3-P01 이 폐기하고, 건수는 EG3_price_daily.n_src_overlap 이 지목한다.
 --
@@ -27,26 +26,17 @@
 --                   = 53,000 = 2,650,000 / 50). change NULL 이면 base 도 NULL(결측은 결측). S06 adj_factor 의
 --                   krx_base_price 원천이 읽고, EG3_price_daily 가 base = 직전 행 close 비율을 기록한다.
 --
--- 저녁 잠정 T 행 (규칙 e1.15.0 · 결정 V2-2 · 플랜 v2 §4 B.2):
---   KRX 공식 시세는 T+1 08:00 에 온다. 그날 저녁(18:15) 스코어링을 하려면 T 종가가 있어야 하므로,
---   `stg_price_daily` 에 **없는 최신 거래일 T** 가 키움 ka10060(`stg_flow_daily_kiwoom`)에 있으면
---   그 종가·거래량으로 T 행을 만든다. 다음 날 아침 확정판에서는 같은 (ticker, date) 가 KRX 원장에
---   있으므로 이 분기가 0행을 내고 KRX 행이 그 자리를 차지한다 — **자연 교체**이고 덮어쓰기가 없다.
---   컬럼 `basis` 가 행마다 원천을 말한다: 'krx'(KRX 원장) · 'evening'(키움 잠정).
---   evening 행은 KRX 기본정보가 없어 **OHL·거래대금·주식수·시총·전일대비·기준가·액면이 전부 NULL**
---   이다(결측은 결측, 원칙 ④ — 0 이나 직전 값으로 채우지 않는다).
---   `corp_action_pending` = 그 행이 기업행위 의심인가. 직전 KRX 종가 대비 절대수익률이
---   `_const.evening_jump_abs_max`(0.30 = 일반 세션 가격제한폭)를 넘거나 직전 종가 자체가 없으면 참.
---   저녁에는 KRX 기본정보가 없어 계수를 만들 수 없으므로 값을 고치지 않고 **표식만** 단다 —
---   소비자가 그날 스코어에서 뺀다(결정 V2-2). krx 행은 항상 거짓이다.
+-- `basis`·`corp_action_pending` (e1.15.0 에 생기고 e1.33.0 에 상수가 됨):
+--   e1.15.0 은 KRX 에 없는 최신 거래일을 키움 ka10060 종가로 채운 저녁 잠정 T 행(basis='evening')을
+--   냈다. 21:20 연구 저녁 빌드가 그림자 시작(10-14)에 멈추고 장 마감 판 T 행은 fi 층이
+--   `postclose.db` 에서 얹으므로(컷오버 트랙 PR-5) e1.33.0(PR-10)에서 그 분기를 걷었다. 두 열은
+--   하류(compat `mappings`·`views`·`price_adj_daily`·S23)가 읽는 계약이라 남기고 늘 'krx'·FALSE 다.
+--   다른 값이 새면 EG3_price_daily 가 폐기한다.
 --
 -- PIT: 가격류 — stage lag_known=true, 공표 시각 미제공 → available_date = date, basis 'default'.
 -- 격리(EG7-P01 격리형, 행을 버리지 않고 _reject/<reason>/ 으로):
 --   nonpositive_price = close ≤ 0 ∨ open ≤ 0 ∨ high ≤ 0 ∨ low ≤ 0 (NULL 은 위반이 아니다)
 --   off_calendar      = trading_calendar(equity 입력, = stg_index_daily distinct date) 에 없는 date.
---                       **krx 행에만 건다** — 저녁 T 는 KRX 지수가 아직 안 와서 캘린더에 없는 것이
---                       정상이다(캘린더 상한 = stg_price_daily max, EG17). evening 행을 여기서
---                       격리하면 잠정판이 T 가격을 통째로 잃는다.
 WITH stock AS (
     SELECT p.ticker, p.date,
            p.open_krw, p.high_krw, p.low_krw, p.close_krw, p.volume_shr, p.value_krw,
@@ -73,50 +63,11 @@ krx AS (
            change_krw, shares_out, par_value_krw
     FROM etf
 ),
-listed_now AS (
-    -- 저녁 잠정 행의 상장 축 — KRX 일별 마스터 최신일(저녁에는 T-1) ∪ ETF 가격 원장 최신일.
-    -- 정본은 `rules_s04.EVENING_LISTED_SQL` 이고 EG1 우변이 같은 문자열을 쓴다.
-    SELECT ticker FROM stg_listing_daily WHERE date = (SELECT max(date) FROM stg_listing_daily) UNION SELECT ticker FROM stg_etf_price_daily WHERE date = (SELECT max(date) FROM stg_etf_price_daily)
-),
-kw AS (
-    -- 저녁 잠정 T — KRX 가격 원장의 상한을 넘어선 **키움의 최신 날짜 하나**뿐이다. 두 조건을 다
-    -- 걸어야 한다: `> KRX max` 만 걸면 키움이 앞서 있는 여러 날이 한꺼번에 들어오고,
-    -- `= 키움 max` 만 걸면 아침 확정판에서 KRX 와 겹쳐 (ticker, date) 가 중복된다.
-    -- 세 번째 조건은 상장 축이다 — 키움 ka10060 은 정리매매가 끝난 종목도 하루 더 `dt` 행을
-    -- 주므로(거래량 0·극단 가격) 그대로 실으면 저녁판 소비자가 폐지 종목을 마지막 날 유니버스에
-    -- 넣는다(DEFECT-E07, 09-19 감사). 아침 확정판은 KRX 축이라 애초에 안 생긴다.
-    SELECT f.ticker, f.date, f.close_krw, f.volume_shr
-    FROM stg_flow_daily_kiwoom f
-    WHERE f.date > (SELECT max(date) FROM stg_price_daily)
-      AND f.date = (SELECT max(date) FROM stg_flow_daily_kiwoom)
-      AND EXISTS (SELECT 1 FROM listed_now n WHERE n.ticker = f.ticker)
-),
-kw_prev AS (
-    -- 직전 종가 = 그 티커의 **마지막 KRX 종가**(참고가 행 포함). 정지 중이던 종목도 마지막으로
-    -- 공표된 값을 기준으로 잡는다 — 세션 수가 아니라 '마지막으로 알던 값' 이 비교축이다.
-    SELECT ticker, close_krw AS prev_close
-    FROM krx
-    QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY date DESC) = 1
-),
 src AS (
     SELECT ticker, date, open_krw, high_krw, low_krw, close_krw, volume_shr, value_krw,
            change_krw, shares_out, par_value_krw,
            'krx'   AS basis, FALSE AS corp_action_pending
     FROM krx
-    UNION ALL
-    SELECT k.ticker, k.date,
-           NULL AS open_krw, NULL AS high_krw, NULL AS low_krw,
-           k.close_krw, k.volume_shr,
-           NULL AS value_krw, NULL AS change_krw, NULL AS shares_out, NULL AS par_value_krw,
-           'evening' AS basis,
-           -- 2치로 닫는다: 직전 종가가 없거나 0 이하이거나 키움 종가가 NULL 이면 "판정 불가 = 의심"(TRUE).
-           -- 3치 논리로 NULL 이 새면 소비자의 `IS NOT TRUE` 거름망을 통과한다(검수 R2-07).
-           CASE WHEN p.prev_close IS NULL OR p.prev_close <= 0 OR k.close_krw IS NULL THEN TRUE
-                ELSE abs(CAST(k.close_krw AS DOUBLE) / CAST(p.prev_close AS DOUBLE) - 1)
-                     > c.evening_jump_abs_max END         AS corp_action_pending
-    FROM kw k
-    LEFT JOIN kw_prev p ON p.ticker = k.ticker
-    CROSS JOIN _const c
 )
 SELECT
     s.ticker,
@@ -141,8 +92,7 @@ SELECT
     'default'     AS available_basis,
     CASE WHEN s.close_krw <= 0 OR s.open_krw <= 0 OR s.high_krw <= 0 OR s.low_krw <= 0
               THEN 'nonpositive_price'
-         WHEN s.basis = 'krx'
-              AND NOT EXISTS (SELECT 1 FROM trading_calendar c WHERE c.date = s.date)
+         WHEN NOT EXISTS (SELECT 1 FROM trading_calendar c WHERE c.date = s.date)
               THEN 'off_calendar'
     END           AS reject_reason
 FROM src s

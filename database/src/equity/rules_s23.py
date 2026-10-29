@@ -273,7 +273,7 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
       ⑥ 구간 밖 계수 유입 0 — 접힌 수가 구간 안 계수 수를 **넘지** 않는다(⑤ 의 부분집합이지만
          방향을 이름으로 남긴다: 누출인지 누락인지가 진단에서 갈린다)
       ⑦ `available_date = date` ∧ basis 'derived' (fold 규약의 귀결을 산출로 증명한다)
-      ⑧ `date` 가 캘린더 세션(**basis='krx' 행만** — 저녁 T 행은 캘린더 밖이 정상) ∧ ticker 6자리
+      ⑧ `date` 가 캘린더 세션 ∧ ticker 6자리
       ⑨ 매크로(`v_adj_price_fwd`·`v_adj_volume_fwd`) 정합 — `_macro_mismatch`
       ⑩ `basis`·`corp_action_pending` 이 price_daily 와 전건 동일(표식 유실 0)
 
@@ -308,19 +308,13 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
           (SELECT count(*) FROM {v} WHERE ticker IS NULL OR typeof(ticker) <> 'VARCHAR'
              OR length(ticker) <> {TICKER_LEN}),
           (SELECT count(*) FROM {v} o
-             WHERE o.basis = 'krx'
-               AND NOT EXISTS (SELECT 1 FROM trading_calendar c WHERE c.date = o.date))""")
-    # 저녁 잠정 T 행(e1.15.0): 캘린더 상한은 KRX 최대일이라 T 는 캘린더 밖이 정상이다 — 위 ⑧ 을
-    # krx 행에만 걸고(검수 R2-01), 표식 두 컬럼이 price_daily 와 글자 그대로 같은지는 폐기형으로 본다.
-    n_basis_ne, n_evening_rows, n_evening_off_cal = _row(ctx, f"""
-        SELECT
-          (SELECT count(*) FROM {v} o JOIN price_daily p USING (ticker, date)
-             WHERE o.basis IS DISTINCT FROM p.basis
-                OR o.corp_action_pending IS DISTINCT FROM p.corp_action_pending),
-          (SELECT count(*) FROM {v} WHERE basis = 'evening'),
-          (SELECT count(*) FROM {v} o
-             WHERE o.basis = 'evening'
-               AND NOT EXISTS (SELECT 1 FROM trading_calendar c WHERE c.date = o.date))""")
+             WHERE NOT EXISTS (SELECT 1 FROM trading_calendar c WHERE c.date = o.date))""")
+    # 표식 두 컬럼(e1.15.0 의 열, e1.33.0 부터 price_daily 가 상수로 낸다)이 price_daily 와 글자 그대로
+    # 같은지는 폐기형으로 본다.
+    n_basis_ne = _row(ctx, f"""
+        SELECT count(*) FROM {v} o JOIN price_daily p USING (ticker, date)
+         WHERE o.basis IS DISTINCT FROM p.basis
+            OR o.corp_action_pending IS DISTINCT FROM p.corp_action_pending""")[0]
     # 독립 재계산 대조 — 값 8축 + available_date. NULL 은 NULL 로 같아야 한다. 조정 OHLC 는
     # ⑤ 누적으로 나눈다(e1.26.0) — 곱셈으로 뒤집으면 여기서 걸린다.
     po = "r_cum_price_only_factor"
@@ -444,9 +438,6 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
         "n_macro_mismatch": n_macro_bad,
     }
     metrics: dict[str, object] = {
-        # 저녁 잠정 행 — 캘린더 밖 T 행 수를 기록형으로 남긴다(⑧ 에서 뺀 만큼)
-        "n_evening_rows": int(str(n_evening_rows)),
-        "n_evening_off_calendar": int(str(n_evening_off_cal)),
         "n_rows": n_out,
         "n_rows_adjusted": int(str(n_rows_adjusted)),
         "n_rows_without_span": int(str(n_no_span)),
@@ -510,10 +501,8 @@ FIELDS: tuple[FieldProfile, ...] = (
                  "동일성을 증명한다. 레지스트리 가격 변화 팩터가 이 필드를 읽으므로(#218) "
                  "FIELD_MAP §2 어휘이고 field_scope='field_map' 이다. 가격 축 미해결은 "
                  "n_price_unresolved_events > 0 인 구간이다 — 조정가 소비자가 거를 축"
-                 "(n_unadjusted_events 는 보유 수량 축 미해결로 뜻 그대로). 저녁 잠정판(e1.15.0)에서는 basis='evening' "
-                 "T 행이 있고 그 adj_close = 키움 종가 × 그날까지의 누적 share_factor ÷ 누적 ⑤"
-                 "(과거 사건 누적 — 전방 조정이라 1 이 아니다), OHLC 조정값은 NULL 이다. "
-                 "corp_action_pending 이 참이면 오늘 스코어에서 뺀다(결정 V2-2).",
+                 "(n_unadjusted_events 는 보유 수량 축 미해결로 뜻 그대로). KRX 원장 행만 싣는다 — "
+                 "e1.15.0 의 저녁 잠정 T 행은 e1.33.0 에서 걷었다(장 마감 판 T 행은 fi 층이 얹는다).",
         coverage_axis="grid_session", axis_columns=("ticker", "date")),
 )
 

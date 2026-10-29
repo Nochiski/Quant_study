@@ -53,9 +53,8 @@
 --
 -- 격리 없음: 조정은 가격 행 하나하나에 대한 순수 함수라 버릴 행이 없다. trading_calendar 는
 -- 산출식이 아니라 게이트(EG3 의 캘린더 독립 재검사)가 읽는 입력이다.
--- 저녁 잠정 T 행(e1.15.0): `price_daily.basis`·`corp_action_pending` 을 **그대로 싣는다** — 이 표는
--- 소비자(워크벤치 `ADJ_TABLE`)가 직접 읽으므로 뷰만 표식을 통과시키면 잠정치가 확정치처럼 보인다
--- (검수 R2-04). T 행은 캘린더 밖이라 EG3 의 캘린더 검사는 basis='krx' 행에만 건다(검수 R2-01).
+-- `price_daily.basis`·`corp_action_pending`(e1.15.0 의 행 표식)을 그대로 싣는다 — 이 표는 소비자(워크벤치
+-- `ADJ_TABLE`)가 직접 읽는다(검수 R2-04). e1.33.0 에 저녁 잠정 T 행을 걷어 두 열은 늘 'krx'·거짓이다.
 WITH px AS (
     SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr,
            p.basis, p.corp_action_pending,

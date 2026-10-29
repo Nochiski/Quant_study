@@ -2445,6 +2445,8 @@ DART 정정신고 첫 장 서식이 2025년에 바뀌어 `stg_doc_correction` �
 
 ### 10-3. EG3_price_daily 확장 — 저녁 잠정 행 축 (결정 V2-2)
 
+> **e1.33.0(v3 컷오버 트랙 PR-10, 2026-10-29)에서 걷음**: 저녁 잠정 행 분기가 없어져 아래 저녁 지표(`n_evening_*`·`evening_date`·EG20 `n_evening_rows_excluded`·EG14 `evening_coverage_ratio`·S23 `n_evening_*`)는 더 이상 나오지 않는다. 남은 축은 `basis` 어휘 폐쇄(`krx` 하나, `n_basis_outside_vocab`)와 불변식 `n_corp_action_pending_true`(참·NULL 행 0)다 — 둘 다 폐기형. 이 절은 이력으로 남긴다.
+
 폐기형으로 추가된 검사(전부 0 이어야 통과):
 
 | 검사 | 뜻 |

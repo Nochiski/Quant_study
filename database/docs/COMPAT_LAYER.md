@@ -22,7 +22,7 @@ exporter 에서 빠지고, 전부 빠지면 `quant.db` 는 플랜 v2 D.2 규약�
 | `daily_prices` | 브리핑 `kr_market.py` · 가설 `store.py` · 리서치센터 S1/S2/S11·base_rates·drilldown · unitelegram `watchlist_peak_card.py` 가 전부 equity `price_daily`/`price_adj_daily` 직독으로 옮겨진 뒤 |
 | `stocks` | 위 + 뉴스 `preview.py`·`providers/naver_ir.py` · 리서치 브로커 `_store.py` · api `health.py` · `export_and_send.py` · unitelegram `kael_db.py` 가 equity `security`/`universe_daily`/`price_daily` 직독으로 옮겨진 뒤 |
 | `investor_detail_flows` | 리서치센터 S1/S11·base_rates·drilldown · 가설 · unitelegram 이 equity `flow_daily` 직독으로 옮겨진 뒤 |
-| `consensus_revision_daily` · `consensus_revision_compare` | 리서치센터 S10 이 equity `consensus_revision`(S17b, T2.6) 직독으로 옮겨진 뒤. **모델 입력으로서의 소비는 T2.6 시점에 이미 끝난다** |
+| `consensus_revision_daily` · `consensus_revision_compare` | 리서치센터 S10 · 위키 ingest(`consensus_revision_daily` eps 변화, §2-1 — QL-M 10-29 서버 확인)가 equity `consensus_revision`(S17b, T2.6) 직독으로 옮겨진 뒤. **모델 입력으로서의 소비는 T2.6 시점에 이미 끝난다** |
 | `consensus_annual` | **은퇴(컷오버 트랙 QL-M, 2026-10-29)** — 소비자가 v3 스코어링 엔진뿐이었고 그 엔진은 컷오버 날(10-16, V3-B) 빠졌다. 매핑에서 뺐고 v3 파일의 표는 마지막 반영 값으로 동결된다(D.2) |
 | `financial_summary` | 위키 ingest(`kael-wiki/scripts/ingest.sh` — 상위 20 확정 연간 재무, §2-1)가 equity `fin_std` 직독으로 옮겨진 뒤. 원래는 `consensus_annual` 과 함께 'v3 엔진뿐'으로 적었으나 위키 소비자가 감사에서 빠져 있었다(10-02 리뷰 R-3, 10-29 서버 확인) |
 | `score_history` | 브리핑 상위 8 · `export_and_send.py` · api health · unitelegram `get_signal_insights` 가 `data/deliver/latest_scores_<basis>.json` 또는 model 판 직독으로 옮겨진 뒤 |
@@ -352,7 +352,7 @@ WHERE s.stock_code = ?
 
 v3 날짜별 사본과 compat 반영본을 대조할 때 차이로 나오지만 고치지 않는 것이다. 여기 없는 차이는 결함 후보로 본다.
 
-판정 범위(T-45): 결함 후보(rc)로 세는 것은 **매일 도는 소비자가 읽는 열**(§2-1 crontab · §2-2 unitelegram — 표만 적거나 '등'으로 적은 곳은 그 표 전 열)의 차이뿐이다. §2-3 리서치센터(crontab 밖 수동)만 읽는 열은 `manual_consumer`, 읽는 곳이 없는 표·열(`financial_summary` 의 위키 밖 열, `stocks.listed_date`·`delisted_date` 등 — `consensus_annual` 은 QL-M 에 대조 대상에서 빠졌다)은 `no_consumer` 로 수만 기록한다. 표.열 목록의 정본은 `v3_replay.DAILY_CONSUMER`·`MANUAL_CONSUMER` 다. 옛 날짜를 `--allow-current-builds` 로 재생해 현판으로 대체한 원천 표가 있으면, 그 표가 원천인 v3 표·열(`v3_replay.fallback_columns` — 매핑의 원천 표, 열 대응을 모르면 표 전 열)의 차이는 `builds_fallback` 으로 수만 기록한다(그 뒤 판의 값이 섞인다 — 서버 10-01: security 대체로 078130 등 개명 3건).
+판정 범위(T-45): 결함 후보(rc)로 세는 것은 **매일 도는 소비자가 읽는 열**(§2-1 crontab · §2-2 unitelegram — 표만 적거나 '등'으로 적은 곳은 그 표 전 열)의 차이뿐이다. §2-3 리서치센터(crontab 밖 수동)만 읽는 열은 `manual_consumer`, 읽는 곳이 없는 표·열(`financial_summary` 의 위키 밖 열, `stocks.listed_date`·`delisted_date` 등 — `consensus_annual` 은 QL-M 에 대조 대상에서 빠졌다)은 `no_consumer` 로 수만 기록한다. 표.열 목록의 정본은 `v3_replay.DAILY_CONSUMER`·`MANUAL_CONSUMER` 다(위키 ingest 열은 QL-M 10-29 에 더했다). 옛 날짜를 `--allow-current-builds` 로 재생해 현판으로 대체한 원천 표가 있으면, 그 표가 원천인 v3 표·열(`v3_replay.fallback_columns` — 매핑의 원천 표, 열 대응을 모르면 표 전 열)의 차이는 `builds_fallback` 으로 수만 기록한다(그 뒤 판의 값이 섞인다 — 서버 10-01: security 대체로 078130 등 개명 3건).
 
 - **신규 스팩 — compat 에만 있다(v3 누락 교정)**: v3 `stocks` 에는 옛 숫자코드 스팩 117개뿐이고, 그 뒤 상장한 스팩(2024-02-01~2026-09-22 상장, 숫자·영숫자 코드 모두)이 없다. compat 은 `sec_type='spac'` 이면 싣는다(10-01·06·07·08 재생에서 71종목, 10-10 판정).
 - **점수 종목 수 — compat 이 적다(유니버스 결정, T-17)**: 하루 행이 `score_history` 1,329 → 593(scope@1.0), `score_history_v2` 2,526 → 625(v2_percentrank@1.0)로 준다. 10-05 '추정치 보유 종목만' 결정을 받아들인 것이다(QL-C). 점수는 유니버스 안 표준화라 공통 종목도 값 크기가 다르다. 그래서 공통 종목끼리 순위(Spearman)로 대조한다. `score_history.val_ev_ebitda` 는 늘 NULL 이다. scope 가 EV/EBITDA 를 밸류에 쓰지 않기 때문이고, v3 도 거의 비어 있었다.

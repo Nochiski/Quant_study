@@ -116,6 +116,11 @@ DAILY_CONSUMER: dict[str, frozenset[str] | str] = {
     "score_history": ALL,
     # §2-1 export 20열(+ score_date 조건)
     "score_history_v2": ALL,
+    # §2-1 위키 ingest(`kael-wiki/scripts/ingest.sh`, 20:05 daily_insight) — 상위 20 확정 연간 재무 · 컨센서스
+    # eps 변화. 감사가 v3 트리만 봐서 빠져 있었다(10-02 리뷰 R-3 → 컷오버 트랙 QL-M 10-29 서버 확인)
+    "financial_summary": frozenset({"stock_code", "period", "period_type", "data_type", "revenue", "op",
+                                    "ni", "roe", "debt_ratio", "fcf"}),
+    "consensus_revision_daily": frozenset({"stock_code", "base_date", "target_period", "eps"}),
 }
 MANUAL_CONSUMER: dict[str, frozenset[str]] = {
     # §2-3 S10 컨센서스 — consensus_revision_daily.collected_date·op·stock_code·target_period / compare.op_1w

@@ -732,7 +732,8 @@ MAPPINGS: tuple[TableMapping, ...] = (
         pk=("stock_code", "base_date"),
         sql=_REVISION_DAILY_SQL,
         retire_when="만료: M2 T2.6 equity consensus_revision(S17b) 승격 시 — "
-                    "그때 이 stage 직독 예외를 없앤다(B-23 종결)",
+                    "그때 이 stage 직독 예외를 없앤다(B-23 종결). 소비자: 리서치센터 S10 · 위키 ingest "
+                    "(eps 변화, QL-M 10-29 서버 확인)",
         note="한시 예외: equity 층을 건너뛰고 stage 를 직독하는 유일한 매핑(GAP-6)",
     ),
     TableMapping(

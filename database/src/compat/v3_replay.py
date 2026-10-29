@@ -256,7 +256,6 @@ ROUNDED: dict[str, frozenset[str]] = {
     "consensus_revision_daily": frozenset({"eps", "bps"}),
     "consensus_revision_compare": frozenset(
         c for c in BY_TABLE["consensus_revision_compare"].columns if c.startswith(("eps_", "bps_"))),
-    "consensus_annual": frozenset({"eps", "bps"}),
     "financial_summary": frozenset({"revenue", "op", "ni", "eps", "bps", "fcf", "capex", "shares",
                                     "gross_profit", "total_assets"}),  # 억원 반올림·주식수 반올림
 }

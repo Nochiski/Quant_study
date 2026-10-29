@@ -132,7 +132,7 @@ def test_replays_each_day_into_isolated_out_without_touching_sources(root: Path,
     assert full["inputs"]["next_v3_db"].endswith("20260923/v3_next.db")
     assert full["inputs"]["compat_window"]["full"] is True
     assert list(full["tables"]) == ["daily_prices", "stocks", "investor_detail_flows", "consensus_revision_daily",
-                                    "consensus_revision_compare", "consensus_annual", "financial_summary",
+                                    "consensus_revision_compare", "financial_summary",
                                     "score_history", "score_history_v2"]
     assert full["tables"]["score_history"]["categories"]["score_universe"]["rows"] == len(tce.SCORE_CODES)
     assert full["rc"] == 1 and full["tables"]["daily_prices"]["other"]["only_in_compat"] > 0

@@ -39,7 +39,6 @@ def test_krw_constants() -> None:
     ("financial_summary", "revenue", "억원", "stg_fin_wise.val_*(accode 200000)", 1),
     ("financial_summary", "gross_profit", "억원", "stg_fin_wise.val_*(accode 200810)", 1),
     ("consensus_revision_daily", "op", "억원", "stg_consensus_matrix.value(acc_cd 121500)", 1),
-    ("consensus_annual", "ni", "억원", "stg_consensus_annual.ni", 1),
 ])
 def test_unit_rule_literals(table: str, column: str, v3_unit: str, src_column: str,
                             divisor: int) -> None:

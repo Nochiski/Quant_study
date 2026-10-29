@@ -205,11 +205,12 @@ def files(tmp_path: Path) -> tuple[Path, Path]:
 
 
 # ── 선언 ─────────────────────────────────────────────────────────────────────
-def test_tables_are_exactly_the_nine_compat_tables() -> None:
-    """반영 대상 = compat 매핑이 선언한 9표 전부(정본은 mappings). market_* 등은 없다(T-27)."""
+def test_tables_are_exactly_the_compat_tables() -> None:
+    """반영 대상 = compat 매핑이 선언한 표 전부(정본은 mappings) — QL-M 에 consensus_annual 이 은퇴해 8표.
+    market_* 등은 없다(T-27)."""
     assert set(TABLES) == {m.v3_table for m in MAPPINGS}
-    assert len(TABLES) == 9
-    assert "market_indices" not in TABLES
+    assert len(TABLES) == 8
+    assert "market_indices" not in TABLES and "consensus_annual" not in TABLES
 
 
 # ── 스테이징 사본 ────────────────────────────────────────────────────────────
@@ -303,6 +304,19 @@ def test_snapshot_refuses_missing_main(tmp_path: Path) -> None:
 
 
 # ── 한 트랜잭션 반영 ─────────────────────────────────────────────────────────
+def test_consensus_annual_은_은퇴해_반영하지_않는다(files) -> None:
+    """QL-M — v3 `consensus_annual` 을 읽는 곳은 컷오버 날 빠진 v3 점수 엔진뿐이라 compat 쓰기를 멈췄다.
+    스테이징 값이 달라도 본 파일 표는 마지막 반영 값으로 동결된다(복원 7표 · refill 에서도 빠진다)."""
+    main, stg = files
+    assert "consensus_annual" not in TABLES
+    assert "consensus_annual" not in v3_restore.DEFAULT_TABLES
+    snapshot(main, stg)
+    _fake_compat(stg)                      # 스테이징 consensus_annual.op 를 2.0 으로 바꿔 둔다
+    assert apply(stg, main, D, "evening").ok
+    assert _rows(main, "SELECT op FROM consensus_annual") == [(1.0,)]
+    assert _rows(main, "SELECT op FROM financial_summary") == [(2,)]      # 위키가 읽어 계속 쓴다
+
+
 def test_apply_moves_nine_tables_window_only(files) -> None:
     main, stg = files
     snapshot(main, stg)
@@ -330,7 +344,7 @@ def test_apply_moves_nine_tables_window_only(files) -> None:
                      (OTHER_SCORE_DATE,)) == [(1.0,)]
     # 스냅샷 표 — 표 전체가 스테이징과 같다
     for table in ("stocks", "consensus_revision_daily", "consensus_revision_compare",
-                  "consensus_annual", "financial_summary"):
+                  "financial_summary"):
         q = f"SELECT * FROM {table} ORDER BY 1, 2"
         assert _rows(main, q) == _rows(stg, q), table
     assert _rows(main, "SELECT stock_code, is_active FROM stocks ORDER BY 1") == [
@@ -628,7 +642,7 @@ def test_next_morning_after_no_scores_evening_fills_scores(files) -> None:
     ({"skipped": {"daily_prices": 1}}, None, "필수 열"),
     ({"n_on_date": 0}, None, "신선도"),
     ({"tables": SEVEN[:-1]}, None, SEVEN[-1]),          # 7표를 한 실행으로
-    ({}, "consensus_annual", "consensus_annual: 반영 범위 행 0"),
+    ({}, "financial_summary", "financial_summary: 반영 범위 행 0"),
     # 점수 표까지 쓴 compat 기록 — 옮기지 않은 점수 표가 기록에 남으면 다음 날 아침이 점수를 건너뛴다
     ({"tables": TABLES}, None, "반영 표 밖"),
 ])

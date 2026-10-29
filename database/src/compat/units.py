@@ -103,12 +103,6 @@ UNIT_RULES: tuple[UnitRule, ...] = (
              "stg_consensus_matrix.value(acc_cd 121500)", "억원", 1, f"{_UNITS_DATA}:6"),
     UnitRule("consensus_revision_daily", "ni", "억원",
              "stg_consensus_matrix.value(acc_cd 122710)", "억원", 1, f"{_UNITS_DATA}:7"),
-    UnitRule("consensus_annual", "revenue", "억원", "stg_consensus_annual.revenue", "억원", 1,
-             f"{_UNITS_DATA}:49"),
-    UnitRule("consensus_annual", "op", "억원", "stg_consensus_annual.op", "억원", 1,
-             f"{_UNITS_DATA}:51"),
-    UnitRule("consensus_annual", "ni", "억원", "stg_consensus_annual.ni", "억원", 1,
-             f"{_UNITS_DATA}:52"),
 )
 
 _BY_KEY: dict[tuple[str, str], UnitRule] = {(r.v3_table, r.v3_column): r for r in UNIT_RULES}

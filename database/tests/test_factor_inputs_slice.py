@@ -324,38 +324,6 @@ def test_fin_summary_slice_financial_revenue_003540(fin_pair) -> None:
     assert (r["revenue"], r["revenue_basis"]) == (8_846.0, "net")
 
 
-# ── compat consensus_annual 동등(v2 원천, D = 2026-09-03) ────────────────────
-def test_consensus_annual_equals_compat_on_slice(chain) -> None:
-    """compat 은 한 기에 E 하나(E 우선)만 남기고 이 표는 E·A 를 다 싣는다 — compat 행마다 같은
-    종류의 우리 행이 같은 값이어야 하고, 우리만 가진 행은 compat 이 E 를 고른 기의 A 뿐이다."""
-    from compat.mappings import BY_TABLE
-    con = duckdb.connect()
-    try:
-        _fin_views(con, chain)
-        p = queries.Params(d=D_FIN.isoformat(), fy=f"{D_FIN.year}12",
-                           price_from=D_FIN.isoformat(), flow_from=D_FIN.isoformat(),
-                           grace_days=5, credit_lag=3)
-        con.execute("CREATE TEMP TABLE _fi_universe AS SELECT ticker FROM security")
-        con.execute(queries.consensus_annual_sql(p))
-        ours = {(r[0], r[1], r[2]): r[3:] for r in con.execute(
-            "SELECT ticker, period, data_type, revenue, op, ni, eps, per "
-            "FROM _fi_consensus_annual").fetchall()}
-        sql = BY_TABLE["consensus_annual"].sql.format(
-            stg_consensus_annual="stg_consensus_annual", consensus_asof=D_FIN.isoformat())
-        compat = {(r[0], r[1], "E" if r[2] == "estimate" else "A"): r[3:] for r in con.execute(
-            f"SELECT stock_code, period, data_type, revenue, op, ni, eps, per FROM ({sql}) "
-            "WHERE period IN ('2025/12', '2026/12', '2027/12')").fetchall()}
-    finally:
-        con.close()
-    assert compat and {t for t, _, _ in compat} == {"000660", "003540", "005930", "161890",
-                                                   "247540"}
-    for key, cv in compat.items():
-        assert key in ours, key
-        assert tuple(None if v is None else float(v) for v in cv) == ours[key], key
-    extra = set(ours) - set(compat)
-    assert all(k[2] == "A" and (k[0], k[1], "E") in compat for k in extra), extra
-
-
 # ── 회귀 가드(배포 묶음 7-2): 접지 않은 절단본에서 WISE 소비 출력이 fi1.2.0 과 같다 ──
 # stage 가 WISE 재무 두 표의 같은 원문을 접어도(7-1) fi 가 (종목, ep) 단위 최신 판을 읽도록 바꾼다.
 # 접지 않은 절단본은 매 수집일 두 ep 가 다 있어 옛 쿼리(종목 한 날짜)와 새 쿼리의 답이 같아야 한다.

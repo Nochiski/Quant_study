@@ -58,7 +58,8 @@ python -m deliver model-weekly --week 2026-W40                [--send] [--dry-ru
   건너뛰어 판이 생기지 않는다.
 - **원천 전환 뒤(컷오버 PR-9 · T-7)**: `config/postclose_chain.env` 의 `POSTCLOSE_ENABLED=1` 그리고 `POSTCLOSE_SEND=1`
   이면 전환 뒤다. 판정은 `scripts/postclose_conf.sh` 한 곳이고, 그 밖(그림자 `SEND=0` 등)은 지금처럼 아침이 보낸다.
-  - 전환 뒤에는 장 마감 체인 ⑤(15:41~, `--basis evening --out-root data/model_db/deliver`)가 D 의 엑셀을 먼저 보낸다.
+  - 전환 뒤에는 장 마감 체인 ⑤(`--basis evening --out-root data/model_db/deliver`)가 D 의 엑셀을 먼저 보낸다. D13(N-62)부터
+    ⑤ 는 15:41 close 가 아니라 그날 18:05 DART 갈래 끝의 evening 이 돈다(그날 공시 반영, DART 실패면 전 거래일 공시로).
   - `model_daily.sh` 는 fi → 모델 → 엑셀을 그대로 짓는다. `--send` 는 장 마감 발송 장부
     `data/model_db/deliver/sent_model_daily.jsonl` 에 그 D 의 basis=evening 줄이 **없을 때만** 붙인다(대체 발송 —
     notify warn '장 마감 판 미발송 → 아침판 대체 발송'). 줄이 있으면 짓기만 한다(info).

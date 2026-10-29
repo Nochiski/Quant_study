@@ -32,7 +32,7 @@ stocks
   000990 v3 시총 NULL · KRX 근거 없음 → other column:market_cap
   900000 compat 폐지(10-07)·is_active 0·시총 50, v3 1·NULL → delisting_timing(T-45 ②)
   088280 v3 시총 NULL · v3 그날 행 없음 · KRX 행 있음 → v3_missed_day · 123450 → new_spac · 777777 compat 에만 → other
-consensus_revision_daily op 0.5% → manual_consumer(§2-3 S10) · eps +10 → no_consumer · financial_summary compat 에만 → no_consumer
+consensus_revision_daily op 0.5% → manual_consumer(§2-3 S10) · bps +10 → no_consumer · financial_summary capex(위키 밖 열) → no_consumer
 score_history D 에 v3 3종목 · compat 2종목(값 ×10, 005930 만 val_ev_ebitda NULL) → score_universe 1 · score_common 2 ·
               score_val_ev_ebitda_null 1, 10-07 행 차이 → other score_date_not_D
 """
@@ -137,9 +137,9 @@ REVISION_COLS = BY_TABLE["consensus_revision_daily"].columns
 _FLOW = tuple(c for c in BY_TABLE["investor_detail_flows"].columns if c not in ("stock_code", "trade_date"))
 
 
-def _revision(op: float, eps: int) -> dict:
+def _revision(op: float, bps: int) -> dict:
     row: dict = dict.fromkeys(REVISION_COLS)
-    row.update(stock_code="005930", base_date="2026-10-07", target_period="2026/12", op=op, eps=eps,
+    row.update(stock_code="005930", base_date="2026-10-07", target_period="2026/12", op=op, bps=bps,
                collected_date=D_ISO)
     return row
 
@@ -181,6 +181,8 @@ def _v3_file(path: Path, prices: list[tuple]) -> Path:
         _insert(con, "daily_prices", BY_TABLE["daily_prices"].columns, prices)
         _insert(con, "stocks", STOCK_COLS, V3_STOCKS)
         _insert(con, "consensus_revision_daily", REVISION_COLS, [_revision(100.0, 5000)])
+        con.execute("INSERT INTO financial_summary (stock_code, period, period_type, capex) "
+                    "VALUES ('005930', '2024/12', 'annual', 10)")
         con.execute(f"INSERT INTO investor_detail_flows (stock_code, trade_date, {', '.join(_FLOW)}) "
                     f"VALUES ('900000', ?, {', '.join('0' * len(_FLOW))})", (D_ISO,))
         _insert(con, "score_history", V3_SCORE_COLUMNS, V3_SCORES)
@@ -217,8 +219,7 @@ def _compat_file(v3: Path, path: Path, prices: dict, *, basis: str = "morning",
         _insert(con, "stocks", STOCK_COLS, COMPAT_STOCKS)
         _insert(con, "consensus_revision_daily", REVISION_COLS, [_revision(100.5, 5010)])
         con.execute("DELETE FROM investor_detail_flows WHERE stock_code = '900000'")
-        con.execute("INSERT INTO financial_summary (stock_code, period, period_type) "
-                    "VALUES ('005930', '2025/12', 'annual')")
+        con.execute("UPDATE financial_summary SET capex = 20 WHERE period = '2024/12'")   # 반올림 ±1 밖
         con.execute("DELETE FROM score_history")
         _insert(con, "score_history", V3_SCORE_COLUMNS, COMPAT_SCORES)
         con.commit()
@@ -321,14 +322,27 @@ def test_manual_and_no_consumer_tables_do_not_set_rc(pair, equity_root) -> None:
     _, other = _tables(rep, "consensus_revision_daily")
     assert other == {}
     assert rep["tables"]["consensus_revision_daily"]["manual_consumer"] == {"column:op": 1}   # §2-3 S10, 0.5%
-    assert rep["tables"]["consensus_revision_daily"]["no_consumer"] == {"column:eps": 1}
-    assert rep["tables"]["financial_summary"]["no_consumer"] == {"only_in_compat": 1}
+    assert rep["tables"]["consensus_revision_daily"]["no_consumer"] == {"column:bps": 1}
+    assert rep["tables"]["financial_summary"]["no_consumer"] == {"column:capex": 1}
     assert (rep["n_manual_consumer"], rep["n_no_consumer"]) == (1, 3)
     assert {o["reason"] for o in rep["manual_consumer"]} == {"column:op"}
     assert rp.consumer_tier("consensus_annual", None) == "no_consumer"
     assert rp.consumer_tier("stocks", ("updated_at", "delisted_date")) == "no_consumer"
     assert rp.consumer_tier("stocks", ("is_active",)) == "other"
     assert rp.consumer_tier("consensus_revision_compare", ("op_1w",)) == "manual_consumer"
+
+
+@pytest.mark.parametrize(("table", "cols", "tier"), [
+    ("financial_summary", ("roe",), "other"),             # 위키 상위 20 재무 열
+    ("financial_summary", None, "other"),                 # 한쪽에만 있는 행 — 위키 쿼리가 행을 고른다
+    ("financial_summary", ("capex",), "no_consumer"),     # 위키가 읽지 않는 열
+    ("consensus_revision_daily", ("eps",), "other"),      # 위키 컨센서스 변화(eps)
+    ("consensus_revision_daily", ("op",), "manual_consumer"),
+])
+def test_wiki_ingest_columns_are_daily_consumers(table: str, cols, tier: str) -> None:
+    """QL-M 서버 확인(10-29) — 매일 20:05 위키 ingest(`kael-wiki/scripts/ingest.sh`)가 financial_summary 와
+    consensus_revision_daily 를 읽는다. 감사(COMPAT §2-1)에서 빠져 있어 그 열의 차이가 rc 에 들지 않았다."""
+    assert rp.consumer_tier(table, cols) == tier
 
 
 def test_score_tables_universe_common_ev_null_and_spearman(pair, equity_root) -> None:

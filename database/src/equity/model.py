@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.32.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.33.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -358,6 +358,13 @@ RULES_VERSION = "e1.32.0"                # BuildRecord.rules_version 에 실린�
 #          `v_fin_latest` 는 사업보고서 분기값을 fin_std 4분기로 읽고 누계 칸 분기를 품은 TTM 을 비운다(연간 행 TTM 불변).
 #          S1-e `corp_event` 자사주 기타주식분 — 결정일 전에 폐지된 우선주가 법인에 있으면 결정일 상장 우선주가 하나여도
 #          class_ambiguous(범위 밖)로 둔다(#590 리뷰 P3-1 을 뒤집음, 한화 2026-01-14). treasury_buy 행만 줄 수 있다.
+# e1.33.0: v3 컷오버 트랙 PR-10 — `price_daily` 저녁 잠정 T 행 분기(e1.15.0, 키움 ka10060 종가 · `listed_now`
+#          상장 축 DEFECT-E07)를 걷었다. 21:20 연구 저녁 빌드는 그림자 시작(10-14)에 멈췄고 장 마감 판 T 행은
+#          fi 층이 `postclose.db` 에서 얹는다(PR-5). 입력에서 `stg_flow_daily_kiwoom` 이 빠지고 `basis`·
+#          `corp_action_pending` 은 늘 'krx'·거짓(하류 계약이라 열은 남김, `PRICE_BASIS_VOCAB` = krx 하나).
+#          EG3_price_daily 저녁 지표 대신 불변식 `n_corp_action_pending_true`, EG14·EG20·S23 의 저녁 지표 삭제.
+#          서버 운영 판 10개(10-15~10-29 m_)에 evening 행 0 — price_daily·price_adj_daily 산출 불변 기대. 바뀌는 것은
+#          `dataset_profile` 의 `source_stage_tables`(price_daily 를 거치는 필드의 stage 폐포에서 키움 표가 빠짐)뿐이다.
 
 # 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a, 규약은 `stage.model.RULES_CHANGED`) — 판본을 올리면 한 줄을 더한다.
 # 그 표를 입력으로 읽는 하류 표는 적지 않는다(읽는 쪽이 `RULES[t].inputs` 를 따라 닫는다). 선언 시작은 e1.31.0 이다 —
@@ -372,6 +379,9 @@ RULES_CHANGED: dict[str, frozenset[str]] = {
     # S1-d 도 fin_std(4분기 9개월 누계 식·게이트·새 열 둘). 카탈로그 `v_fin_latest` 는 표가 아니라 선언 밖이다.
     # S1-e corp_event(결정일 전 폐지 우선주가 있으면 자사주 기타주식분을 class_ambiguous 로).
     "e1.32.0": frozenset({"fin_std", "corp_event"}),
+    # PR-10 — price_daily 저녁 분기를 걷었지만 운영 아침 판에는 그 행이 없었다(price_daily 산출 불변 기대).
+    # 입력에서 stg_flow_daily_kiwoom 이 빠져 dataset_profile 의 source_stage_tables 만 바뀐다.
+    "e1.33.0": frozenset({"dataset_profile"}),
 }
 
 
@@ -387,10 +397,9 @@ def changed_between(prev: str, cur: str) -> frozenset[str] | None:
 BUILD_BASES: tuple[str, ...] = tuple(sorted(stage_model.BASIS_PREFIX))
 BUILD_BASIS_DEFAULT = stage_model.BASIS_MANUAL     # `--basis` 없이 지은 판 (build_id 접두 `b_`)
 # `price_daily.basis` 행 어휘 — 그 **행의 값이 어느 원천에서 왔는가** (결정 V2-2). 빌드 판
-# (위 BUILD_BASES)과 이름이 겹치지만 축이 다르다: 저녁 빌드가 지은 표에도 KRX 행이 대부분이다.
+# (위 BUILD_BASES)과 이름이 겹치지만 축이 다르다. e1.33.0 에 저녁 잠정 행('evening')을 걷어 KRX 하나다.
 PRICE_BASIS_KRX = "krx"
-PRICE_BASIS_EVENING = "evening"
-PRICE_BASIS_VOCAB: tuple[str, ...] = (PRICE_BASIS_KRX, PRICE_BASIS_EVENING)
+PRICE_BASIS_VOCAB: tuple[str, ...] = (PRICE_BASIS_KRX,)
 
 
 def record_basis(record: manifest.BuildRecord) -> str:

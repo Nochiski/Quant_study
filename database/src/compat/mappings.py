@@ -1,4 +1,7 @@
-"""v3 `quant.db` 9표 ← equity/stage/model 매핑 선언 (플랜 `2026-09-24-v3-merge.md` §5 T1.2 2).
+"""v3 `quant.db` 반영 표 ← equity/stage/model 매핑 선언 (플랜 `2026-09-24-v3-merge.md` §5 T1.2 2).
+
+은퇴한 표는 선언에서 뺀다 — `consensus_annual` 은 컷오버 트랙 QL-M(10-29)에 은퇴했다(읽는 곳이 컷오버 날 빠진
+v3 점수 엔진뿐, `docs/COMPAT_LAYER.md` §1). v3 파일의 그 표는 마지막 반영 값으로 동결된다.
 
 표마다 ① 원천(equity 판 · stage 판 · 모델 판 점수 표) ② duckdb SELECT ③ v3 컬럼 순서 ④ PK
 ⑤ `retire_when`(만료 조건) ⑥ `null_columns`(소스에 재료가 없어 NULL 로 두는 v3 열)을 선언한다.
@@ -394,48 +397,6 @@ FROM sel
 GROUP BY ticker
 """
 
-# ── consensus_annual ────────────────────────────────────────────────────────────────────────
-# stage `stg_consensus_annual`(c1050001 T2Y). 종목별 최신 fetched_date 한 판.
-# v3 형식: period 'YYYY/MM' · period_type 는 **월이 12 면 annual, 아니면 quarter**
-#   (v3 `_wisereport_parsers.py:89-98` 의 규칙 그대로 — 비12월 결산은 v3 에서도 quarter 로 들어가
-#    scoring 의 `period_type='annual'` 창에서 빠진다. 같은 동작을 재현해야 비교가 선다).
-# data_type: period_kind 'E' → 'estimate', 'A' → 'actual'
-#   (v3 `v2_data_loader.py:50-57` 이 'estimate' 만 문자열로 본다).
-# 같은 period 에 A·E 가 둘 다 오면 E 를 고른다(v2 의 'estimate 우선'과 같은 방향).
-_CONSENSUS_ANNUAL_SQL = """
-WITH latest AS (
-    SELECT ticker, max(fetched_date) AS fetched_date
-    FROM {stg_consensus_annual}
-    WHERE fetched_date <= DATE '{consensus_asof}'
-    GROUP BY ticker
-),
-sel AS (
-    SELECT a.*, row_number() OVER (
-             PARTITION BY a.ticker, a.period
-             ORDER BY CASE WHEN a.period_kind = 'E' THEN 0 ELSE 1 END, a.period_label) AS rn
-    FROM {stg_consensus_annual} a
-    JOIN latest l ON l.ticker = a.ticker AND l.fetched_date = a.fetched_date
-    WHERE a.period IS NOT NULL
-)
-SELECT ticker                                              AS stock_code,
-       substr(period, 1, 4) || '/' || substr(period, 5, 2) AS period,
-       CASE WHEN substr(period, 5, 2) = '12' THEN 'annual' ELSE 'quarter' END AS period_type,
-       CASE WHEN period_kind = 'E' THEN 'estimate' ELSE 'actual' END          AS data_type,
-       CAST(revenue AS DOUBLE)                             AS revenue,
-       CAST(yoy_pct AS DOUBLE)                             AS yoy,
-       CAST(op AS DOUBLE)                                  AS op,
-       CAST(ni AS DOUBLE)                                  AS ni,
-       CAST(round(eps) AS BIGINT)                          AS eps,
-       CAST(round(bps) AS BIGINT)                          AS bps,
-       CAST(per AS DOUBLE)                                 AS per,
-       CAST(pbr AS DOUBLE)                                 AS pbr,
-       CAST(roe_pct AS DOUBLE)                             AS roe,
-       CAST(ev_ebitda AS DOUBLE)                           AS ev_ebitda,
-       fs_basis                                            AS accounting_standard
-FROM sel
-WHERE rn = 1
-"""
-
 # ── financial_summary (두 원천 합성 — T1.5 · D-10) ──────────────────────────────────────────
 # ① stage `stg_fin_wise`(WISE cF3002 재무제표 + cF4002 투자지표, 결정 D-5)
 #      → revenue · op · ni · eps · bps · per · pbr · ev_ebitda · dividend_yield · shares ·
@@ -771,7 +732,8 @@ MAPPINGS: tuple[TableMapping, ...] = (
         pk=("stock_code", "base_date"),
         sql=_REVISION_DAILY_SQL,
         retire_when="만료: M2 T2.6 equity consensus_revision(S17b) 승격 시 — "
-                    "그때 이 stage 직독 예외를 없앤다(B-23 종결)",
+                    "그때 이 stage 직독 예외를 없앤다(B-23 종결). 소비자: 리서치센터 S10 · 위키 ingest "
+                    "(eps 변화, QL-M 10-29 서버 확인)",
         note="한시 예외: equity 층을 건너뛰고 stage 를 직독하는 유일한 매핑(GAP-6)",
     ),
     TableMapping(
@@ -787,17 +749,6 @@ MAPPINGS: tuple[TableMapping, ...] = (
         note="한시 예외: 위와 같은 좌표에서 lookback 1w/1m/3m/1y 축만 뽑는다",
     ),
     TableMapping(
-        v3_table="consensus_annual",
-        source_kind=STAGE,
-        sources=("stg_consensus_annual",),
-        columns=("stock_code", "period", "period_type", "data_type", "revenue", "yoy", "op",
-                 "ni", "eps", "bps", "per", "pbr", "roe", "ev_ebitda", "accounting_standard"),
-        pk=("stock_code", "period", "period_type"),
-        sql=_CONSENSUS_ANNUAL_SQL,
-        retire_when="v2 엔진이 model 층 입력(equity consensus)으로 옮겨진 뒤 — "
-                    "consensus_annual 소비자는 scoring 뿐이다(플랜 §8-3)",
-    ),
-    TableMapping(
         v3_table="financial_summary",
         source_kind=STAGE,
         sources=("stg_fin_wise",),
@@ -807,8 +758,9 @@ MAPPINGS: tuple[TableMapping, ...] = (
                  "accounting_standard", "gross_profit", "total_assets"),
         pk=("stock_code", "period", "period_type"),
         sql=_FINANCIAL_SUMMARY_SQL,
-        retire_when="v3 엔진이 model 층으로 은퇴한 뒤(D-4) — financial_summary 소비자는 "
-                    "scoring 뿐이다(플랜 §8-3)",
+        retire_when="위키 ingest(kael-wiki scripts/ingest.sh — 상위 20 확정 연간 재무, v3 daily_insight "
+                    "20:05)가 equity fin_std 직독으로 옮겨진 뒤. v3 점수 엔진은 컷오버(V3-B)로 빠졌다 — "
+                    "컷오버 트랙 QL-M(10-29) 서버 확인",
         null_columns=("op_margin", "ni_margin", "yoy"),
         note="WISE(손익·투자지표) + DART fin_std(재무상태표·현금흐름) 합성 — T1.5/D-10. "
              "quality 입력 roa·debt_ratio·fcf·total_assets 는 DART 쪽에서 온다",

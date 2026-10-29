@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# v3 점수 대조 — 플랜 `docs/plans/2026-09-24-v3-merge.md` T1.3 / 게이트 G-M2 ②③·G-M3 ①.
+# 점수 표 대조 — 플랜 `docs/plans/2026-09-24-v3-merge.md` T1.3 / 게이트 G-M2 ②③·G-M3 ①.
+#   컷오버(10-16) 뒤 기준(--left)은 v3 엔진이 아니라 운영 scope 점수가 담긴 sqlite 다(QL-N, `model/compare.py` 머리).
 #   순서: 인자 확인 → `python -m model.compare`(두 sqlite 를 ?mode=ro 로만 연다) → 리포트 → 알림
 #   산출: logs/model_compare/<D>_<표>.md · .json, 실행 로그 logs/model_compare/<D>.log
-#   크론 없음 — M1 그림자 실행(오케스트레이터 수동)과 M2 이식 동등성 확인에 쓴다.
+#   크론 없음 — 손 도구. 옛 용도는 M1 그림자 실행과 M2 이식 동등성 확인이었다.
 #   rc: 0 pass(info) · 1 fail(warn — 차이 원인 분류를 사람이 본다) · 그 외 오류(crit)
-#   사용: model_compare.sh --date YYYY-MM-DD|YYYYMMDD --left V3_QUANT_DB --right OUR_DB [--table score_history|score_history_v2|both]
+#   사용: model_compare.sh --date YYYY-MM-DD|YYYYMMDD --left BASE_DB --right OTHER_DB [--table score_history|score_history_v2|both]
 set -uo pipefail
 cd "$HOME/quant-ledger" || { echo "quant-ledger 홈으로 이동 실패" >&2; exit 2; }
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
@@ -20,7 +21,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 if [ -z "$DATE_ARG" ] || [ -z "$LEFT" ] || [ -z "$RIGHT" ]; then
-  echo "usage: model_compare.sh --date YYYY-MM-DD --left V3_QUANT_DB --right OUR_DB [--table …]" >&2
+  echo "usage: model_compare.sh --date YYYY-MM-DD --left BASE_DB --right OTHER_DB [--table …]" >&2
   exit 2
 fi
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
@@ -36,7 +37,7 @@ LOG="$OUT/${D}.log"
 RCF=$(mktemp)          # 파이프(`| tee`) 안의 RC 는 서브셸에 갇힌다 — 파일로 꺼낸다(wics_weekly 09-20 교훈)
 {
 echo "════ [$(kst)] model_compare 시작 D=$D table=$TABLE ════"
-echo "  왼쪽(v3) $LEFT / 오른쪽 $RIGHT"
+echo "  왼쪽(기준) $LEFT / 오른쪽 $RIGHT"
 $PY -m model.compare --date "$D" --left "$LEFT" --right "$RIGHT" --out "$OUT" --table "$TABLE"
 RC=$?
 echo "════ 종료 rc=$RC $(kst) ════"

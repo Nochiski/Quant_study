@@ -369,8 +369,8 @@ def test_backup_sh_argument_errors_are_rc5(tmp_path, v3, args) -> None:
 
 
 # ── 복원: 리허설(백업 → 컷오버 기간 쓰기 → 계획 → 복원) ─────────────────────────────
-def test_rehearsal_restores_seven_tables_and_leaves_the_rest(tmp_path, v3) -> None:
-    """정본 QL-I 리허설(T-42) — 기본 7표는 백업과 같아지고, 점수 두 표(컷오버 기간에 실제로 나간 점수)와 9표 밖(v3 가
+def test_rehearsal_restores_default_tables_and_leaves_the_rest(tmp_path, v3) -> None:
+    """정본 QL-I 리허설(T-42) — 기본 표(점수 두 표를 뺀 compat 표, QL-M 뒤 6표)는 백업과 같아지고, 점수 두 표(컷오버 기간에 실제로 나간 점수)와 9표 밖(v3 가
     계속 쓴 행 포함)은 그대로, `_compat_meta` 에 복원 기록 1행이 붙는다. --dry-run 은 표별 행 수만 보이고 락도 잡지
     않는다. 백업 파일은 바뀌지 않는다."""
     _home(tmp_path)
@@ -413,7 +413,7 @@ def test_rehearsal_restores_seven_tables_and_leaves_the_rest(tmp_path, v3) -> No
     assert rec[0] > max(m[0] for m in meta_before)
     assert rec[2:4] == ("restore", "ok")
     counts = json.loads(rec[4])
-    assert set(counts) == set(DEFAULT_TABLES) and len(counts) == 7
+    assert set(counts) == set(DEFAULT_TABLES) and len(counts) == 6
     assert counts["daily_prices"] == {"n_before": 19, "n_rows": 18}
     win = json.loads(rec[5])
     assert win["sha256"] == bak_sha and win["backup"].endswith(backup.name)

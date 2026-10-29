@@ -135,7 +135,8 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                   etf_tickers: frozenset[str] = frozenset(),
                   corp_ticker: list[dict[str, object]] | None = None,
                   spans: list[dict[str, object]] | None = None,
-                  const: dict[str, object] | None = None) -> dict[str, dict[str, object]]:
+                  const: dict[str, object] | None = None,
+                  scope_out: dict[str, int] | None = None) -> dict[str, dict[str, object]]:
     """`sql/corp_event.sql` 을 합성 입력 뷰 위에서 그대로 실행한다(프레임·게이트 없이 산출식만).
 
     `listing` 은 (ticker, date, list_shrs[, par_value_krw]) 를 주면 되고 corp_ticker·security_span
@@ -146,6 +147,9 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
     `prices` 는 equity
     `price_daily` 의 (ticker, date, close, base_price_krw) — 없으면 빈 뷰(C-04 기준가 확인 축).
     `security.sec_type` 은 `etf_tickers` 면 'etf', 아니면 'stock'(C-04 기준가 후보에서 ETF 제외).
+    `scope_out` 을 주면 같은 입력의 pool 범위 판정(`rules_s05.pool_sql`, EG3 `n_pool_by_scope` 와 같은
+    질의)을 사유별 건수로 채운다(범위 안은 'in_scope') — 범위 밖은 행을 내지 않아 산출만으로는 사유를
+    가를 수 없다.
     """
     con = duckdb.connect()
     try:
@@ -188,8 +192,12 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
         _view(con, "_const", [k], dict.fromkeys(k, "DOUBLE"))
         rel = con.execute(_EVENT_SQL)
         cols = [d[0] for d in rel.description]
-        return {str(r[cols.index("event_id")]): dict(zip(cols, r, strict=True))
-                for r in rel.fetchall()}
+        out = {str(r[cols.index("event_id")]): dict(zip(cols, r, strict=True))
+               for r in rel.fetchall()}
+        if scope_out is not None:
+            scope_out.update({str(s): int(n) for s, n in con.execute(rules_s05.pool_sql(
+                "coalesce(scope_out, 'in_scope'), count(*) FROM pool GROUP BY 1")).fetchall()})
+        return out
     finally:
         con.close()
 
@@ -1004,12 +1012,14 @@ def _run_two_class_corp(cal: list[date], preferred: tuple[str, ...],
                         delisted: tuple[str, ...] = (),
                         listed_days: dict[str, list[date]] | None = None,
                         spans: list[dict[str, object]] | None = None,
-                        repeat_legs: tuple[str, ...] = ()) -> dict[str, dict[str, object]]:
+                        repeat_legs: tuple[str, ...] = (),
+                        scope_out: dict[str, int] | None = None) -> dict[str, dict[str, object]]:
     """보통주 A00001 과 상장 우선주 `preferred` 를 가진 법인 CX 위에서 자사주 공시만 돌린다.
 
     `delisted` 의 우선주는 앞 10세션만 상장했다가 폐지된다(security_span 끝 = cal[9]).
     `listed_days` 는 티커별 상장 세션을 직접 정하고, `spans` 는 security_span 을 직접 준다.
     `repeat_legs` 의 티커는 corp_ticker 에 같은 행이 두 번 실린다(원천 중복).
+    `scope_out` 은 `run_event_sql` 의 같은 이름 인자로 넘긴다(pool 범위 판정 건수).
     """
     tickers = ("A00001", *preferred)
     days = {t: (listed_days or {}).get(t, cal[:10] if t in delisted else cal) for t in tickers}
@@ -1017,7 +1027,8 @@ def _run_two_class_corp(cal: list[date], preferred: tuple[str, ...],
     corp_ticker: list[dict[str, object]] = [
         {"ticker": t, "isin8": f"KR7{t}", "corp_code": "CX", "is_common": t == "A00001"}
         for t in (*tickers, *repeat_legs)]
-    return run_event_sql(cal, listing, tsstk=tsstk, corp_ticker=corp_ticker, spans=spans)
+    return run_event_sql(cal, listing, tsstk=tsstk, corp_ticker=corp_ticker, spans=spans,
+                         scope_out=scope_out)
 
 
 def test_자사주_취득_금액은_주식_종류별로_그_종류의_티커에_붙는다() -> None:
@@ -1077,23 +1088,78 @@ def test_결정일_전에_폐지된_우선주에는_기타주식_금액을_싣�
 
     유일한 우선주 A00005 가 cal[9] 에 폐지됐으면 cal[20] 결정의 기타주식분은 그날 상장 우선주가
     없어 unlisted_class(범위 밖)다 — 폐지된 티커에 붙이지 않는다. 보통주식분은 그대로다.
+    결정일 전 폐지 우선주가 있어도(S1-e) 그날 상장 우선주가 없으면 class_ambiguous 가 아니라
+    unlisted_class 다 — 고를 상장 티커가 하나도 없어 '어느 우선주인지 모호'가 아니다.
     """
     cal = sessions(60)
     tsstk = [{**_BOTH_CLASSES, "aq_dd": cal[20], "available_date": cal[20]}]
-    out = _run_two_class_corp(cal, ("A00005",), tsstk, delisted=("A00005",))
+    scope: dict[str, int] = {}
+    out = _run_two_class_corp(cal, ("A00005",), tsstk, delisted=("A00005",), scope_out=scope)
     got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
     assert got == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000}
+    assert scope == {"in_scope": 1, "unlisted_class": 1}
 
 
-def test_우선주_둘_중_결정일에_살아_있는_하나에만_기타주식_금액이_붙는다() -> None:
-    """A00007 은 cal[9] 에 폐지돼 cal[20] 결정일에 상장 우선주는 A00005 하나뿐이다 — ambiguous 가
-    아니라 A00005 에 귀속한다."""
+def test_결정일_전에_폐지된_우선주가_있으면_살아_있는_우선주_하나에도_기타주식_금액을_싣지_않는다() -> None:
+    """연구 DB S1-e(#590 리뷰 P3-1 규칙을 의도적으로 뒤집는다).
+
+    A00007 은 cal[9] 에 폐지돼 cal[20] 결정일에 상장 우선주는 A00005 하나뿐이다. #590 은 이것을
+    A00005 에 귀속했다("결정일 전에 폐지된 우선주는 그날의 매입 대상이 아니다"). 실제 반례가 그 전제와
+    반대다 — 한화 2026-01-14 자기주식 취득결정은 기타주식분만 있고(141.5억) 취득목적이 '제1우선주
+    상장폐지 이후 소액주주 보호를 위한 자기주식(제1우선주) 취득' 이다. 제1우선주(000885)는 2025-07-15
+    에 폐지됐고, #590 규칙은 이 매입을 결정일에 상장된 유일한 우선주 3우선주(신형)(00088K)에 붙였다.
+    상장폐지 뒤 남은 주식을 회사가 사들이는 것이라 폐지된 우선주도 매입 대상일 수 있다 — 결정일 전에
+    끝난 우선주 구간이 법인에 하나라도 있으면 기타주식분은 어느 우선주인지 모호해 class_ambiguous
+    (범위 밖)다. 시간 창은 두지 않는다. 보통주식분은 그대로 보통주 티커에 실린다.
+    """
     cal = sessions(60)
     tsstk = [{**_BOTH_CLASSES, "aq_dd": cal[20], "available_date": cal[20]}]
-    out = _run_two_class_corp(cal, ("A00005", "A00007"), tsstk, delisted=("A00007",))
+    scope: dict[str, int] = {}
+    out = _run_two_class_corp(cal, ("A00005", "A00007"), tsstk, delisted=("A00007",),
+                              scope_out=scope)
     got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
-    assert got == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000,
-                   f"A00005:treasury_buy:{cal[20]}": 1_000_000_000}
+    assert got == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000}
+    assert scope == {"in_scope": 1, "class_ambiguous": 1}
+
+
+def test_한화_모양_폐지_우선주_매입은_상장_우선주에_붙지_않고_class_ambiguous_로_빠진다() -> None:
+    """S1-e 재현 — 한화 2026-01-14 모양: 우선주 A(000885 꼴)는 결정일 전 폐지, 우선주 B(00088K 꼴)는
+    결정일에 상장, 공시는 기타주식분만 있다(보통주 금액·수량 없음).
+
+    옛 규칙은 결정일 상장 우선주 수만 세어(1) B 에 거짓 treasury_buy 를 냈다(조용한 오귀속 — 사건 연구의
+    발표 당일 초과수익에 없는 사건이 생긴다). 새 규칙은 행을 내지 않고 범위 밖 class_ambiguous 를
+    하나 센다. 기타주식만 산 공시라 보통주 행도 없다.
+    """
+    cal = sessions(60)
+    tsstk = [{"rcept_no": "20260114000001", "corp_code": "CX", "aq_dd": cal[20],
+              "aqpln_prc_estk": 14_151_246_300.0, "available_date": cal[20]}]
+    scope: dict[str, int] = {}
+    out = _run_two_class_corp(cal, ("A00005", "A0000K"), tsstk, delisted=("A00005",),
+                              scope_out=scope)
+    assert _treasury_rows(out) == {}
+    assert scope == {"class_ambiguous": 1}
+
+
+def test_우선주가_처음부터_하나뿐인_법인은_기타주식만_산_공시도_그_티커에_붙는다() -> None:
+    """S1-e 대조 — 폐지된 우선주가 없는 법인은 지금처럼 결정일에 상장된 유일한 우선주에 귀속한다."""
+    cal = sessions(60)
+    tsstk = [{"rcept_no": "20260114000001", "corp_code": "CX", "aq_dd": cal[20],
+              "aqpln_prc_estk": 14_151_246_300.0, "available_date": cal[20]}]
+    scope: dict[str, int] = {}
+    out = _run_two_class_corp(cal, ("A0000K",), tsstk, scope_out=scope)
+    assert _treasury_rows(out) == {f"A0000K:treasury_buy:{cal[20]}": 14_151_246_300}
+    assert scope == {"in_scope": 1}
+
+
+def test_결정일_뒤에_상장한_우선주는_폐지_우선주로_세지_않아_귀속을_막지_않는다() -> None:
+    """S1-e 가 세는 것은 결정일 **전에 끝난** 구간이다 — 결정일 뒤에 처음 상장하는 우선주 A00007
+    (cal[30]~)은 그날 상장도 폐지도 아니라 cal[20] 결정은 상장 우선주 A00005 하나에 붙는다."""
+    cal = sessions(60)
+    tsstk = [{**_BOTH_CLASSES, "aq_dd": cal[20], "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005", "A00007"), tsstk,
+                              listed_days={"A00007": cal[30:]})
+    assert _treasury_rows(out) == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000,
+                                   f"A00005:treasury_buy:{cal[20]}": 1_000_000_000}
     # 정해진 티커(leg_ticker)는 legs 로 다시 펴지 않는다 — 펴면 우선주 leg 수만큼 같은 후보가
     # pool 에 들어가 dedup 이 접고(n_src_rows 2), EG1 모집단이 부푼다.
     assert out[f"A00005:treasury_buy:{cal[20]}"]["n_src_rows"] == 1

@@ -356,6 +356,8 @@ RULES_VERSION = "e1.32.0"                # BuildRecord.rules_version 에 실린�
 #          공개일 축 불변) · 매출 기준 불일치면 매출 4분기만, 음수 매출 4분기면 손익 4분기 전부 NULL · 새 열
 #          `q4_derived_basis`·`flow_3m_is_ytd` · EG3 `n_q4_negative_revenue`·`n_q4_basis_label_conflict`. 카탈로그
 #          `v_fin_latest` 는 사업보고서 분기값을 fin_std 4분기로 읽고 누계 칸 분기를 품은 TTM 을 비운다(연간 행 TTM 불변).
+#          S1-e `corp_event` 자사주 기타주식분 — 결정일 전에 폐지된 우선주가 법인에 있으면 결정일 상장 우선주가 하나여도
+#          class_ambiguous(범위 밖)로 둔다(#590 리뷰 P3-1 을 뒤집음, 한화 2026-01-14). treasury_buy 행만 줄 수 있다.
 
 # 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a, 규약은 `stage.model.RULES_CHANGED`) — 판본을 올리면 한 줄을 더한다.
 # 그 표를 입력으로 읽는 하류 표는 적지 않는다(읽는 쪽이 `RULES[t].inputs` 를 따라 닫는다). 선언 시작은 e1.31.0 이다 —
@@ -368,8 +370,8 @@ RULES_CHANGED: dict[str, frozenset[str]] = {
                           "dataset_profile", "factor_readiness"}),
     # 연구 DB S1 묶음 — S1-b fin_std(정정 승계 값 판정) · S1-c 도 fin_std(값 품질 격리·원본 접수일 지연) ·
     # S1-d 도 fin_std(4분기 9개월 누계 식·게이트·새 열 둘). 카탈로그 `v_fin_latest` 는 표가 아니라 선언 밖이다.
-    # 같은 판본의 뒤 PR(S1-e)이 표를 더한다.
-    "e1.32.0": frozenset({"fin_std"}),
+    # S1-e corp_event(결정일 전 폐지 우선주가 있으면 자사주 기타주식분을 class_ambiguous 로).
+    "e1.32.0": frozenset({"fin_std", "corp_event"}),
 }
 
 

@@ -89,6 +89,11 @@ def late_adapter(tmp_path_factory: pytest.TempPathFactory) -> EquityDuckdbAdapte
     """
     pytest.importorskip("duckdb", reason=DUCKDB_EXTRA)
     root = build_workbench_root(tmp_path_factory.mktemp("columnar-late") / "equity")
+    # 2022 4분기는 원장 fin_std 의 4분기 파생(매출 660 − 480 · 순이익 136 − 96)과 그 공개일
+    # (구성 행 max = 늦게 접수된 1분기 정정본 01-10)이다. 뷰는 그 값을 그 공개일부터 쓴다
+    # (원장 e1.32.0 연구 DB S1-d) — 실원장의 사업보고서 행은 이 두 열을 늘 갖는다.
+    q4_2022 = {"revenue_q4_derived": 180, "net_income_q4_derived": 40,
+               "q4_derived_available_date": date(2024, 1, 10)}
     fiscal_2022 = [
         {
             "corp_code": "C00660",
@@ -100,6 +105,7 @@ def late_adapter(tmp_path_factory: pytest.TempPathFactory) -> EquityDuckdbAdapte
             "revenue": revenue,
             "net_income": net_income,
             "cf_operating_ytd": cf_ytd,
+            **(q4_2022 if report == "11011" else {}),
         }
         for period_end, report, available, revenue, net_income, cf_ytd in (
             (date(2022, 3, 31), "11013", date(2024, 1, 10), 150, 30, 20),

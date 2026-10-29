@@ -19,7 +19,12 @@ fin_map 에 이미 있으므로 새 계정이 아니라 FIELD_MAP §3 의 판정
 
 **기간 어휘**: 손익(IS·CIS)의 `thstrm_amount` 는 분기 보고서에서 **당분기 3개월**, 사업보고서에서
 12개월이다(DEFECT-C02, STAGE_SPEC §2-7). 4분기 값은 원장에 없으므로 `<계정>_q4_derived` =
-사업보고서 − Σ(1Q·2Q·3Q) 로 만들고 **셋 중 하나라도 없으면 NULL**(부분합 금지). 현금흐름은
+사업보고서 − 같은 회계연도 3분기 보고서의 9개월 누계(`thstrm_add_amount`, 3개월 값을 고른 그 줄들 — e1.32.0
+연구 DB S1-d)로 만들고 1Q·2Q·3Q **셋 중 하나라도 없으면 NULL**(부분합 금지). 1~3분기 '3개월' 칸을 더하던 옛 식은
+3분기가 재분류로 다시 적은 9개월과 기준이 섞였다. 연간과 3분기의 매출 기준이 다르면 매출 4분기만, 같은데 매출
+4분기 < 0 이면 손익 4분기 전부를 비우고 `q4_derived_basis`(`Q4_DERIVED_BASIS_VOCAB`)가 사유를 남긴다. 반기·3분기
+'3개월' 칸이 누계인 분기 행은 `flow_3m_is_ytd` 가 표시한다(값은 고치지 않는다 — `v_fin_latest` 가 그 분기를 품은
+TTM 을 비운다). 현금흐름은
 연초누계라 `_ytd` 를 그대로 싣고 `_q` = 자기 누계 − 직전 보고서 누계(1분기는 누계 = 분기).
 두 파생 블록은 각각 `q4_derived_available_date`·`q4_derived_n_rows`,
 `cf_q_available_date`·`cf_q_n_rows` 를 동반한다(DESIGN §3 파생 컬럼 규약).
@@ -112,6 +117,10 @@ FS_DIV_VOCAB: tuple[str, ...] = ("CFS", "OFS")
 REJECT_REASONS: tuple[str, ...] = ("non_krw", "period_unresolved", "rcept_lag_out_of_range",
                                    "total_asset_nonpositive", "unit_scale_suspect",
                                    "duplicate_vintage")
+# 성립한 4분기(구성 넷)의 손익 4분기 묶음 라벨(e1.32.0 연구 DB S1-d) — `ytd_9m` = 연간 − 9개월 누계 그대로 ·
+# `revenue_basis_mismatch` = 연간·3분기 매출 기준이 달라 매출 4분기만 비웠다 · `negative_revenue` = 기준이 같은데
+# 매출 4분기 < 0 이라 손익 4분기를 전부 비웠다. 구성이 모자란 행은 라벨이 없다(`q4_derived_n_rows` 가 말한다).
+Q4_DERIVED_BASIS_VOCAB: tuple[str, ...] = ("ytd_9m", "revenue_basis_mismatch", "negative_revenue")
 
 # ── 계정 (fin_map 21 + DESIGN §4-4 추가 3 = 24) ────────────────────────────────
 # `family` 가 기간 어휘를 정한다: flow = 손익(3개월/12개월, q4 파생 대상) · stock = 재무상태표
@@ -524,6 +533,20 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
                                       "WHERE report_code <> '11011' AND "
                                       "(q4_derived_n_rows IS NOT NULL OR "
                                       "q4_derived_available_date IS NOT NULL)"),
+        # 4분기 매출은 음수가 될 수 없다(e1.32.0 연구 DB S1-d) — 같은 기준인데 음수면 `.sql` 이 손익 4분기를 비운다.
+        "n_q4_negative_revenue": _n(ctx, f'SELECT count(*) FROM "{v}" '
+                                         "WHERE revenue_q4_derived < 0"),
+        # 라벨과 NULL 모양 — 라벨은 성립한 4분기(사업보고서 · 구성 넷)에만, 어휘 안에서 붙고, 비웠다고 말한 계정은
+        # 비어 있어야 한다(기준 불일치 = 매출 · 음수 매출 = 손익 전부).
+        "n_q4_basis_label_conflict": _n(
+            ctx, f'SELECT count(*) FROM "{v}" WHERE '
+                 "(q4_derived_basis IS NOT NULL) <> "
+                 "coalesce(report_code = '11011' AND q4_derived_n_rows = 4, FALSE) "
+                 f"OR q4_derived_basis NOT IN ({_vocab_sql(Q4_DERIVED_BASIS_VOCAB)}) "
+                 "OR (q4_derived_basis = 'revenue_basis_mismatch' "
+                 "AND revenue_q4_derived IS NOT NULL) "
+                 "OR (q4_derived_basis = 'negative_revenue' AND ("
+                 + " OR ".join(f'"{c}" IS NOT NULL' for c in Q4_COLUMNS) + "))"),
         "n_cf_q_partial": _n(
             ctx, f'SELECT count(*) FROM "{v}" WHERE report_code <> \'11013\' '
                  "AND coalesce(cf_q_n_rows, 0) < 2 AND ("
@@ -621,6 +644,10 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
         "coverage_q4_derived": _coverage(ctx, Q4_COLUMNS),
         "coverage_cf_q": _coverage(ctx, CF_Q_COLUMNS),
         "n_q4_complete": _n(ctx, f'SELECT count(*) FROM "{v}" WHERE q4_derived_n_rows = 4'),
+        # **기록형**(e1.32.0 연구 DB S1-d). 성립한 4분기의 라벨 분포 — 게이트가 비운 묶음의 크기다.
+        "n_by_q4_derived_basis": _counts(ctx, "q4_derived_basis"),
+        # **기록형**. 반기·3분기 '3개월' 칸이 누계인 분기 행 — `v_fin_latest` 가 그 분기를 품은 TTM 을 비운다.
+        "n_flow_3m_is_ytd": _n(ctx, f'SELECT count(*) FROM "{v}" WHERE flow_3m_is_ytd'),
         "rcept_lag_p50": _f(ctx, "SELECT quantile_cont(date_diff('day', period_end, rcept_dt), "
                                  f'0.5) FROM "{v}"'),
         "rcept_lag_p99": _f(ctx, "SELECT quantile_cont(date_diff('day', period_end, rcept_dt), "
@@ -1073,6 +1100,7 @@ FIN_STD = register(EquityTable(
              **{m: _VALUE_COLUMNS[m] for m in ACCOUNTS},
              **{c: _VALUE_COLUMNS[c] for c in Q4_COLUMNS},
              "q4_derived_n_rows": "BIGINT", "q4_derived_available_date": "DATE",
+             "q4_derived_basis": "VARCHAR", "flow_3m_is_ytd": "BOOLEAN",
              **{c: _VALUE_COLUMNS[c] for c in CF_Q_COLUMNS},
              "cf_q_n_rows": "BIGINT", "cf_q_available_date": "DATE",
              "available_date": "DATE", "available_basis": "VARCHAR"},
@@ -1092,9 +1120,11 @@ FIN_STD = register(EquityTable(
         # `account_detail`·`ord`·`observed_date` 는 재수집 판본을 접는 축이다(자연키 8열 +
         # first_write_wins) — 산출 컬럼이 아니다. `account_nm_norm` 은 stage 가 적는 공백 제거
         # 계정명(T-E)이고 `nm_exact` 우선순위가 원문 `account_nm` 과의 동일성으로 갈린다.
+        # `thstrm_add_amount`(연초 누계 칸)는 4분기 파생의 9개월 누계와 누계 칸 분기 표식의 축이다(S1-d).
         "stg_fin": ("corp_code", "bsns_year", "reprt_code", "fs_div", "sj_div", "account_id",
                     "account_detail", "ord", "account_nm", "account_nm_norm", "thstrm_amount",
-                    "account_std", "is_krw", "currency", "rcept_no", "observed_date"),
+                    "thstrm_add_amount", "account_std", "is_krw", "currency", "rcept_no",
+                    "observed_date"),
         "stg_doc_meta": ("rcept_no", "member_role", "doc_acode", "period_from", "period_to"),
         # `available_date` = stage 보정 공개일(J-41) — 공개일 축. `rcept_dt` 는 기간 판정 축.
         "stg_disclosure": ("rcept_no", "rcept_dt", "available_date", "observed_date"),
@@ -1129,7 +1159,7 @@ __all__ = ["ACCOUNTS", "BASELINE_SEED", "CAPEX_BASIS_NULL_REASONS", "CAPEX_BASIS
            "TIER_REVENUE_FALLBACK",
            "EXTRA_ACCOUNTS", "FIN_STD", "FLOW_ACCOUNTS", "PERIOD_END_BASIS_VOCAB",
            "PREV_FY_PREDICATE",
-           "Q4_COLUMNS", "REJECT_REASONS", "REPORT_CODE_VOCAB", "REVENUE_BASIS_NULL_REASONS",
+           "Q4_COLUMNS", "Q4_DERIVED_BASIS_VOCAB", "REJECT_REASONS", "REPORT_CODE_VOCAB", "REVENUE_BASIS_NULL_REASONS",
            "REVENUE_BASIS_VOCAB",
            "STOCK_ACCOUNTS", "TABLES", "VINTAGE_KIND", "VINTAGE_KIND_VOCAB", "acct_rows",
            "acct_values_sql", "norm_nm"]

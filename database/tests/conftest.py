@@ -87,7 +87,8 @@ STAGE_SNAPSHOT_ID_DEFAULT = "snap_20260905T000000Z"
 def _make_stage_tree(tmp_path: Path, table: str, rows: list[dict[str, object]],
                      partition_class: str = "whole", build_id: str = "b_stage_0001",
                      gate_status: str = "pass", lag_known: bool = True,
-                     snapshot_id: str = STAGE_SNAPSHOT_ID_DEFAULT) -> StageTree:
+                     snapshot_id: str = STAGE_SNAPSHOT_ID_DEFAULT,
+                     types: dict[str, str] | None = None) -> StageTree:
     """tmp_path 아래에 stage 규약 그대로의 테이블 1개를 만든다.
 
     `<tmp_path>/stage/<table>/v=<build_id>/` + 파티션 `_meta.json` + `MANIFEST.json`
@@ -95,6 +96,8 @@ def _make_stage_tree(tmp_path: Path, table: str, rows: list[dict[str, object]],
     partition_class: whole = `part0.parquet` 하나, date_axis = `year(date)`,
     receipt_axis = `substr(rcept_no,1,4)` 하이브 디렉토리.
     snapshot_id: 그 판이 선 원장 스냅샷 — equity EG13 이 공개일 상한(KST 날짜)으로 읽는다.
+    types: 컬럼 타입 지정(값으로 추론하지 않는다) — 값이 전부 None 인 열은 추론이 VARCHAR 라
+    수치 열로 읽는 소비 SQL 이 깨진다.
     """
     import duckdb  # sys.path 조작 뒤에 import 해야 한다
     from stage import manifest
@@ -106,12 +109,12 @@ def _make_stage_tree(tmp_path: Path, table: str, rows: list[dict[str, object]],
         if list(r) != cols:
             raise ValueError(f"row {i} has different columns: table={table} "
                              f"expected={cols} got={list(r)}")
-    types = {c: _duckdb_type([r[c] for r in rows]) for c in cols}
+    col_types = {c: (types or {}).get(c) or _duckdb_type([r[c] for r in rows]) for c in cols}
     stage_root = Path(tmp_path) / "stage"
     table_root = stage_root / table
     vdir = table_root / f"v={build_id}"
     vdir.mkdir(parents=True, exist_ok=True)
-    values = ", ".join("(" + ", ".join(f"CAST({_lit(r[c])} AS {types[c]})" for c in cols) + ")"
+    values = ", ".join("(" + ", ".join(f"CAST({_lit(r[c])} AS {col_types[c]})" for c in cols) + ")"
                        for r in rows)
     col_list = ", ".join(f'"{c}"' for c in cols)
     con = duckdb.connect()

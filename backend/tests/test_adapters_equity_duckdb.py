@@ -789,10 +789,16 @@ def test_a_late_correction_inside_the_ttm_window_completes_that_period_ttm_on_it
     않아 다음 정기보고서까지 결측이었다. 지금은 정정 접수일(랙 1세션이라 01-10)부터 반기 TTM 이
     선다. 고르는 기간(반기)과 잔액 필드(자본)는 그대로다.
 
-    창 밖 2022 1분기 정정본(01-10)은 사업보고서 4분기 파생에만 기대므로 손익 TTM 공개일만 늦춘다
-    — 손익은 01-11 부터, 영업현금은 01-10 부터 선다. 공개일 열이 둘인 이유다(#300 리뷰 P3-1).
+    창 밖 2022 1분기 정정본(01-10)은 사업보고서 4분기 파생의 공개일(원장 fin_std 의 구성 행
+    max)에만 실리므로 손익 TTM 공개일만 늦춘다 — 손익은 01-11 부터, 영업현금은 01-10 부터
+    선다. 공개일 열이 둘인 이유다(#300 리뷰 P3-1).
     """
     root = build_workbench_root(tmp_path / "equity")
+    # 2022 4분기는 원장 fin_std 의 4분기 파생(연간 − 3분기 누계 — 매출 660 − 480 · 순이익
+    # 136 − 96)과 그 공개일(구성 행 max = 늦게 접수된 1분기 정정본 01-10)이다. 뷰는 그 값을 그
+    # 공개일부터 쓴다(원장 e1.32.0 연구 DB S1-d).
+    q4_2022 = {"revenue_q4_derived": 180, "net_income_q4_derived": 40,
+               "q4_derived_available_date": date(2024, 1, 10)}
     fiscal_2022 = [
         {
             "corp_code": "C00660",
@@ -804,6 +810,7 @@ def test_a_late_correction_inside_the_ttm_window_completes_that_period_ttm_on_it
             "revenue": revenue,
             "net_income": net_income,
             "cf_operating_ytd": cf_ytd,
+            **(q4_2022 if report == "11011" else {}),
         }
         for period_end, report, available, revenue, net_income, cf_ytd in (
             (date(2022, 3, 31), "11013", date(2024, 1, 10), 150, 30, 20),
@@ -839,7 +846,7 @@ def test_a_late_correction_inside_the_ttm_window_completes_that_period_ttm_on_it
         assert all((c.value is None) == (c.kind is CellKind.MISSING) for c in cells.values())
         return {field: (cell.value, cell.available_date) for field, cell in cells.items()}
 
-    # 2022 3분기 · 2022 4분기(연간 − 1~3분기) · 2023 1분기(정정본) · 2023 반기
+    # 2022 3분기 · 2022 4분기(fin_std 4분기 파생) · 2023 1분기(정정본) · 2023 반기
     revenue, net_income = 170.0 + 180.0 + 190.0 + 200.0, 34.0 + 40.0 + 38.0 + 40.0
     cash_flow, row = 25.0 + 30.0 + 40.0 + 30.0, date(2023, 8, 14)
     assert seen(date(2024, 1, 9)) == {

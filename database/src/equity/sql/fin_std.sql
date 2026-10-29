@@ -30,8 +30,11 @@
 -- `period_end_basis='inferred'`, 아니면 `period_unresolved` 격리.
 --
 -- 기간 어휘(DEFECT-C02): 손익 `thstrm_amount` 는 분기 3개월 · 사업보고서 12개월. 4분기 값은
--- `<계정>_q4_derived` = 사업보고서 − Σ(같은 회계연도 1Q·2Q·3Q) 이고 **셋 중 하나라도 없으면
--- NULL**(부분합 금지). 현금흐름은 연초누계 `_ytd` 를 그대로 싣고 `_q` = 자기 누계 − 같은 회계연도
+-- `<계정>_q4_derived` = 사업보고서 − 같은 회계연도 3분기 보고서의 9개월 누계(`thstrm_add_amount`,
+-- e1.32.0 연구 DB S1-d)이고 같은 회계연도 1Q·2Q·3Q 의 3개월 값이 **하나라도 없으면 NULL**(부분합 금지).
+-- 매출 기준이 연간과 3분기에서 다르면 매출 4분기만, 같은데 매출 4분기 < 0 이면 손익 4분기 전부 NULL 이고
+-- `q4_derived_basis` 가 사유를 싣는다. 반기·3분기 '3개월' 칸이 누계인 분기 행은 `flow_3m_is_ytd` 표식.
+-- 현금흐름은 연초누계 `_ytd` 를 그대로 싣고 `_q` = 자기 누계 − 같은 회계연도
 -- 직전 분기 보고서 누계(11013 은 누계 자체가 분기값). "같은 회계연도" 는 `bsns_year` 가 아니라
 -- 기간 말일로 찾는다(#236 — `bsns_year` 는 기간 말일의 연도라 비12월 결산에서 회계연도와 어긋난다).
 -- 두 파생 블록은 `*_available_date`(구성 행 max)와 `*_n_rows` 를 동반한다.
@@ -155,7 +158,10 @@ fin AS (
            f.account_nm,
            f.account_nm_norm,
            f.account_std,
-           f.thstrm_amount
+           f.thstrm_amount,
+           -- 연초 누계 칸 — 분기 손익의 4분기 파생(9개월 누계)과 누계 칸 분기 표식이 읽는다(e1.32.0 연구 DB S1-d).
+           -- 사업보고서·재무상태표·현금흐름표 줄은 원천에서 비어 있다.
+           f.thstrm_add_amount
     FROM stg_fin f
     SEMI JOIN grp g
       ON g.corp_code = f.corp_code AND g.bsns_year = f.bsns_year
@@ -166,7 +172,8 @@ fin AS (
     QUALIFY row_number() OVER (
         PARTITION BY f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.sj_div,
                      f.account_id, f.account_detail, f.ord
-        ORDER BY f.observed_date NULLS LAST, f.thstrm_amount NULLS LAST) = 1
+        ORDER BY f.observed_date NULLS LAST, f.thstrm_amount NULLS LAST,
+                 f.thstrm_add_amount NULLS LAST) = 1
 ),
 dt AS (
     -- 접수일·공개일 원천. 접수번호당 1행으로 접어야 `head` 조인이 grp 행을 늘리지 않는다.
@@ -262,7 +269,8 @@ hit AS (
            -- `val` 의 `pick` 이 0 을 먼저 본다(F-A4) — 정규화가 없던 때 뽑히던 값을 지킨다.
            CASE WHEN a.kind = 'concept' OR f.account_nm = f.account_nm_norm
                 THEN 0 ELSE 1 END                                 AS nm_exact,
-           f.thstrm_amount                                       AS val
+           f.thstrm_amount                                       AS val,
+           f.thstrm_add_amount                                   AS val_add
     FROM fin f
     JOIN _acct a
       ON list_position(a.sjs, f.sj_div) IS NOT NULL
@@ -315,7 +323,27 @@ val AS (
                      THEN min(h.val) FILTER (WHERE h.nm_exact = 0)
                 WHEN count(*) FILTER (WHERE h.nm_exact = 0) = 0
                      AND count(DISTINCT h.val) = 1 THEN min(h.val)
-           END                                                   AS v
+           END                                                   AS v,
+           -- 연초 누계(e1.32.0 연구 DB S1-d) — 위 `v` 를 고른 **바로 그 줄들**의 `thstrm_add_amount`. 갈래를 `v` 와
+           -- 같은 집계 안에 두어 같은 줄임을 구조로 지킨다(`hit` 를 다시 읽지 않는다 — 빌드 메모리가 빠듯하다).
+           -- `sum`·`sum_abs` 는 같은 줄들의 누계를 같은 방식으로 더하되 한 줄이라도 비면 NULL(부분합 금지),
+           -- `pick` 은 고른 줄 전부에 누계가 있고 하나로 모일 때만 그 값(갈리거나 비면 NULL). 모임은 min = max 로
+           -- 본다 — 다 찬 줄에서 count(DISTINCT) = 1 과 같고 DISTINCT 집계의 해시 표를 더 만들지 않는다.
+           CASE WHEN min(h.agg) = 'sum'
+                     THEN CASE WHEN count(h.val_add) = count(*) THEN sum(h.val_add) END
+                WHEN min(h.agg) = 'sum_abs'
+                     THEN CASE WHEN count(h.val_add) = count(*) THEN sum(abs(h.val_add)) END
+                WHEN count(DISTINCT h.val) FILTER (WHERE h.nm_exact = 0) = 1
+                     THEN CASE WHEN count(h.val_add) FILTER (WHERE h.nm_exact = 0)
+                                    = count(*) FILTER (WHERE h.nm_exact = 0)
+                                    AND min(h.val_add) FILTER (WHERE h.nm_exact = 0)
+                                        = max(h.val_add) FILTER (WHERE h.nm_exact = 0)
+                               THEN min(h.val_add) FILTER (WHERE h.nm_exact = 0) END
+                WHEN count(*) FILTER (WHERE h.nm_exact = 0) = 0
+                     AND count(DISTINCT h.val) = 1
+                     THEN CASE WHEN count(h.val_add) = count(*) AND min(h.val_add) = max(h.val_add)
+                               THEN min(h.val_add) END
+           END                                                   AS v_ytd
     FROM hit h
     JOIN best b
       ON b.corp_code = h.corp_code AND b.bsns_year = h.bsns_year
@@ -541,10 +569,11 @@ q4member AS (
     WHERE a.reprt_code = '11011'
 ),
 q4src AS (
-    -- 같은 회계연도 1Q·반기·3Q 의 3개월 손익 합. 셋이 다 있어야(n_q = 3) q4 가 선다(부분합 금지).
+    -- 같은 회계연도 1Q·반기·3Q 의 3개월 손익 값 수와 3분기 보고서의 9개월 누계(`val.v_ytd`, e1.32.0 연구 DB S1-d).
+    -- 4분기는 누계만 빼지만 셋이 다 있어야(n_q = 3) 선다 — 성립 조건(부분합 금지)·구성 수·공개일 축은 그대로다.
     SELECT q.corp_code, q.bsns_year, q.fs_div, v.metric,
-           sum(v.v)                                              AS sum_q,
-           count(v.v)                                            AS n_q
+           count(v.v)                                            AS n_q,
+           max(v.v_ytd) FILTER (WHERE q.m_report_code = '11014') AS ytd_9m
     FROM q4member q
     JOIN val v
       ON v.corp_code = q.corp_code AND v.bsns_year = q.m_bsns_year
@@ -553,8 +582,11 @@ q4src AS (
     GROUP BY q.corp_code, q.bsns_year, q.fs_div, v.metric
 ),
 q4 AS (
+    -- 4분기 = 연간 − 9개월 누계(e1.32.0 연구 DB S1-d). 1분기·반기 '3개월' 칸을 더하던 옛 식은 3분기 보고서가
+    -- 재분류·분할을 반영해 다시 적은 9개월과 기준이 섞였다(동진쎄미켐 FY2025 매출 1,493억 → 누계 식 3,092억 =
+    -- WISE). 누계가 없으면 대체식 없이 NULL. 연간·누계 모두 그룹 최신 판(`api_restated`)이라 같은 규약이다.
     SELECT a.corp_code, a.bsns_year, a.fs_div, a.metric,
-           a.v - q.sum_q                                         AS v
+           a.v - q.ytd_9m                                        AS v
     FROM val a
     JOIN q4src q
       ON q.corp_code = a.corp_code AND q.bsns_year = a.bsns_year
@@ -613,6 +645,20 @@ cfqmeta AS (
            CASE WHEN report_code = '11013' THEN avail_dt
                 ELSE greatest(avail_dt, coalesce(p_avail_dt, avail_dt)) END AS available_date
     FROM cfprev
+),
+ytd3m AS (
+    -- 반기·3분기 '3개월' 칸이 누계인 분기 행(e1.32.0 연구 DB S1-d, `flow_3m_is_ytd`) — 매출·영업이익·순이익 중
+    -- 하나라도 3개월 값 = 누계 ≠ 0 이고 같은 회계연도 바로 앞 보고서가 있다(`cfprev` 대응표 — 그래야 누계가
+    -- 3개월보다 길다. 반기만 내는 리츠는 앞 보고서가 없어 빠진다). 값은 고치지 않는다(누계 − 직전 누계로 보정하면
+    -- 보고서 사이 기준이 섞인다) — 표식만 싣고 `v_fin_latest` 가 그 분기를 품은 TTM 을 비운다(바이오비쥬 2026 반기).
+    SELECT DISTINCT c.corp_code, c.bsns_year, c.reprt_code, c.fs_div
+    FROM cfprev c
+    JOIN val v
+      ON v.corp_code = c.corp_code AND v.bsns_year = c.bsns_year
+     AND v.reprt_code = c.reprt_code AND v.fs_div = c.fs_div
+    WHERE c.report_code IN ('11012', '11014') AND c.p_reprt_code IS NOT NULL
+      AND v.metric IN ('revenue', 'op_profit', 'net_income')
+      AND v.v = v.v_ytd AND v.v <> 0
 ),
 wide_acct AS (
     -- **그룹 축이 정본**이다 — 대응표 24 계정 중 하나도 안 걸린 그룹(표준계정 행은 있지만 전부
@@ -736,6 +782,42 @@ basis_prev AS (
     WHERE j.pre_reject IS NULL AND d.n_grain = 1
     GROUP BY j.corp_code, TRY_CAST(j.bsns_year AS INTEGER), j.report_code, j.fs_div
 ),
+q4gate AS (
+    -- 성립한 4분기(구성 넷)마다 손익 4분기 묶음의 라벨 하나(e1.32.0 연구 DB S1-d, `q4_derived_basis`).
+    --   revenue_basis_mismatch — 연간과 3분기의 매출 기준(`revenue_basis`)이 다르다: 두 매출의 차는 4분기 매출이
+    --     아니다 → 매출 4분기만 NULL(다른 계정은 매출 기준과 무관하다. 메리츠금융지주형 연간 banking_gross ·
+    --     3분기 standard).
+    --   negative_revenue — 기준이 같은데 매출 4분기 < 0(연간 매출 < 9개월 누계): 3분기 뒤 재분류·분할·단위 오류의
+    --     신호다(WISE 분기 매출 약 4,100칸 중 음수 0) → 손익 4분기 전부 NULL. 영업이익·순이익의 음수 4분기는 흔한
+    --     실제 손실이라 부호만으로는 못 가르고, 같은 신호가 그 계정도 흔들므로 함께 비운다.
+    --   ytd_9m — 그 밖(누계가 없어 값이 빈 계정 포함 — 대체식은 없다).
+    -- 구성이 모자란 행(`q4_derived_n_rows` < 4)은 라벨이 없다 — 그 사유는 구성 수가 말한다.
+    SELECT m.corp_code, m.bsns_year, m.fs_div,
+           CASE WHEN wa.revenue_basis IS DISTINCT FROM w3.revenue_basis THEN 'revenue_basis_mismatch'
+                WHEN r.v < 0                                          THEN 'negative_revenue'
+                ELSE 'ytd_9m' END                                AS basis
+    FROM q4meta m
+    JOIN q4member t
+      ON t.corp_code = m.corp_code AND t.bsns_year = m.bsns_year AND t.fs_div = m.fs_div
+     AND t.m_report_code = '11014'
+    JOIN wide wa
+      ON wa.corp_code = m.corp_code AND wa.bsns_year = m.bsns_year
+     AND wa.reprt_code = '11011' AND wa.fs_div = m.fs_div
+    JOIN wide w3
+      ON w3.corp_code = t.corp_code AND w3.bsns_year = t.m_bsns_year
+     AND w3.reprt_code = t.m_reprt_code AND w3.fs_div = t.fs_div
+    LEFT JOIN q4 r
+      ON r.corp_code = m.corp_code AND r.bsns_year = m.bsns_year AND r.fs_div = m.fs_div
+     AND r.metric = 'revenue'
+    WHERE m.n_rows = 1 + (SELECT count(*) FROM _qcode)
+),
+q4ok AS (
+    -- 라벨대로 비운 뒤 남는 4분기 값 — 기준 불일치는 매출만, 음수 매출은 손익 전부를 뺀다.
+    SELECT q.*
+    FROM q4 q
+    JOIN q4gate g ON g.corp_code = q.corp_code AND g.bsns_year = q.bsns_year AND g.fs_div = q.fs_div
+    WHERE g.basis = 'ytd_9m' OR (g.basis = 'revenue_basis_mismatch' AND q.metric <> 'revenue')
+),
 q4wide AS (
     SELECT corp_code, bsns_year, fs_div,
            max(v) FILTER (WHERE metric = 'revenue')              AS revenue_q4_derived,
@@ -748,7 +830,7 @@ q4wide AS (
            max(v) FILTER (WHERE metric = 'eps_basic')            AS eps_basic_q4_derived,
            max(v) FILTER (WHERE metric = 'depreciation')         AS depreciation_q4_derived,
            max(v) FILTER (WHERE metric = 'interest_expense')     AS interest_expense_q4_derived
-    FROM q4
+    FROM q4ok
     GROUP BY corp_code, bsns_year, fs_div
 ),
 cfqwide AS (
@@ -787,6 +869,8 @@ SELECT
     q.interest_expense_q4_derived,
     CASE WHEN j.reprt_code = '11011' THEN qm.n_rows END          AS q4_derived_n_rows,
     CASE WHEN j.reprt_code = '11011' THEN qm.available_date END  AS q4_derived_available_date,
+    qg.basis                                                    AS q4_derived_basis,
+    y.corp_code IS NOT NULL                                     AS flow_3m_is_ytd,
     cq.cf_operating_q, cq.cf_investing_q, cq.cf_financing_q, cq.capex_q,
     cm.n_rows                                                   AS cf_q_n_rows,
     cm.available_date                                           AS cf_q_available_date,
@@ -803,6 +887,12 @@ LEFT JOIN q4wide q
  AND q.fs_div = j.fs_div
 LEFT JOIN q4meta qm
   ON qm.corp_code = j.corp_code AND qm.bsns_year = j.bsns_year AND qm.fs_div = j.fs_div
+LEFT JOIN q4gate qg
+  ON j.reprt_code = '11011' AND qg.corp_code = j.corp_code AND qg.bsns_year = j.bsns_year
+ AND qg.fs_div = j.fs_div
+LEFT JOIN ytd3m y
+  ON y.corp_code = j.corp_code AND y.bsns_year = j.bsns_year
+ AND y.reprt_code = j.reprt_code AND y.fs_div = j.fs_div
 LEFT JOIN cfqwide cq
   ON cq.corp_code = j.corp_code AND cq.bsns_year = j.bsns_year
  AND cq.reprt_code = j.reprt_code AND cq.fs_div = j.fs_div

@@ -392,17 +392,22 @@ WHERE rn = 1
     #      리터럴로 본다.
     #   ② 재무제표 구분: (corp_code, period_end, report_code) 당 **CFS 우선** 한 행 → `fs_div_used`.
     #      동률은 available_date 최신 → rcept_no 최신(정정 재제출).
-    #   ③ TTM: 분기값(3개월) 4행 합인데 **4분기가 전부 보일 때만**이다. 분기값은 뷰가 회계기간 축
-    #      (법인별 period_end 순서)에서 직접 만든다 — fin_std 의 `<계정>_q4_derived`·`cf_operating_q`
-    #      는 `bsns_year` 로 묶여 비12월 결산에서 다른 회계연도 분기로 만들어지고(#227 리뷰 P1-1),
-    #      창 밖 분기에 기대는데도 공개일 가드를 받지 않았다(P1-2). 그래서 쓰지 않는다. fin_std 쪽도
-    #      #236 에서 회계기간 축으로 고쳤지만, 창 공개일 가드와 한 규칙으로 보려고 여기서 만든다.
-    #      · 손익: 분기 보고서는 원 계정(3개월). 사업보고서는 연간 − 직전 3행인데, 직전 3행이
-    #        1분기·반기·3분기 보고서 순서이고 폭이 3분기(TTM_SPAN)이며 fs_div·매출 기준이 같을 때만
-    #        선다. 그래서 사업보고서 행의 TTM 은 항등식으로 연간과 같다.
+    #   ③ TTM: 분기값(3개월) 4행 합인데 **4분기가 전부 보일 때만**이다. 창은 회계기간 축(법인별
+    #      period_end 순서)이다.
+    #      · 손익: 분기 보고서는 원 계정(3개월) — 단 fin_std `flow_3m_is_ytd`(반기·3분기 '3개월' 칸이
+    #        누계)면 그 분기값은 NULL 이라 그 분기를 품은 TTM 이 NULL 이다. 사업보고서는 fin_std 의
+    #        `<계정>_q4_derived`(연간 − 3분기 9개월 누계, e1.32.0 연구 DB S1-d — 4분기 식의 주인은 fin_std
+    #        하나)를 읽는다. 직전 3행이 1분기·반기·3분기 보고서 순서이고 폭이 3분기(TTM_SPAN)이며 fs_div 가
+    #        같고(`annual_ok`) 그 4분기의 공개일(`q4_derived_available_date` = 구성 행 max)이 컷오프 이하일
+    #        때만 쓴다 — 그날까지 공개된 구성 행으로 만든 값만이다. (예전 #227 리뷰 P1-1 에는 fin_std 4분기가
+    #        `bsns_year` 로 묶여 뷰가 연간 − 직전 3행을 따로 세웠다. #236 으로 fin_std 가 회계기간 축이 됐다.)
+    #      · 사업보고서 행 자기 TTM 은 **연간 값 그대로**다(항등식): `annual_ok` 이고 직전 3행 값이 셋이며
+    #        매출은 기준이 하나일 때. 4분기를 9개월 누계로 세우면 앞 3행 + 4분기의 합이 연간과 달라질 수
+    #        있는데, 그 시점 12개월 값은 보고된 연간이 가장 정확하다. 공개일은 창 규칙 그대로다.
     #      · 현금흐름: 1분기 보고서는 누계 그대로, 나머지는 누계 − 바로 앞 분기 보고서 누계(간격
     #        QUARTER_GAP, 같은 fs_div).
-    #      · 분기값의 공개일 = 그 값을 만든 행들의 available_date max(창 밖 행에 기대는 파생 포함).
+    #      · 분기값의 공개일 = 그 값을 만든 행들의 available_date max(창 밖 행에 기대는 파생 포함) —
+    #        사업보고서 손익은 greatest(available_date, q4_derived_available_date).
     #        창 안 네 분기값 공개일의 max 가 TTM 의 공개일이다 — 손익 `ttm_income_available_date`,
     #        현금흐름 `ttm_cf_available_date`(#238). 정정 재제출로 창 안 분기가 이 행보다 늦게
     #        접수되면 이 행의 TTM 은 그날 완성된다. 다른 기간 값으로 대신하는 것이 아니라 같은 기간
@@ -449,18 +454,13 @@ prev AS (
     SELECT p.*,
            count(*) OVER w3                                          AS p_n,
            min(p.period_end) OVER w3                                 AS p_first_end,
-           max(p.available_date) OVER w3                             AS p_max_available,
            min(p.fs_div) OVER w3                                     AS p_fs_min,
            max(p.fs_div) OVER w3                                     AS p_fs_max,
            min(p.revenue_basis) OVER w3                              AS p_basis_min,
            max(p.revenue_basis) OVER w3                              AS p_basis_max,
-           sum(p.revenue) OVER w3                                    AS p_sum_revenue,
            count(p.revenue) OVER w3                                  AS p_cnt_revenue,
-           sum(p.gross_profit) OVER w3                               AS p_sum_gross_profit,
            count(p.gross_profit) OVER w3                             AS p_cnt_gross_profit,
-           sum(p.op_profit) OVER w3                                  AS p_sum_op_profit,
            count(p.op_profit) OVER w3                                AS p_cnt_op_profit,
-           sum(p.net_income) OVER w3                                 AS p_sum_net_income,
            count(p.net_income) OVER w3                               AS p_cnt_net_income,
            (lag(p.report_code, 3) OVER s = '11013' AND lag(p.report_code, 2) OVER s = '11012'
             AND lag(p.report_code, 1) OVER s = '11014')              AS p_fiscal_chain,
@@ -490,29 +490,42 @@ chain AS (
 ),
 q AS (
     SELECT c.*,
-           CASE WHEN c.report_code <> '11011' THEN c.revenue
-                WHEN c.annual_ok AND c.p_cnt_revenue = 3
+           CASE WHEN c.report_code <> '11011' THEN
+                     CASE WHEN NOT c.flow_3m_is_ytd THEN c.revenue END
+                WHEN c.q4_ok THEN c.revenue_q4_derived END           AS q_revenue,
+           CASE WHEN c.report_code <> '11011' THEN
+                     CASE WHEN NOT c.flow_3m_is_ytd THEN c.gross_profit END
+                WHEN c.q4_ok THEN c.gross_profit_q4_derived END      AS q_gross_profit,
+           CASE WHEN c.report_code <> '11011' THEN
+                     CASE WHEN NOT c.flow_3m_is_ytd THEN c.op_profit END
+                WHEN c.q4_ok THEN c.op_profit_q4_derived END         AS q_op_profit,
+           CASE WHEN c.report_code <> '11011' THEN
+                     CASE WHEN NOT c.flow_3m_is_ytd THEN c.net_income END
+                WHEN c.q4_ok THEN c.net_income_q4_derived END        AS q_net_income,
+           -- 사업보고서 행 자기 TTM(항등식) — 연간 값 그대로. 조건은 4분기를 뷰가 세우던 때와 같다.
+           CASE WHEN c.annual_ok AND c.p_cnt_revenue = 3
                      AND c.p_basis_min = c.revenue_basis AND c.p_basis_max = c.revenue_basis
-                THEN c.revenue - c.p_sum_revenue END                 AS q_revenue,
-           CASE WHEN c.report_code <> '11011' THEN c.gross_profit
-                WHEN c.annual_ok AND c.p_cnt_gross_profit = 3
-                THEN c.gross_profit - c.p_sum_gross_profit END       AS q_gross_profit,
-           CASE WHEN c.report_code <> '11011' THEN c.op_profit
-                WHEN c.annual_ok AND c.p_cnt_op_profit = 3
-                THEN c.op_profit - c.p_sum_op_profit END             AS q_op_profit,
-           CASE WHEN c.report_code <> '11011' THEN c.net_income
-                WHEN c.annual_ok AND c.p_cnt_net_income = 3
-                THEN c.net_income - c.p_sum_net_income END           AS q_net_income,
+                THEN c.revenue END                                   AS a_revenue,
+           CASE WHEN c.annual_ok AND c.p_cnt_gross_profit = 3
+                THEN c.gross_profit END                              AS a_gross_profit,
+           CASE WHEN c.annual_ok AND c.p_cnt_op_profit = 3
+                THEN c.op_profit END                                 AS a_op_profit,
+           CASE WHEN c.annual_ok AND c.p_cnt_net_income = 3
+                THEN c.net_income END                                AS a_net_income,
            CASE WHEN c.report_code = '11013' THEN c.cf_operating_ytd
                 WHEN c.cf_prev_ok
                 THEN c.cf_operating_ytd - c.p1_cf_operating_ytd END  AS q_cf_operating,
            CASE WHEN c.report_code = '11011'
-                THEN greatest(c.available_date, c.p_max_available)
+                THEN greatest(c.available_date,
+                              coalesce(c.q4_derived_available_date, c.available_date))
                 ELSE c.available_date END                            AS q_income_available,
            CASE WHEN c.report_code = '11013' THEN c.available_date
                 ELSE greatest(c.available_date, coalesce(c.p1_available, c.available_date))
                 END                                                  AS q_cf_available
-    FROM chain c
+    -- fin_std 4분기는 창 조건(`annual_ok`)을 지키고 그날까지 공개된 구성 행으로 만든 값일 때만 쓴다(PIT 가드)
+    FROM (SELECT r.*, (r.annual_ok AND r.q4_derived_available_date <= (SELECT cutoff FROM cut))
+                      AS q4_ok
+          FROM chain r) c
 ),
 ttm AS (
     SELECT q.*,
@@ -553,14 +566,18 @@ SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
        o.bsns_year, o.rcept_no, o.period_start, o.currency,
        o.revenue, o.revenue_basis, o.gross_profit, o.op_profit, o.net_income,
        o.total_asset, o.total_liab, o.total_equity, o.cf_operating_ytd, o.cf_operating_q,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_revenue = 4
+       CASE WHEN o.report_code = '11011' THEN o.a_revenue
+            WHEN o.ttm_window_ok AND o.ttm_cnt_revenue = 4
                  AND o.ttm_basis_min = o.ttm_basis_max
             THEN o.ttm_sum_revenue END                               AS ttm_revenue,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_gross_profit = 4
+       CASE WHEN o.report_code = '11011' THEN o.a_gross_profit
+            WHEN o.ttm_window_ok AND o.ttm_cnt_gross_profit = 4
             THEN o.ttm_sum_gross_profit END                          AS ttm_gross_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_op_profit = 4
+       CASE WHEN o.report_code = '11011' THEN o.a_op_profit
+            WHEN o.ttm_window_ok AND o.ttm_cnt_op_profit = 4
             THEN o.ttm_sum_op_profit END                             AS ttm_op_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_net_income = 4
+       CASE WHEN o.report_code = '11011' THEN o.a_net_income
+            WHEN o.ttm_window_ok AND o.ttm_cnt_net_income = 4
             THEN o.ttm_sum_net_income END                            AS ttm_net_income,
        CASE WHEN o.ttm_window_ok AND o.ttm_cnt_cf_operating = 4
             THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,

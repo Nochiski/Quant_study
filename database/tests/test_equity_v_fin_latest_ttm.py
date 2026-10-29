@@ -28,9 +28,9 @@ _FIN_COLUMNS = (
     "revenue_q4_derived DECIMAL(24,4), gross_profit_q4_derived DECIMAL(24,4), "
     "op_profit_q4_derived DECIMAL(24,4), net_income_q4_derived DECIMAL(24,4), "
     "available_date DATE, available_basis VARCHAR, vintage_kind VARCHAR, "
-    "q4_derived_available_date DATE, cf_q_available_date DATE"
+    "q4_derived_available_date DATE, cf_q_available_date DATE, flow_3m_is_ytd BOOLEAN"
 )
-_N_COLUMNS = 27
+_N_COLUMNS = 28
 _REPORT_BY_MONTH = {3: "11013", 6: "11012", 9: "11014", 12: "11011"}
 
 
@@ -39,18 +39,22 @@ def _fin(corp: str, period_end: date, available: date, *, report: str | None = N
          q4_available: date | None = None, cf_ytd: int | None = None,
          cf_q: int | None = None, cf_q_available: date | None = None,
          revenue: int | None = None, revenue_q4: int | None = None,
-         revenue_basis: str = "standard",
-         fs_div: str = "CFS") -> tuple[object, ...]:
+         revenue_basis: str = "standard", fs_div: str = "CFS",
+         flow_3m_is_ytd: bool = False) -> tuple[object, ...]:
     """fin_std 1행. `report` 를 안 주면 12월 결산으로 보고 분기말 달에서 보고서 종류를 정한다.
 
-    `q4_derived`·`cf_q` 와 두 파생 공개일은 fin_std(S12)가 `bsns_year` 로 만든 파생 블록이다 —
-    뷰가 그것을 쓰면 비12월 결산에서 다른 회계연도 분기가, 창 밖 분기의 늦은 정정이 새어 든다.
+    사업보고서의 4분기(`q4_derived`·`revenue_q4`)는 fin_std(S12)가 정한 값을 뷰가 그대로 읽는다(e1.32.0 연구 DB
+    S1-d — 4분기 식의 주인은 fin_std 하나). 그 공개일 `q4_available` 은 fin_std 규약대로 구성 행(사업보고서 +
+    같은 회계연도 1~3분기) 공개일의 max 이고, 안 주면 구성 분기가 먼저 공개된 보통의 경우인 사업보고서
+    공개일로 둔다. 현금흐름 분기값 `cf_q` 는 뷰가 누계 차로 직접 세우므로 읽지 않는다.
     """
     report = report or _REPORT_BY_MONTH[period_end.month]
+    if q4_available is None and report == "11011" and (q4_derived, revenue_q4) != (None, None):
+        q4_available = available
     return (corp, period_end, report, fs_div, str(period_end.year), f"R{corp}{period_end}",
             None, "KRW", revenue, revenue_basis, None, None, net_income, None, None, None,
             cf_ytd, cf_q, revenue_q4, None, None, q4_derived, available, "derived", "api_restated",
-            q4_available, cf_q_available)
+            q4_available, cf_q_available, flow_3m_is_ytd)
 
 
 def _row(corp: str, period_end: date, available: date, net_income: int,
@@ -136,15 +140,18 @@ def test_창_폭_상한은_정상_연속_4분기를_모두_받는다(span: int) 
     assert views.TTM_SPAN_MAX_DAYS < 365       # 분기 하나가 빠진 창(365일 이상)은 받지 않는다
 
 
-# ── #227 리뷰: 뷰가 fin_std 의 `bsns_year` 파생 블록을 쓰지 않고 회계기간 축으로 4분기를 세운다 ──
+# ── 4분기는 fin_std 의 값을 읽는다(e1.32.0 연구 DB S1-d — 4분기 식의 주인은 fin_std 하나) ──────────────
+# 예전(#227 리뷰 P1-1)에는 fin_std 4분기가 `bsns_year` 로 묶여 비12월 결산에서 다른 회계연도 분기로 만들어져 뷰가
+# 연간 − 직전 3행을 따로 세웠다. #236 으로 fin_std 도 회계기간 축이 됐고 S1-d 에서 4분기가 연간 − 3분기 9개월
+# 누계로 바뀌어, 뷰는 사업보고서 행의 분기값을 `fin_std.<계정>_q4_derived` 로 읽는다(창 조건 `annual_ok` 와
+# `q4_derived_available_date <= 컷오프`). 사업보고서 행 자기 TTM 은 연간 값 그대로다(항등식).
 
 
-def test_비12월_결산은_같은_회계연도_분기로_4분기를_세워_연간_행_TTM_이_연간과_같다() -> None:
-    """3월 결산 — fin_std 의 q4 파생·cf 분기값은 `bsns_year` 조인이라 다음 회계연도 분기로 만들어진다.
+def test_비12월_결산도_fin_std_4분기를_읽고_연간_행_TTM_은_연간과_같다() -> None:
+    """3월 결산 — fin_std 4분기는 같은 회계연도(2021-06 ~ 2022-03) 3분기 누계로 만든 값(10 · 11)이다.
 
-    리뷰 P1-1(018500): 사업보고서 행 TTM 이 결산월 3·6·8·9월 법인 전건에서 연간과 달랐다. 뷰는
-    창 직전 3행(1분기·반기·3분기 보고서)으로 4분기를 직접 만들어야 한다. 파생 블록의 엉뚱한 값
-    (q4 1·7, cf 분기 99)은 결과에 나오면 안 된다.
+    뷰는 그 값을 창에 넣고(2022-06 1분기 TTM = 반기 10 + 3분기 11 + 4분기 10 + 1분기 12), 사업보고서 행 TTM 은
+    연간 그대로다. 현금흐름 분기값은 뷰가 누계 차로 세우므로 fin_std `cf_q`(엉뚱한 99)는 결과에 나오면 안 된다.
     """
     march = [
         _fin("M3", date(2021, 6, 30), date(2021, 8, 13), report="11013", net_income=9, cf_ytd=5),
@@ -153,19 +160,19 @@ def test_비12월_결산은_같은_회계연도_분기로_4분기를_세워_연�
         _fin("M3", date(2021, 12, 31), date(2022, 2, 14), report="11014", net_income=11,
              cf_ytd=18, cf_q=99),
         _fin("M3", date(2022, 3, 31), date(2022, 6, 20), report="11011", net_income=40,
-             q4_derived=1, q4_available=date(2023, 2, 14), cf_ytd=26, cf_q=99),
+             q4_derived=10, cf_ytd=26, cf_q=99),
         _fin("M3", date(2022, 6, 30), date(2022, 8, 12), report="11013", net_income=12, cf_ytd=6),
         _fin("M3", date(2022, 9, 30), date(2022, 11, 14), report="11012", net_income=13,
              cf_ytd=13, cf_q=99),
         _fin("M3", date(2022, 12, 31), date(2023, 2, 14), report="11014", net_income=14,
              cf_ytd=21, cf_q=99),
         _fin("M3", date(2023, 3, 31), date(2023, 6, 20), report="11011", net_income=50,
-             q4_derived=7, q4_available=date(2023, 11, 14), cf_ytd=30, cf_q=99),
+             q4_derived=11, cf_ytd=30, cf_q=99),
     ]
     con = _connect(march)
-    assert _ttm(con, "M3", date(2022, 3, 31)) == 40                    # 9 + 10 + 11 + (40 − 30)
+    assert _ttm(con, "M3", date(2022, 3, 31)) == 40                    # 연간 행 = 연간
     assert _ttm(con, "M3", date(2023, 3, 31)) == 50                    # 연간 행 = 연간
-    assert _ttm(con, "M3", date(2022, 6, 30)) == 10 + 11 + 10 + 12     # 창에 든 4분기 = 10
+    assert _ttm(con, "M3", date(2022, 6, 30)) == 10 + 11 + 10 + 12     # 창에 든 4분기 = fin_std 10
     assert _ttm(con, "M3", date(2022, 3, 31), "ttm_cf_operating") == 26
     assert _ttm(con, "M3", date(2023, 3, 31), "ttm_cf_operating") == 30
     assert _ttm(con, "M3", date(2022, 12, 31), "ttm_cf_operating") == 6 + 8 + 7 + 8
@@ -175,9 +182,10 @@ def test_창_밖_분기의_늦은_정정은_4분기_파생을_거쳐_TTM_공개�
     """12월 결산 — 전년 1·2분기 정정본이 당해 반기보다 늦게 접수됐다(리뷰 P1-2, 091970).
 
     2022 반기 행의 창 [2021 3분기, 2021 사업보고서, 2022 1분기, 2022 반기]는 행 공개일이 다
-    2022-08-16 이하다. 그러나 2021 4분기 = 연간 − (1·2·3분기)라 창 밖 1·2분기의 값(2023-11-17
-    접수)에 기댄다. 그 창의 TTM 은 반기 공개일에 알 수 없었다 — 값은 서지만 공개일 열이 정정
-    접수일을 가리켜 그 전에는 새어 들지 못한다(#238).
+    2022-08-16 이하다. 그러나 2021 4분기는 fin_std 가 같은 회계연도 1~3분기가 다 있을 때만 세우는 값이라
+    그 공개일(`q4_derived_available_date` = 구성 행 max)이 창 밖 1·2분기의 정정 접수일(2023-11-17)이다.
+    그 창의 TTM 은 반기 공개일에 알 수 없었다 — 값은 서지만 공개일 열이 정정 접수일을 가리켜 그 전에는
+    새어 들지 못한다(#238).
     """
     late = date(2023, 11, 17)
     con = _connect([
@@ -211,17 +219,18 @@ def test_창_밖_반기의_늦은_정정은_현금흐름_분기_차분을_거쳐
 def test_3분기_행은_창의_가장_오래된_사업보고서_4분기가_늦게_서면_손익_공개일만_늦춘다() -> None:
     """리뷰 #300 P2-1·P3-1 — 3분기 행의 창 [전년 사업보고서, 1분기, 반기, 3분기].
 
-    전년 1분기 정정본(2022-12-01)이 3분기 행보다 늦게 접수됐다. 전년 4분기 = 연간 − 1~3분기라
-    그날을 싣는 것은 창의 가장 오래된 행뿐이다 — 공개일 창이 그 행을 빼면 손익 TTM 이 3분기
-    공개일부터 새어 든다(실원장 순이익 628행). 영업현금 4분기는 전년 3분기 누계에만 기대므로
-    현금 공개일은 행 공개일 그대로다 — 공개일 열이 둘인 이유다.
+    전년 1분기 정정본(2022-12-01)이 3분기 행보다 늦게 접수됐다. 전년 4분기의 공개일(fin_std
+    `q4_derived_available_date` = 구성 행 max)이 그날이라 그날을 싣는 것은 창의 가장 오래된 행뿐이다 — 공개일
+    창이 그 행을 빼면 손익 TTM 이 3분기 공개일부터 새어 든다(실원장 순이익 628행). 영업현금 4분기는 전년
+    3분기 누계에만 기대므로 현금 공개일은 행 공개일 그대로다 — 공개일 열이 둘인 이유다.
     """
     late = date(2022, 12, 1)
     con = _connect([
         _fin("P1", date(2021, 3, 31), late, net_income=10, cf_ytd=10),
         _fin("P1", date(2021, 6, 30), date(2021, 8, 16), net_income=11, cf_ytd=21),
         _fin("P1", date(2021, 9, 30), date(2021, 11, 15), net_income=12, cf_ytd=33),
-        _fin("P1", date(2021, 12, 31), date(2022, 3, 21), net_income=46, cf_ytd=46),
+        _fin("P1", date(2021, 12, 31), date(2022, 3, 21), net_income=46, cf_ytd=46,
+             q4_derived=13, q4_available=late),
         _fin("P1", date(2022, 3, 31), date(2022, 5, 16), net_income=14, cf_ytd=14),
         _fin("P1", date(2022, 6, 30), date(2022, 8, 16), net_income=15, cf_ytd=29),
         _fin("P1", date(2022, 9, 30), date(2022, 11, 14), net_income=16, cf_ytd=45),
@@ -316,3 +325,52 @@ def test_현금흐름_분기값은_직전_행이_바로_앞_분기_보고서일_
         _fin("N7", date(2022, 9, 30), date(2022, 11, 14), cf_ytd=75),
     ])
     assert _ttm(con, "N7", date(2022, 9, 30), "ttm_cf_operating") is None
+
+
+# ── 4분기 = 연간 − 3분기 9개월 누계, 누계 칸 분기 (e1.32.0 연구 DB S1-d) ──────────────────────────────
+
+
+def test_TTM_은_fin_std_4분기를_읽고_연간_행은_연간과_같다() -> None:
+    """동진쎄미켐형 — fin_std 4분기는 연간 11,941 − 3분기 9개월 누계 8,849 = 3,092 다. 뷰가 연간 − 1~3분기 3개월
+    칸(10,448)으로 따로 세우면 1,493 이 다음 해 1분기 TTM 에 섞인다. 사업보고서 행 TTM 은 연간 그대로다."""
+    con = _connect([
+        _fin("D1", date(2022, 3, 31), date(2022, 5, 16), revenue=3681),
+        _fin("D1", date(2022, 6, 30), date(2022, 8, 16), revenue=3768),
+        _fin("D1", date(2022, 9, 30), date(2022, 11, 14), revenue=2999),
+        _fin("D1", date(2022, 12, 31), date(2023, 3, 20), revenue=11941, revenue_q4=3092),
+        _fin("D1", date(2023, 3, 31), date(2023, 5, 15), revenue=3500),
+    ])
+    assert _ttm(con, "D1", date(2023, 3, 31), "ttm_revenue") == 3768 + 2999 + 3092 + 3500
+    assert _ttm(con, "D1", date(2022, 12, 31), "ttm_revenue") == 11941
+
+
+def test_4분기_파생_공개일_전에는_그_4분기를_TTM_에_쓰지_않는다() -> None:
+    """PIT — fin_std 4분기의 공개일(구성 행 max)이 기준일 컷오프 뒤면 그 4분기를 품은 창은 그날까지 결측이다.
+    연간 행 TTM 은 4분기를 쓰지 않으므로 그대로 선다."""
+    con = _connect([
+        _fin("Q7", date(2022, 3, 31), date(2022, 5, 16), net_income=10),
+        _fin("Q7", date(2022, 6, 30), date(2022, 8, 16), net_income=11),
+        _fin("Q7", date(2022, 9, 30), date(2022, 11, 14), net_income=12),
+        _fin("Q7", date(2022, 12, 31), date(2023, 3, 20), net_income=46, q4_derived=13,
+             q4_available=date(2024, 2, 1)),
+        _fin("Q7", date(2023, 3, 31), date(2023, 5, 15), net_income=14),
+    ])
+    assert _ttm(con, "Q7", date(2023, 3, 31)) is None
+    assert _ttm(con, "Q7", date(2022, 12, 31)) == 46
+
+
+def test_반기_3개월_칸이_누계면_그_분기를_품은_TTM_을_비운다() -> None:
+    """바이오비쥬형 — 2022 반기 '3개월' 칸이 6개월 누계(21 = 10 + 11)다(fin_std `flow_3m_is_ytd`). 그 칸을 창에 넣으면
+    TTM 이 1분기만큼 부푼다. 그 분기를 품은 창(2022 3분기 ~ 2023 1분기 행)은 결측이고, 창에서 빠진 2023 반기 행과
+    연간 행(항등식)은 선다."""
+    con = _connect([
+        _fin("Y8", date(2022, 3, 31), date(2022, 5, 16), net_income=10),
+        _fin("Y8", date(2022, 6, 30), date(2022, 8, 16), net_income=21, flow_3m_is_ytd=True),
+        _fin("Y8", date(2022, 9, 30), date(2022, 11, 14), net_income=12),
+        _fin("Y8", date(2022, 12, 31), date(2023, 3, 20), net_income=46, q4_derived=13),
+        _fin("Y8", date(2023, 3, 31), date(2023, 5, 15), net_income=14),
+        _fin("Y8", date(2023, 6, 30), date(2023, 8, 14), net_income=15),
+    ])
+    assert _ttm(con, "Y8", date(2023, 3, 31)) is None
+    assert _ttm(con, "Y8", date(2023, 6, 30)) == 12 + 13 + 14 + 15
+    assert _ttm(con, "Y8", date(2022, 12, 31)) == 46

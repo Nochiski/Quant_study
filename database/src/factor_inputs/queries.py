@@ -23,6 +23,9 @@ stage T 행)·`_t_prices`(T 가격 행)·`_t_adj_src`(T 행을 넣은 수정주�
 판의 마지막 세션)이다. 날짜 축이 있는 정보 입력 — DART(재무·배당·감사·공시)·`universe_daily`(D' 행)·
 WICS(`sector_snapshot`)·추정기관 수·기업행위(`adj_factor`) — 는 fetched/available ≤ asof 로 자른다.
 그래야 재생이 D' 뒤 자료를 담은 판을 고정해도 실운영(15:41 에는 D' 까지만 안다)과 같다.
+DART(재무·배당·감사·공시)만은 `Params.dart_asof` 로 자른다(D13 · N-62): 비우면 asof 이고, 18:05 DART 수집 뒤
+저녁 DART 판(모델 DB equity 루트)을 읽은 장 마감 판만 T 다. 그 판은 그날 저녁 공시까지 담고 나머지 정보 입력은
+그대로 D' 다.
 WISE(컨센서스·재무 — `stg_consensus_annual`·`stg_consensus_matrix`·`stg_fin_wise`·`stg_fin_wise_q`)만
 `Params.wise_asof` 로 자른다(N-53): 아침판 D, 장 마감 판도 T 다. WISE 는 그날 06:00 에 받고 장 마감 판이
 고정한 D' 확정판의 stage 판에 그 수집분이 실려 있다(평일은 T 아침 08:10 빌드 — 월요일·연휴 다음 날은 확정판이
@@ -130,12 +133,15 @@ class Params:
     basis: str = "morning"  # morning | evening(장 마감 판 — 컷오버 T-2) | supplement(주말 보강판 N-45)
     asof: str = ""          # 정보 시점(YYYY-MM-DD) — 비우면 d. 장 마감 판은 D'(모듈 docstring)
     wise_asof: str = ""     # WISE 정보 시점 — 비우면 d. 장 마감 판도 T(그날 06:00 수집, N-53), 보강판은 휴일 수집일 W
+    dart_asof: str = ""     # DART 정보 시점 — 비우면 asof. 저녁 DART 판을 읽은 장 마감 판만 T(D13 · N-62)
 
     def __post_init__(self) -> None:
         if not self.asof:
             object.__setattr__(self, "asof", self.d)
         if not self.wise_asof:
             object.__setattr__(self, "wise_asof", self.d)
+        if not self.dart_asof:
+            object.__setattr__(self, "dart_asof", self.asof)
 
 
 def _lit_list(values: tuple[str, ...]) -> str:
@@ -318,7 +324,7 @@ aud AS (
                             DESC NULLS LAST,
                         a.adt_opinion_class, a.rcept_no DESC) AS rn
     FROM audit_opinion a JOIN security s ON s.corp_code = a.corp_code
-    WHERE a.reprt_code = '{ANNUAL_REPORT}' AND a.available_date <= DATE '{p.asof}'
+    WHERE a.reprt_code = '{ANNUAL_REPORT}' AND a.available_date <= DATE '{p.dart_asof}'
       AND coalesce(a.bsns_year_label, '') NOT LIKE '%전%'
       AND a.adt_opinion IS NOT NULL
       AND s.ticker IN (SELECT ticker FROM u)
@@ -326,7 +332,7 @@ aud AS (
 filing AS (
     SELECT s.ticker, v.rcept_dt, v.rcept_no, v.legal_deadline
     FROM disclosure_version v JOIN security s ON s.corp_code = v.corp_code
-    WHERE NOT coalesce(v.is_correction, false) AND v.available_date <= DATE '{p.asof}'
+    WHERE NOT coalesce(v.is_correction, false) AND v.available_date <= DATE '{p.dart_asof}'
       AND v.legal_deadline IS NOT NULL AND s.ticker IN (SELECT ticker FROM u)
 ),
 fil AS (
@@ -833,7 +839,7 @@ fin AS (
                         f.available_date DESC, f.rcept_no DESC) AS rn
     FROM fin_std f
     WHERE f.report_code IN ({_lit_list(QUARTER_REPORTS)})
-      AND f.available_date <= DATE '{p.asof}'
+      AND f.available_date <= DATE '{p.dart_asof}'
 ),
 dsec AS (
     SELECT ticker, corp_code FROM security
@@ -858,7 +864,7 @@ div AS (
     FROM dividend_event e JOIN dsec s ON s.corp_code = e.corp_code
     WHERE e.reprt_code = '{ANNUAL_REPORT}'
       AND trim(e.stock_knd) IN ({_lit_list(DPS_STOCK_KINDS + (DPS_FALLBACK_KIND,))})
-      AND e.available_date <= DATE '{p.asof}'
+      AND e.available_date <= DATE '{p.dart_asof}'
 ),
 dart AS (
     SELECT s.ticker,
@@ -900,24 +906,24 @@ qtr AS (
     SELECT s.ticker,
            strftime(f.period_end, '%Y/%m') AS period,
            CASE WHEN f.report_code = '{ANNUAL_REPORT}' THEN
-                    CASE WHEN f.q4_derived_available_date <= DATE '{p.asof}'
+                    CASE WHEN f.q4_derived_available_date <= DATE '{p.dart_asof}'
                          THEN f.revenue_q4_derived END
                 ELSE f.revenue END      AS q_revenue,
            CASE WHEN f.report_code = '{ANNUAL_REPORT}' THEN
-                    CASE WHEN f.q4_derived_available_date <= DATE '{p.asof}'
+                    CASE WHEN f.q4_derived_available_date <= DATE '{p.dart_asof}'
                          THEN f.op_profit_q4_derived END
                 ELSE f.op_profit END    AS q_op,
            CASE WHEN f.report_code = '{ANNUAL_REPORT}' THEN
-                    CASE WHEN f.q4_derived_available_date <= DATE '{p.asof}'
+                    CASE WHEN f.q4_derived_available_date <= DATE '{p.dart_asof}'
                          THEN f.net_income_q4_derived END
                 ELSE f.net_income END   AS q_ni,
            CASE WHEN f.report_code = '{ANNUAL_REPORT}' THEN
-                    CASE WHEN f.q4_derived_available_date <= DATE '{p.asof}'
+                    CASE WHEN f.q4_derived_available_date <= DATE '{p.dart_asof}'
                          THEN f.gross_profit_q4_derived END
                 ELSE f.gross_profit END AS q_gross_profit,
            f.total_asset, f.total_liab, f.total_equity, f.capex_basis, f.fs_div,
            CASE WHEN f.report_code = '{ANNUAL_REPORT}'
-                     AND f.q4_derived_available_date <= DATE '{p.asof}'
+                     AND f.q4_derived_available_date <= DATE '{p.dart_asof}'
                 THEN greatest(f.available_date, f.q4_derived_available_date)
                 ELSE f.available_date END AS available_date,
            row_number() OVER (PARTITION BY s.ticker ORDER BY f.period_end DESC,

@@ -72,6 +72,9 @@ def _parser() -> argparse.ArgumentParser:
                    help="WISE 컨센서스 입력의 시점(YYYYMMDD) — 보강판은 휴일 수집일(D 보다 뒤) 필수, "
                         "그 밖은 생략(= 판 날짜 — 장 마감 판 T, N-53. 주면 판 날짜와 같아야 한다). "
                         "가격·수급·DART 등은 asof 그대로")
+    b.add_argument("--dart-builds-from", type=Path, default=None,
+                   help="저녁 DART 인계 JSON(장 마감 판만, D13 · N-62) — DART 표를 그 인계의 모델 DB 판에서 읽고 "
+                        "DART 정보 시점을 T 로 연다(나머지는 asof 그대로). 체인 evening 모드가 준다")
     return p
 
 
@@ -84,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
                        calendar_dir=args.calendar_dir,
                        postclose_stage_root=args.postclose_stage_root,
                        candidates_root=args.candidates_root, replay=args.replay,
-                       wise_asof=args.wise_asof)
+                       wise_asof=args.wise_asof, dart_builds_from=args.dart_builds_from)
     except FactorInputsError as e:
         print(f"factor_inputs 실패: {e}", file=sys.stderr)
         return 2

@@ -31,6 +31,10 @@ class Handoff:
     health: dict[str, str]          # 키가 없거나 객체가 아니면 빈 dict(= ok 아님)
     date: str | None = None         # 대상 거래일 D(YYYYMMDD) — 없으면 None, 검사는 읽는 쪽이 한다
     basis: str | None = None        # 'morning'(아침 확정판) · 'evening' — 없으면 None
+    # 판 목록을 해석할 루트 — 저녁 DART 인계(`daily.evening_dart`)는 모델 DB 루트라 읽는 쪽이 이 값으로 연다.
+    # 아침 인계 이력은 equity_root 만 싣는다(읽는 쪽은 자기 루트를 쓴다). 없으면 None
+    equity_root: str | None = None
+    stage_root: str | None = None
 
     @property
     def health_ok(self) -> bool:
@@ -62,4 +66,10 @@ def load(path: Path) -> Handoff:
                    health={str(k): str(v) for k, v in health.items()}
                    if isinstance(health, dict) else {},
                    date=None if date is None else str(date),
-                   basis=None if basis is None else str(basis))
+                   basis=None if basis is None else str(basis),
+                   equity_root=_text(raw.get("equity_root")),
+                   stage_root=_text(raw.get("stage_root")))
+
+
+def _text(value: object) -> str | None:
+    return str(value) if isinstance(value, str) and value else None

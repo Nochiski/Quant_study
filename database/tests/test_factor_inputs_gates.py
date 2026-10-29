@@ -331,6 +331,18 @@ def test_evening_fg1_takes_wise_rows_of_the_day(con_evening) -> None:
             m.metrics["fi_consensus_annual.outside_window_or_vocab"]) == (1, 1)
 
 
+def test_evening_fg1_dart_rows_are_bounded_by_dart_asof(con_evening) -> None:
+    """D13(N-62) — 저녁 DART 판을 읽은 장 마감 판은 DART 정보 시점이 T 다. 공개일 T 인 DART 행은 dart_asof = T 면 통과,
+    T 뒤면 FAIL. dart_asof 가 없으면(인계 없는 장 마감 판) 지금처럼 D' 가 상한이라 T 행도 FAIL 이다."""
+    key = "fi_fin_summary.dart_available_after_asof"
+    con_evening.execute(f"UPDATE g_fi_fin_summary SET available_date = DATE '{T}', "
+                        "fs_basis = 'DART:CFS'")
+    assert gates.fg1_rows(_ectx(con_evening, dart_asof=T)).metrics[key] == 0
+    assert gates.fg1_rows(_ectx(con_evening)).metrics[key] > 0
+    con_evening.execute(f"UPDATE g_fi_fin_summary SET available_date = DATE '{T_NEXT}'")
+    assert gates.fg1_rows(_ectx(con_evening, dart_asof=T)).metrics[key] > 0
+
+
 def test_morning_fg2_refuses_the_evening_market_cap_basis(con) -> None:
     con.execute("UPDATE g_fi_universe SET mktcap_basis = 't1_shares_x_t_close'")
     r = gates.fg2_overlay(_ctx(con))

@@ -2419,6 +2419,161 @@ def test_evening_cli_reads_the_postclose_root_and_candidates(evening, tmp_path: 
     assert _hashes(out / "_runs" / f"{T_S}_evening.json") == _hashes(evening.e.run_manifest)
 
 
+# ── 저녁 판 DART 정보 시점 T(D13 · N-62) — 저녁 DART 인계 `--dart-builds-from` ─────────────────────
+# 저녁 DART 판은 모델 DB equity 루트에 DART 5표만 e_ 판으로 선다(운영: 18:05 DART 수집이 끝나면 체인이 짓는다). 원천은
+# 연구 판과 같은 행 + T 날짜 DART 행(`_leak_rows(T)` 의 DART 몫). 나머지 입력은 지금 장 마감 판 그대로(D' 고정 판)다
+DART_EQ_BUILD = "e_20260929T093500_000000Z"
+DART_TABLES = ("fin_std", "dividend_event", "audit_opinion", "disclosure_version", "corp")
+# 저녁 DART 판으로도 안 바뀌는 fi_universe 열 — 가격·유니버스·WICS·추정기관 수는 D' 그대로다
+UNI_NOT_DART = ("ticker, name, market, sec_type, listed_date, shares, sector_l1, sector_l1_name, "
+                "sector_l2, sector_l2_name, n_analysts, adv20, is_admin, is_halted")
+
+
+def _dart_root(base: Path, day: dt.date) -> Path:
+    """저녁 DART equity 루트 — DART 5표(연구 판 행 + `day` 날짜 DART 행)를 e_ 판으로 짓는다."""
+    leak = _leak_rows(day)
+    rows = {"fin_std": _fin_std(), "dividend_event": _dividend(), "audit_opinion": _audit(),
+            "disclosure_version": _disclosure(), "corp": _corp()}
+    for table, base_rows in rows.items():
+        _make_stage_tree(base, table, base_rows + leak.get(table, []), build_id=DART_EQ_BUILD)
+    return base / "stage"
+
+
+def _dart_handoff(path: Path, root: Path, **override: object) -> Path:
+    """체인이 저녁 DART 판 뒤에 쓰는 인계(읽기는 `equity.handoff` — basis evening · 날짜 T). `override` 는
+    최상위 키를 바꾼다."""
+    payload: dict[str, object] = {
+        "date": T_S, "basis": "evening", "equity_root": str(root),
+        "stage_root": str(path.parent / "dart_stage"),
+        "stage_builds": {"stg_disclosure": "e_20260929T093000_000000Z"},
+        "equity_builds": {t: DART_EQ_BUILD for t in DART_TABLES}, "health": HEALTH_OK, **override}
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+@pytest.fixture(scope="module")
+def evening_dart(evening, tmp_path_factory) -> SimpleNamespace:
+    """`evening` 과 같은 원천·고정 판 위에 저녁 DART 인계만 더해 장 마감 판을 짓는다."""
+    base = tmp_path_factory.mktemp("fi_evening_dart")
+    droot = _dart_root(base / "dart", T)
+    dh = _dart_handoff(base / f"{T_S}_evening_dart.json", droot)
+    e = build(T_S, "evening", base / "fi_d", evening.st, evening.eq, grace_days=5, min_eligible=5,
+              golden_path=None, builds_from=evening.hist, calendar_dir=evening.cal,
+              postclose_stage_root=evening.pc, candidates_root=evening.out_m, dart_builds_from=dh)
+    return SimpleNamespace(e=e, out=base / "fi_d", droot=droot, dh=dh)
+
+
+def test_evening_dart_handoff_records_dart_asof_t_and_the_dart_builds(evening,
+                                                                      evening_dart) -> None:
+    """판 기록 — 정보 시점은 셋이다: asof = D'(가격·유니버스·WICS·추정기관 수·기업행위) · wise_asof = T · dart_asof = T.
+    DART 5표는 저녁 DART 판(e_)을 읽고(표별 inputs) 인계 전체를 `dart_board` 에 남긴다 — `equity_builds` 는 고정한 연구
+    판에서 읽은 표만(아침 두 판 대조가 이 목록을 연구 판과 맞춘다). 인계가 없으면 dart_asof = asof 이고 dart_board 는 None."""
+    assert evening_dart.e.ok, [(g.name, g.detail) for g in evening_dart.e.gates if not g.passed]
+    run = json.loads(evening_dart.e.run_manifest.read_text(encoding="utf-8"))
+    assert (run["asof"], run["wise_asof"], run["dart_asof"]) == ("2026-09-28", "2026-09-29",
+                                                                 "2026-09-29")
+    assert run["dart_board"] == {
+        "builds_from": str(evening_dart.dh.resolve()),
+        "equity_root": str(evening_dart.droot.resolve()),
+        "stage_root": str(evening_dart.dh.parent / "dart_stage"),
+        "equity_builds": {t: DART_EQ_BUILD for t in DART_TABLES},
+        "stage_builds": {"stg_disclosure": "e_20260929T093000_000000Z"}}
+    assert set(run["equity_builds"]) == set(EQ_TABLES) - set(DART_TABLES)
+    assert run["tables"]["fi_fin_summary"]["inputs"]["fin_std"] == DART_EQ_BUILD
+    plain = json.loads(evening.e.run_manifest.read_text(encoding="utf-8"))
+    assert (plain["dart_asof"], plain["dart_board"]) == ("2026-09-28", None)
+
+
+def test_evening_dart_handoff_takes_the_day_s_dart_rows_only(evening, evening_dart) -> None:
+    """저녁 DART 판이면 T 공개 DART 행이 들어간다 — E 4Q 파생값 · A 배당 2,000원 · A 감사 의견거절과 지연 제출(같은 법인
+    우선주 G 도) · H 의 T 공개 재제출본(지연) · L 의 T 공개 지연 원본. DART 밖 T 행(유니버스 상태·WICS·추정기관 수·기업행위)과
+    가격·수급·컨센서스는 인계 없는 장 마감 판과 같다."""
+    out, plain = evening_dart.out, evening.out_e
+    dart_max = "SELECT max(available_date) FROM t WHERE fs_basis LIKE 'DART:%'"
+    assert (q(plain, "fi_fin_summary", dart_max), q(out, "fi_fin_summary", dart_max)) == (
+        [(dt.date(2026, 8, 14),)], [(T,)])
+    e_q4 = (f"SELECT revenue IS NOT NULL FROM t WHERE ticker = '{E}' AND period = '2025/12' "
+            "AND period_type = 'quarter'")
+    assert (q(plain, "fi_fin_summary", e_q4), q(out, "fi_fin_summary", e_q4)) == ([(False,)],
+                                                                               [(True,)])
+    a_dps = (f"SELECT dps FROM t WHERE ticker = '{A}' AND period = '2025/12' "
+             "AND period_type = 'annual'")
+    assert (q(plain, "fi_fin_summary", a_dps), q(out, "fi_fin_summary", a_dps)) == (
+        [(1_446.0,)], [(2_000.0,)])
+    flags = "SELECT ticker, audit_adverse, filing_late FROM t ORDER BY ticker"
+    p_flags = {r[0]: r[1:] for r in q(plain, "fi_universe", flags)}
+    d_flags = {r[0]: r[1:] for r in q(out, "fi_universe", flags)}
+    assert (d_flags[A], d_flags[G], d_flags[H][1], d_flags[L][1]) == ((True, True), (True, True),
+                                                                      True, True)
+    assert (p_flags[A][0], p_flags[G][0], p_flags[H][1], p_flags[L][1]) == (False, False, False,
+                                                                           False)
+    assert {t: v for t, v in d_flags.items() if t not in (A, G, H, L)} == {
+        t: v for t, v in p_flags.items() if t not in (A, G, H, L)}
+    keep = f"SELECT {UNI_NOT_DART} FROM t ORDER BY ticker"
+    assert q(out, "fi_universe", keep) == q(plain, "fi_universe", keep)
+    not_dart = ("fi_prices", "fi_adj_prices", "fi_flows", "fi_credit", "fi_consensus",
+                "fi_consensus_annual")
+    d_hash, p_hash = _hashes(evening_dart.e.run_manifest), _hashes(evening.e.run_manifest)
+    assert {t: d_hash[t] for t in not_dart} == {t: p_hash[t] for t in not_dart}
+
+
+@pytest.mark.parametrize(("case", "message"), [
+    ("morning_board", "장 마감 판"),
+    ("basis", "basis=evening"),
+    ("date", "날짜"),
+    ("health", "health"),
+    ("missing_table", "fin_std"),
+    ("not_evening_build", "e_"),
+    ("research_root", "연구"),
+    ("extra_table", "price_daily"),
+])
+def test_evening_dart_handoff_refusals_are_rc2(evening, tmp_path: Path, capsys, case: str,
+                                               message: str) -> None:
+    """저녁 DART 인계는 그날(T) 저녁 판 · health ok · DART 5표 전부 · 저녁 판(e_) · 연구 루트 아님 · DART 표만일 때만
+    읽는다. 아니면 판을 만들지 않고 rc 2 — D' 판으로 조용히 대신하지 않는다(P1). 아침판에는 줄 수 없다."""
+    droot = _dart_root(tmp_path / "dart", T)
+    over: dict[str, object] = {
+        "basis": {"basis": "morning"}, "date": {"date": D_S},
+        "health": {"health": {"stage": "ok", "equity": "fail"}},
+        "missing_table": {"equity_builds": {t: DART_EQ_BUILD for t in DART_TABLES
+                                            if t != "fin_std"}},
+        "not_evening_build": {"equity_builds": {t: EQ_BUILD for t in DART_TABLES}},
+        "research_root": {"equity_root": str(evening.eq)},
+        "extra_table": {"equity_builds": {**{t: DART_EQ_BUILD for t in DART_TABLES},
+                                          "price_daily": DART_EQ_BUILD}},
+    }.get(case, {})
+    dh = _dart_handoff(tmp_path / "dart.json", droot, **over)
+    if case == "morning_board":
+        args = ["--date", D_S, "--basis", "morning", "--stage-root", str(evening.st),
+                "--equity-root", str(evening.eq)]
+    else:
+        args = ["--date", T_S, "--basis", "evening", "--stage-root", str(evening.st),
+                "--equity-root", str(evening.eq), "--calendar-dir", str(evening.cal),
+                "--builds-from", str(evening.hist), "--postclose-stage-root", str(evening.pc),
+                "--candidates-root", str(evening.out_m)]
+    out = tmp_path / "fi"
+    rc = cli_main(["build", "--root", str(out), "--grace-days", "5", "--min-eligible", "5",
+                   "--dart-builds-from", str(dh), *args])
+    assert rc == 2
+    assert message in capsys.readouterr().err
+    assert not (out / "fi_universe" / "MANIFEST.json").exists()
+
+
+def test_evening_dart_handoff_cli_matches_the_build(evening, evening_dart, tmp_path: Path,
+                                                    capsys) -> None:
+    """CLI `--dart-builds-from` 가 build 로 그대로 간다 — 픽스처와 같은 8표."""
+    out = tmp_path / "fi"
+    rc = cli_main(["build", "--date", T_S, "--basis", "evening", "--root", str(out),
+                   "--stage-root", str(evening.st), "--equity-root", str(evening.eq),
+                   "--grace-days", "5", "--min-eligible", "5",
+                   "--calendar-dir", str(evening.cal), "--builds-from", str(evening.hist),
+                   "--postclose-stage-root", str(evening.pc),
+                   "--candidates-root", str(evening.out_m),
+                   "--dart-builds-from", str(evening_dart.dh)])
+    assert rc == 0, capsys.readouterr().err
+    assert _hashes(out / "_runs" / f"{T_S}_evening.json") == _hashes(evening_dart.e.run_manifest)
+
+
 def test_cli_postclose_defaults_are_model_db_stage_and_research_fi() -> None:
     """기본값: 장 마감 stage 루트 = `<QL_HOME>/data/model_db/stage`(T-29), 후보 = 연구 fi 루트
     (수집기 `board_candidates` 가 읽는 자리와 같다)."""

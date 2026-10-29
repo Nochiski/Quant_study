@@ -32,7 +32,8 @@
 
 정보 시점(컷오버 PR-4 · N-53): 재무의 available 상한·연간 컨센서스의 fetched 상한은 WISE 정보 시점
 `wise_asof` 로 본다(아침판 D, 장 마감 판도 T — 그날 06:00 수집, 보강판은 휴일 수집일 W — N-45). 재무 표는
-WISE·DART 를 한 행에 합쳐 available_date = 원천들의 max 라, DART 의 D' 자르기는 SQL(`queries`, asof)이 맡는다.
+WISE·DART 를 한 행에 합쳐 available_date = 원천들의 max 라, DART 의 D' 자르기는 SQL(`queries`, dart_asof — 비우면
+asof, 저녁 DART 판을 읽은 장 마감 판만 T · N-62)이 맡는다.
 신용 available_date 는 세션 축이라 D(장 마감 판 T)로 본다. 보강판은 D* 가 wise_asof(휴일 수집일)와 같아야
 한다 — 다르면 그 휴일 WISE 가 판에 없다(FG-fresh FAIL, 정규 판과 같은 판을 '보강판'으로 내보내지 않는다).
 """
@@ -111,6 +112,7 @@ class GateContext:
     view: Callable[[str], str] = lambda t: f"g_{t}"
     asof: str = ""                          # 정보 시점 — 비우면 date. 장 마감 판은 D'
     wise_asof: str = ""                     # WISE 정보 시점 — 비우면 date. 장 마감 판도 T(N-53), 보강판은 휴일 수집일 W
+    dart_asof: str = ""                     # DART 정보 시점 — 비우면 asof. 저녁 DART 판을 읽은 장 마감 판만 T(N-62)
     # 장 마감 판 FG5 대상 = 직전 판 모델 후보(`daily.postclose.fi_candidates`). 못 읽었으면 None
     t_candidates: tuple[str, ...] | None = None
     t_candidates_from: str = ""             # 후보를 읽은 fi 판 id, 못 읽었으면 그 사유
@@ -122,6 +124,8 @@ class GateContext:
             self.asof = self.date
         if not self.wise_asof:
             self.wise_asof = self.date
+        if not self.dart_asof:
+            self.dart_asof = self.asof
 
 
 def _scalar(con: duckdb.DuckDBPyConnection, sql: str) -> object:
@@ -208,11 +212,11 @@ def fg1_rows(ctx: GateContext) -> GateResult:
     # 연간 행 available_date 는 WISE 판 날짜와 DART 날짜의 max 라 상한은 wise_asof 다(DART 쪽은 SQL 이 asof 로 자른다)
     viol["fi_fin_summary.available_after_d"] = _count(
         con, f"SELECT count(*) FROM {fin} WHERE available_date > DATE '{ctx.wise_asof}'")
-    # 재무 표의 DART 행(WISE 값이 없는 행 — fs_basis 'DART:')은 asof(장 마감 판 D')까지다. 위 상한이 wise_asof(T)로
-    # 넓어져(N-53) 장 마감 판의 DART D' 자르기 회귀를 따로 잡는다
+    # 재무 표의 DART 행(WISE 값이 없는 행 — fs_basis 'DART:')은 dart_asof(장 마감 판 D', 저녁 DART 판을 읽었으면 T —
+    # N-62)까지다. 위 상한이 wise_asof(T)로 넓어져(N-53) 장 마감 판의 DART 자르기 회귀를 따로 잡는다
     viol["fi_fin_summary.dart_available_after_asof"] = _count(
         con, f"SELECT count(*) FROM {fin} WHERE fs_basis LIKE 'DART:%' "
-             f"AND available_date > DATE '{ctx.asof}'")
+             f"AND available_date > DATE '{ctx.dart_asof}'")
     viol["fi_consensus.horizon_outside_vocab"] = _count(
         con, f"SELECT count(*) FROM {v('fi_consensus')} "
              "WHERE horizon NOT IN ('cur', '1w', '1m', '3m') OR horizon IS NULL")

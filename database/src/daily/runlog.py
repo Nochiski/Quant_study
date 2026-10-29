@@ -22,6 +22,9 @@ TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 POSTCLOSE_COMPARE = "postclose_compare"
 # 조용한 손실 검사(K1-4a, `daily.silent_loss`) 런 source — 08:10 체인 맨 끝. 날짜 = 확정판의 거래일 D
 SILENT_LOSS = "silent_loss"
+# 저녁 DART 판(D13 · N-62, `daily.evening_dart`) 런 source — 장 마감 체인 evening 이 fi 앞에 남긴다. 판이 실패했거나 그날 DART
+# 갈래가 실패해 전 거래일 공시 판으로 간 날은 fallback(warn — 판은 그대로 나간다, 갈래 1). 판의 필수 단계(POSTCLOSE_STEPS) 밖이다
+POSTCLOSE_DART = "postclose_dart"
 WARN_STATUSES: dict[str, frozenset[str]] = {
     # 16:00 컷오프 · 16:00 뒤 시작(콜 0) · 세션 예외일 건너뜀 — 남은 종목은 QL-D 가 21:05 저녁 값
     "kiwoom_postclose": frozenset({"cutoff", "late", "session_exception"}),
@@ -30,11 +33,16 @@ WARN_STATUSES: dict[str, frozenset[str]] = {
     # 조용한 손실 기록형(N-42 Q4 — 그림자 시작 10-14 부터 2주 기록) — 미설명 > 0 · 판정 불가 표. 차단형으로 바꾸면
     # 같은 경우가 blocked(이 목록 밖 — 일일 리포트 crit)다
     SILENT_LOSS: frozenset({"unexplained", "undecidable"}),
+    # 저녁 DART 판 실패·DART 갈래 실패 — 장 마감 판은 전 거래일 공시로 나간다(D13 갈래 1)
+    POSTCLOSE_DART: frozenset({"fallback"}),
 }
-# 장 마감 체인(`scripts/postclose_chain.sh close`, 컷오버 PR-8)이 ①(수집 — 수집기가 `kiwoom_postclose` 로 남김) 뒤
-# 단계마다 남기는 source, 체인 순서. 16:30 워치독(`watchdog.sh postclose_board`)이 그날 단계마다 마지막 런을 본다
-POSTCLOSE_STEPS: tuple[str, ...] = ("postclose_stage", "postclose_fi", "postclose_model",
-                                     "postclose_excel", "postclose_v3")
+# 장 마감 판(`scripts/postclose_chain.sh`, 컷오버 PR-8)이 ①(수집 — 수집기가 `kiwoom_postclose` 로 남김) 뒤 단계마다 남기는
+# source, 체인 순서. D13(N-62)부터 15:41 close 는 stage 까지(`POSTCLOSE_CLOSE_STEPS` — 16:30 워치독 postclose_board 가 본다),
+# 나머지는 그날 DART 갈래가 끝난 뒤 evening 이 남긴다(`POSTCLOSE_EVENING_STEPS` — 저녁 워치독 evening_board 가 본다)
+POSTCLOSE_CLOSE_STEPS: tuple[str, ...] = ("postclose_stage",)
+POSTCLOSE_EVENING_STEPS: tuple[str, ...] = ("postclose_fi", "postclose_model", "postclose_excel",
+                                             "postclose_v3")
+POSTCLOSE_STEPS: tuple[str, ...] = POSTCLOSE_CLOSE_STEPS + POSTCLOSE_EVENING_STEPS
 # 그 뒤를 잇는 source — 21:05 저녁 원장 뒤 재반영(daily_evening.sh 훅) · 다음 날 아침 KRX 재반영 · 두 판 대조
 # (daily_build.sh 훅). 날짜는 모두 판의 거래일 T 다
 POSTCLOSE_FOLLOWUPS: tuple[str, ...] = ("postclose_v3_refill", "postclose_v3_morning",

@@ -6,7 +6,8 @@
 #         → [키움 rc 0 이면] 원장 락을 놓고 장 마감 판 재반영 훅 scripts/postclose_chain.sh refill(컷오버 PR-8 ⑦)
 #   ① 키움 ka10060·ka10014 fetch + --commit — KRX 대조 없이 원장 직행(결정 V2-1). 대조 상대인 KRX 는
 #      T+1 08:00 공표라 그날 저녁엔 없다. 오염 게이트(b)만 통과 조건이다(ka10008 이 없으니 basis=skipped).
-#   ② DART 당일 스윕·상세 — 접수 마감 18:00 직후.
+#   ② DART 당일 스윕·상세 — 접수 마감 18:00 직후. 끝나면 그 갈래 안에서 저녁 판 훅 scripts/postclose_chain.sh evening
+#      (D13 — 그날 공시를 반영한 장 마감 판을 지어 보낸다, 갈래 rc 는 DART rc 그대로)
 #   WISE 스냅샷은 06:00 daily_ledger.sh 로 옮겼다(N-53 — V2-3 되돌림. 그날 장 마감 판이 그날 수집분을 읽게).
 #   ① 의 종료 시각을 로그와 deliver JSON 에 남긴다 — 잠정 빌드(build_evening.sh)의 트리거 근거다.
 #   휴장·이미 완료도 info 로 보고한다(결정 V2-7: 무소식과 고장을 구분한다). dry-run 만 알림 없음.
@@ -82,6 +83,13 @@ branch_dart() {
   $PY -m daily.dart_daily --date "$D" $DRY $LIMIT
   local rc=$?
   echo "──── DART 종료 rc=$rc $(kst) ────"
+  # 저녁 판 훅(D13 · N-62) — DART 가 끝나면(완료 감지, P9) 그 rc 를 넘겨 장 마감 판을 짓는다. 부모는 21:05 키움을 먼저
+  # 기다리므로 이 갈래 안에서 잇는다. 갈래 rc 는 DART rc 그대로다(저녁 판 rc 를 섞으면 ledger_evening.json dart_rc 가
+  # 오염된다). 저녁 판은 원장을 읽기만 하므로 원장 락 fd 9 는 넘기지 않는다. dry-run 은 부르지 않는다
+  if [ -z "$DRY" ]; then
+    bash scripts/postclose_chain.sh evening --date "$D" --dart-rc "$rc" 9>&-
+    echo "  저녁 판 rc=$? — logs/postclose/${D}_evening.log $(kst)"
+  fi
   return "$rc"
 }
 {

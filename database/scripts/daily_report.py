@@ -37,7 +37,7 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 
-from daily.runlog import POSTCLOSE_FOLLOWUPS, POSTCLOSE_STEPS, WARN_STATUSES, Run
+from daily.runlog import POSTCLOSE_DART, POSTCLOSE_FOLLOWUPS, POSTCLOSE_STEPS, WARN_STATUSES, Run
 
 KST = dt.timezone(dt.timedelta(hours=9))
 MAX_TEXT = 3900                 # notify.sh 가 텔레그램에 넘기는 상한과 같다
@@ -52,7 +52,8 @@ NOTIFY_WINDOW_H = 24
 # kiwoom_postclose: 같은 날 재실행이 그날 대상 전체를 다시 보고(이미 받은 종목만 빼고) 남은 종목을 받는다.
 # 장 마감 체인 단계(PR-8 — stage 단독 빌드·fi·모델·엑셀·v3 반영·재반영·아침 재반영·대조): 다시 돌면 그 T 의 그 단계를
 # 통째로 다시 한다(scripts/postclose_chain.sh).
-LAST_RUN_SOURCES = frozenset({"dart", "kiwoom_postclose", *POSTCLOSE_STEPS, *POSTCLOSE_FOLLOWUPS})
+LAST_RUN_SOURCES = frozenset({"dart", "kiwoom_postclose", *POSTCLOSE_STEPS, POSTCLOSE_DART,
+                              *POSTCLOSE_FOLLOWUPS})
 # 뒤 런이 ok 여도 회복으로 덮지 않는 상태 — v3 프로덕션 키 사용은 수집 실패가 아니라 사고다(P1)
 NEVER_RECOVERED = frozenset({"kael_key_used"})
 # 저녁 체인 런 detail 의 갈래별 rc — `kiwoom_rc=0 dart_rc=2 …`. 이 리포트가 `scripts/daily_evening.sh` 의

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from conftest import _make_stage_tree, allow_skips
+from conftest import allow_skips
 from equity import build, rules_s02, rules_s04
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
@@ -113,7 +113,7 @@ def test_절단본_빌드가_전_게이트를_통과한다(built: build.BuildRes
     assert eg1["lhs"] == N_ROWS and eg1["rhs"] == N_ROWS
     assert _gate(r, "EG0").metrics["unpinned"] == []
     assert set(r.inputs) == {"stg_price_daily", "stg_etf_price_daily", "stg_listing_daily",
-                             "stg_flow_daily_kiwoom", "trading_calendar"}
+                             "trading_calendar"}
     assert r.inputs["trading_calendar"] == "b_s02_cal"   # equity 입력도 고정된다
 
 
@@ -395,9 +395,6 @@ def _fake_build(tmp_path: Path, make_stage_tree, price_rows: list[dict[str, obje
     cal_fx.write_text(json.dumps([{"key": {"date": D1.isoformat()}, "column": "prev_td",
                                    "expect": None, "source": "hand — 가짜 캘린더 첫날"}]),
                       encoding="utf-8")
-    make_stage_tree(tmp_path, "stg_flow_daily_kiwoom",
-                    [{"ticker": "005930", "date": D1, "close_krw": 1000, "volume_shr": 1}],
-                    "date_axis")
     with allow_skips(("equity", "EG17", "no_baseline",
                       "가짜 3일 달력 — 달력 하한 상수(calendar_start)를 싣지 않는다")):
         cal = build.build_table(rules_s02.TRADING_CALENDAR, tree.stage_root, eq, Baseline({}),
@@ -408,7 +405,7 @@ def _fake_build(tmp_path: Path, make_stage_tree, price_rows: list[dict[str, obje
                                      "source": "hand — 가짜 stage 1행"}]), encoding="utf-8")
     # EG14 의 두 상수는 일부러 안 싣는다 — 가짜 4행짜리 입력에 최신 세션 행수 하한을 들이대면
     # 표본 크기 때문에 폐기되고, 이 픽스처가 보려는 축(격리·NULL 처리)이 가려진다.
-    bl = baseline or Baseline({"price_daily": {"evening_jump_abs_max": 0.3}})
+    bl = baseline or Baseline({})
     with allow_skips(("equity", "EG14", "no_baseline",
                       "가짜 4행 입력 — 최신 세션 행수 상수를 일부러 싣지 않는다(위 주석)")):
         return build.build_table(rules_s04.PRICE_DAILY, tree.stage_root, eq, bl,
@@ -492,160 +489,68 @@ def test_trading_calendar가_없으면_빌드가_예외로_멈춘다(tmp_path: P
         _build_price(tmp_path / "equity")
 
 
-# ── 저녁 잠정 T 행 (규칙 e1.15.0 · 결정 V2-2 · 플랜 v2 §4 B.2) ────────────────
+# ── 저녁 잠정 T 행 분기를 걷음 (e1.15.0 → e1.33.0, v3 컷오버 트랙 PR-10) ──────────
 
-T_EVENING = date(2026, 8, 21)       # KRX 상한(2026-08-20) 다음 날 — 캘린더에 아직 없다
-# 직전 KRX 종가(2026-08-20 실측): 005930 271,000 · 036220 6,740 · 069500(ETF) 108,190
-# `999999` 는 KRX 마스터 최신일에 없는 종목 — 키움이 하루 더 주는 폐지 종목 자리다(DEFECT-E07).
+T_EVENING = date(2026, 8, 21)       # KRX 상한(2026-08-20) 다음 날 — 키움 원장만 앞서 있다
 EVENING_ROWS: list[dict[str, object]] = [
     {"ticker": "005930", "date": T_EVENING, "close_krw": 280000, "volume_shr": 20000000},
     {"ticker": "036220", "date": T_EVENING, "close_krw": 10000, "volume_shr": 5000},
     {"ticker": "069500", "date": T_EVENING, "close_krw": 110000, "volume_shr": 30000000},
     {"ticker": "999999", "date": T_EVENING, "close_krw": 5000, "volume_shr": 0},
 ]
-# 그중 상장 축(마스터 최신일 ∪ ETF 원장 최신일)에 남아 산출로 나가는 행수
-N_EVENING_OUT = 3
-N_EVENING_NOT_LISTED = len(EVENING_ROWS) - N_EVENING_OUT
 
 
-def _evening_stage_root(tmp_path: Path, make_stage_tree,
-                        rows: list[dict[str, object]] | None = None) -> Path:
+def _evening_stage_root(tmp_path: Path, make_stage_tree) -> Path:
     """절단본에 **키움 판만 바꿔 끼운** stage 루트. 나머지 표는 절단본을 심볼릭 링크로 그대로 쓴다
     (`inputs.pin` 은 파일에 하드링크를 걸므로 링크된 디렉토리를 통해도 같게 동작한다)."""
-    tree = make_stage_tree(tmp_path, "stg_flow_daily_kiwoom",
-                           rows if rows is not None else EVENING_ROWS, "date_axis")
+    tree = make_stage_tree(tmp_path, "stg_flow_daily_kiwoom", EVENING_ROWS, "date_axis")
     for d in sorted(STAGE_SLICE.iterdir()):
         if d.is_dir() and d.name != "stg_flow_daily_kiwoom":
             (tree.stage_root / d.name).symlink_to(d)
     return tree.stage_root
 
 
-@pytest.fixture(scope="module")
-def evening(tmp_path_factory: pytest.TempPathFactory) -> build.BuildResult:
-    """저녁 잠정판 왕복 1회 — 읽기 전용 검사가 여럿이라 모듈에서 한 번만 짓는다.
-    모듈 스코프라 함수 스코프 픽스처(`make_stage_tree`)를 못 쓴다 — 생성기를 직접 부른다."""
-    tmp = tmp_path_factory.mktemp("s04_evening")
-    root = _evening_stage_root(tmp, _make_stage_tree)
-    eq = tmp / "equity"
-    r = build.build_table(rules_s02.TRADING_CALENDAR, root, eq, SEED, build_id="e_s02_cal",
-                          basis="evening")
-    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
-    return _build_price(eq, build_id="e_s04_price", stage_root=root, basis="evening")
-
-
-def test_KRX에_없는_최신일이_키움에_있으면_잠정_T_행이_생긴다(
-        evening: build.BuildResult) -> None:
-    r = evening
-    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
-    assert r.basis == "evening" and r.build_id.startswith("e_")
-    assert r.n_rows == N_ROWS + N_EVENING_OUT and r.n_reject == 0
-    eg1 = _gate(r, "EG1").metrics
-    assert eg1["lhs"] == N_ROWS + N_EVENING_OUT == eg1["rhs"]
-    assert r.out_dir is not None
-    assert _query(r.out_dir, "SELECT ticker, \"close\", volume_shr, price_kind, basis, "
-                             "corp_action_pending FROM pd WHERE date = DATE '2026-08-21' "
-                             "ORDER BY ticker") == [
-        ("005930", Decimal(280000), Decimal(20000000), "trade", "evening", False),
-        ("036220", Decimal(10000), Decimal(5000), "trade", "evening", True),   # +48% 급등
-        ("069500", Decimal(110000), Decimal(30000000), "trade", "evening", False)]  # ETF 도 남는다
-
-
-def test_잠정_T_행은_OHL_거래대금_주식수가_전부_NULL이다(evening: build.BuildResult) -> None:
-    """KRX 기본정보가 없으므로 채우지 않는다(원칙 ④). 시총·기준가도 그래서 NULL 이다."""
-    assert evening.out_dir is not None
-    assert _query(evening.out_dir, """
-        SELECT count(*) FROM pd WHERE basis = 'evening' AND NOT (
-            "open" IS NULL AND high IS NULL AND low IS NULL AND value_krw IS NULL
-            AND shares_out IS NULL AND mktcap_krw IS NULL AND change_krw IS NULL
-            AND base_price_krw IS NULL AND par_value_krw IS NULL)""") == [(0,)]
-    assert _query(evening.out_dir, "SELECT count(*) FROM pd WHERE basis = 'krx' "
-                                   "AND corp_action_pending") == [(0,)]
-
-
-def test_잠정_T_행은_캘린더_밖이어도_격리되지_않는다(evening: build.BuildResult) -> None:
-    """캘린더 상한 = stg_price_daily max(EG17) 라 T 는 아직 캘린더에 없다. 여기서 격리하면
-    잠정판이 그날 가격을 통째로 잃는다."""
-    assert evening.out_dir is not None
-    assert _query(evening.out_dir, "SELECT count(*) FROM pd p WHERE NOT EXISTS "
-                                   "(SELECT 1 FROM tc c WHERE c.date = p.date)") == [
-        (N_EVENING_OUT,)]
-    assert _gate(evening, "EG3_price_daily").metrics["n_off_calendar"] == 0
-
-
-def test_EG20은_잠정_행을_원주가_변조로_세지_않는다(evening: build.BuildResult) -> None:
-    eg20 = _gate(evening, "EG20")
-    assert eg20.status is GateStatus.PASS
-    assert eg20.metrics["n_rows_checked"] == N_ROWS
-    assert eg20.metrics["n_evening_rows_excluded"] == N_EVENING_OUT
-
-
-def test_잠정_행_축이_EG3_price_daily_metric에_남는다(evening: build.BuildResult) -> None:
-    m = _gate(evening, "EG3_price_daily").metrics
-    assert m["n_evening_rows"] == N_EVENING_OUT
-    assert m["evening_date"] == T_EVENING.isoformat()
-    assert m["n_evening_corp_action_pending"] == 1
-    assert m["n_evening_value_mismatch"] == 0          # 종가·거래량은 키움 원장 그대로
-    assert m["basis_vocab"] == ["krx", "evening"] and m["build_basis"] == "evening"
-    assert m["n_basis_outside_vocab"] == 0 and m["n_evening_dates_over_one"] == 0
-
-
-def test_마스터에_없는_종목의_저녁_행은_생기지_않고_기록으로_남는다(
-        evening: build.BuildResult) -> None:
-    """DEFECT-E07 — 키움 ka10060 은 정리매매가 끝난 종목도 하루 더 `dt` 행을 준다.
-
-    그 행을 그대로 실으면 저녁 잠정판을 받아 쓰는 소비자가 이미 폐지된 종목을 마지막 날
-    유니버스에 넣는다(가격이 극단적이라 소형주·저가주 팩터에 노이즈로 들어간다). 상장 축은
-    KRX 일별 마스터 최신일 ∪ ETF 가격 원장 최신일이고, 이는 EG14 의 `universe_n` 과 같은 정의다.
-    빠뜨린 행수는 폐기하지 않고 **기록형 지표**로 남긴다 — 정상 운영에서도 0 이 아닐 수 있다.
-    """
-    assert evening.out_dir is not None
-    assert _query(evening.out_dir,
-                  "SELECT count(*) FROM pd WHERE ticker = '999999'") == [(0,)]
-    m = _gate(evening, "EG3_price_daily").metrics
-    assert m["n_evening_rows_not_listed"] == N_EVENING_NOT_LISTED
-
-
-def test_저녁_상장축은_rules_선언과_sql_리터럴이_같다() -> None:
-    """`kw` CTE · EG1 우변이 한 정의를 쓴다 — 한쪽만 고치면 행수 등식이 조용히 깨진다."""
-    def norm(x: str) -> str:
-        return " ".join(x.split())
-
-    assert norm(rules_s04.EVENING_LISTED_SQL) in norm(_body())
-    assert norm(rules_s04.EVENING_LISTED_SQL) in norm(rules_s04.PRICE_DAILY.eg1_rhs_sql)
-    assert norm(rules_s04.evening_listed_predicate()) in norm(_body())
-    assert norm(rules_s04.evening_listed_predicate()) in norm(
-        rules_s04.PRICE_DAILY.eg1_rhs_sql)
-
-
-def test_아침_확정판에_잠정_행이_남아_있으면_EG3_price_daily가_폐기한다(
-        tmp_path: Path, make_stage_tree) -> None:
-    """KRX 가 안 온 채로 `--basis morning` 을 돌린 상황 — 잠정 종가가 확정 딱지를 달고 굳는다."""
+@pytest.mark.parametrize("basis", ["evening", "morning"])
+def test_키움이_KRX보다_앞선_날에도_price_daily는_KRX_행만이다(
+        tmp_path: Path, make_stage_tree, basis: str) -> None:
+    """e1.33.0(컷오버 트랙 PR-10) — 저녁 잠정 T 행 분기를 걷었다. 장 마감 판 T 행은 fi 층이
+    `postclose.db` 에서 얹으므로(PR-5) equity 는 KRX 원장 행만 낸다. 키움 원장이 KRX 보다 앞서
+    있어도 그 날 행은 생기지 않고, `basis` 는 늘 'krx' · `corp_action_pending` 은 늘 거짓이다."""
     root = _evening_stage_root(tmp_path, make_stage_tree)
     eq = tmp_path / "equity"
-    cal = build.build_table(rules_s02.TRADING_CALENDAR, root, eq, SEED, build_id="m_s02_cal",
-                            basis="morning")
-    assert cal.ok
-    r = _build_price(eq, build_id="m_s04_price", stage_root=root, basis="morning")
+    prefix = basis[0]
+    assert build.build_table(rules_s02.TRADING_CALENDAR, root, eq, SEED,
+                             build_id=f"{prefix}_s02_cal", basis=basis).ok
+    r = _build_price(eq, build_id=f"{prefix}_s04_price", stage_root=root, basis=basis)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert r.n_rows == N_ROWS and r.n_reject == 0
+    eg1 = _gate(r, "EG1").metrics
+    assert eg1["lhs"] == N_ROWS == eg1["rhs"]
+    assert "stg_flow_daily_kiwoom" not in r.inputs
+    assert r.out_dir is not None
+    assert _query(r.out_dir, f"SELECT count(*) FROM pd WHERE date = DATE '{T_EVENING}'") == [(0,)]
+    assert _query(r.out_dir, "SELECT DISTINCT basis, corp_action_pending FROM pd") == [
+        ("krx", False)]
+
+
+@pytest.mark.parametrize(("column", "expr", "check"), [
+    ("basis", "'evening'", "n_basis_outside_vocab"),
+    ("corp_action_pending", "TRUE", "n_corp_action_pending_true"),
+])
+def test_KRX_밖_basis나_기업행위_표식이_새면_EG3_price_daily가_폐기한다(
+        tmp_path: Path, column: str, expr: str, check: str) -> None:
+    """두 열은 하류 계약(compat·views·S23)을 위해 상수로 남긴 열이다 — 다른 값이 새면 산출식이
+    잘못된 것이므로 폐기한다(옛 저녁 축이 되살아나는 것을 막는다)."""
+    eq = tmp_path / "equity"
+    _build_calendar(eq)
+    sql = (f"WITH base AS (SELECT * FROM ({_body()}))\n"
+           f"SELECT * REPLACE (CASE WHEN ticker = '005930' AND date = DATE '{LAST_KRX_SESSION}' "
+           f"THEN {expr} ELSE {column} END AS {column}) FROM base")
+    r = _build_price(eq, _variant(tmp_path, f"price_leak_{column}", sql))
     assert r.status is build.BuildStatus.GATE_FAILED
     g = _gate(r, "EG3_price_daily")
-    assert g.status is GateStatus.FAIL
-    assert g.metrics["n_evening_rows_in_morning_build"] == N_EVENING_OUT
-    assert "n_evening_rows_in_morning_build" in g.detail
-
-
-def test_KRX가_따라잡으면_잠정_행은_저절로_사라진다(
-        tmp_path: Path, make_stage_tree) -> None:
-    """자연 교체 — 키움 최신일이 KRX 상한을 넘지 않으면 `kw` 가 0행을 낸다(덮어쓰기 없음)."""
-    root = _evening_stage_root(tmp_path, make_stage_tree, [
-        {"ticker": "005930", "date": date(2026, 8, 20), "close_krw": 271000,
-         "volume_shr": 26095919}])
-    eq = tmp_path / "equity"
-    assert build.build_table(rules_s02.TRADING_CALENDAR, root, eq, SEED,
-                             build_id="m_cal", basis="morning").ok
-    r = _build_price(eq, build_id="m_price", stage_root=root, basis="morning")
-    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
-    assert r.n_rows == N_ROWS
-    assert _gate(r, "EG3_price_daily").metrics["n_evening_rows"] == 0
+    assert g.status is GateStatus.FAIL and g.metrics[check] == 1
+    assert check in g.detail
 
 
 # ── EG14 최신 구간 수집 완결성 (규칙 e1.15.0) ─────────────────────────────────
@@ -666,18 +571,6 @@ def test_EG14는_최신_KRX_세션_창의_행수와_종가를_본다(built: buil
                                              "2026-08-14", "2026-08-13"]
     assert all(s["n_rows"] == N_UNIVERSE and s["n_close_null"] == 0 for s in sessions)
     assert g.metrics["thin_sessions"] == [] and g.metrics["sessions_with_null_close"] == []
-    assert g.metrics["n_evening_rows"] == 0
-
-
-def test_EG14는_저녁_세션을_판정에서_뺀다(evening: build.BuildResult) -> None:
-    """키움 커버(절단본 3종목)는 KRX 유니버스(12)보다 구조적으로 작다 — 같은 잣대를 들이대면
-    매일 저녁 빌드가 폐기된다. 커버율은 기록형으로 남는다."""
-    g = _gate(evening, "EG14")
-    assert g.status is GateStatus.PASS
-    assert [s["date"] for s in g.metrics["sessions"]] == ["2026-08-20", "2026-08-19",
-                                                          "2026-08-18", "2026-08-14", "2026-08-13"]
-    assert g.metrics["n_evening_rows"] == N_EVENING_OUT
-    assert g.metrics["evening_coverage_ratio"] == pytest.approx(N_EVENING_OUT / N_UNIVERSE)
 
 
 def _thin_tail(tmp_path: Path, name: str, drop: tuple[str, ...]) -> EquityTable:
@@ -722,8 +615,7 @@ def test_종가가_빈_최신_세션은_EG14가_폐기한다(tmp_path: Path, mak
                      for d in (D1, D2, D3)],
                     {"ticker": "000660", "date": D3.isoformat()}, "100",
                     baseline=Baseline({"price_daily": {
-                        "evening_jump_abs_max": 0.3, "recent_session_window": 3,
-                        "recent_session_row_ratio_min": 0.98}}))
+                        "recent_session_window": 3, "recent_session_row_ratio_min": 0.98}}))
     assert r.status is build.BuildStatus.GATE_FAILED
     assert _gate(r, "EG20").status is GateStatus.PASS
     g = _gate(r, "EG14")
@@ -736,31 +628,9 @@ def test_EG14_상수가_없으면_no_baseline_SKIP_이고_허용표_밖이라_�
     """상수 미등재는 통과로 세지 않는다(GATES §0-2) — K1-7a 부터 판을 폐기하고 측정치는 남긴다."""
     eq = tmp_path / "equity"
     _build_calendar(eq)
-    bl = Baseline({**SEED.data, "price_daily": {"evening_jump_abs_max": 0.3}})
+    bl = Baseline({**SEED.data, "price_daily": {}})
     r = build.build_table(rules_s04.PRICE_DAILY, STAGE_SLICE, eq, bl, build_id="b_no_eg14")
     assert r.status is build.BuildStatus.GATE_FAILED
     g = _gate(r, "EG14")
     assert g.status is GateStatus.FAIL and g.metrics["skip_reason"] == "no_baseline"
     assert g.metrics["missing_metric"] == "price_daily.recent_session_window"
-
-
-def test_키움이_KRX보다_이틀_앞서면_원천_기준으로_폐기한다(tmp_path: Path, make_stage_tree) -> None:
-    """검수 R2-02: 산출의 evening 행은 `kw` 술어가 최신 하루로 접어 항상 한 날짜라
-    `n_evening_dates_over_one` 이 산출에서 세면 사문이다. 원천(키움 원장)에서 KRX 최대일을 넘는
-    날짜가 둘이면 중간 세션이 통째로 빠지므로 폐기해야 한다."""
-    from datetime import timedelta
-    t2 = T_EVENING + timedelta(days=1)
-    rows = list(EVENING_ROWS) + [
-        {"ticker": "005930", "date": t2, "close_krw": 281000, "volume_shr": 21000000},
-        {"ticker": "036220", "date": t2, "close_krw": 10100, "volume_shr": 5100},
-    ]
-    root = _evening_stage_root(tmp_path, make_stage_tree, rows=rows)
-    eq = tmp_path / "equity"
-    r = build.build_table(rules_s02.TRADING_CALENDAR, root, eq, SEED, build_id="e_s02_cal2",
-                          basis="evening")
-    assert r.ok
-    r = _build_price(eq, build_id="e_s04_two_days", stage_root=root, basis="evening")
-    assert not r.ok
-    g = next(x for x in r.gates if x.name == "EG3_price_daily")
-    assert g.status is GateStatus.FAIL
-    assert "n_evening_dates_over_one=1" in g.detail

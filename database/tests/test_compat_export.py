@@ -589,14 +589,16 @@ def test_consensus_revision_daily_and_compare(roots, tmp_path: Path) -> None:
         ("2026/12", 1000.0, 900.0, 800.0, 700.0)]
 
 
-def test_consensus_annual_period_and_data_type(roots, tmp_path: Path) -> None:
+def test_consensus_annual_은_은퇴해_compat_이_쓰지_않는다(roots, tmp_path: Path) -> None:
+    """QL-M — v3 consensus_annual 의 소비자(v3 점수 엔진)는 컷오버 날 빠졌다. 전 표 export 는 이 표를 쓰지
+    않고, 이름으로 고르면 모르는 표로 거절한다(원장의 c1050001 판은 fi_consensus_annual 이 계속 읽는다)."""
+    from compat.mappings import MAPPINGS, MODEL
     target = tmp_path / "quant.db"
-    _run(roots, target, tables=["consensus_annual"])
-    assert _rows(target, "SELECT period, period_type, data_type, op, ni "
-                         "FROM consensus_annual WHERE stock_code='005930' "
-                         "ORDER BY period") == [
-        ("2025/12", "annual", "actual", 500_000.0, 400_000.0),
-        ("2026/12", "annual", "estimate", 500_000.0, 400_000.0)]
+    res = _run(roots, target, tables=[m.v3_table for m in MAPPINGS if m.source_kind != MODEL])
+    assert "consensus_annual" not in res.tables and "financial_summary" in res.tables
+    assert _rows(target, "SELECT count(*) FROM consensus_annual") == [(0,)]
+    with pytest.raises(CompatError, match="모르는 표: 'consensus_annual'"):
+        _run(roots, tmp_path / "q2.db", tables=["consensus_annual"])
 
 
 def test_financial_summary_scoring_window(roots, tmp_path: Path) -> None:

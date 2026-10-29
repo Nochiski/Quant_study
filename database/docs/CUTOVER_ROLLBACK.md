@@ -156,8 +156,9 @@ scripts/v3_restore.sh --backup "$B/quant_$S.db" --v3-db "$V3"                  #
   .venv/bin/python - "$V3" "$B/quant_$S.db" <<'EOF'
   import sqlite3, sys
   from pathlib import Path
+  # QL-M(10-29) 뒤 compat 표는 8개(consensus_annual 은퇴) — 모드 이름 seven·nine 은 옛 이름 그대로
   NINE = ["daily_prices", "stocks", "investor_detail_flows", "consensus_revision_daily",
-          "consensus_revision_compare", "consensus_annual", "financial_summary",
+          "consensus_revision_compare", "financial_summary",
           "score_history", "score_history_v2"]
   mode = sys.argv[3] if len(sys.argv) > 3 else "seven"
   cur, ref = (Path(p).resolve().as_uri() for p in sys.argv[1:3])
@@ -165,7 +166,7 @@ scripts/v3_restore.sh --backup "$B/quant_$S.db" --v3-db "$V3"                  #
   c.execute("ATTACH ? AS r", (f"{ref}?mode=ro",))
   names = [t for (t,) in c.execute("SELECT name FROM r.sqlite_master WHERE type='table' "
                                    "AND name NOT LIKE 'sqlite_%' AND name <> '_compat_meta' ORDER BY name")]
-  want = set(names) if mode == "all" else set(NINE if mode == "nine" else NINE[:7])
+  want = set(names) if mode == "all" else set(NINE if mode == "nine" else NINE[:6])
   bad = 0
   for t in names:
       a = c.execute(f'SELECT count(*) FROM (SELECT * FROM main."{t}" EXCEPT SELECT * FROM r."{t}")').fetchone()[0]

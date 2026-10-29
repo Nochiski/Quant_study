@@ -745,10 +745,11 @@ def test_저녁_판으로_지으면_대장_basis도_evening이다(tmp_path: Path
     assert _rows(r.out_dir, "SELECT DISTINCT basis FROM dp") == [("evening",)]
 
 
-def test_price_close_프로파일이_저녁_판_규약을_적는다(built) -> None:
-    """evidence 는 문서가 아니라 선언이 정본이다 — 잠정판 규약도 여기 실려야 소비자에게 간다."""
+def test_price_close_프로파일이_KRX_원장_행만이라고_적는다(built) -> None:
+    """evidence 는 문서가 아니라 선언이 정본이다 — e1.33.0(PR-10)에 저녁 잠정 T 행을 걷은 사실도
+    여기 실려야 소비자에게 간다(옛 '키움 종가·OHLC NULL' 규약 문구가 남으면 소비자가 그 행을 거른다)."""
     out_dir = built[1].out_dir
     assert out_dir is not None
     (evidence,) = _rows(out_dir, "SELECT evidence FROM dp WHERE field_id = 'price.close'")[0]
-    assert "evening 판은 키움 종가·OHLC NULL" in str(evidence)
-    assert "corp_action_pending" in str(evidence)
+    assert "KRX 원장 행만" in str(evidence)
+    assert "evening 판은 키움 종가" not in str(evidence)

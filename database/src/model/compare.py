@@ -1,8 +1,11 @@
 """v3 점수 표 대조 — 같은 `score_date` 의 두 sqlite 를 맞춰 보고 차이의 원인을 분류한다.
 
-왼쪽 = v3 자체 `quant.db`(정본 비교 대상), 오른쪽 = 우리 호환 DB(`data/compat/quant.db`) 또는
-우리 model 층 산출. 플랜 `docs/plans/2026-09-24-v3-merge.md` §2 G-M2·G-M3 의 측정 도구다.
-두 DB 는 **읽기 전용**(`?mode=ro` URI)으로만 연다 — v3 원본에 쓰지 않는다.
+왼쪽 = 기준 판, 오른쪽 = 견줄 판. 플랜 `docs/plans/2026-09-24-v3-merge.md` §2 G-M2·G-M3 의 측정 도구였고
+그때 기준은 v3 자체 `quant.db`(v3 점수 엔진 정본)였다. **컷오버(10-16) 뒤에는 v3 점수 엔진이 없다** — v3
+`score_history`·`_v2` 는 compat 이 scope@2.0·v2_percentrank 판으로 채운다(T-16 · N-47). 그래서 기준은
+운영 scope 점수가 담긴 sqlite(지금 v3 `quant.db` 또는 날짜별 사본 — 10-15 이전 사본만 v3 엔진 점수)이고,
+오른쪽은 견줄 후보(다른 판·재생 결과)다(컷오버 트랙 QL-N). 비교 규칙은 그대로다.
+두 DB 는 **읽기 전용**(`?mode=ro` URI)으로만 연다 — 기준 파일에 쓰지 않는다.
 
 대조 대상 열은 v3 `backend/db/schema.py:155-187` + `backend/db/migration_sql.py` 의
 `score_history`(48열)·`score_history_v2`(21열). 팩터·서브 raw 열은 양쪽 표에 다 있는 숫자 열에서
@@ -23,7 +26,8 @@ rank 가 통째로 당겨져 입력이 같은 종목까지 전부 알림에 뜬�
 분류: `universe`(한쪽만 있음) / `input:<열>`(raw 열이 다름 — 상대 차이 큰 순) /
 `unclassified`(raw 는 같은데 순위만 다름 → GAP-7 동점 정렬 의심). `v3_defect` 는 분류를 덮지 않는
 **추가 표식**으로, 양쪽 `daily_prices` 의 최근 `adj_close/close` 비율이 다른 종목에 붙는다(GAP-4:
-v3 adj_close 는 한 번 채워지면 갱신되지 않아 최근 기업행위 종목의 모멘텀이 v3 쪽에서 틀리다).
+v3 adj_close 는 한 번 채워지면 갱신되지 않아 최근 기업행위 종목의 모멘텀이 v3 쪽에서 틀리다 — 기준이
+10-15 이전 v3 사본일 때만 뜻이 있다. 컷오버 뒤 두 파일은 모두 compat 이 `daily_prices` 를 채운다).
 GAP-5(v3 입력은 날짜 축 없는 스냅샷)에 따라 **같은 날** 비교만 의미가 있다. 과거 날짜 재실행 차이는
 정상이므로 이 도구로 판정하지 않는다.
 
@@ -522,7 +526,7 @@ def _render_md(result: CompareResult) -> str:
     lines = [
         f"# 점수 대조 {r.date} — {r.table}",
         "",
-        f"- 왼쪽(v3): `{r.left_db}`",
+        f"- 왼쪽(기준): `{r.left_db}`",
         f"- 오른쪽: `{r.right_db}`",
         f"- **판정: {r.verdict}**" + ("" if r.verdict == "pass" else " — " + " / ".join(r.reasons)),
         f"- 임계: Spearman ≥ {r.thresholds['spearman_min']} · 상위 50 겹침 ≥ "
@@ -602,10 +606,10 @@ def _parse_top_ns(raw: str) -> tuple[int, ...]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="model.compare", description="v3 점수 표 대조")
+    ap = argparse.ArgumentParser(prog="model.compare", description="점수 표 대조(왼쪽 = 기준 판)")
     ap.add_argument("--date", required=True, help="score_date (YYYY-MM-DD 또는 YYYYMMDD)")
-    ap.add_argument("--left", required=True, help="왼쪽 sqlite (v3 quant.db)")
-    ap.add_argument("--right", required=True, help="오른쪽 sqlite (compat/model 산출)")
+    ap.add_argument("--left", required=True, help="왼쪽 = 기준 sqlite (컷오버 뒤 운영 scope 점수 — v3 quant.db 또는 날짜별 사본)")
+    ap.add_argument("--right", required=True, help="오른쪽 = 견줄 sqlite (compat/model 산출)")
     ap.add_argument("--out", required=True, help="리포트 디렉터리")
     ap.add_argument("--table", default="score_history",
                     choices=["score_history", "score_history_v2", "both"])

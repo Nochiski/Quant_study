@@ -597,18 +597,27 @@ FROM j;
 | EG7-P01 | `price_daily` | `nonpositive_price` | `close <= 0 ∨ (open ≤ 0 ∧ open IS NOT NULL)` … |
 | EG7-P02 | `adj_factor` | `nonpositive_factor` | `price_factor <= 0 ∨ share_factor <= 0` |
 | EG7-P03 | `security` | `unknown_sec_type` | `sec_type = 'other'` |
-| EG7-P04 | `fin_std` | `rcept_lag_out_of_range` | `rcept_dt − period_end ∉ [0, baseline p99]` |
+| EG7-P04 | `fin_std` | `rcept_lag_out_of_range` | `원본 접수일 − period_end ∉ [0, baseline p99]` — 원본 접수일 = 링크가 확인된 정정(`is_correction` ∧ `date_check` ∈ {exact, off_1d} — S1-b 승계와 같은 조건)이면 정정 사슬의 원본(`disclosure_version.orig_rcept_no`)의 `rcept_dt`, 그 밖(정정 아님 · 링크 없음 · 날짜 확인 안 됨)은 자기 `rcept_dt`(e1.32.0 연구 DB S1-c) |
 | EG7-P05 | `disclosure_version` | `no_label` | 기간 라벨 `(YYYY.MM)` 없음 |
 | EG7-P06 | 격자 3종 | `pre_calendar` / `off_grid` | 캘린더 하한 이전 / 유니버스 밖 |
 | EG7-P07 | 비율 컬럼 전수 | `pct_out_of_range` | 선언 범위 밖 |
 | EG7-P08 | `corp_event` | `effective_before_announce` | `effective_date < announce_date − baseline` |
+| EG7-P09 | `fin_std` | `total_asset_nonpositive` | `total_asset <= 0`(e1.32.0 연구 DB S1-c) |
+| EG7-P10 | `fin_std` | `unit_scale_suspect` | 같은 (법인, fs_div) 자산총계 양수 시계열(1차 격리 없는 행, 순서 `period_end`·`report_code`·`bsns_year`·`reprt_code`)에서 `ROWS BETWEEN 4 PRECEDING AND 4 FOLLOWING` 창 행 수 ≥ `unit_scale_min_rows` ∧ `abs(log10(total_asset / median)) ≥ unit_scale_log10_min`(e1.32.0 연구 DB S1-c) |
 
 ```sql
--- EG7-P04 : 상한은 baseline p99, 하한은 등식 0 (음수 = 결산 전 접수 = 불가능)
+-- EG7-P04 : 상한은 baseline p99, 하한은 등식 0 (음수 = 결산 전 접수 = 불가능).
+--            지연은 정정 사슬의 원본 접수일로 잰다(e1.32.0 연구 DB S1-c) — 원본을 제때 낸 보고서의 늦은
+--            정정은 통과시키고, 원본 자체가 상한 밖이거나 결산 전이면 격리한다. 원본 접수일은 링크가
+--            확인된 정정(첫 장 원본 제출일이 원본 접수일과 1일 안)에만 쓰고, 그 밖은 자기 접수일.
 SELECT count(*) AS n_reject
-FROM fin_std
-WHERE date_diff('day', period_end, rcept_dt) < 0
-   OR date_diff('day', period_end, rcept_dt) > (SELECT bl_int('fin_std','rcept_lag_p99_days'));
+FROM fin_std f
+LEFT JOIN disclosure_version c
+  ON c.rcept_no = f.rcept_no AND c.is_correction AND c.date_check IN ('exact', 'off_1d')
+LEFT JOIN stg_disclosure o ON o.rcept_no = c.orig_rcept_no   -- 접수번호당 1행으로 접은 판(fin_std.sql `dt`)
+WHERE date_diff('day', f.period_end, coalesce(o.rcept_dt, f.rcept_dt)) < 0
+   OR date_diff('day', f.period_end, coalesce(o.rcept_dt, f.rcept_dt))
+      > (SELECT bl_int('fin_std','rcept_lag_p99_days'));
 
 -- EG7 공통 비율 판정 (stage gates.py:g7_range 와 같은 형태)
 SELECT (SELECT sum(n) FROM _reject_counts WHERE tbl = '${T}')::DOUBLE
@@ -839,7 +848,9 @@ WHERE g.${VALUE_COL} = 0
 | `<격자>.evidence_rate_min` | EG9-P02 | 3 | 근거율 하한 |
 | `<격자>.coverage_return_corr_max`·`corr_min_months` | EG9-P03 | 3 | 상관 상한·최소 월수 |
 | `<table>.threshold_EG7` | EG7 | 전 단계 | 격리 비율 상한 |
-| `fin_std.rcept_lag_p99_days` | EG7-P04 | 4 | `rcept_dt − period_end` **범위 상한**(이름은 p99 로 등재됐지만 값은 백분위가 아니다 — §9 S12 참조). seed 1826 |
+| `fin_std.rcept_lag_p99_days` | EG7-P04 | 4 | `원본 접수일 − period_end` **범위 상한**(이름은 p99 로 등재됐지만 값은 백분위가 아니다 — §9 S12 참조. 원본 접수일 축은 e1.32.0 S1-c). seed 1826 |
+| `fin_std.unit_scale_log10_min` | EG7-P10 | 4 | 단위 의심 문턱 — 이동중앙값 대비 log10 편차. 2.0(100배, 10-27 서버 실측 25/25 · 오탐 0) |
+| `fin_std.unit_scale_min_rows` | EG7-P10 | 4 | 단위 의심 판정의 창 행 수 하한(자기 포함). 3 — 2행 시계열은 판정하지 않는다(사각지대) |
 | `fin_std.period_end_lag_max_days` | `period_end` 후보 선택 | 4 | 후보 판정 상한. seed 200 |
 | `fin_std.quarter_months`·`half_months`·`three_quarter_months` | `period_end` 후보 식 · `doc_acode` 11013 의 1Q/3Q 분해 | 4 | 3·6·9 — 회계 달력의 정의이고 SQL 리터럴 금지 규약의 통로(`universe_daily.adv_window_td` 와 같은 취급) |
 | `fin_std.nonmatch_rate_gap_max` | EG6-P08 | 4 | 결산월별 무매칭률 비대칭 상한(초안은 `disclosure_version.` 접두, §9 S12) |
@@ -888,7 +899,7 @@ WHERE g.${VALUE_COL} = 0
 | 12 | `flow_daily` | 3 | ● | ●(§3-⑪) | ●(P01–P04) | ●(P01,P06,P07,P13) | ●(FX-3-001,002,003,004,005,006,007) | ●(a) | skip(no_multi_version) | ●(P06,P07) | ●(P05) | ●(P01–P04) | — |
 | 13 | `short_daily` | 3 | ● | ●(§3-⑪) | ●(P01–P04) | ●(P01,P07,P13) | ●(FX-3-001,003,004) | ●(a) | skip(no_multi_version) | ●(P06,P07) | ●(P06) | ●(P01–P04) | — |
 | 14 | `credit_daily` | 3 | ● | ●(§3-⑪) | ●(P01–P04) | ●(P01,P07,P13) | ●(FX-3-008) | ●(a) | skip(no_multi_version) | ●(P06,P07) | skip(no_cross_source) | ●(P01,P03,P04) · P02 skip(no_log_axis) | — |
-| 15 | `fin_std` | 4 | ● | ●(§3-⑫) | ●(P01–P05) | ●(P01,P13) + `EG3_fin_std` | ●(FX-4-001…008) | ●(a) · c 는 뷰(S12 후속) | ●(P08) | ●(P04 + non_krw·period_unresolved·duplicate_vintage) | skip(no_baseline)→D9 승격 시 ● | skip(not_grid) | ●⑥⑦ |
+| 15 | `fin_std` | 4 | ● | ●(§3-⑫) | ●(P01–P05) | ●(P01,P13) + `EG3_fin_std` | ●(FX-4-001…008) | ●(a) · c 는 뷰(S12 후속) | ●(P08) | ●(P04·P09·P10 + non_krw·period_unresolved·duplicate_vintage) | skip(no_baseline)→D9 승격 시 ● | skip(not_grid) | ●⑥⑦ |
 | 16 | `disclosure_version` | 4 | ● | ●(§3-⑬) | ●(P01–P04) | ●(P01) + `EG3_disclosure_version` | ●(FX-4-004,005,009,010) | ●(a) | ●(P05,P06) · P07 미등재 · P08 → `fin_std` | ●(격리 `rcept_dt_missing` 뿐 — P05 `no_label` 폐기) | ●(P09) | skip(not_grid) | ●⑦ |
 | 17 | ~~`correction_link`~~ (16행에 흡수) | 4 | — | — | — | — | — | — | — | — | — | — | — |
 | 18 | `holder_daily` | 4B | ● | ●(§3-⑮) | ●(P01–P04) | ●(P01,P07) | ●(FX-4B-003) | ●(a) | skip(no_multi_version) | ● | — | skip(not_grid) | — |
@@ -2155,8 +2166,8 @@ DART 정정신고 첫 장 서식이 2025년에 바뀌어 `stg_doc_correction` �
 |---|---|---|---|
 | 접수일 원천 `stg_rcept_dt_map` | DESIGN §4-4 입력 | **stage 에 실재하지 않는다**(`data/stage` 절단본·STAGE_HANDOFF 표 어디에도 없다) → `stg_disclosure.rcept_dt` 로 대체. 절단본 `stg_fin` 의 226 접수번호 전건이 `stg_disclosure` 에 있다 | 절단본 DESCRIBE · `SELECT count(DISTINCT rcept_no) FROM stg_fin WHERE NOT EXISTS (…stg_disclosure…)` = 0 |
 | EG6-P08 조인축 | `disclosure_version.bsns_year = f.bsns_year AND .reprt_code = f.report_code` | v1.2 `disclosure_version` 은 grain 이 `rcept_no` 라 그 두 컬럼이 없다 → **접수번호 조인**(`d.rcept_no = o.rcept_no`). baseline 키도 `fin_std.nonmatch_rate_gap_max` 로 옮겼다(측정이 `fin_std` 빌드에서 일어난다) | §1-12 갱신 · `eg6_fin_std` |
-| EG7-P04 `rcept_lag_p99_days` | "상한은 baseline p99" | **값을 문자 그대로 p99 로 잡으면 안 된다** — 그러면 정의상 1% 가 매번 격리된다(§5-B 유형). 이 상한이 잡아야 하는 것은 `period_end` 오판(1년 어긋나면 lag 이 365 이상 튄다)과 음수 lag(결산 전 접수 = 불가능)이고, 늦은 정정 접수는 통과시켜야 한다. 이름은 등록부대로 두고 seed 는 1826(5년) — 절단본 p99 216 · max 445 | `baseline_seed_s12.json` |
-| 격리 어휘 | EG7-P04 `rcept_lag_out_of_range` 만 | 4종: `non_krw`(`is_krw` 아님 — 원 단위 축 밖) · `period_unresolved`(문서도 없고 후보가 0 또는 2) · `rcept_lag_out_of_range` · `duplicate_vintage`(서로 다른 (bsns_year, reprt_code) 가 같은 grain 으로 접힘 — 어느 쪽이 옳은지 규칙이 못 고르므로 **둘 다** 격리한다) | 부정 픽스처 4건 |
+| EG7-P04 `rcept_lag_p99_days` | "상한은 baseline p99" | **값을 문자 그대로 p99 로 잡으면 안 된다** — 그러면 정의상 1% 가 매번 격리된다(§5-B 유형). 이 상한이 잡아야 하는 것은 `period_end` 오판(1년 어긋나면 lag 이 365 이상 튄다)과 음수 lag(결산 전 접수 = 불가능)이고, 늦은 정정 접수는 통과시켜야 한다. 이름은 등록부대로 두고 seed 는 1826(5년) — 절단본 p99 216 · max 445. **2026-10-28 e1.32.0 연구 DB S1-c**: 구현이 지연을 판의 `rcept_dt`(API 가 준 정정본 = 정정 접수일)로 재 이 의도와 반대였다 — 원본을 기간 말일 뒤 45~92일에 제때 낸 보고서의 5년 뒤 정정 89행(10-27 실측, 기간 오판 0건)이 격리됐다. 지연을 **정정 사슬의 원본 접수일**(`disclosure_version.orig_rcept_no` → 원천 `rcept_dt`)로 재도록 고쳤다. 원본 접수일은 링크가 확인된 정정(`is_correction` ∧ `date_check` ∈ {exact, off_1d} — S1-b 승계와 같은 조건)에만 쓰고 그 밖은 자기 접수일이다 — 한 그룹에 다른 보고서가 묶이는 경우(한화리츠 01669226)를 막는다. 원본 자체가 상한 밖이거나 결산 전이면 여전히 격리한다 | `baseline_seed_s12.json` · `test_5년_넘게_늦은_*` |
+| 격리 어휘 | EG7-P04 `rcept_lag_out_of_range` 만 | 4종: `non_krw`(`is_krw` 아님 — 원 단위 축 밖) · `period_unresolved`(문서도 없고 후보가 0 또는 2) · `rcept_lag_out_of_range` · `duplicate_vintage`(서로 다른 (bsns_year, reprt_code) 가 같은 grain 으로 접힘 — 어느 쪽이 옳은지 규칙이 못 고르므로 **둘 다** 격리한다). **2026-10-28 e1.32.0 연구 DB S1-c 로 6종**: 값 품질 격리 `total_asset_nonpositive`(EG7-P09, 자산총계 ≤ 0 — 10-27 실측 8행)·`unit_scale_suspect`(EG7-P10, XBRL 전체 단위 오류 — 10-27 실측 25행)를 더했다. 1차 사유(앞 셋)가 있으면 그것이 이기고, 격리 행은 4분기·현금흐름 분기 파생의 구성에서도 빠진다. 대차 항등식 1% 어긋남은 격리하지 않고 EG3 기록형 `n_bs_identity_gap_gt_1pct`, 산출에 자산 ≤ 0 이 남으면 EG3 불변식 `n_total_asset_nonpositive` 가 폐기한다 | 부정 픽스처 4건 + S1-c 재현·회귀(`test_equity_s12_fin.py` 값 품질 격리 절) |
 | FX-4-008 `derived_n_rows` | 이름 하나 | 파생 블록이 둘(q4·CF 분기)이라 접두를 붙였다 — `q4_derived_n_rows`·`q4_derived_available_date` · `cf_q_n_rows`·`cf_q_available_date`. 계정별 `<col>_available_date` 는 두지 않는다: 한 블록의 구성 보고서가 같아 값이 전부 같다 | DESIGN §3 파생 규약 |
 | 계정 수 | fin_map 21 + 3 + `gross_profit` | **24**. `gross_profit` 은 fin_map 21 에 이미 있으므로 새 계정이 아니라 FIELD_MAP §3 의 판정(미지원 → 지원)만 바뀐다. 추가 3 의 `account_id` 는 절단본에서 실재 확인: `DepreciationAndAmortisationExpense`(CIS 9) · `Borrowings`(BS 9) · `InterestExpense`(CIS 12). **합산하지 않는다** — 단기·장기·유동성장기 차입금은 겹쳐서 이중계상되고 `FinanceCosts`(137행)는 이자비용보다 넓다. 커버율이 낮은 것은 사실이고 `coverage_by_account` 가 기록한다 | `rules_s12.EXTRA_ACCOUNTS` |
 | 계정 대응표 위치 | 미결 | `src/fin_map.py` 가 정본이고 `rules_s12.acct_rows()` 가 import 해서 유도한다(베끼지 않는다). `.sql` 의 `_acct` VALUES 블록은 `acct_values_sql()` 문자열을 그대로 담고 tests 가 `in` 으로 대조 | `test_sql_의_acct_블록은_생성기_문자열과_같다` |

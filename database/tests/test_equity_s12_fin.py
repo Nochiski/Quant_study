@@ -387,10 +387,12 @@ def test_직전_회계연도_술어는_sql_과_같은_축이다() -> None:
 
 def test_격리_어휘와_상수_선언() -> None:
     assert FIN_STD.reject_reasons == ("non_krw", "period_unresolved",
-                                      "rcept_lag_out_of_range", "duplicate_vintage")
+                                      "rcept_lag_out_of_range", "total_asset_nonpositive",
+                                      "unit_scale_suspect", "duplicate_vintage")
     assert FIN_STD.consts == ("period_end_lag_max_days", "rcept_lag_p99_days",
                               "quarter_months", "half_months",
-                              "three_quarter_months")
+                              "three_quarter_months", "unit_scale_log10_min",
+                              "unit_scale_min_rows")
     assert FIN_STD.inputs == ("stg_fin", "stg_doc_meta", "stg_disclosure",
                               "disclosure_version", "corp")
 
@@ -1857,3 +1859,248 @@ def test_격리된_분기는_파생의_구성_행이_되지_않는다(make_stage
     assert annual["q4_derived_n_rows"] == 3
     assert annual["cf_operating_q"] is None
     assert annual["cf_q_n_rows"] == 1
+
+
+# ── 값 품질 격리 · 접수 지연을 원본 접수일로 (e1.32.0 연구 DB S1-c) ─────────────────────────────
+# 단위 오류(XBRL 전체 단위를 잘못 적은 보고서 — ×10³·×10⁶·÷10⁶)와 자산총계 0 은 행째 격리한다. 단위 의심은
+# 같은 (법인, fs_div) 자산총계 양수 시계열의 앞뒤 4칸(자기 포함 최대 9칸) 이동중앙값 대비
+# |log10(자산 ÷ 중앙값)| ≥ `unit_scale_log10_min`(2.0) 이고 창 행 수 ≥ `unit_scale_min_rows`(3) 일 때다.
+# 접수 지연 상한(`rcept_lag_p99_days` 5년)은 정정 사슬의 **원본 접수일**로 잰다 — 원본을 제때 낸 보고서의
+# 늦은 정정은 통과시킨다(GATES §9 S12 정정의 원래 의도).
+_SERIES_CORP = "00000001"
+_TA = 1e10                                # 자산총계 100억(원)
+
+
+def _annual_series(assets: list[float]
+                   ) -> tuple[list[tuple[str, str, str, str, date, date | None, str | None]],
+                              list[dict[str, object]]]:
+    """한 법인의 연간 보고서 시계열 — FY2016 부터 해마다 자산총계 `assets[i]`(BS 한 줄)."""
+    reports: list[tuple[str, str, str, str, date, date | None, str | None]] = []
+    fin: list[dict[str, object]] = []
+    for i, ta in enumerate(assets):
+        y = 2016 + i
+        rc = f"{y + 1}0330{i + 1:06d}"
+        reports.append((rc, _SERIES_CORP, str(y), "11011", date(y + 1, 3, 30), date(y, 12, 31),
+                        "11011"))
+        fin.append(_fin_row(_SERIES_CORP, str(y), "11011", rc, sj="BS",
+                            account_id="ifrs-full_Assets", account_nm="자산총계", amount=ta))
+    return reports, fin
+
+
+def _series_rejects(make_stage_tree, tmp_path: Path, assets: list[float], *, keep: int = 0,
+                    fin_extra: list[dict[str, object]] | None = None
+                    ) -> tuple[build.BuildResult, list[tuple[object, object]]]:
+    """(빌드 결과, 격리 행의 (기간 말일, 사유)). `keep` 은 EG4 픽스처를 걸 산출 행(격리되지 않는 행)."""
+    reports, fin = _annual_series(assets)
+    r = _hand_build(make_stage_tree, tmp_path, [(_SERIES_CORP, "12")], reports,
+                    fin + (fin_extra or []), (reports[keep][0], "period_end_basis", "document"))
+    assert r.ok and r.out_dir is not None, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rej = _rejects(r.out_dir) if r.n_reject else []
+    return r, [(x["period_end"], x["reject_reason"]) for x in rej]
+
+
+def test_부정_자산이_천배_튄_보고서는_unit_scale_suspect_로_격리된다(make_stage_tree,
+                                                                  tmp_path: Path) -> None:
+    """가운데 한 해만 전 계정 ×1000(JW생명과학 2021 반기형 +2.99자리). 앞뒤 넷은 남는다."""
+    r, rej = _series_rejects(make_stage_tree, tmp_path,
+                             [_TA, 1.1 * _TA, 1.2e3 * _TA, 1.3 * _TA, 1.4 * _TA])
+    assert rej == [(date(2018, 12, 31), "unit_scale_suspect")]
+    assert r.n_rows == 4
+    assert dict(_gate(r, "EG7").metrics["reject_by_reason"]) == {"unit_scale_suspect": 1}
+
+
+def test_부정_최신_보고서가_백만배면_다음_기간_없이도_격리된다(make_stage_tree,
+                                                             tmp_path: Path) -> None:
+    """하나34호스팩 2025 1Q형(×10⁶, 뒤 분기 없음) — 앞뒤 **모두** 대비로 보던 조사 규칙(G-25)은 최신 행을 못
+    봤다. 이동중앙값은 앞 행만으로도 잡는다."""
+    _r, rej = _series_rejects(make_stage_tree, tmp_path,
+                              [_TA, 1.1 * _TA, 1.2 * _TA, 1.3 * _TA, 1.4e6 * _TA])
+    assert rej == [(date(2020, 12, 31), "unit_scale_suspect")]
+
+
+def test_부정_첫_보고서가_천배면_격리되고_둘째는_남는다(make_stage_tree, tmp_path: Path) -> None:
+    """신영스팩11호 FY2025형 — 시계열 첫 행이 틀리면 뒤 행으로 판정한다(사후 정리: 틀린 값을 지울 뿐 새 값을
+    만들지 않는다). 둘째 행의 창 중앙값은 정상 수준이라 둘째는 남는다."""
+    _r, rej = _series_rejects(make_stage_tree, tmp_path,
+                              [1e3 * _TA, _TA, 1.1 * _TA, 1.2 * _TA], keep=1)
+    assert rej == [(date(2016, 12, 31), "unit_scale_suspect")]
+
+
+def test_합병형_100배_계단은_격리하지_않는다(make_stage_tree, tmp_path: Path) -> None:
+    """오탐 방지 — 네 해 100억 뒤 네 해 1조(100배 계단). 계단 양쪽 행의 창은 두 수준이 반씩이라 중앙값이
+    가운데(5,050억)로 가고 편차는 2자리에 못 미친다. 창의 과반이 새 수준이 되면 중앙값이 따라간다."""
+    r, rej = _series_rejects(make_stage_tree, tmp_path, [_TA] * 4 + [100 * _TA] * 4)
+    assert rej == []
+    assert r.n_rows == 8
+
+
+def test_시계열이_2행이면_판정하지_않는다(make_stage_tree, tmp_path: Path) -> None:
+    """사각지대를 못박는다 — 창 행 수 < `unit_scale_min_rows`(3)면 천 배가 튀어도 어느 쪽이 틀렸는지 모른다."""
+    r, rej = _series_rejects(make_stage_tree, tmp_path, [_TA, 1e3 * _TA])
+    assert rej == []
+    assert r.n_rows == 2
+
+
+def test_부정_자산총계_0_보고서는_total_asset_nonpositive_로_격리된다(make_stage_tree,
+                                                                    tmp_path: Path) -> None:
+    """코스나인 2026 1Q형 — BS 줄이 전부 0 인 빈 XBRL. 로그 비율은 0 을 못 보므로 따로 격리한다(자산을
+    분모로 쓰는 비율이 무한대·NULL 이 되고 손익 0 이 TTM 에 섞인다)."""
+    zero_rc = "20190330000003"
+    bs_zero = [_fin_row(_SERIES_CORP, "2018", "11011", zero_rc, sj="BS", account_id=acc,
+                        account_nm=nm, amount=0.0, ord_=o)
+               for acc, nm, o in (("ifrs-full_Liabilities", "부채총계", 2),
+                                  ("ifrs-full_Equity", "자본총계", 3))]
+    r, rej = _series_rejects(make_stage_tree, tmp_path, [_TA, 1.1 * _TA, 0.0, 1.2 * _TA],
+                             fin_extra=bs_zero)
+    assert rej == [(date(2018, 12, 31), "total_asset_nonpositive")]
+    assert r.n_rows == 3
+
+
+_LATE_CORP = "00147772"                   # 정원엔시스형 — FY2015 사업보고서를 2023-01-18 에 정정
+_LATE_FY = date(2015, 12, 31)
+_LATE_CORR = ("20230118000147", date(2023, 1, 18))     # 기간 말일에서 2,575일 — 5년 상한 밖
+
+
+def _late_correction(make_stage_tree, tmp_path: Path, orig: tuple[str, date],
+                     amounts: tuple[float, float], filed: date | None = None) -> build.BuildResult:
+    """FY2015 사업보고서 원본 `orig` 뒤 `_LATE_CORR` 정정(첫 장 항목 비재무). 첫 장의 원본 제출일 `filed` 는
+    기본이 원본 접수일(`date_check` exact). 두 판 줄이 원장에 있고 매출은 (원본, 정정) = `amounts`.
+    대조군 법인(00000001, 제때 낸 원본)이 EG4 픽스처를 맡는다."""
+    corps = [(_LATE_CORP, "12"), ("00000001", "12")]
+    ctl = ("20160330000001", date(2016, 3, 30))
+    reports = [(rc, _LATE_CORP, "2015", "11011", dt, _LATE_FY, "11011")
+               for rc, dt in (orig, _LATE_CORR)]
+    reports.append((ctl[0], "00000001", "2015", "11011", ctl[1], _LATE_FY, "11011"))
+    fin = [_fin_row(_LATE_CORP, "2015", "11011", rc, sj="IS", account_id="ifrs-full_Revenue",
+                    account_nm="매출액", amount=amt)
+           for (rc, _dt), amt in zip((orig, _LATE_CORR), amounts, strict=True)]
+    fin.append(_fin_row("00000001", "2015", "11011", ctl[0], sj="IS",
+                        account_id="ifrs-full_Revenue", account_nm="매출액", amount=50.0))
+    corrections = [{"rcept_no": _LATE_CORR[0], "page_found": True,
+                    "filed_date": orig[1] if filed is None else filed,
+                    "filed_date_status": "parsed", "reason_raw": "기재정정",
+                    "items": json.dumps([{"항목": _NONFIN}], ensure_ascii=False)}]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin, (ctl[0], "rcept_no", ctl[0]),
+                    report_names={_LATE_CORR[0]: "[기재정정]사업보고서 (2015.12)"},
+                    corrections=corrections)
+    assert r.ok and r.out_dir is not None, [(g.name, g.status.value, g.detail) for g in r.gates]
+    return r
+
+
+def _late_row(r: build.BuildResult) -> dict[str, object] | None:
+    if r.out_dir is None:
+        raise AssertionError([(g.name, g.status.value, g.detail) for g in r.gates])
+    return {str(x["corp_code"]): x for x in _rows(r.out_dir)}.get(_LATE_CORP)
+
+
+def test_5년_넘게_늦은_재무무관_정정도_원본이_제때면_원본일로_남는다(make_stage_tree,
+                                                                tmp_path: Path) -> None:
+    """정원엔시스 00147772 FY2015 — 원본(2016-03-30, 90일)을 제때 냈고 2023-01-18 에 지분표만 고친 정정. API 는
+    정정본 하나를 줘서 판의 접수일이 정정일이다. 옛 규칙은 지연을 정정일로 재 2,575일 → 격리했다(홀드아웃
+    공개 18행 손실). 값이 같으므로 공개일은 원본 접수일(S1-b)이다."""
+    r = _late_correction(make_stage_tree, tmp_path, ("20160330000147", date(2016, 3, 30)),
+                         (100.0, 100.0))
+    assert r.n_reject == 0, _rejects(r.out_dir)                # type: ignore[arg-type]
+    row = _late_row(r)
+    assert row is not None
+    assert (row["rcept_no"], row["rcept_dt"]) == _LATE_CORR
+    assert row["available_date"] == date(2016, 3, 30)
+
+
+def test_5년_넘게_늦은_재무정정은_정정일로_남는다(make_stage_tree, tmp_path: Path) -> None:
+    """원본을 제때 낸 보고서를 5년 넘게 지나 재작성한 정정(값이 바뀜) — 지연은 원본 접수일로 재므로 격리하지
+    않고, 값 증거가 없으니 공개일은 정정일이다(사용자 결정 A안: 재무 정정 70행이 정정일 공개로 돌아온다)."""
+    r = _late_correction(make_stage_tree, tmp_path, ("20160330000147", date(2016, 3, 30)),
+                         (100.0, 90.0))
+    assert r.n_reject == 0, _rejects(r.out_dir)                # type: ignore[arg-type]
+    row = _late_row(r)
+    assert row is not None
+    assert _num(row["revenue"]) == Decimal(90)
+    assert row["available_date"] == _LATE_CORR[1]
+
+
+def test_원본부터_5년_넘게_늦으면_여전히_격리된다(make_stage_tree, tmp_path: Path) -> None:
+    """가드 유지 — 원본 자체가 기간 말일에서 1,916일 뒤에 접수됐다(기간 오판의 모양). 정정이 있어도 원본
+    접수일로 재므로 상한 밖이다."""
+    r = _late_correction(make_stage_tree, tmp_path, ("20210330000147", date(2021, 3, 30)),
+                         (100.0, 100.0))
+    assert _late_row(r) is None
+    assert [(x["corp_code"], x["reject_reason"]) for x in _rejects(r.out_dir)] == [  # type: ignore[arg-type]
+        (_LATE_CORP, "rcept_lag_out_of_range")]
+
+
+def test_부정_원본_제출일이_확인되지_않은_링크는_자기_접수일로_잰다(make_stage_tree,
+                                                                tmp_path: Path) -> None:
+    """링크 방어 — 정정 첫 장의 원본 제출일(2016-02-01)이 링크된 원본 접수일(2016-03-30)과 어긋나면
+    (`date_check` mismatch) 그 원본이 같은 보고서라는 확인이 없다(한 그룹에 다른 보고서가 묶이는 경우,
+    한화리츠 01669226). S1-b 승계와 같은 조건으로 원본 접수일을 쓰지 않고 자기 접수일(2,575일)로 재므로
+    상한 밖이다."""
+    r = _late_correction(make_stage_tree, tmp_path, ("20160330000147", date(2016, 3, 30)),
+                         (100.0, 100.0), filed=date(2016, 2, 1))
+    assert _late_row(r) is None
+    rej = _rejects(r.out_dir) if r.n_reject else []                 # type: ignore[arg-type]
+    assert [(x["corp_code"], x["reject_reason"]) for x in rej] == [
+        (_LATE_CORP, "rcept_lag_out_of_range")]
+
+
+def test_결산_전_접수는_여전히_격리된다(make_stage_tree, tmp_path: Path) -> None:
+    """가드 유지 — 음수 지연(기간 말일 전 접수)은 기간 오판이다. 정정이 아니라 원본 링크가 없으면 자기
+    접수일로 잰다."""
+    corps = [("00000001", "12"), ("00000002", "12")]
+    reports = [("20210330000001", "00000001", "2020", "11011", date(2021, 3, 30),
+                date(2020, 12, 31), "11011"),
+               ("20201201000002", "00000002", "2020", "11011", date(2020, 12, 1),
+                date(2020, 12, 31), "11011")]
+    fin = [_fin_row(c, "2020", "11011", rc, sj="IS", account_id="ifrs-full_Revenue",
+                    account_nm="매출액", amount=100.0)
+           for rc, c, *_x in reports]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20210330000001", "rcept_no", "20210330000001"))
+    assert r.ok and r.out_dir is not None, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert [(x["corp_code"], x["reject_reason"]) for x in _rejects(r.out_dir)] == [
+        ("00000002", "rcept_lag_out_of_range")]
+
+
+def test_격리된_분기는_4분기_파생과_다음_분기_cf_q_에서_빠진다(make_stage_tree,
+                                                              tmp_path: Path) -> None:
+    """3월 결산 법인의 2020-09 반기 자산이 ×1000 이다. 그 행은 `kept` 밖이라 같은 회계연도 사업보고서
+    (2021-03)의 4분기 파생이 NULL(부분합 금지 — 구성 3)이고, 다음 분기(2020-12, 3분기)의 현금흐름 분기값도
+    직전 분기가 없어 NULL 이다. 옛 규칙은 그 행을 그대로 써 4분기 파생을 냈다."""
+    corps, reports, fin, starts = _march_fy()
+    scaled = "20201113000901"
+    fin = fin + [_fin_row(c, y, rc, rcept, sj="BS", account_id="ifrs-full_Assets",
+                          account_nm="자산총계", amount=1e3 * _TA if rcept == scaled else _TA,
+                          ord_=3)
+                 for rcept, c, y, rc, *_x in reports]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20210621000901", "period_end_basis", "document"), period_from=starts)
+    assert r.ok and r.out_dir is not None, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rej = _rejects(r.out_dir) if r.n_reject else []
+    assert [(x["period_end"], x["reject_reason"]) for x in rej] == [
+        (date(2020, 9, 30), "unit_scale_suspect")]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}
+    annual = rows["20210621000901"]
+    assert annual["op_profit_q4_derived"] is None
+    assert annual["q4_derived_n_rows"] == 3
+    q3 = rows["20210215000901"]
+    assert q3["report_code"] == "11014"
+    assert q3["cf_operating_q"] is None
+    assert q3["cf_q_n_rows"] == 1
+
+
+def test_부정_자산총계_0_행이_산출에_남으면_EG3_가_잡는다(make_stage_tree, tmp_path: Path) -> None:
+    """`.sql` 이 `total_asset_nonpositive` 격리를 빠뜨린 회귀를 심는다 — 산출 행의 자산을 0 으로 바꾸면
+    `n_total_asset_nonpositive` 가 폐기한다."""
+    r, _rej = _series_rejects(make_stage_tree, tmp_path, [_TA])
+    g = _eg3_on(tmp_path, r, "0 AS total_asset")
+    assert g.status is GateStatus.FAIL
+    assert g.metrics["n_total_asset_nonpositive"] == 1
+
+
+def test_대차_항등식이_1퍼센트_넘게_어긋나면_기록만_한다(make_stage_tree, tmp_path: Path) -> None:
+    """기록형 — 자산 100 = 부채 50 + 자본 48 은 2% 어긋남이다. 격리·폐기하지 않고 세기만 한다(삼성생명 2025 3Q
+    −3% 같은 대형사 TTM 을 네 분기 지우는 비용이 오차보다 크다)."""
+    r, _rej = _series_rejects(make_stage_tree, tmp_path, [_TA])
+    g = _eg3_on(tmp_path, r, "100 AS total_asset, 50 AS total_liab, 48 AS total_equity")
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_bs_identity_gap_gt_1pct"] == 1

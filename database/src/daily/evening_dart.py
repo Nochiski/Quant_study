@@ -18,6 +18,7 @@
   ③ stage 16표 — 표마다 따로 프로세스(`python -m stage`, ① 의 스냅숏 id 를 모두 쓴다)
   ④ equity 6표 — `python -m equity --baseline <연구 baseline>`(사본을 두면 S1 처럼 상수가 늘 때 갈린다)
   ⑤ 인계 기록(원자 교체) → 스냅숏 GC(keep = KEEP_DEFAULT, 현재 판 보호) · 지난 문서 캐시 정리(현재 판이 선 것만 남김)
+     · equity `_pinned` 정리(`equity.inputs.gc_pinned` — 현재 판이 가리키는 판 + 표별 최신 keep, 연구 체인과 같은 함수)
 표마다 따로 프로세스인 이유: stg_fin 은 6GB 메모리 한도로 돈다 — 한 프로세스에 쌓지 않는다(연구 체인 run_stage_all 과 같다).
 시간 한도는 두지 않는다(P9 — 늦어짐은 저녁 워치독이 알린다).
 """
@@ -37,6 +38,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
+from equity import inputs
 from stage import manifest, snapshot
 from stage.rules import LEDGER_FILES
 
@@ -250,7 +252,11 @@ def build(t: str, roots: Roots, *, run: Runner = _subprocess_runner, python: str
         protect = snapshot.current_snapshot_ids(roots.stage)
         gc = snapshot.gc(roots.snapshots, keep=snapshot.KEEP_DEFAULT, protect=protect)
         pruned = _prune_doc_caches(roots.stage, protect)
-        print(f"  저녁 DART 스냅숏 {gc.summary()} · 지난 문서 캐시 {pruned}개 정리", flush=True)
+        pins = inputs.gc_pinned(roots.equity)
+        print(f"  저녁 DART 스냅숏 {gc.summary()} · 지난 문서 캐시 {pruned}개 정리 · _pinned 삭제 "
+              f"{pins.n_removed}(확보 {pins.freed_bytes / 1e9:.2f}GB)", flush=True)
+        for err in pins.errors:
+            print(f"  _pinned gc 오류: {err}", flush=True)
     return BoardResult(BoardStatus.OK if failed is None else BoardStatus.FAILED, out, snap_id,
                        tuple(steps), failed)
 

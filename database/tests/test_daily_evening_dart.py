@@ -106,6 +106,7 @@ def test_build_runs_the_closure_in_order_on_one_dart_snapshot(roots: Roots) -> N
         assert cmd[cmd.index("--snapshot-id") + 1] == r.snapshot_id
         assert (cmd[cmd.index("--stage-root") + 1], cmd[cmd.index("--basis") + 1]) == (
             str(roots.stage), "evening")
+        assert cmd[cmd.index("--baseline") + 1] == str(roots.research_stage / "baseline.json")
     for cmd in run.calls[1 + len(STAGE_TABLES):]:
         assert (cmd[cmd.index("--root") + 1], cmd[cmd.index("--baseline") + 1]) == (
             str(roots.equity), str(roots.baseline))

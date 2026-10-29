@@ -26,6 +26,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--stage-root", type=Path, default=base / "data" / "stage")
     ap.add_argument("--snapshot-root", type=Path, default=base / "data" / "snapshots")
     ap.add_argument("--snapshot-id", help="기존 스냅샷 재사용 (재현성 검증용)")
+    ap.add_argument("--baseline", type=Path, default=None,
+                    help="게이트 임계·빌드 입력 baseline.json(기본 <stage-root>/baseline.json) — 저녁 DART 판"
+                         "(D13 · N-62)은 모델 DB stage 루트에 짓고 연구 stage 루트의 파일을 쓴다(사본을 두면 갈린다)")
     ap.add_argument("--build-id")
     ap.add_argument("--basis", choices=sorted(model.BASIS_PREFIX), default=model.BASIS_MANUAL,
                     help="빌드 판 구분 — evening=e_ · morning=m_ · manual=b_ (기본)")
@@ -61,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"reuse_declined reason=error {type(e).__name__}: {e}", flush=True)
     if r is None:
         r = build.build_table(rule, snap, a.stage_root, build_id=bid, gate_thresholds=thr,
-                              fixtures_path=fx if fx.exists() else None,
+                              fixtures_path=fx if fx.exists() else None, baseline_path=a.baseline,
                               memory_limit=a.memory_limit, threads=a.threads, code_rev=code_rev)
     reused = f" reused_from={r.reused_from}" if r.reused_from else ""
     print(f"{r.status.value} table={r.table} build={r.build_id} "

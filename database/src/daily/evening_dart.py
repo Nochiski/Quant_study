@@ -15,7 +15,8 @@
 순서(앞 단계가 실패하면 멈추고, 인계는 health fail 로 쓴다 — fi 가 그 인계를 거절해 체인이 전 거래일 공시 판으로 간다):
   ① 스냅숏 — dart.db 하나만 `<model_db>/snapshots` 에 VACUUM INTO(원장 락 없이 — 아침 빌드와 같은 방식, 원장 무변경)
   ② 문서 캐시 — 연구 루트의 최신 ok 캐시를 기준으로 증분(`stage.doc_prepass --base-stage-root`, 손대지 않은 샤드는 하드링크)
-  ③ stage 16표 — 표마다 따로 프로세스(`python -m stage`, ① 의 스냅숏 id 를 모두 쓴다)
+  ③ stage 16표 — 표마다 따로 프로세스(`python -m stage`, ① 의 스냅숏 id 를 모두 쓴다 · 게이트 임계는 연구 stage
+     baseline 을 `--baseline` 으로 — 모델 DB stage 루트엔 그 파일이 없어 한도 0 으로 걸린다, 10-29 미리 돌리기)
   ④ equity 6표 — `python -m equity --baseline <연구 baseline>`(사본을 두면 S1 처럼 상수가 늘 때 갈린다)
   ⑤ 인계 기록(원자 교체) → 스냅숏 GC(keep = KEEP_DEFAULT, 현재 판 보호) · 지난 문서 캐시 정리(현재 판이 선 것만 남김)
      · equity `_pinned` 정리(`equity.inputs.gc_pinned` — 현재 판이 가리키는 판 + 표별 최신 keep, 연구 체인과 같은 함수)
@@ -221,7 +222,8 @@ def build(t: str, roots: Roots, *, run: Runner = _subprocess_runner, python: str
             if not step(f"stage:{table}", [
                     python, "-m", "stage", "--table", table, "--basis", BASIS,
                     "--raw-dir", str(roots.raw_dir), "--stage-root", str(roots.stage),
-                    "--snapshot-root", str(roots.snapshots), "--snapshot-id", snap_id]):
+                    "--snapshot-root", str(roots.snapshots), "--snapshot-id", snap_id,
+                    "--baseline", str(roots.research_stage / "baseline.json")]):
                 failed = f"stage:{table} (rc={steps[-1].rc})"
                 break
         else:

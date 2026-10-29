@@ -9,6 +9,10 @@ keep=3 으로 남은 옛 판을 함께 문다). stage 표도 같은 규칙으로
 루트는 fi 판 JSON 의 `equity_root` · `stage_root` 가 기본이고, deliver CLI `--equity-root` ·
 `--stage-root` 로 덮는다(로컬 사본 대조 · 리허설).
 
+저녁 DART 판(D13 · N-62): fi 판 JSON 에 `dart_board`(모델 DB 저녁 판 루트 · 판 목록)가 있으면 그 판의 표(공시·주요사항
+결정·지분 등 DART 폐포 — `daily.evening_dart`)는 그 루트에서 그 판 id 로 읽는다. 그 밖의 표는 위 규칙 그대로다.
+저녁 판 루트에 그 판이 없으면 연구 판으로 대신하지 않는다(시트만 '데이터 없음').
+
 원천 날짜 상한은 엑셀 D 다. 단 WISE 에서 나온 원천(Analyst)은 fi 판 JSON 의 `wise_asof` 까지 —
 아침판은 D, 장 마감 판은 T(그날 06:00 수집분 — N-53, factor_inputs `build`), 주말 보강판은
 휴일 수집일 W(그 수집이 D 분 보고서 · 추정치를 담는다, N-45).
@@ -50,6 +54,8 @@ class Sources:
     # WISE 원천 상한 — fi 판 JSON 의 wise_asof(아침판 D · 장 마감 판 T(N-53) · 주말 보강판 W, N-45).
     # 없으면 엑셀 D 와 같다(`wise_upto`)
     wise_asof: date | None = None
+    # 저녁 DART 판(N-62) — '층/표' → (루트, 판 id). 있으면 그 표만 이 자리에서 읽는다(fi 판 JSON `dart_board`)
+    overrides: Mapping[str, tuple[Path, str]] = field(default_factory=dict)
 
     def wise_upto(self, d: date) -> date:
         """WISE 에서 나온 원천(증권사 의견 · 컨센서스 요약)을 읽을 수집일 상한."""
@@ -73,9 +79,13 @@ class Sources:
         return f"read_parquet([{lst}], hive_partitioning=false, union_by_name=true)"
 
     def equity(self, table: str) -> str:
+        if (hit := self.overrides.get(f"equity/{table}")) is not None:
+            return self._read("equity", hit[0], table, hit[1])
         return self._read("equity", self.equity_root, table, self.equity_pins.get(table))
 
     def stage(self, table: str) -> str:
+        if (hit := self.overrides.get(f"stage/{table}")) is not None:
+            return self._read("stage", hit[0], table, hit[1])
         return self._read("stage", self.stage_root, table, self.stage_pins.get(table))
 
     def used_text(self) -> str:
@@ -109,7 +119,20 @@ def open_sources(fi_meta: Mapping[str, object], equity_root: Path | None = None,
                         fi_meta["wise_asof"])
     return Sources(equity_root or root(fi_meta.get("equity_root")),
                    stage_root or root(fi_meta.get("stage_root")),
-                   pins("equity_builds"), pins("stage_builds"), wise_asof=wise)
+                   pins("equity_builds"), pins("stage_builds"), wise_asof=wise,
+                   overrides=_dart_overrides(fi_meta.get("dart_board")))
+
+
+def _dart_overrides(board: object) -> dict[str, tuple[Path, str]]:
+    """fi 판 JSON `dart_board` → '층/표' → (루트, 판 id). 없거나 모양이 아니면 빈 dict(그 판은 저녁 DART 판이 없다)."""
+    if not isinstance(board, Mapping):
+        return {}
+    out: dict[str, tuple[Path, str]] = {}
+    for layer in ("equity", "stage"):
+        root, builds = board.get(f"{layer}_root"), board.get(f"{layer}_builds")
+        if isinstance(root, str) and root and isinstance(builds, Mapping):
+            out.update({f"{layer}/{t}": (Path(root), str(b)) for t, b in builds.items()})
+    return out
 
 
 def connect(temp_dir: Path | None = None) -> duckdb.DuckDBPyConnection:

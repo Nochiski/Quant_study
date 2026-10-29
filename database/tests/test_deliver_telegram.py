@@ -182,6 +182,25 @@ def test_caption_daily_evening_says_postclose_basis() -> None:
     assert "장 마감" not in morning and "컨센서스" not in morning
 
 
+def test_caption_daily_evening_adds_the_disclosure_time() -> None:
+    """D13(N-62) — 장 마감 판은 둘째 줄 끝에 공시·재무 시점을 붙인다(그날 저녁 공시까지 / 전 거래일까지). 문구는
+    `common.dart_note` 가 fi 판 기록(저녁 DART 판이 있는가)으로 정한다. 없으면 지금 줄 그대로."""
+    from deliver import common
+
+    top = [(1, "005930", "삼성전자")]
+    base = tg.caption_daily("2026-10-14", "evening", "scope@2.0", top, 593, 600)
+    for meta, want in (({"dart_board": {"equity_builds": {}}}, "공시·재무 = 당일 저녁 공시까지 반영"),
+                       ({"dart_board": None}, "공시·재무 = 전 거래일까지(오늘 공시 미반영)")):
+        note = common.dart_note("evening", meta)
+        assert note == want
+        c = tg.caption_daily("2026-10-14", "evening", "scope@2.0", top, 593, 600, dart_note=note)
+        assert c.splitlines()[1] == base.splitlines()[1] + " · " + want
+        assert c.splitlines()[2:] == base.splitlines()[2:]
+        assert "판" not in want and "—" not in want
+    assert common.dart_note("morning", {"dart_board": {"equity_builds": {}}}) is None
+    assert common.dart_note("supplement", {}) is None
+
+
 def test_caption_daily_supplement_says_weekend_supplement() -> None:
     """N-45 · E5 — 주말 보강판(basis supplement)은 첫 줄 basis 자리가 '주말 보강'이고 둘째 줄에
     데이터 성격(휴일 아침 WISE 재수집 · 컨센서스 기준일 = 기준일 당일)을 단다. '판' 없이, 1024자 안."""

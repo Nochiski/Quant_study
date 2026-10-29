@@ -174,7 +174,8 @@ def main(argv: list[str] | None = None) -> int:
             sha256 = hashlib.sha256(r.path.read_bytes()).hexdigest()
             rc = _deliver(args, r.path, caption_daily(
                 r.date, r.basis, r.spec_id, r.top, r.n_ranked, r.n_rows,
-                correction=len(prior), build_id=r.build_id, generated_at=r.generated_at))
+                correction=len(prior), build_id=r.build_id, generated_at=r.generated_at,
+                dart_note=r.dart_note))
             if rc == 0 and sending:
                 sent = True
                 entry = {"date": r.date, "basis": r.basis, "build_id": r.build_id,

@@ -1039,7 +1039,8 @@ class Side:
         return {"root": str(self.root), "basis": self.basis, "fi_build_id": self.fi.build_id,
                 "model_build_id": self.model_run.build_id,
                 "fi_rules_version": self.fi_run.get("rules_version"),
-                "asof": self.fi_run.get("asof"), "primary_spec": self.model_run.primary_spec,
+                "asof": self.fi_run.get("asof"), "dart_asof": self.fi_run.get("dart_asof"),
+                "primary_spec": self.model_run.primary_spec,
                 "excluded_specs": sorted(ex) if isinstance(ex, dict) else []}
 
 
@@ -1486,14 +1487,25 @@ def compare(t: date, evening_root: Path, research_root: Path, *, calendar_dir: P
                         read_krx_base(rt, t), no_pred)
     fi = compare_fi(ev.fi, rt.fi, FiBoard(rt.fi_root, str(rd["build_id"])), t, dprime, evidence,
                     replay=replay, wise_cut=_wise_cut(ev, t))
-    if ev.fi_run.get("equity_builds") != rd.get("equity_builds"):
+    pinned_research = _research_pinned(ev.fi_run, rd.get("equity_builds"))
+    if ev.fi_run.get("equity_builds") != pinned_research:
         fi.tally.add(Finding("boards", "", {}, "value", UNEXPLAINED, ("equity_builds",),
                              {"equity_builds": ev.fi_run.get("equity_builds")},
-                             {"equity_builds": rd.get("equity_builds")},
+                             {"equity_builds": pinned_research},
                              "장 마감 판이 고정한 equity 판 ≠ 연구 판 D' 의 equity 판"))
     model = compare_model(ev, rt, fi.tally, spearman_min, list_n,
                           universe=(fi.universe_e, fi.universe_r))
     return Result(t, dprime, replay, ev, rt, rd, fi, model, spearman_min)
+
+
+def _research_pinned(ev_run: dict[str, object], rd_builds: object) -> object:
+    """연구 판 D' 판 목록 중 장 마감 판이 고정한 연구 판에서 읽었어야 할 몫 — 저녁 DART 판(D13 · N-62)을 읽은 장 마감
+    판은 그 판의 표(판 기록 `dart_board.equity_builds`)를 연구 판에서 읽지 않으므로 뺀다. 없으면 D' 판 목록 그대로."""
+    board = ev_run.get("dart_board")
+    dart = board.get("equity_builds") if isinstance(board, dict) else None
+    if not isinstance(dart, dict) or not isinstance(rd_builds, dict):
+        return rd_builds
+    return {t: b for t, b in rd_builds.items() if t not in dart}
 
 
 # ── 출력 ─────────────────────────────────────────────────────────────────────

@@ -153,7 +153,7 @@ def _names(top: Sequence[tuple[int, str, str]]) -> str:
 
 def caption_daily(date: str, basis: str, spec_id: str, top: Sequence[tuple[int, str, str]],
                   n_ranked: int, n_rows: int, *, correction: int = 0, build_id: str = "",
-                  generated_at: str = "") -> str:
+                  generated_at: str = "", dart_note: str | None = None) -> str:
     """[모델 점수] 날짜 basis · spec / 상위 5 / 순위·제외·모집단.
 
     정정 발송(`correction` ≥ 1 — 같은 D·basis 를 `--resend` 로 다시 보냄)이면 끝에
@@ -161,8 +161,11 @@ def caption_daily(date: str, basis: str, spec_id: str, top: Sequence[tuple[int, 
     그대로다. 장 마감 직후 데이터(evening) · 주말 보강(supplement)은 둘째 줄에 데이터
     성격(`common.BASIS_NOTES`)을 단다(PR-6 · N-45). 주말 보강은 첫 줄 basis 자리도 '주말 보강'
     (`CAPTION_BASIS`). 읽는 사람이 '판'을 몰라 '데이터'라고 쓴다(10-11 사용자, DECISIONS §7 #6).
+    `dart_note`(장 마감 판의 공시·재무 시점, `common.dart_note` — D13 · N-62)를 주면 그 줄 끝에 붙인다.
     """
     note = BASIS_NOTES.get(basis)
+    if note and dart_note:
+        note = f"{note} · {dart_note}"
     text = (f"[모델 점수] {date} {CAPTION_BASIS.get(basis, basis)} · {spec_id}\n"
             + (f"{note}\n" if note else "")
             + f"상위5: {_names(top)}\n"

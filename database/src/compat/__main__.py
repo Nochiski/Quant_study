@@ -7,7 +7,7 @@
         [--model-universe all|estimates] [--builds-from-missing error|current] [--in-place] \\
         [--model-root data/model] \\
         [--postclose-db data/raw/postclose.db --kiwoom-db data/raw/kiwoom.db] \\
-        [--calendar-dir DIR] [--allow-older]
+        [--calendar-dir DIR] [--allow-older] [--dart-builds-from data/model_db/dart/20260923_evening.json]
 
 점수 두 표(score_history·score_history_v2)는 --model-root 의 그날·그 basis 모델 판이 원천이다(QL-C).
 표를 고르지 않으면 점수 표도 들어가므로 --model-root 가 필요하다.
@@ -71,6 +71,9 @@ def _parser() -> argparse.ArgumentParser:
                    help="인계 이력 JSON(data/deliver/history/<D>_<basis>.json) 의 판으로 고정")
     e.add_argument("--builds-from-missing", default="error", choices=("error", "current"),
                    help="--builds-from 의 판이 없을 때: error(멈춤) | current(current_build 폴백)")
+    e.add_argument("--dart-builds-from", default=None, type=Path,
+                   help="저녁 DART 인계 JSON(data/model_db/dart/<T>_evening.json) — 장 마감 판만. "
+                        "financial_summary 의 DART 재무(fin_std)를 그날 저녁 DART 판에서 읽는다(D13 R2)")
     e.add_argument("--model-universe", default="all", choices=("all", "estimates"),
                    help="estimates 면 당해 12월기 WISE 추정치가 없는 종목의 "
                         "stocks.market_cap 을 NULL 로 둔다(사용자 결정 09-24). 그림자 전용")
@@ -189,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
             model_universe=args.model_universe, in_place=args.in_place,
             model_root=args.model_root, postclose_db=args.postclose_db,
             kiwoom_db=args.kiwoom_db, calendar_dir=args.calendar_dir,
-            allow_older=args.allow_older)
+            allow_older=args.allow_older, dart_builds_from=args.dart_builds_from)
     except CompatError as e:
         print(f"compat 실패: {e}", file=sys.stderr)
         return 2

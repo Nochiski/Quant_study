@@ -55,6 +55,7 @@ from pathlib import Path
 
 import duckdb
 from daily import calendar as daily_calendar
+from daily import evening_dart
 from daily.ledger_health import KRX_RECHECK_SESSIONS
 from deliver.reader import DeliverError, load_run
 from equity import handoff, inputs
@@ -827,9 +828,13 @@ def _selected(tables: list[str] | None) -> list[TableMapping]:
 def _resolve_sources(selected: list[TableMapping], roots: dict[str, Path],
                      pinned: dict[str, dict[str, str]] | None,
                      extra: Iterable[tuple[str, str]] = (),
-                     on_missing: str = "error"
+                     on_missing: str = "error",
+                     dart: evening_dart.DartPin | None = None
                      ) -> tuple[dict[str, dict[str, str]], tuple[str, ...]]:
     """쓰기 전에 원천 판을 전부 해석한다 — 판 가드(R5)를 먼저 걸기 위해서다.
+
+    `dart`(저녁 DART 인계, D13 R2)를 주면 인계에 든 equity 표(DART 폐포)는 인계의 모델 DB equity 루트·판에서 읽는다.
+    그 판이 없으면 `on_missing` 과 상관없이 멈춘다 — D' 판으로 떨어지면 그날 공시가 조용히 빠진다(P1).
 
     `on_missing='current'` 면 `--builds-from` 에 **키가 없는 표**와 그 build_id 가 이미
     **GC 로 MANIFEST 에서 사라진 표**를 `current_build` 로 떨어뜨리고 목록을 함께 돌려준다
@@ -844,6 +849,15 @@ def _resolve_sources(selected: list[TableMapping], roots: dict[str, Path],
     for kind, table in wanted:
         assert kind is not None
         if table in builds[kind]:
+            continue
+        if dart is not None and kind == EQUITY and table in dart.pin.equity_builds:
+            bid = dart.pin.equity_builds[table]
+            try:
+                builds[kind][_EXPR + table], builds[kind][table] = _parquet_source(
+                    dart.equity_root, table, kind, bid)
+            except CompatError as e:
+                raise CompatError(f"저녁 DART 인계 판이 모델 DB equity 루트에 없다: root={dart.equity_root} "
+                                  f"table={table} build_id={bid} 인계={dart.pin.path} ({e})") from e
             continue
         want = pinned[kind].get(table) if pinned is not None else None
         if pinned is not None and want is None:
@@ -977,7 +991,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
            model_universe: str = "all", in_place: bool = False,
            model_root: Path | None = None, postclose_db: Path | None = None,
            kiwoom_db: Path | None = None, calendar_dir: Path | None = None,
-           allow_older: bool = False) -> ExportResult:
+           allow_older: bool = False, dart_builds_from: Path | None = None) -> ExportResult:
     """equity/stage/model 판을 읽어 v3 `quant.db` 9표 중 지정 표를 upsert 한다.
 
     date·consensus_asof 는 YYYYMMDD. `full=False`(기본)면 as_of 이하 마지막 거래일과 그 앞
@@ -998,6 +1012,9 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     반영(`in_place`)의 창 세션 가드에도 쓴다(QL-E MINOR-1 — 아침판 포함). 증분(`full=False`)이면
     창 시작일도 이 달력으로 센다(K1-9d — 못 읽으면 멈춘다).
     `allow_older` 는 장 마감 판이 대상의 더 나중 반영 기록(T-35 순서)을 무시하게 한다(재생 전용).
+    `dart_builds_from` 은 저녁 DART 인계 JSON(`data/model_db/dart/<T>_evening.json`, D13 R2) — 장 마감 판에만 준다. 고른 표가
+    읽는 equity DART 폐포 표(지금은 financial_summary 의 `fin_std`)만 그날 저녁 DART 판에서 읽고, 나머지는 `builds_from`
+    고정 판 그대로다. 인계 검사는 fi 와 같은 `daily.evening_dart.load_handoff` — 거절이면 대상을 열기 전에 멈춘다.
     """
     as_of = _parse_date(date, "--date")
     if basis not in BASES:
@@ -1034,6 +1051,19 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     roots = {EQUITY: Path(equity_root), STAGE: Path(stage_root)}
     selected = _selected(tables)
     pinned = _load_builds_from(builds_from) if builds_from is not None else None
+    dart = None
+    if dart_builds_from is not None:
+        if basis != "evening":
+            raise CompatError(f"--dart-builds-from(저녁 DART 인계)은 장 마감 판(--basis evening)에만 준다: "
+                              f"--basis={basis} 인계={dart_builds_from}")
+        pairs = ([(m.source_kind, t) for m in selected for t in m.sources]
+                 + [pair for m in selected for pair in m.cross_sources])
+        need = sorted({t for k, t in pairs if k == EQUITY and t in evening_dart.EQUITY_TABLES})
+        try:
+            dart = evening_dart.load_handoff(Path(dart_builds_from), as_of.strftime("%Y%m%d"),
+                                             Path(equity_root), need)
+        except evening_dart.HandoffRejected as e:
+            raise CompatError(str(e)) from e
     # QL-D — 장 마감 판. T 행 모듈은 stage 빌더·규칙을 끌어오므로 저녁에만 불러온다
     # (t_rows docstring).
     # 인자·달력·판 이음매 준비는 대상 파일을 열기 전에 끝낸다.
@@ -1053,7 +1083,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         selected, roots, pinned,
         ([(STAGE, "stg_consensus_annual")] if want_estimates else [])
         + ([(EQUITY, "universe_daily")] if evening and reads_equity else []),
-        builds_from_missing)
+        builds_from_missing, dart)
     builds[MODEL] = _resolve_model(selected, model_root, params["date"], basis)
     equity_builds, stage_builds = _build_ids(builds[EQUITY]), _build_ids(builds[STAGE])
     model_builds = _build_ids(builds[MODEL])

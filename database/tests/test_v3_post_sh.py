@@ -448,6 +448,25 @@ def test_allow_older_reaches_the_evening_export(env, evening_sources, tmp_path) 
     assert r2.rc == 0, r2.out
     assert _q(main, f"SELECT count(*) FROM daily_prices WHERE trade_date='{D_ISO}'") == [(2,)]
 
+def test_dart_handoff_reaches_the_evening_export_only(env, evening_sources, tmp_path) -> None:
+    """`--dart-builds-from`(D13 R2)은 ② export 로 가서 financial_summary 의 DART 재무가 그날 저녁 DART 판 값(자산 600조 →
+    6,000,000 억원)으로 본 파일에 들어간다. 아침 재반영에 주면 인자 오류 rc 5 — 본 파일 무변경."""
+    _, main = env
+    droot = tmp_path / "dart"
+    rows = tce._fin_std_rows() + [tce._fin_std_row("005930", dt.date(2025, 12, 31), tce.D23, "20260923000001",
+                                                   total_asset=600_000_000_000_000.0)]
+    tce._make_stage_tree(droot, "fin_std", rows, build_id=tce.DART_BUILD)
+    dh = tce._dart_handoff(tmp_path / "dart.json", droot / "stage")
+    before = _sha(main)
+    r = _run(tmp_path, evening_sources, *_base(main, "--dart-builds-from", str(dh)))
+    assert r.rc == 5, r.out
+    assert _sha(main) == before
+    r = _run(tmp_path, evening_sources, *_evening(main, "--dart-builds-from", str(dh)))
+    assert r.rc == 0, r.out
+    assert _q(main, "SELECT total_assets FROM financial_summary "
+                    "WHERE stock_code='005930' AND period='2025/12'") == [(6_000_000,)]
+
+
 # ── T-38 점수 없는 저녁 반영(QL-F2) ─────────────────────────────────────────
 SEVEN = tuple(t for t in TABLES if t not in SCORE_TABLES)
 

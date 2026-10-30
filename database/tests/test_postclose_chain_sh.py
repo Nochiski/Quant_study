@@ -276,7 +276,8 @@ def test_evening_builds_the_dart_board_then_fi_to_v3(tmp_path: Path) -> None:
         "--fi-root data/model_db/factor_inputs --out-root data/model_db/deliver")
     assert r.call("v3_post.sh") == (
         f"v3_post.sh --date {T} --basis evening --v3-db {tmp_path / 'v3_quant.db'} "
-        f"--model-root data/model_db/model --builds-from {H_PREV} --shadow | QL_V3_POST_CMD=unset")
+        f"--model-root data/model_db/model --builds-from {H_PREV} --shadow "
+        f"--dart-builds-from {DART_HANDOFF} | QL_V3_POST_CMD=unset")
     assert r.runs == [(runlog.POSTCLOSE_DART, "ok"),
                       *((s, "ok") for s in runlog.POSTCLOSE_EVENING_STEPS)]
     assert r.titles("info")[-1].startswith("장 마감 판 준비 ")
@@ -299,6 +300,7 @@ def test_evening_falls_back_to_the_d_prime_board(tmp_path: Path, dart_rc: str, b
     assert r.rc == 0, r.out + r.log
     assert r.mods == (EVENING_MODULES if board_rc is not None else EVENING_MODULES[1:])
     assert "--dart-builds-from" not in r.call("factor_inputs")
+    assert "--dart-builds-from" not in r.call("v3_post.sh")     # v3 재무도 전 거래일 공시 판(D13 R2)
     assert r.runs == [(runlog.POSTCLOSE_DART, "fallback"),
                       *((s, "ok") for s in runlog.POSTCLOSE_EVENING_STEPS)]
     assert r.titles("warn") == ["저녁 판 — 오늘 공시 미반영(전 거래일 공시로)"]
@@ -624,7 +626,7 @@ def test_live_switch_sends_and_reflects_in_place_with_daily_post(tmp_path: Path)
     assert r.call("deliver").endswith("--out-root data/model_db/deliver --send")
     v3 = r.call("v3_post.sh")
     assert "--shadow" not in v3
-    assert f"--builds-from {H_PREV} --v3-post-cmd echo post |" in v3
+    assert f"--builds-from {H_PREV} --v3-post-cmd echo post --dart-builds-from {DART_HANDOFF} |" in v3
 
 
 def test_server_local_conf_is_read_last_and_wins(tmp_path: Path) -> None:
@@ -741,6 +743,20 @@ def test_refill_always_reflects_seven_tables_without_scores(tmp_path: Path, seed
         f"--builds-from {H_PREV} --shadow | QL_V3_POST_CMD=unset")
     assert r.runs == [("postclose_v3_refill", "ok")]
     assert r.titles("info") == ["장 마감 재반영 완료"]
+
+
+@pytest.mark.parametrize(("dart", "passed"), [("ok", True), ("fallback", False), (None, False)],
+                         ids=["dart_board_ok", "fell_back", "no_dart_run"])
+def test_refill_passes_the_evening_dart_handoff_only_when_that_board_was_ok(tmp_path: Path, dart: str | None,
+                                                                            passed: bool) -> None:
+    """D13 R2 — financial_summary 는 표 전체 스냅샷이라 refill 이 인계 없이 돌면 21:19 에 D' 공시 판으로 되돌아간다. 그날
+    저녁 DART 판(postclose_dart 마지막 런)이 ok 일 때만 ⑥ 과 같은 인계를 넘긴다 — 갈래 1(fallback)·런 없음이면 안 넘긴다."""
+    root = _root(tmp_path)
+    if dart is not None:
+        _seed(root, T, runlog.POSTCLOSE_DART, dart)
+    r = _chain(tmp_path, "refill", "--date", T)
+    assert r.rc == 0, r.out + r.log
+    assert (f"--dart-builds-from {DART_HANDOFF}" in r.call("v3_post.sh")) is passed
 
 
 def test_refill_in_place_passes_no_post_command(tmp_path: Path) -> None:

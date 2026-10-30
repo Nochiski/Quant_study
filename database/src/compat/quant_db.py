@@ -52,10 +52,10 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import duckdb
 from daily import calendar as daily_calendar
-from daily import evening_dart
 from daily.ledger_health import KRX_RECHECK_SESSIONS
 from deliver.reader import DeliverError, load_run
 from equity import handoff, inputs
@@ -76,6 +76,9 @@ from .mappings import (
     TableMapping,
     score_spec_candidates,
 )
+
+if TYPE_CHECKING:
+    from daily.evening_dart import DartPin
 
 log = logging.getLogger(__name__)
 
@@ -829,7 +832,7 @@ def _resolve_sources(selected: list[TableMapping], roots: dict[str, Path],
                      pinned: dict[str, dict[str, str]] | None,
                      extra: Iterable[tuple[str, str]] = (),
                      on_missing: str = "error",
-                     dart: evening_dart.DartPin | None = None
+                     dart: DartPin | None = None
                      ) -> tuple[dict[str, dict[str, str]], tuple[str, ...]]:
     """쓰기 전에 원천 판을 전부 해석한다 — 판 가드(R5)를 먼저 걸기 위해서다.
 
@@ -1053,6 +1056,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     pinned = _load_builds_from(builds_from) if builds_from is not None else None
     dart = None
     if dart_builds_from is not None:
+        # 저녁 DART 판 모듈은 stage 스냅숏·규칙을 끌어오므로 인계를 줄 때만 불러온다(장 마감 수집기를 가볍게 — MINOR-5)
+        from daily import evening_dart
         if basis != "evening":
             raise CompatError(f"--dart-builds-from(저녁 DART 인계)은 장 마감 판(--basis evening)에만 준다: "
                               f"--basis={basis} 인계={dart_builds_from}")

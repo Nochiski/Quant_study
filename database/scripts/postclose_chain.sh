@@ -53,13 +53,17 @@
 #             --builds-from data/deliver/history/<D'>_morning.json — fi 와 같은 고정 판(P1). 컨센서스 정보 시점은 compat
 #             기본(T)이다 — fi 장 마감 판 wise_asof 도 T(N-53, 그날 06:00 수집)라 D' 로 고정하면 점수와 갈린다(10-19 재병합에서
 #             801d0f26 되돌림). 그림자는 --shadow(v3 본 파일 무변경). 설정 POSTCLOSE_V3=in-place 면 제자리 반영이고, POSTCLOSE_V3_POST_CMD 가 있으면 --v3-post-cmd(v3
-#             daily_post, T-31). 점수 두 표를 v3 에 쓰는 것은 이 ⑥ 하나다
+#             daily_post, T-31). 점수 두 표를 v3 에 쓰는 것은 이 ⑥ 하나다. 저녁 DART 판이 ok 면 fi 와 같은 인계를
+#             --dart-builds-from 으로 넘긴다 — financial_summary 의 DART 재무(20:05 위키 상위 20 재무가 읽음)가 그날 저녁
+#             공시까지 들어간다(D13 R2, 사용자 10-30 '당일 데이터까지 가장 신선하게')
 #   refill — 21:05 저녁 원장 뒤 v3 재반영(QL-D 후속 · T-38). ⑥ 결과와 상관없이 늘 점수 없는 7표 반영
 #     v3_post.sh --basis evening --no-scores --builds-from <D'>_morning.json(QL-F2, compat 만 — daily_post 없음).
 #     16:00 컷오프로 못 받은 종목을 21:05 원장 값으로 채우고, 장 마감 판이 없는 날(판 실패·세션 예외일)엔 그날 저녁 v3
 #     T 행을 넣는 유일한 경로다(T-26 · T-38). 점수는 ⑥ 만 쓴다 — 판이 없던 날의 점수는 다음 날 아침 재반영이 채운다(T-34).
 #     부르기 전에 고정 판(<D'>_morning.json)의 날짜·health 를 본다 — 쓸 수 없으면 v3_post 를 부르지 않고 crit(compat 은
 #     health 를 보지 않아 equity 일부만 실패한 날 옛 판이 7표에 조용히 섞인다, P1).
+#     그날 저녁 DART 판(런 로그 postclose_dart 마지막 런)이 ok 면 ⑥ 과 같은 인계를 넘긴다(D13 R2) — financial_summary 는
+#     표 전체 스냅샷이라 안 넘기면 21:19 에 D' 공시 판으로 되돌아간다. 갈래 1(fallback)인 날은 ⑥ 처럼 넘기지 않는다.
 #   morning — 다음 날 아침 잇기. ⓐ v3_post.sh --date D --basis morning --builds-from data/deliver/history/<D>_morning.json
 #     (compat 만 — 반영 표 7·9 는 compat 이 장 마감 반영 기록으로 고른다, T-34. 고정 판 <D>_morning.json 의 날짜·health 를
 #     먼저 보고 쓸 수 없으면 부르지 않고 crit — refill 과 같은 이유) ⓑ 두 판 대조 python -m daily.board_compare
@@ -294,12 +298,13 @@ excel_cmd() {
 # crit 을 낸다. 락 fd 는 v3 쪽 자식에 넘기지 않는다
 v3_evening_cmd() {  # $1 = daily_post 명령(⑥ 에만, 그 밖엔 빈 값)
   bash scripts/v3_post.sh --date "$D" --basis evening --v3-db "$V3_DB" --model-root "$MDB/model" \
-     --builds-from "$HIST/${DPREV}_morning.json" ${SHADOW:+--shadow} ${1:+--v3-post-cmd "$1"} 6>&- 7>&-
+     --builds-from "$HIST/${DPREV}_morning.json" ${SHADOW:+--shadow} ${1:+--v3-post-cmd "$1"} \
+     ${DART_FROM:+--dart-builds-from "$DART_FROM"} 6>&- 7>&-
 }
 v3_noscores_cmd() {  # refill — 점수 두 표를 뺀 7표(T-38, QL-F2). 점수는 ⑥ 만 쓴다
   STEP_NOTE="no-scores"
   bash scripts/v3_post.sh --date "$D" --basis evening --v3-db "$V3_DB" --no-scores \
-     --builds-from "$HIST/${DPREV}_morning.json" ${SHADOW:+--shadow} 6>&- 7>&-
+     --builds-from "$HIST/${DPREV}_morning.json" ${SHADOW:+--shadow} ${DART_FROM:+--dart-builds-from "$DART_FROM"} 6>&- 7>&-
 }
 v3_morning_cmd() {
   bash scripts/v3_post.sh --date "$D" --basis morning --v3-db "$V3_DB" \
@@ -372,12 +377,12 @@ if [ -n "$DRY" ]; then
       echo "  4. $PY -m factor_inputs build --date $D --basis evening --root $MDB/factor_inputs --builds-from $HIST/${DPREV:-?}_morning.json --calendar-dir data/calendar$([ "$DART_RC" = 0 ] && echo " --dart-builds-from $MDB/dart/${D}_evening.json")"
       echo "  5. $PY -m model build --date $D --basis evening --root $MDB/model --fi-root $MDB/factor_inputs"
       echo "  6. $PY -m deliver model-daily --date $D --basis evening --model-root $MDB/model --trend-fallback-root data/model --fi-root $MDB/factor_inputs --out-root $MDB/deliver${SEND:+ --send}"
-      echo "  7. scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --model-root $MDB/model --builds-from $HIST/${DPREV:-?}_morning.json${SHADOW:+ --shadow}${POST_CMD:+ --v3-post-cmd '<설정 POSTCLOSE_V3_POST_CMD>'}" ;;
+      echo "  7. scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --model-root $MDB/model --builds-from $HIST/${DPREV:-?}_morning.json${SHADOW:+ --shadow}${POST_CMD:+ --v3-post-cmd '<설정 POSTCLOSE_V3_POST_CMD>'}$([ "$DART_RC" = 0 ] && echo " --dart-builds-from $MDB/dart/${D}_evening.json")" ;;
     refill)
       DPREV=$(prev_day "$D" 2>/dev/null)
       echo "  0. 체인 락 $CHAIN_LOCK (돌고 있는 close 가 끝날 때까지 기다림)"
       echo "  -  고정 판 $HIST/${DPREV:-?}_morning.json — 지금: $( [ -n "$DPREV" ] && board_ok "$DPREV" 2>&1 || echo 'D 계산 불가')"
-      echo "  1. 점수 없는 7표(⑥ 결과와 무관, T-38): scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --no-scores --builds-from $HIST/${DPREV:-?}_morning.json${SHADOW:+ --shadow}" ;;
+      echo "  1. 점수 없는 7표(⑥ 결과와 무관, T-38): scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --no-scores --builds-from $HIST/${DPREV:-?}_morning.json${SHADOW:+ --shadow}$([ "$(last_status postclose_dart)" = ok ] && echo " --dart-builds-from $MDB/dart/${D}_evening.json")   (인계는 그날 저녁 DART 판이 ok 일 때만)" ;;
     morning)
       echo "  -  고정 판 $HIST/${D}_morning.json — 지금: $(board_ok "$D" 2>&1)"
       echo "  1. scripts/v3_post.sh --date $D --basis morning --v3-db $V3_DB --builds-from $HIST/${D}_morning.json${SHADOW:+ --shadow}   (compat 만)"
@@ -576,6 +581,9 @@ refill_main() {
     return
   fi
   NOTE="점수 없는 7표 — 16:00 컷오프 종목은 21:05 원장 값, 장 마감 판이 없던 날은 그날 v3 T 행의 유일한 경로(T-38 · T-26)"
+  # 인계 자리의 정본은 daily.evening_dart.handoff_path(evening 과 같다)
+  [ "$(last_status postclose_dart)" = ok ] && DART_FROM="$MDB/dart/${D}_evening.json" &&
+    NOTE="$NOTE · 재무는 그날 저녁 DART 판(D13 R2)"
   echo "  T=$D D'=$DPREV $board · $NOTE"
   step postclose_v3_refill "21:05 원장 뒤 7표 반영" v3_noscores_cmd
 }

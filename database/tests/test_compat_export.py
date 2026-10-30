@@ -22,12 +22,14 @@ import json
 import re
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from compat import CompatEmptyError, CompatError, CompatSchemaError, export, quant_db
 from compat.__main__ import main as cli_main
 from conftest import _make_stage_tree
 from daily import calendar as daily_calendar
+from daily import evening_dart
 
 AS_OF = "20260923"
 D21, D22, D23 = dt.date(2026, 9, 21), dt.date(2026, 9, 22), dt.date(2026, 9, 23)
@@ -663,6 +665,83 @@ def test_financial_summary_wise_gross_profit_wins(roots, tmp_path: Path) -> None
     _run(roots, target, tables=["financial_summary"])
     assert _rows(target, "SELECT gross_profit FROM financial_summary "
                          "WHERE stock_code='005930' AND period='2025/12'") == [(1_000_000,)]
+
+
+# ── D13 R2 — 장 마감 판 financial_summary 의 DART 재무는 그날 저녁 DART 판(T)에서 ─────────────────────────
+# 저녁 DART 판은 모델 DB equity 루트에 DART 폐포를 e_ 판으로 짓는다(`daily.evening_dart`). 그 판의 fin_std 에는 D 날짜에 공개된
+# 정정 판본(자산 600조)이 있고, 연구 판(D' 고정)에는 없다. 연구 판은 수동 판(b_)이라 장 마감 이음매 검사 밖이다
+MANUAL_BUILD = "b_20260924T035911_573147Z"
+DART_BUILD = "e_20260923T094000_000000Z"
+
+
+@pytest.fixture(scope="module")
+def dart_board(tmp_path_factory) -> SimpleNamespace:
+    base = tmp_path_factory.mktemp("r2")
+    research = _make_roots(base / "research", eq_build=MANUAL_BUILD)
+    rows = _fin_std_rows() + [_fin_std_row("005930", dt.date(2025, 12, 31), D23, "20260923000001",
+                                           total_asset=600_000_000_000_000.0)]
+    _make_stage_tree(base / "dart", "fin_std", rows, build_id=DART_BUILD)
+    return SimpleNamespace(roots=research, droot=base / "dart" / "stage")
+
+
+def _dart_handoff(path: Path, root: Path, **over: object) -> Path:
+    """체인이 저녁 DART 판 뒤에 쓰는 인계 모양(`daily.evening_dart` — basis evening · 날짜 T). `over` 는 최상위 키."""
+    payload: dict[str, object] = {
+        "date": AS_OF, "basis": "evening", "equity_root": str(root),
+        "stage_root": str(path.parent / "dart_stage"), "stage_builds": {"stg_fin": DART_BUILD},
+        "equity_builds": {t: DART_BUILD for t in evening_dart.EQUITY_TABLES},
+        "health": {"stage": "ok", "equity": "ok"}, **over}
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_evening_financial_summary_reads_dart_from_the_evening_dart_board(dart_board, tmp_path: Path,
+                                                                          capsys) -> None:
+    """장 마감 판에 저녁 DART 인계를 주면 DART 열은 그날 저녁 DART 판(자산 600조 → 6,000,000 억원)에서, WISE 열과 나머지
+    기간은 그대로다. 기록의 원천 판 fin_std = 저녁 판 id. 인계가 없으면 D' 연구 판(5,000,000 억원). CLI 도 같다."""
+    dh = _dart_handoff(tmp_path / "dart.json", dart_board.droot)
+    plain, board = tmp_path / "plain.db", tmp_path / "board.db"
+    r0 = _run(dart_board.roots, plain, basis="evening", tables=["financial_summary"])
+    rc = cli_main(["export", "--date", AS_OF, "--basis", "evening", "--full",
+                   "--equity-root", str(dart_board.roots[0]), "--stage-root", str(dart_board.roots[1]),
+                   "--target", str(board), "--tables", "financial_summary", "--dart-builds-from", str(dh)])
+    assert rc == 0, capsys.readouterr().err
+    from compat.mappings import BY_TABLE
+    cols = list(BY_TABLE["financial_summary"].columns)
+    q = f"SELECT {', '.join(cols)} FROM financial_summary ORDER BY stock_code, period, period_type"
+    before, after = _rows(plain, q), _rows(board, q)
+    changed = {(a[0], a[1], cols[i]) for a, b in zip(before, after, strict=True)
+               for i in range(len(cols)) if a[i] != b[i]}
+    assert changed == {("005930", "2025/12", "total_assets"), ("005930", "2025/12", "roa")}
+    one = "SELECT total_assets FROM financial_summary WHERE stock_code='005930' AND period='2025/12'"
+    assert (_rows(plain, one), _rows(board, one)) == ([(5_000_000,)], [(6_000_000,)])
+    assert r0.tables["financial_summary"].sources["fin_std"] == MANUAL_BUILD
+    meta = json.loads(_rows(board, "SELECT tables FROM _compat_meta")[0][0])
+    assert meta["financial_summary"]["sources"]["fin_std"] == DART_BUILD
+
+
+@pytest.mark.parametrize(("case", "message"), [
+    ("morning", "장 마감 판"),
+    ("health", "health"),
+    ("research_root", "연구"),
+    ("gone_build", "모델 DB equity"),
+])
+def test_dart_handoff_refusals_stop_before_writing(dart_board, tmp_path: Path, case: str,
+                                                   message: str) -> None:
+    """저녁 DART 인계는 장 마감 판에만 · 그날 저녁 판 health ok · 모델 DB 루트(연구 루트 아님) · 그 판이 있을 때만 읽는다.
+    아니면 대상에 쓰기 전에 CompatError — D' 판으로 조용히 대신하지 않는다(P1). 검사는 fi 와 같은 함수다."""
+    over: dict[str, object] = {
+        "health": {"health": {"stage": "ok", "equity": "fail"}},
+        "research_root": {"equity_root": str(dart_board.roots[0])},
+        "gone_build": {"equity_builds": {t: "e_20260923T090000_000000Z" for t in evening_dart.EQUITY_TABLES}},
+    }.get(case, {})
+    dh = _dart_handoff(tmp_path / "dart.json", dart_board.droot, **over)
+    target = tmp_path / "quant.db"
+    with pytest.raises(CompatError, match=message):
+        _run(dart_board.roots, target, basis="morning" if case == "morning" else "evening",
+             tables=["financial_summary"], dart_builds_from=dh)
+    assert not target.exists() or _rows(target, "SELECT count(*) FROM sqlite_master "
+                                                "WHERE name='financial_summary'") == [(0,)]
 
 
 def test_financial_summary_takes_each_ep_from_its_own_latest_version(tmp_path: Path) -> None:

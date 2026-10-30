@@ -51,12 +51,14 @@
 #     — 주 모델을 scope@2.0 으로 바꾸기 전에 지은 날은 그날 모델 판에 scope@2.0 이 없어 scope@1.0 점수로 채운다.
 #   rc: 0 완료 · 2 반영 실패(crit — COMMIT 전이면 v3 본 파일 무변경) · 3 락 실패(warn) · 4 홈 이동 실패 ·
 #       5 인자 오류(warn — 스테이징 경로가 본 파일과 같은 파일, 아침 + post 명령, --no-scores + 아침,
-#         --no-scores + post 명령, --full 없는 --window-days 포함) ·
+#         --no-scores + post 명령, --full 없는 --window-days, 아침 + --dart-builds-from 포함) ·
 #       6 반영 완료, daily_post 실패 또는 날짜가 달라 미호출(warn)
 #   사용: v3_post.sh --date YYYYMMDD --basis evening|morning --v3-db PATH
 #                    [--v3-post-cmd CMD] [--shadow] [--allow-older] [--staging PATH] [--model-root PATH]
 #                    [--full [--window-days N]] [--builds-from PATH] [--consensus-asof YYYYMMDD] [--no-scores]
-#                    [--first-after-restore]
+#                    [--first-after-restore] [--dart-builds-from PATH]
+#     --dart-builds-from 은 저녁 DART 인계(data/model_db/dart/<T>_evening.json, D13 R2) — --basis evening 전용. ② compat
+#     export 에 그대로 넘겨 financial_summary 의 DART 재무를 그날 저녁 DART 판에서 읽는다(인계 검사는 compat — 거절이면 rc 2).
 #     --first-after-restore 는 v3 표 복원 뒤 다시 컷오버할 때의 첫 반영 전용이다(사람이 준다, CUTOVER_ROLLBACK §5).
 #     ③④ apply 에만 넘긴다. 첫 컷오버(V3-C)·평상시에는 주지 않는다(주면 rc 2).
 #     --full 은 손 복구(반영이 끊겨 사건 단계까지 창 밖으로 나갔거나 equity 원값이 바뀐 경우)용이다. 매일
@@ -84,7 +86,7 @@ POSTCLOSE_DB="${QL_POSTCLOSE_DB:-data/raw/postclose.db}"
 KIWOOM_DB="${QL_KIWOOM_DB:-data/raw/kiwoom.db}"
 V3_DB="${QL_V3_DB:-}"; POST_CMD="${QL_V3_POST_CMD:-}"
 D=""; BASIS=""; SHADOW=""; STAGING=""; FULL=""; BUILDS=""; CONS=""; OLDER=""; NOSCORES=""; WINDOW=""
-FIRST=""
+FIRST=""; DART_FROM=""
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 die_arg() {
   echo "v3_post 인자 오류: $1" >&2
@@ -119,6 +121,7 @@ while [ $# -gt 0 ]; do
     --full) FULL="--full"; shift ;;
     --window-days) need_val "$@"; WINDOW="$2"; shift 2 ;;
     --first-after-restore) FIRST=1; shift ;;
+    --dart-builds-from) need_val "$@"; DART_FROM="$2"; shift 2 ;;
     *) die_arg "모르는 인자 '$1'" ;;
   esac
 done
@@ -134,6 +137,8 @@ esac
   die_arg "--basis morning 에 daily_post 명령(--v3-post-cmd·QL_V3_POST_CMD)을 줬다 — 아침 재반영은 compat 만(T-31)"
 [ -n "$NOSCORES" ] && [ "$BASIS" != evening ] &&
   die_arg "--no-scores 는 --basis evening 전용이다 — 아침 반영 표는 T-34 가 정한다(T-38)"
+[ -n "$DART_FROM" ] && [ "$BASIS" != evening ] &&
+  die_arg "--dart-builds-from 은 --basis evening 전용이다 — 아침 재반영은 그날 아침 판이 이미 저녁 공시를 담는다(D13 R2)"
 [ -n "$WINDOW" ] && [ -z "$FULL" ] &&
   die_arg "--window-days 는 --full 과 함께만 쓴다 — 제자리 --full 창을 대상 v3 이력 안에 맞출 때(T-46)"
 [ -n "$NOSCORES" ] && [ -n "$POST_CMD" ] &&
@@ -189,6 +194,7 @@ step "② compat export --in-place" "$PY" -m compat export --date "$D" --basis "
     --equity-root "$EQUITY_ROOT" --stage-root "$STAGE_ROOT" --model-root "$MODEL_ROOT" \
     --target "$STAGING" --in-place --tables "$TABLES" $FULL ${CONS:+--consensus-asof "$CONS"} \
     ${WINDOW:+--window-days "$WINDOW"} ${BUILDS:+--builds-from "$BUILDS"} ${OLDER:+--allow-older} \
+    ${DART_FROM:+--dart-builds-from "$DART_FROM"} \
     ${LEDGERS[@]+"${LEDGERS[@]}"} &&
 step "③④ 게이트·반영" "$PY" -m compat apply --staging "$STAGING" --v3-db "$V3_DB" \
     --date "$D" --basis "$BASIS" --commit-flag "$CF" ${SHADOW:+--shadow} ${OLDER:+--allow-older} \

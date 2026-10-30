@@ -39,8 +39,9 @@ from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
-from equity import inputs
+from equity import handoff, inputs
 from stage import manifest, snapshot
+from stage.model import basis_of_build_id
 from stage.rules import LEDGER_FILES
 
 # 원장 → stage 순서(run_stage_all.sh ORDER 의 상대 순서 — 공개일 조회표가 먼저, 문서 캐시 표가 끝)
@@ -66,6 +67,54 @@ Runner = Callable[[Sequence[str]], int]
 def handoff_path(model_db: Path, t: str) -> Path:
     """저녁 DART 인계 — `<model_db>/dart/<T>_evening.json`(T = YYYYMMDD)."""
     return Path(model_db) / "dart" / f"{t}_{BASIS}.json"
+
+
+class HandoffRejected(ValueError):
+    """저녁 DART 인계를 받지 않는다 — 읽는 쪽(fi · compat)이 자기 오류로 감싸 rc 2 로 멈춘다."""
+
+
+@dataclass(frozen=True)
+class DartPin:
+    """저녁 DART 인계 — 판 목록과 그 판을 해석할 모델 DB equity 루트."""
+    pin: handoff.Handoff
+    equity_root: Path
+
+
+def load_handoff(path: Path, t: str, research_equity_root: Path, need: Sequence[str]) -> DartPin:
+    """저녁 DART 인계를 읽고 다음을 본다 — 하나라도 아니면 `HandoffRejected`(D' 판으로 대신하지 않는다, P1).
+    ① 그날 저녁 판(basis evening · date T, YYYYMMDD) ② stage·equity health ok ③ DART 폐포(`EQUITY_TABLES`) 표만 싣고
+    읽는 쪽이 쓰는 DART 표(`need`)가 다 있다 ④ 판이 저녁 판(e_) ⑤ equity 루트가 있고 연구 equity 루트가 아니다."""
+    try:
+        h = handoff.load(path)
+    except handoff.HandoffError as e:
+        raise HandoffRejected(str(e)) from e
+    where = f"인계={path}"
+    if h.basis != BASIS:
+        raise HandoffRejected(f"저녁 DART 인계가 저녁 판(basis=evening) 것이 아니다: {where} basis={h.basis}")
+    if h.date != t:
+        raise HandoffRejected(f"저녁 DART 인계 날짜가 판 날짜 T 와 다르다(그날 저녁 판만 읽는다): {where} "
+                              f"date={h.date} --date={t}")
+    if not h.health_ok:
+        raise HandoffRejected(f"저녁 DART 인계의 health 가 ok 가 아니다(그날 저녁 DART 판 실패): {where} "
+                              f"health={h.health} 기대={{'stage': 'ok', 'equity': 'ok'}}")
+    extra = sorted(set(h.equity_builds) - set(EQUITY_TABLES))
+    if extra:
+        raise HandoffRejected(f"저녁 DART 인계에 DART 폐포 밖 equity 표가 있다: {where} 표={extra} "
+                              f"— 폐포는 daily.evening_dart.EQUITY_TABLES {EQUITY_TABLES}")
+    missing = [x for x in need if x not in h.equity_builds]
+    if missing:
+        raise HandoffRejected(f"저녁 DART 인계에 읽는 쪽이 쓰는 DART 표가 없다: {where} 없는 표={missing}")
+    not_evening = {x: b for x, b in sorted(h.equity_builds.items()) if basis_of_build_id(b) != BASIS}
+    if not_evening:
+        raise HandoffRejected(f"저녁 DART 인계의 판이 저녁 판(e_)이 아니다: {where} {not_evening}")
+    if h.equity_root is None:
+        raise HandoffRejected(f"저녁 DART 인계에 equity_root 가 없다: {where}")
+    root = Path(h.equity_root)
+    if root.resolve() == Path(research_equity_root).resolve():
+        raise HandoffRejected(
+            f"저녁 DART 인계의 equity 루트가 연구 equity 루트다: {where} equity_root={root} — 저녁 판은 모델 DB "
+            "루트(data/model_db/equity)에 짓는다(연구 인계 이력에 저녁 판이 섞이지 않게)")
+    return DartPin(h, root)
 
 
 class BoardStatus(Enum):

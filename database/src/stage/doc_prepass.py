@@ -404,18 +404,20 @@ def _break_link(path: Path) -> None:
 
 def incremental(db: Path, docs_dir: Path, cache_root: Path, snapshot_id: str,
                 base_snapshot_id: str, workers: int = 3, d2_limit: float = 0.005,
-                d3_limit: float = 0.01) -> PrepassSummary:
+                d3_limit: float = 0.01, *, base_cache_root: Path | None = None) -> PrepassSummary:
     """base 캐시를 이어받아 새 스냅샷의 차집합만 파싱한다 — 전량 3~4.5h 대신 분 단위.
 
     ① base 샤드를 하드링크 ② `doc_store(zip_ok=1)` 과 base 캐시의 접수번호를 비교해 added·removed
     ③ added 를 파싱해 해당 샤드만 교체(쓰기 전에 링크를 끊는다 — base 캐시는 읽기 전용)
     ④ `input_hash`·D0 는 **새 스냅샷 기준으로 다시 계산**한다. `repair()` 처럼 이어받으면 어제 문서
     집합의 해시가 오늘 판에 실린다(F03). 이력은 `increments`, 캐시 파일 포맷은 그대로다.
+    `base_cache_root` 를 주면 base 를 그 루트에서 찾는다(기본 = cache_root) — 저녁 DART 판(D13 · N-62)이 모델 DB
+    stage 루트에 캐시를 세우며 연구 루트의 최신 ok 캐시를 기준으로 쓴다(같은 파일시스템이면 하드링크).
     """
     if snapshot_id == base_snapshot_id:
         raise ValueError(f"incremental needs a base other than itself: same snapshot "
                          f"{snapshot_id} (cache_root={cache_root})")
-    base = cache_root / base_snapshot_id
+    base = (cache_root if base_cache_root is None else base_cache_root) / base_snapshot_id
     base_summary = base / "summary.json"
     if not base_summary.exists():
         raise FileNotFoundError(f"incremental needs an existing base cache summary: "
@@ -539,6 +541,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="목록 문서만 재파싱해 캐시 행 교체 + summary 재집계")
     ap.add_argument("--base-snapshot", metavar="ID",
                     help="기준 캐시 스냅샷 id — 하드링크로 잇고 차집합만 파싱(일일 증분)")
+    ap.add_argument("--base-stage-root", type=Path, default=None,
+                    help="기준 캐시가 있는 stage 루트(기본 = --stage-root) — 저녁 DART 판은 연구 루트 캐시를 기준으로 쓴다")
     a = ap.parse_args(argv)
     db = a.snapshot_root / a.snapshot_id / "dart.db"
     cache_root = a.stage_root / "_tmp" / "doc"
@@ -555,7 +559,9 @@ def main(argv: list[str] | None = None) -> int:
         s = repair(db, a.docs_dir, cache_root, a.snapshot_id, lst, a.workers)
         print(f"repaired {len(lst)} documents; parser={s.parser_version} repairs={len(s.repairs)}")
     elif a.base_snapshot:
-        s = incremental(db, a.docs_dir, cache_root, a.snapshot_id, a.base_snapshot, a.workers)
+        s = incremental(db, a.docs_dir, cache_root, a.snapshot_id, a.base_snapshot, a.workers,
+                        base_cache_root=None if a.base_stage_root is None
+                        else a.base_stage_root / "_tmp" / "doc")
         inc = s.increments[-1]
         print(f"incremental from {a.base_snapshot}: added={inc['added']} removed={inc['removed']}")
     else:

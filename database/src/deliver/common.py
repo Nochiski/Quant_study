@@ -34,6 +34,19 @@ BASIS_NOTES: dict[str, str] = {
                    "컨센서스 기준일 = 기준일 당일")}
 
 
+# 장 마감 판 공시·재무 시점(D13 · N-62) — 캡션 둘째 줄 끝 · 엑셀 메타 '공시·재무' 줄. fi 판 기록에 저녁 DART 판
+# (`dart_board`)이 있으면 그날 저녁 공시까지, 없으면(DART 실패일 · D13 전 판) 전 거래일까지다. 엑셀 글이라 대시 없이 쓴다
+DART_NOTE_EVENING = "공시·재무 = 당일 저녁 공시까지 반영"
+DART_NOTE_PREVIOUS = "공시·재무 = 전 거래일까지(오늘 공시 미반영)"
+
+
+def dart_note(basis: str, fi_meta: Mapping[str, object]) -> str | None:
+    """장 마감 판(basis evening)의 공시·재무 시점 문구. 그 밖의 basis 는 None(아침·보강판은 그 판의 확정 공시다)."""
+    if basis != "evening":
+        return None
+    return DART_NOTE_EVENING if fi_meta.get("dart_board") else DART_NOTE_PREVIOUS
+
+
 @dataclass(frozen=True)
 class IndMeta:
     """지표 표시 규칙 — 라벨 · 배율(비율 → %) · 숫자 서식."""

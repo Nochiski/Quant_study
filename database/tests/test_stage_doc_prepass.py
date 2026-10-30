@@ -273,6 +273,28 @@ def test_incremental_hardlinks_untouched_shards_and_breaks_the_link_on_change(
     assert (root / "snap_base" / changed[0] / changed[1]).read_text().strip()   # 원본 행 그대로
 
 
+def test_incremental_takes_the_base_from_another_stage_root(tmp_path: Path) -> None:
+    """D13(N-62) — 저녁 DART 판은 모델 DB stage 루트에 캐시를 세우고 기준은 연구 루트의 최신 ok 캐시다. 다른 루트의
+    기준을 이어받아도 같은 루트 증분과 행이 같고, 손대지 않은 샤드는 그 기준과 하드링크이며, 기준 캐시는 그대로다."""
+    docs, db = _setup(tmp_path)
+    research, model_db = tmp_path / "research_cache", tmp_path / "model_db_cache"
+    doc_prepass.run(db, docs, research, snapshot_id="snap_base", workers=1)
+    db2 = _next_snapshot(tmp_path, docs, db)
+    ref = doc_prepass.incremental(db2, docs, research, "snap_ref", "snap_base", workers=1)
+    before = _cache_bytes(research / "snap_base")
+    inc = doc_prepass.incremental(db2, docs, model_db, "snap_next", "snap_base", workers=1,
+                                  base_cache_root=research)
+    assert (inc.n_docs, inc.tables, inc.status, inc.input_hash) == (ref.n_docs, ref.tables,
+                                                                    ref.status, ref.input_hash)
+    for t in doc_prepass.TABLES:
+        assert _rows(model_db / "snap_next", t) == _rows(research / "snap_ref", t), t
+    kept = ("stg_doc_meta", "year=2020_q1.jsonl")
+    assert ((model_db / "snap_next" / kept[0] / kept[1]).stat().st_ino
+            == (research / "snap_base" / kept[0] / kept[1]).stat().st_ino)
+    assert _cache_bytes(research / "snap_base") == before
+    assert not (model_db / "snap_base").exists()
+
+
 def test_incremental_with_no_diff_only_links_and_keeps_the_summary_equal(tmp_path: Path) -> None:
     docs, db = _setup(tmp_path)
     root = tmp_path / "cache"

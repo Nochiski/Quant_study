@@ -110,8 +110,8 @@ _HHMM_RE = re.compile(r"\d{1,2}:\d{2}")
 # 새 crit 제목을 만들면 테스트(`test_스크립트_crit_제목은_빠짐없이_분류된다`)가 깨진다 — 둘 중 한 곳에 넣는다.
 # 세는 목록 = 점수에 영향을 주는 경로
 COUNTED_CRIT_PREFIXES: tuple[str, ...] = (
-    # 장 마감 체인 — scripts/postclose_chain.sh close · refill · morning(PR-8)
-    "장 마감 체인 실패", "장 마감 재반영 실패", "장 마감 판 아침 잇기 실패", "장 마감 체인 설정 오류",
+    # 장 마감 체인 — scripts/postclose_chain.sh close · evening(D13 저녁 판) · refill · morning(PR-8)
+    "장 마감 체인 실패", "저녁 판 실패", "장 마감 재반영 실패", "장 마감 판 아침 잇기 실패", "장 마감 체인 설정 오류",
     # 연구 아침 빌드 — daily_build.sh(실패·중단·원장 락 날짜 바뀜) · build_morning.sh · build_chain.sh(확정판) ·
     # model_daily.sh(아침 fi·모델·엑셀)
     "daily_build ", "확정 빌드 시작 불가", "확정판 빌드 실패", "모델 단계 실패",
@@ -123,8 +123,10 @@ COUNTED_CRIT_PREFIXES: tuple[str, ...] = (
     # v3 반영 경로 감시 — 파이썬 `daily.cutover_watch`(QL-L)의 `TITLE_VIOLATION`·`TITLE_ERROR`(v3 수집 0·점수 쓰기 한 곳·
     # v3 크론, 판정 불가 포함). 셸 훑기 테스트에 안 잡혀 `test_컷오버_감시_crit_제목은_세는_목록이다` 가 상수로 대조한다
     "컷오버 감시 ",
-    # 워치독 — watchdog.sh postclose_board · morning_build(확정 빌드 · 확정판 엑셀 발송 장부)
-    "watchdog: HH:MM 까지 장 마감 판", "watchdog: HH:MM 까지 확정", "watchdog: 확정판 엑셀 발송",
+    # 워치독 — watchdog.sh postclose_board(D13 전 제목 '장 마감 판' · 뒤 '장 마감 수집·stage') · evening_board(D13) ·
+    # morning_build(확정 빌드 · 확정판 엑셀 발송 장부)
+    "watchdog: HH:MM 까지 장 마감 판", "watchdog: HH:MM 까지 장 마감 수집", "watchdog: 저녁 판",
+    "watchdog: HH:MM 까지 확정", "watchdog: 확정판 엑셀 발송",
 )
 # 제외 목록 = 세지 않고 '판정 밖 crit' 으로 보이기만(사용자 10-10 · N-43). 수집 결손이 점수에 닿으면 위 아침 빌드·
 # 장 마감 판 실패로 잡힌다

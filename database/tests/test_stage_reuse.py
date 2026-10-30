@@ -382,3 +382,21 @@ def test_부정_지문에서_sha256_을_빼면_같은_키_다른_원문을_재�
     monkeypatch.setattr(fold, "input_fingerprint", without_sha)
     _declined_morning(home, spy, capsys, _same_key_other_body)
     assert spy == [] and _current(home).reused_from is not None     # 가드 '같은 키 다른 원문' 이 FAIL
+
+
+@pytest.mark.parametrize("given", [True, False])
+def test_cli_baseline_option_reads_the_table_entry_from_another_root(home: Path, given: bool) -> None:
+    """D13(N-62) — 저녁 DART 판은 모델 DB stage 루트에 짓고 게이트 임계·빌드 입력은 연구 stage 루트의 baseline.json 을
+    쓴다(`--baseline`, 10-29 서버 미리 돌리기에서 stg_dividend G2 가 기본 한도 0 으로 걸렸다). 주면 그 파일의 표 항목이,
+    안 주면 지금처럼 `<stage-root>/baseline.json`(없으면 항목 없음)이 빌드 입력 `baseline_sha256` 에 실린다."""
+    entry = {"thresholds": {"G2": 0.5}}
+    other = home / "research_stage_baseline.json"
+    other.write_text(json.dumps({TABLE: entry}), encoding="utf-8")
+    extra = ("--baseline", str(other)) if given else ()
+    assert _run(home, "s_e", "evening", TABLE, *extra) == 0
+    seen = entry if given else None
+    want = hashlib.sha256(json.dumps(seen, sort_keys=True, ensure_ascii=False,
+                                     default=str).encode("utf-8")).hexdigest()
+    metas = [json.loads(m.read_text(encoding="utf-8")) for m in _evening_dir(home).glob("**/_meta.json")]
+    assert metas and {m["build_inputs"]["baseline_sha256"] for m in metas} == {want}
+

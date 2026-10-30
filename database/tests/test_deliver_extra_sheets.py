@@ -44,7 +44,7 @@ from deliver.extra_common import (
     span,
 )
 from deliver.qpack import XRefs, new_workbook
-from deliver.sources import SourceMissing, Sources, connect
+from deliver.sources import SourceMissing, Sources, connect, open_sources
 from openpyxl import Workbook, load_workbook
 from stage import manifest
 from test_deliver_excel import FRI, HOLIDAY, W38, W39, tick, write_fi_day, write_model_day
@@ -286,6 +286,30 @@ def con() -> Iterator[duckdb.DuckDBPyConnection]:
     c = connect()
     yield c
     c.close()
+
+
+def test_open_sources_reads_the_evening_dart_board_tables_from_its_roots(
+        roots: tuple[Path, Path], tmp_path: Path) -> None:
+    """D13(N-62) — fi 판 기록에 저녁 DART 판(`dart_board`)이 있으면 그 판의 표(Events 시트의 공시·지분 등)는 모델 DB
+    저녁 판 루트에서 그 판 id 로 읽고, 나머지 표(가격·수급·ETF 등)는 fi 판 기록의 루트(연구 판) 그대로다. 읽은 판
+    id 는 `used` 에 남는다(Meta). 저녁 판 루트에 그 판이 없으면 연구 판으로 대신하지 않는다(P1)."""
+    deq, dst = tmp_path / "dart_eq", tmp_path / "dart_st"
+    write_table(dst, "stg_disclosure", {"rcept_no": (S, ["x"])}, build_id="e_dart_st")
+    write_table(deq, "holder_daily", {"corp_code": (S, ["C1"])}, build_id="e_dart_eq")
+    meta: dict[str, object] = {
+        "equity_root": str(roots[0]), "stage_root": str(roots[1]),
+        "dart_board": {"equity_root": str(deq), "stage_root": str(dst),
+                       "equity_builds": {"holder_daily": "e_dart_eq"},
+                       "stage_builds": {"stg_disclosure": "e_dart_st", "stg_corp_map": "e_gone"}}}
+    src = open_sources(meta)
+    assert str(dst) in src.stage("stg_disclosure") and str(deq) in src.equity("holder_daily")
+    assert str(roots[0]) in src.equity("flow_daily")
+    assert src.used == {"stage/stg_disclosure": "e_dart_st", "equity/holder_daily": "e_dart_eq",
+                        "equity/flow_daily": "b_test_0001"}
+    with pytest.raises(SourceMissing):
+        src.stage("stg_corp_map")
+    plain = open_sources({k: v for k, v in meta.items() if k != "dart_board"})
+    assert str(roots[1]) in plain.stage("stg_disclosure")
 
 
 def book_with_refs() -> tuple[Workbook, XRefs]:

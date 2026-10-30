@@ -2,9 +2,16 @@
 # 장 마감 체인 — 컷오버 트랙 PR-8(정본 `docs/plans/2026-10-10-cutover-track.md` §3 P3 · T-2·T-3·T-4·T-7·T-26·T-29·
 #   T-31·T-34·T-35·T-37·T-38, DECISIONS N-35 · N-42 Q3·Q4). 15:41 장 마감 수집에서 v3 반영까지를 **완료 감지로** 잇는다
 #   (P9) — 대기 한도·재시도 시각이 없고, 고정 시각은 외부 공개 시각(KRX 정규장 수급 확정 15:40 → 15:41 크론)뿐이다.
-#   사용: scripts/postclose_chain.sh close   [--date T] [--dry-run]   15:41 KST 크론(T 기본 = 오늘 KST) — ⓪~⑥
+#   사용: scripts/postclose_chain.sh close   [--date T] [--dry-run]   15:41 KST 크론(T 기본 = 오늘 KST) — ⓪~②
+#         scripts/postclose_chain.sh evening --date T --dart-rc <rc> [--dry-run]
+#                                                         daily_evening.sh DART 갈래가 끝나면(갈래 안 훅) — ⓔ0~ⓔ3 → ③~⑥
 #         scripts/postclose_chain.sh refill  --date T  [--dry-run]    daily_evening.sh 가 21:05 키움 원장 커밋 뒤 — ⑦
 #         scripts/postclose_chain.sh morning --date D  [--dry-run]    daily_build.sh 가 확정판·모델 단계 뒤 — ⑧
+#
+#   D13(N-62 — 사용자 10-28 '15:55 에는 굳이 보낼 필요가 없다 · 만들지마 · 시간만 변경'): 장 마감 판은 하루 하나이고
+#   그날 18:05 DART 수집이 끝난 뒤에 짓는다. close 는 정규장 가격·수급 수집과 장 마감 stage 표까지만 한다(16:00 뒤 키움 일별
+#   값은 애프터마켓 체결가라 수집 시각은 못 옮긴다). ③~⑥ 은 evening 모드가 저녁 DART 판 뒤에 돈다 — 단계 이름·산출 자리
+#   (data/model_db, basis evening, _runs/<T>_evening.json, 발송 장부 (T, evening))는 그대로다.
 #
 #   close — 앞 단계가 실패하면 뒤 단계는 돌지 않는다. 산출은 data/model_db/ 아래만(T-3 · T-29)
 #     ⓪ T 가 휴장이면(판정 달력 daily.calendar) 수집 전에 info 로 끝난다(수집기는 휴장일에 rc 0 이라 체인이 먼저 본다).
@@ -24,7 +31,16 @@
 #             --snapshot-root data/model_db/snapshots(T-29 — 연구 루트에 지으면 연구 인계 stage_builds 에 섞인다), 이어서
 #             그 표만 건전성 stage.health --tables(리포트 logs/health/postclose_stage_<T>.json — 연구 판 리포트
 #             stage_<D>_<basis>.json 과 이름을 가른다. 일일 리포트가 그 이름을 연구 판으로 읽는다). 뒤에 장 마감 스냅샷
-#             GC(keep = snapshot.KEEP_DEFAULT, 현재 판 보호 — 기록형, 실패해도 체인은 간다)
+#             GC(keep = snapshot.KEEP_DEFAULT, 현재 판 보호 — 기록형, 실패해도 체인은 간다). close 는 여기서 끝난다
+#   evening — D13 저녁 판(갈래 1, 사용자 10-29). 체인 락은 기다린다(돌고 있는 close·손 실행 뒤에 잇는다 — P9, 시간 한도 없음)
+#     ⓔ0 T 가 휴장이면 info 로 끝난다(daily_evening 은 휴장에 갈래를 돌리지 않는다 — 손 실행 방어)
+#     ⓔ1 그날 close ② (런 로그 postclose_stage 마지막 런 ok)가 없으면 저녁 판 없음(info — 그날 crit·warn 은 close 가 이미
+#        냈다: 세션 예외일·수집 실패·고정 판 실패). 다음 날 아침 대체 발송(T-7)·21:05 뒤 점수 없는 7표 반영(T-38) 그대로
+#     ⓔ2 고정 판(D' 아침 인계 이력) 확인 — 아니면 crit, 빌드 락 없음(close ①' 와 같다)
+#     ⓔ3 빌드 락(기다림) → DART 갈래 rc 0 이면 저녁 DART 판 python -m daily.evening_dart build --date T(런 로그
+#        postclose_dart). 그 판이 실패하거나 DART rc ≠ 0 이면 곧바로 전 거래일 공시 판(지금 장 마감 판과 같은 입력 — DART
+#        정보 시점 D')으로 간다 — 런 로그 postclose_dart fallback · warn 한 줄(갈래 1: 대체 판 · 정정판 없음)
+#     ③~⑤ 그대로(fi 는 저녁 DART 판이 ok 면 --dart-builds-from <인계>) → 빌드 락 반납 → ⑥ v3(점수 포함, 하루 한 번)
 #     ③ fi    python -m factor_inputs build --date T --basis evening --root data/model_db/factor_inputs
 #             --builds-from data/deliver/history/<D'>_morning.json --calendar-dir data/calendar(D' = 직전 거래일, T-2).
 #             rc 0 이어도 판 manifest(_runs/<T>_evening.json) 게이트 중 metrics.warn 이 참인 것(FG5 — 후보 중 T-6 보류
@@ -97,25 +113,33 @@ CHAIN_LOCK="${QL_POSTCLOSE_CHAIN_LOCK_FILE:-/tmp/quant_ledger_postclose_chain.lo
 BUILD_LOCK="${QL_BUILD_LOCK_FILE:-/tmp/quant_ledger_build.lock}"
 V3_DB="${QL_V3_DB:-$HOME/kael-system-v3/data/quant.db}"
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
-usage() { echo "usage: postclose_chain.sh <close|refill|morning> [--date YYYYMMDD] [--dry-run]" >&2; exit 2; }
+usage() { echo "usage: postclose_chain.sh <close|evening|refill|morning> [--date YYYYMMDD] [--dart-rc N] [--dry-run]" >&2; exit 2; }
 
 MODE="${1:-}"
 [ $# -gt 0 ] && shift
-case "$MODE" in close|refill|morning) ;; *) usage ;; esac
-D=""; DRY=""
+case "$MODE" in close|evening|refill|morning) ;; *) usage ;; esac
+D=""; DRY=""; DART_RC=""
 while [ $# -gt 0 ]; do
   case "$1" in
     # 값 없는 --date 는 D 를 비운 채 넘긴다 — 아래 형식 검사가 rc 2 로 거부한다
     --date) if [ $# -ge 2 ]; then D="$2"; shift 2; else shift; fi ;;
+    --dart-rc) if [ $# -ge 2 ]; then DART_RC="$2"; shift 2; else shift; fi ;;
     --dry-run) DRY=1; shift ;;
     *) echo "unknown arg: $1" >&2; usage ;;
   esac
 done
+case "$MODE" in close) LABEL="장 마감 체인" ;; evening) LABEL="저녁 판" ;; refill) LABEL="장 마감 재반영" ;;
+  *) LABEL="장 마감 판 아침 잇기" ;; esac
 TODAY_KST=$(TZ=Asia/Seoul date +%Y%m%d)
 [ "$MODE" = close ] && D="${D:-$TODAY_KST}"
 if [[ ! "$D" =~ ^[0-9]{8}$ ]]; then
   # refill·morning 은 기본값이 없다 — 아침 잇기의 D 는 전날이라 오늘로 잘못 잡으면 다른 날 판을 대조·반영한다
   echo "--date YYYYMMDD 가 필요하다(mode=$MODE, 받은 값: '$D') — 아무 단계도 돌지 않았다" >&2
+  exit 2
+fi
+if [ "$MODE" = evening ] && [[ ! "$DART_RC" =~ ^[0-9]+$ ]]; then
+  # DART 갈래 rc 가 없으면 저녁 DART 판을 지을지 정할 수 없다 — 훅은 늘 넘긴다(daily_evening.sh branch_dart)
+  echo "evening 은 --dart-rc <DART 갈래 rc> 가 필요하다(받은 값: '$DART_RC') — 아무 단계도 돌지 않았다" >&2
   exit 2
 fi
 if [[ "$D" > "$TODAY_KST" ]]; then
@@ -235,8 +259,10 @@ print(f"  장 마감 스냅샷 {r.summary()} (보호 {len(protect)}판)")
 PY
 }
 fi_cmd() {
+  # shellcheck disable=SC2086  # reason: ${DART_FROM:+…} 는 있거나 없는 옵션 한 쌍이다
   $PY -m factor_inputs build --date "$D" --basis evening --root "$MDB/factor_inputs" \
-     --builds-from "$HIST/${DPREV}_morning.json" --calendar-dir data/calendar || return $?
+     --builds-from "$HIST/${DPREV}_morning.json" --calendar-dir data/calendar \
+     ${DART_FROM:+--dart-builds-from "$DART_FROM"} || return $?
   # 판정은 통과지만 사람이 봐야 하는 게이트 경고(metrics.warn — FG5 T-37 · FG-fresh N-47)를 판 manifest 에서 읽는다
   # (읽기는 postclose_conf.sh fi_gate_warns 한 곳 — 아침 model_daily 와 같다)
   local warns
@@ -247,6 +273,16 @@ fi_cmd() {
     echo "  fi 게이트 경고 — $STEP_NOTE"
   fi
   return 0
+}
+# 저녁 DART 판(D13 ⓔ3) — 실패는 전 거래일 공시 판으로 가는 갈래라 rc 1 로 모은다(step 이 fallback 으로 적는다)
+dart_cmd() {
+  $PY -m daily.evening_dart build --date "$D" && return 0
+  STEP_NOTE="저녁 DART 판 실패 — 전 거래일 공시 판으로(갈래 1)"
+  return 1
+}
+dart_skipped_cmd() {   # DART 갈래가 실패한 날 — 저녁 DART 판을 짓지 않는다
+  STEP_NOTE="DART 갈래 rc=$DART_RC — 저녁 DART 판을 짓지 않고 전 거래일 공시 판으로(갈래 1)"
+  return 1
 }
 model_cmd() { $PY -m model build --date "$D" --basis evening --root "$MDB/model" --fi-root "$MDB/factor_inputs"; }
 excel_cmd() {
@@ -315,14 +351,28 @@ if [ -n "$DRY" ]; then
       else
         echo "     조용한 손실 관문(K1-4a) — 차단 스위치 off(config/silent_loss.env), 관문을 부르지 않고 통과"
       fi
-      echo "  -  빌드 락 $BUILD_LOCK (쥐여 있으면 기다림) — 2~5 동안만"
+      echo "  -  빌드 락 $BUILD_LOCK (쥐여 있으면 기다림) — 2 동안만"
       echo "  2. $PY -m stage --table stg_flow_postclose_kiwoom --basis evening --stage-root $MDB/stage --snapshot-root $MDB/snapshots"
       echo "     $PY -m stage.health --stage-root $MDB/stage --basis evening --date $D --tables stg_flow_postclose_kiwoom --out logs/health/postclose_stage_${D}.json"
       echo "     스냅샷 GC $MDB/snapshots (keep ${KEEP:-?} = snapshot.KEEP_DEFAULT, 현재 판 보호 — 기록형)"
-      echo "  3. $PY -m factor_inputs build --date $D --basis evening --root $MDB/factor_inputs --builds-from $HIST/${DPREV:-?}_morning.json --calendar-dir data/calendar"
-      echo "  4. $PY -m model build --date $D --basis evening --root $MDB/model --fi-root $MDB/factor_inputs"
-      echo "  5. $PY -m deliver model-daily --date $D --basis evening --model-root $MDB/model --trend-fallback-root data/model --fi-root $MDB/factor_inputs --out-root $MDB/deliver${SEND:+ --send}"
-      echo "  6. scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --model-root $MDB/model --builds-from $HIST/${DPREV:-?}_morning.json${SHADOW:+ --shadow}${POST_CMD:+ --v3-post-cmd '<설정 POSTCLOSE_V3_POST_CMD>'}" ;;
+      echo "  -  fi·모델·엑셀·v3 는 그날 DART 갈래가 끝난 뒤 evening 모드(daily_evening.sh 훅, D13)" ;;
+    evening)
+      trading "$D"; TD=$?
+      DPREV=$(prev_day "$D" 2>/dev/null)
+      echo "  거래일 판정 rc=$TD · D'=${DPREV:-계산 불가} · DART 갈래 rc=$DART_RC"
+      echo "  0. 체인 락 $CHAIN_LOCK (돌고 있는 장 마감 체인이 끝날 때까지 기다림)"
+      echo "  1. 그날 close ② postclose_stage 마지막 런 — 지금: $(last_status postclose_stage 2>/dev/null || true)(ok 가 아니면 저녁 판 없음)"
+      echo "  2. 고정 판 $HIST/${DPREV:-?}_morning.json — 지금: $( [ -n "$DPREV" ] && board_ok "$DPREV" 2>&1 || echo 'D 계산 불가')"
+      echo "  -  빌드 락 $BUILD_LOCK (쥐여 있으면 기다림) — 3~5 동안만"
+      if [ "$DART_RC" = 0 ]; then
+        echo "  3. $PY -m daily.evening_dart build --date $D   (실패하면 전 거래일 공시 판으로)"
+      else
+        echo "  3. DART 갈래 rc=$DART_RC — 저녁 DART 판 없이 전 거래일 공시 판으로"
+      fi
+      echo "  4. $PY -m factor_inputs build --date $D --basis evening --root $MDB/factor_inputs --builds-from $HIST/${DPREV:-?}_morning.json --calendar-dir data/calendar$([ "$DART_RC" = 0 ] && echo " --dart-builds-from $MDB/dart/${D}_evening.json")"
+      echo "  5. $PY -m model build --date $D --basis evening --root $MDB/model --fi-root $MDB/factor_inputs"
+      echo "  6. $PY -m deliver model-daily --date $D --basis evening --model-root $MDB/model --trend-fallback-root data/model --fi-root $MDB/factor_inputs --out-root $MDB/deliver${SEND:+ --send}"
+      echo "  7. scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --model-root $MDB/model --builds-from $HIST/${DPREV:-?}_morning.json${SHADOW:+ --shadow}${POST_CMD:+ --v3-post-cmd '<설정 POSTCLOSE_V3_POST_CMD>'}" ;;
     refill)
       DPREV=$(prev_day "$D" 2>/dev/null)
       echo "  0. 체인 락 $CHAIN_LOCK (돌고 있는 close 가 끝날 때까지 기다림)"
@@ -339,7 +389,7 @@ fi
 
 # ── 락 ───────────────────────────────────────────────────────────────────────
 if [ "$MODE" != morning ]; then
-  exec 7>"$CHAIN_LOCK" || { scripts/notify.sh warn "장 마감 체인 락 열기 실패" "mode=$MODE D=$D | $CHAIN_LOCK 을 열 수 없다 — 아무 단계도 돌지 않았다"; exit 3; }
+  exec 7>"$CHAIN_LOCK" || { scripts/notify.sh warn "$LABEL 체인 락 열기 실패" "mode=$MODE D=$D | $CHAIN_LOCK 을 열 수 없다 — 아무 단계도 돌지 않았다"; exit 3; }
   if ! flock -n 7; then
     if [ "$MODE" = close ]; then
       echo "[$(kst)] 장 마감 체인이 이미 돈다($CHAIN_LOCK) — 같은 T 를 두 번 돌지 않는다. 건너뜀"
@@ -347,26 +397,26 @@ if [ "$MODE" != morning ]; then
       exit 3
     fi
     W0_KST=$(kst)
-    echo "[$W0_KST] 장 마감 체인 락 대기 시작 — 돌고 있는 close 가 끝나면 그 ⑥ 결과로 판정한다"
-    scripts/notify.sh info "장 마감 재반영 체인 락 대기" "T=$D 시작 $W0_KST — 장 마감 체인이 아직 돈다. 끝나면 이어서 판정한다"
+    echo "[$W0_KST] 장 마감 체인 락 대기 시작 — 돌고 있는 장 마감 체인이 끝나면 이어서 돈다"
+    scripts/notify.sh info "$LABEL 체인 락 대기" "T=$D 시작 $W0_KST — 장 마감 체인이 아직 돈다. 끝나면 이어서 판정한다"
     if ! flock 7; then
-      scripts/notify.sh warn "장 마감 재반영 락 실패" "T=$D | $CHAIN_LOCK 을 기다리다 flock 이 실패했다 — 재반영 안 함"
+      scripts/notify.sh warn "$LABEL 락 실패" "T=$D | $CHAIN_LOCK 을 기다리다 flock 이 실패했다 — 아무 단계도 돌지 않았다"
       exit 3
     fi
     echo "[$(kst)] 장 마감 체인 락 대기 끝 ($W0_KST ~)"
   fi
 fi
 BUILD_HELD=""
-if [ "$MODE" = close ] && [ -z "${QL_BUILD_LOCK_HELD:-}" ]; then
-  exec 6>"$BUILD_LOCK" || { scripts/notify.sh crit "장 마감 체인 실패: 빌드 락 열기(rc=3)" "T=$D | $BUILD_LOCK 을 열 수 없다 — 아무 단계도 돌지 않았다"; exit 3; }
+if { [ "$MODE" = close ] || [ "$MODE" = evening ]; } && [ -z "${QL_BUILD_LOCK_HELD:-}" ]; then
+  exec 6>"$BUILD_LOCK" || { scripts/notify.sh crit "$LABEL 실패: 빌드 락 열기(rc=3)" "T=$D | $BUILD_LOCK 을 열 수 없다 — 아무 단계도 돌지 않았다"; exit 3; }
 fi
-build_lock() {   # ②~⑤ 앞. 쥐여 있으면 끝날 때까지 기다린다(시간 한도 없음 — P9)
+build_lock() {   # close ② · evening ⓔ3~⑤ 앞. 쥐여 있으면 끝날 때까지 기다린다(시간 한도 없음 — P9)
   [ -n "${QL_BUILD_LOCK_HELD:-}" ] && return 0
   if ! flock -n 6; then
     local w0 w0_kst
     w0=$(date +%s); w0_kst=$(kst)
     echo "[$w0_kst] 빌드 락 대기 시작 — 다른 빌드(연구 빌드·배포·gc)가 $BUILD_LOCK 을 쥐고 있다(끝나면 이어서 돈다)"
-    scripts/notify.sh info "장 마감 체인 빌드 락 대기" \
+    scripts/notify.sh info "$LABEL 빌드 락 대기" \
       "T=$D 시작 $w0_kst — 다른 빌드가 $BUILD_LOCK 을 쥐고 있다. 끝나면 이어서 돈다(늦어짐은 16:30 워치독)"
     flock 6 || return 3
     echo "[$(kst)] 빌드 락 대기 끝 — $(( $(date +%s) - w0 ))초"
@@ -377,7 +427,8 @@ build_unlock() { [ -n "$BUILD_HELD" ] && flock -u 6; BUILD_HELD=""; return 0; }
 
 # ── 단계 실행 ─────────────────────────────────────────────────────────────────
 FAILED=""; FAILED_SOFT=""; WARNED=""; DONE=""; SKIP=""; SKIP_LEVEL=""; NOTE=""; NO_CLOSE=""
-ALT_RC=""; ALT_STATUS=""   # 그 단계의 rc 하나를 다른 상태로 기록한다 — 대조 1 → mismatch(warn)
+ALT_RC=""; ALT_STATUS=""   # 그 단계의 rc 하나를 다른 상태로 기록한다 — 대조 1 → mismatch(warn) · 저녁 DART 판 1 → fallback
+DART_FROM=""; FELL_BACK="" # 저녁 DART 인계(ok 일 때만) · 전 거래일 공시 판으로 간 사유(D13 갈래 1)
 step() {  # step <런 로그 source> <이름> <명령…> — source 한 행(running → 상태). 실패하면 FAILED 에 남기고 1
   local src="$1" name="$2" rid rc t0 status
   shift 2
@@ -403,6 +454,7 @@ runlog.finish(sys.argv[1], int(sys.argv[2]), status=sys.argv[3], detail=sys.argv
   case "$status" in
     ok) DONE="$DONE $name"; return 0 ;;
     mismatch) WARNED="${WARNED:+$WARNED, }$name($status)"; return 0 ;;
+    fallback) FELL_BACK="${STEP_NOTE:-$name rc=$rc}"; return 1 ;;
     *) FAILED="${FAILED:+$FAILED, }$name(rc=$rc)"; return 1 ;;
   esac
 }
@@ -463,6 +515,49 @@ close_main() {
   if step postclose_stage "stage 단독 빌드" stage_step; then
     echo "──── 장 마감 스냅샷 GC 시작 $(kst) ────"
     snapshot_gc || FAILED_SOFT="장 마감 스냅샷 GC"
+  fi
+  build_unlock
+  # fi·모델·엑셀·v3 는 그날 DART 갈래가 끝난 뒤 evening 모드(D13 — daily_evening.sh 훅)
+}
+
+evening_main() {
+  trading "$D"; local td=$?
+  if [ "$td" -eq 2 ]; then FAILED="거래일 판정(rc=2)"; return; fi
+  if [ "$td" -eq 1 ]; then
+    SKIP="휴장"; SKIP_LEVEL=info
+    echo "  T=$D 는 거래일이 아니다 — 저녁 판 없음"
+    return
+  fi
+  DPREV=$(prev_day "$D")
+  if [ -z "$DPREV" ]; then FAILED="직전 거래일 계산"; return; fi
+  echo "  T=$D D'=$DPREV · DART 갈래 rc=$DART_RC · $SWITCH ($CONF_NOTE)"
+  local stage_status
+  stage_status=$(last_status postclose_stage)
+  if [ "$stage_status" != ok ]; then
+    SKIP="장 마감 stage 판 없음"; SKIP_LEVEL=info
+    NOTE="그날 postclose_stage 마지막 런=${stage_status:-없음} — 저녁 판 없음(그날 경보는 close 가 냈다 · 다음 날 아침 대체 발송 T-7 · 21:05 뒤 점수 없는 7표 반영 T-38)"
+    echo "  $NOTE"
+    return
+  fi
+  local board
+  if ! board=$(board_ok "$DPREV" 2>&1); then
+    FAILED="고정 판 확인"
+    NOTE="$board — 빌드 락을 잡지 않았다. 그날 장 마감 판 없음(T-7 대체 발송 경로 · 21:05 뒤 점수 없는 7표 반영 T-38)"
+    echo "  $NOTE"
+    return
+  fi
+  echo "  $board"
+  if ! build_lock; then FAILED="빌드 락 대기(rc=3)"; return; fi
+  ALT_RC=1; ALT_STATUS=fallback
+  if [ "$DART_RC" = 0 ]; then
+    # 인계 자리의 정본은 daily.evening_dart.handoff_path(테스트가 같은지 본다)
+    step postclose_dart "저녁 DART 판" dart_cmd && DART_FROM="$MDB/dart/${D}_evening.json"
+  else
+    step postclose_dart "저녁 DART 판" dart_skipped_cmd
+  fi
+  ALT_RC=""; ALT_STATUS=""
+  if [ -z "$FAILED" ]; then
+    [ -n "$FELL_BACK" ] && echo "  전 거래일 공시 판으로 간다 — $FELL_BACK"
     step postclose_fi "fi 장 마감 판" fi_cmd \
       && step postclose_model "모델 장 마감 판" model_cmd \
       && step postclose_excel "엑셀" excel_cmd
@@ -516,6 +611,7 @@ T0=$(date +%s)
 echo "════ [$(kst)] postclose_chain $MODE D=$D · $SWITCH ════"
 case "$MODE" in
   close) close_main ;;
+  evening) evening_main ;;
   refill) refill_main ;;
   morning) morning_main ;;
 esac
@@ -523,7 +619,6 @@ echo "════ 종료 $(( ($(date +%s) - T0) / 60 ))분 failed=${FAILED:-없
 } >> "$LOG" 2>&1
 
 BODY="D=$D · $SWITCH | 완료:${DONE:- 없음}${NOTE:+ | $NOTE}${NO_CLOSE:+ | $NO_CLOSE} | 로그 $LOG"
-case "$MODE" in close) LABEL="장 마감 체인" ;; refill) LABEL="장 마감 재반영" ;; *) LABEL="장 마감 판 아침 잇기" ;; esac
 RC=0
 if [ -n "$FAILED" ]; then
   scripts/notify.sh crit "$LABEL 실패: $FAILED" "$BODY"
@@ -534,6 +629,8 @@ elif [ -n "$WARNED" ]; then
   scripts/notify.sh warn "$LABEL — 두 판 대조 불일치" "$BODY | 판정은 연속 창 집계($MDB/compare/${D}.json)"
   RC=1
 elif [ "$MODE" = close ]; then
+  scripts/notify.sh info "장 마감 수집·stage 준비 $(TZ=Asia/Seoul date +%H:%M)" "$BODY | $(( ($(date +%s) - T0) / 60 ))분"
+elif [ "$MODE" = evening ]; then
   scripts/notify.sh info "장 마감 판 준비 $(TZ=Asia/Seoul date +%H:%M)" "$BODY | $(( ($(date +%s) - T0) / 60 ))분"
 elif [ -n "$NO_CLOSE" ]; then
   scripts/notify.sh warn "$LABEL 완료 — 그날 장 마감 체인 런 없음" "$BODY"
@@ -542,6 +639,9 @@ else
 fi
 if [ -n "$CHAIN_WARN" ]; then
   scripts/notify.sh warn "$LABEL 게이트 경고" "D=$D | $CHAIN_WARN | 판정은 그대로 — 사람이 본다 | 로그 $LOG"
+fi
+if [ -n "$FELL_BACK" ]; then
+  scripts/notify.sh warn "$LABEL — 오늘 공시 미반영(전 거래일 공시로)" "D=$D | $FELL_BACK | 로그 $LOG"
 fi
 if [ -n "$FAILED_SOFT" ]; then
   scripts/notify.sh warn "$LABEL 기록형 단계 실패: $FAILED_SOFT" "판정에는 넣지 않는다 — $BODY"

@@ -695,6 +695,25 @@ def test_evening_pinned_other_equity_builds_is_unexplained(same_pair, tmp_path) 
     assert u["columns"] == ["equity_builds"]
 
 
+@pytest.mark.parametrize(("dart_tables", "unexplained"), [(("fin_std",), False), ((), True)],
+                         ids=["dart_board_table", "plain_missing_table"])
+def test_evening_dart_board_tables_are_left_out_of_the_d_prime_builds_check(
+        same_pair, tmp_path, dart_tables: tuple[str, ...], unexplained: bool) -> None:
+    """D13(N-62) — 저녁 DART 판을 읽은 장 마감 판은 DART 표를 그 판에서 읽어 `equity_builds` 에 싣지 않는다. 판 기록
+    `dart_board` 에 있는 표는 연구 판 D' 판 목록과 맞추지 않고, 그 밖의 표가 빠지면 지금처럼 미설명이다."""
+    ev, rs = _copy_pair(same_pair, tmp_path)
+    rd_path = rs / "factor_inputs" / "_runs" / f"{DP_S}_morning.json"
+    rd_builds = json.loads(rd_path.read_text(encoding="utf-8"))["equity_builds"]
+    _edit_json(rd_path, equity_builds={**rd_builds, "fin_std": EQ_D})
+    _edit_json(ev / "factor_inputs" / "_runs" / f"{T_S}_evening.json",
+               dart_board={"equity_root": str(tmp_path / "dart_eq"), "stage_root": None,
+                           "equity_builds": {t: "e_20260928T093000_000000Z" for t in dart_tables},
+                           "stage_builds": {}})
+    assert run_cli((ev, rs), tmp_path) == (1 if unexplained else 0)
+    boards = [u for u in report(tmp_path)["unexplained"] if u["table"] == "boards"]
+    assert bool(boards) is unexplained
+
+
 # ── T 행 종가·수급 상한·컷오프(41종목 판) ────────────────────────────────────
 def _variant(tmp: Path, research: dict[str, list[dict[str, object]]],
              mutate: Callable[[dict[str, Any], dict[str, Any]], None],

@@ -1602,6 +1602,9 @@ def test_postclose_run_in_model_db_leaves_operating_roots_alone(
     book = load_workbook(xlsx)
     meta = dict(_meta_pairs(book))
     assert meta["basis"] == "evening" and meta["데이터 성격"] == POSTCLOSE_NOTE
+    # D13 — 저녁 DART 판이 없는 판(fi 판 기록 dart_board 없음)은 전 거래일 공시까지라고 적는다(캡션도 같은 말)
+    assert meta["공시·재무"] == "공시·재무 = 전 거래일까지(오늘 공시 미반영)"
+    assert "전 거래일까지(오늘 공시 미반영)" in out and "공시·재무" not in morning_meta
     assert meta["전일 비교 데이터"] == "전일 데이터 없음"           # 변화 열도 비운다(I-2)
     assert str(book["Score"]["A4"].value).startswith("기준일: 2026-09-28 장 마감 데이터")
     assert meta["순위 흐름 날짜"] == "2026-09-28 ~ 2026-09-28 · 1개"

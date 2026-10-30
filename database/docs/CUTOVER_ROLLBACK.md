@@ -122,6 +122,13 @@ V3="$HOME/kael-system-v3/data/quant.db"
   - 되돌린 다음 날 아침에는 전날 장 마감 판이 이미 나갔어도 아침판이 한 번 더 나간다. basis 가 다른 별개 엑셀이고 장부도 따로라 막지 않는다.
   - 08:10 아침판이 '짓기만'으로 끝난 뒤 그날 10:30 전에 되돌렸으면, 그날 10:30 워치독 crit '확정판 엑셀 발송 기록 없음' 은 예상된 것이다(워치독이 아침 장부만 보는데 그 D 는 장 마감 판이 보냈다).
   - 확인: 아래 '성공 확인'의 `발송 off` 가 곧 전환 전이다. 다음 날 아침 장부에 그 D 의 basis=morning 줄이 생기고, 10:30 워치독이 정상 info 를 낸다.
+- **D13(N-62) 뒤 — 발송은 저녁 판이 한다**: 장 마감 판(fi·모델·엑셀·v3)은 15:41 `close` 가 아니라 18:05 DART 갈래 끝의
+  `postclose_chain.sh evening` 이 짓는다. 스위치 뜻은 그대로다(그림자면 evening 도 미발송·`--shadow`). 확인 dry-run 은
+  `bash scripts/postclose_chain.sh evening --date <오늘> --dart-rc 0 --dry-run`.
+  - **서버 전용 설정이 이긴다**: `local/postclose_chain.env`(배포가 덮지 않는 자리, D9)를 저장소 설정 다음에 읽어 마지막 대입이
+    이긴다. 되돌릴 때 같은 키가 그 파일에 있으면 그 줄을 먼저 고친다 — 저장소 값만 바꿔 배포하면 안 바뀐다.
+  - **15:55 발송으로 되돌리기**는 스위치가 아니라 코드 재배포다: D13 직전 rev 작업 트리에서
+    `scripts/deploy.sh --apply --allow-rollback <D13 rev 40자>` — 그날 15:41 부터 close 가 다시 ③~⑥ 을 돈다.
 - **QL-Q 연결(QL-Q2 스위치, T-48)**: 같은 배포로 `config/calendar_export.env` 의 `CALENDAR_EXPORT_V3=0` 을 내보낸다 — 06:00 체인이 v3 `data/.kis_holidays.json` 을 더 쓰지 않고, 06:00·18:05 v3 사본 동기화(병행 대조)가 다시 돈다. 4-3 에서 v3 휴장 쓰기(V3-D 크론 2줄·되살린 daily_all 의 `calendar_refresh`)를 되살리기 전에 꺼져 있어야 한다 — 켜진 채면 이 파일을 쓰는 주체가 둘이 된다.
 - **성공 확인**
   - `bash scripts/postclose_chain.sh close --dry-run | head -1` 이 `켜짐 · 발송 off · v3 shadow` 를 보인다.

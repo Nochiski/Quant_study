@@ -95,6 +95,16 @@ python -m factor_inputs build --date <T> --basis evening --root data/model_db/fa
   그날 수집이 빠지면 lag 1(허용 — 옛 장 마감 판과 같은 시점), 이틀 빠지면 FAIL. 월요일·연휴 다음 날은 고정 판이
   토요일·연휴 첫날 수집분이라 정상이 lag 1 이다.
 - 산출은 `_runs/<T>_evening.json` · `latest_evening.json`, 판 id 접두 `e_`.
+- **저녁 DART 판(D13 · N-62, fi1.11.0)**: 장 마감 판은 그날 18:05 DART 수집이 끝난 뒤 한 번 짓는다. 체인이 그날 공시로
+  DART 폐포를 모델 DB 루트에 다시 지어(`daily.evening_dart` — stage 16표 · equity 6표, 판 id `e_`) 인계
+  `data/model_db/dart/<T>_evening.json` 을 쓰면, fi 는 `--dart-builds-from` 으로 그 인계를 읽어 DART 표
+  (`DART_EQUITY_SOURCES` — corp · disclosure_version · fin_std · dividend_event · audit_opinion)를 그 판에서 읽고
+  **DART 정보 시점 dart_asof = T** 로 감사·공시 판본·fin_std 분기·배당·4Q 파생 공개일을 자른다. 위 asof(D') 와
+  wise_asof(T)는 그대로다 — 가격·유니버스·WICS·추정기관 수·기업행위는 D'. 인계는 그날(T) 저녁 판 · health ok ·
+  폐포 표만 · `e_` 판 · 연구 루트 아님이어야 하고 아니면 rc 2(D' 판으로 대신하지 않는다, P1). FG1 의 DART 행 상한도
+  dart_asof 다. 인계가 없는 날(DART 실패 — 갈래 1)은 dart_asof = asof = D' 라 SQL 이 위 그대로다. 판 manifest 에
+  `dart_asof` · `dart_board`(인계 전체 — 엑셀 Events 시트가 같은 판을 읽는다)를 남기고 `equity_builds` 는 고정한 연구
+  판에서 읽은 표만 싣는다(두 판 대조가 이 목록을 연구 판 D' 와 맞춘다).
 
 ### 2-2. 장 마감 판 T 행 · 당일 기업행위 · 후보 커버리지(컷오버 PR-5 · fi1.7.0)
 
@@ -230,10 +240,10 @@ data/factor_inputs/
 - 원천 판은 MANIFEST `current_build` 로 해석한다(맨 glob 금지). equity `_pinned/` 처럼 하드링크로
   고정하지 않는다 — 산출 자체가 창을 자른 사본이고 equity 루트에 쓰지 않기 위해서다. 읽은 판 id 는
   표별 `BuildRecord.inputs` 와 판 manifest `equity_builds`·`stage_builds`·`tables.<표>.inputs` 에 남는다.
-- 판 manifest 필드: `layer · status · build_id · date · basis · asof · wise_asof · generated_at · rules_version ·
-  equity_root · stage_root · equity_builds · stage_builds · postclose_stage_root · postclose_builds ·
+- 판 manifest 필드: `layer · status · build_id · date · basis · asof · wise_asof · dart_asof · generated_at · rules_version ·
+  equity_root · stage_root · equity_builds · stage_builds · dart_board · postclose_stage_root · postclose_builds ·
   window · universe_rule · min_eligible · coverage · n_lapsed_dropped · tables · gaps · gates ·
-  elapsed_s`(`postclose_*` 는 장 마감 판만, 아침판 null).
+  elapsed_s`(`postclose_*` 는 장 마감 판만, 아침판 null · `dart_board` 는 저녁 DART 인계를 읽은 장 마감 판만, 그 밖 null).
 
 ## 4. 표별 원천 · 창 · 단위
 

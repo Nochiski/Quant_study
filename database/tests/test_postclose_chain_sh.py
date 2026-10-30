@@ -108,8 +108,10 @@ SHADOW_CONF = ("POSTCLOSE_ENABLED=1\nPOSTCLOSE_SEND=0\nPOSTCLOSE_V3=shadow\n"
                "POSTCLOSE_V3_POST_CMD=''\n")
 LIVE_CONF = ("POSTCLOSE_ENABLED=1\nPOSTCLOSE_SEND=1\nPOSTCLOSE_V3=in-place\n"
              "POSTCLOSE_V3_POST_CMD='echo post'\n")
-STEP_MODULES = ["daily.postclose", "stage", "stage.health", "factor_inputs", "model", "deliver",
-                "v3_post.sh"]
+# D13(N-62) — 15:41 close 는 수집·stage 까지, fi~v3 는 저녁 DART 판 뒤 evening 이 돈다
+CLOSE_MODULES = ["daily.postclose", "stage", "stage.health"]
+EVENING_MODULES = ["daily.evening_dart", "factor_inputs", "model", "deliver", "v3_post.sh"]
+DART_HANDOFF = f"data/model_db/dart/{T}_evening.json"
 H_PREV = f"data/deliver/history/{D_PREV}_morning.json"
 H_T = f"data/deliver/history/{T}_morning.json"
 
@@ -213,19 +215,26 @@ def _chain(home: Path, *args: str, **env: str) -> Run:
                _read(root / "notify.txt").splitlines(), _runs(root)[seeded:], log)
 
 
-# ── close: 15:41 장 마감 체인 ①~⑥ ───────────────────────────────────────────────
+def _evening_chain(home: Path, *args: str, dart_rc: str = "0", stage: str | None = "ok",
+                   **env: str) -> Run:
+    """저녁 판(D13) — 그날 close ② 런 로그(`stage` 상태, None 이면 없음)를 심고 evening 을 돌린다."""
+    root = home / "quant-ledger"
+    if stage is not None:
+        _seed(root, T, "postclose_stage", stage)
+    return _chain(home, "evening", "--date", T, "--dart-rc", dart_rc, *args, **env)
 
-def test_close_runs_every_step_in_order_and_logs_each_step(tmp_path: Path) -> None:
-    """정상 경로 — 수집 → 고정 판 확인 → stage 단독 빌드·건전성 → fi → 모델 → 엑셀 → v3 그림자 반영.
 
-    단계마다 런 로그 source 한 행(ok)이 `daily.runlog.POSTCLOSE_STEPS` 순서로 남고, 준비 info 1건.
-    산출 루트는 전부 data/model_db(T-3·T-29), fi 와 v3 반영은 같은 D' 아침 인계 이력으로 고정한다(T-2 · P1).
-    엑셀은 1M 비교 판 대체 루트로 연구 모델 루트 data/model 을 받는다(T-50 — 읽기만).
+# ── close: 15:41 장 마감 체인 ①~② ───────────────────────────────────────────────
+
+def test_close_collects_and_builds_the_postclose_stage_only(tmp_path: Path) -> None:
+    """정상 경로 — 수집 → 고정 판 확인 → stage 단독 빌드·건전성에서 끝난다(D13 — fi~v3 는 저녁 판).
+
+    런 로그는 postclose_stage 한 행(ok), 준비 info 1건. 산출 루트는 data/model_db(T-3·T-29).
     """
     _root(tmp_path)
     r = _chain(tmp_path, "close", "--date", T)
     assert r.rc == 0, r.out + r.log
-    assert r.mods == STEP_MODULES
+    assert r.mods == CLOSE_MODULES
     assert r.call("daily.postclose") == f"daily.postclose --date {T}"
     stage = r.call("stage")
     assert ("--table stg_flow_postclose_kiwoom --basis evening --stage-root data/model_db/stage "
@@ -234,9 +243,31 @@ def test_close_runs_every_step_in_order_and_logs_each_step(tmp_path: Path) -> No
     assert "--stage-root data/model_db/stage --basis evening" in health
     assert f"--date {T}" in health and "--tables stg_flow_postclose_kiwoom" in health
     assert f"--out logs/health/postclose_stage_{T}.json" in health
+    assert r.runs == [(s, "ok") for s in runlog.POSTCLOSE_CLOSE_STEPS]
+    assert r.titles("info")[-1].startswith("장 마감 수집·stage 준비 ")
+    assert r.titles("crit") == [] and r.titles("warn") == []
+
+
+# ── evening: 저녁 DART 판 뒤 ③~⑥ (D13 · N-62) ───────────────────────────────────
+
+def test_evening_builds_the_dart_board_then_fi_to_v3(tmp_path: Path) -> None:
+    """정상 경로 — 저녁 DART 판 → fi(그 인계로 DART 정보 시점 T) → 모델 → 엑셀 → v3 그림자 반영.
+
+    단계마다 런 로그 한 행(ok): postclose_dart 뒤 `daily.runlog.POSTCLOSE_EVENING_STEPS` 순서. 준비 info 1건.
+    fi 와 v3 반영은 같은 D' 아침 인계 이력으로 고정하고(T-2 · P1), 엑셀은 1M 비교 판 대체 루트로 연구 모델 루트
+    data/model 을 받는다(T-50 — 읽기만). 인계 자리는 `daily.evening_dart.handoff_path` 와 같다.
+    """
+    from daily import evening_dart
+
+    _root(tmp_path)
+    r = _evening_chain(tmp_path)
+    assert r.rc == 0, r.out + r.log
+    assert r.mods == EVENING_MODULES
+    assert r.call("daily.evening_dart") == f"daily.evening_dart build --date {T}"
+    assert DART_HANDOFF == str(evening_dart.handoff_path(Path("data/model_db"), T))
     assert r.call("factor_inputs") == (
         f"factor_inputs build --date {T} --basis evening --root data/model_db/factor_inputs "
-        f"--builds-from {H_PREV} --calendar-dir data/calendar")
+        f"--builds-from {H_PREV} --calendar-dir data/calendar --dart-builds-from {DART_HANDOFF}")
     assert r.call("model") == (f"model build --date {T} --basis evening --root data/model_db/model "
                                "--fi-root data/model_db/factor_inputs")
     assert r.call("deliver") == (
@@ -246,47 +277,136 @@ def test_close_runs_every_step_in_order_and_logs_each_step(tmp_path: Path) -> No
     assert r.call("v3_post.sh") == (
         f"v3_post.sh --date {T} --basis evening --v3-db {tmp_path / 'v3_quant.db'} "
         f"--model-root data/model_db/model --builds-from {H_PREV} --shadow | QL_V3_POST_CMD=unset")
-    assert r.runs == [(s, "ok") for s in runlog.POSTCLOSE_STEPS]
+    assert r.runs == [(runlog.POSTCLOSE_DART, "ok"),
+                      *((s, "ok") for s in runlog.POSTCLOSE_EVENING_STEPS)]
     assert r.titles("info")[-1].startswith("장 마감 판 준비 ")
     assert r.titles("crit") == [] and r.titles("warn") == []
 
 
-def test_build_lock_covers_stage_to_excel_only(tmp_path: Path) -> None:
-    """체인 락(fd 7)은 처음에 비대기로, 빌드 락(fd 6)은 ②~⑤ 동안만 — 수집(①)은 빌드 락 밖이라 16:00 창이
-    빌드·배포에 묶이지 않고(T-4), v3 반영(⑥)은 빌드 락을 놓은 뒤다."""
+@pytest.mark.parametrize(("dart_rc", "board_rc", "why"), [
+    ("0", "1", "저녁 DART 판 실패"),
+    ("0", "2", "저녁 DART 판 실패"),
+    ("2", None, "DART 갈래 rc=2"),
+])
+def test_evening_falls_back_to_the_d_prime_board(tmp_path: Path, dart_rc: str, board_rc: str | None,
+                                                 why: str) -> None:
+    """갈래 1(사용자 10-29) — 저녁 DART 판이 실패하거나 그날 DART 갈래가 실패하면 곧바로 전 거래일 공시 판(지금
+    장 마감 판과 같은 입력 — fi 에 저녁 DART 인계 없음)을 지어 보낸다. postclose_dart 는 fallback(warn), 판 단계는 ok,
+    warn 1건 · 준비 info 1건. DART 갈래가 실패한 날은 저녁 DART 판을 부르지 않는다."""
+    _root(tmp_path)
+    env = {} if board_rc is None else {"RC_daily_evening_dart": board_rc}
+    r = _evening_chain(tmp_path, dart_rc=dart_rc, **env)
+    assert r.rc == 0, r.out + r.log
+    assert r.mods == (EVENING_MODULES if board_rc is not None else EVENING_MODULES[1:])
+    assert "--dart-builds-from" not in r.call("factor_inputs")
+    assert r.runs == [(runlog.POSTCLOSE_DART, "fallback"),
+                      *((s, "ok") for s in runlog.POSTCLOSE_EVENING_STEPS)]
+    assert r.titles("warn") == ["저녁 판 — 오늘 공시 미반영(전 거래일 공시로)"]
+    assert why in r.notify[-1] or any(why in n for n in r.notify)
+    assert r.titles("info")[-1].startswith("장 마감 판 준비 ")
+    assert r.titles("crit") == []
+
+
+@pytest.mark.parametrize("stage", [None, "failed", "running"])
+def test_evening_without_the_close_stage_builds_nothing(tmp_path: Path, stage: str | None) -> None:
+    """그날 close ② 가 ok 가 아니면(세션 예외일·수집 실패·고정 판 실패) 저녁 판 없음 — 그날 경보는 close 가 냈으니
+    info 만, 빌드 락도 잡지 않는다. 다음 날 아침 대체 발송(T-7)이 그대로 맡는다."""
+    _root(tmp_path)
+    r = _evening_chain(tmp_path, stage=stage)
+    assert r.rc == 0, r.out + r.log
+    assert r.mods == [] and r.runs == []
+    assert not any(c.startswith("flock") and " 6" in c for c in r.calls)
+    assert r.titles("info") == ["저녁 판 장 마감 stage 판 없음 — 건너뜀"]
+    assert r.titles("crit") == [] and r.titles("warn") == []
+
+
+def test_evening_missing_pinned_board_fails_before_the_build_lock(tmp_path: Path) -> None:
+    """고정 판(D' 아침 인계 이력)이 그 사이 없어졌으면 빌드 락을 잡지 않고 crit(close ①' 와 같다)."""
+    root = _root(tmp_path)
+    (root / H_PREV).unlink()
+    r = _evening_chain(tmp_path)
+    assert r.rc == 2, r.out + r.log
+    assert r.mods == []
+    assert not any(c.startswith("flock") and " 6" in c for c in r.calls)
+    assert r.titles("crit") == ["저녁 판 실패: 고정 판 확인"]
+
+
+def test_evening_on_a_holiday_skips(tmp_path: Path) -> None:
+    """휴장일 손 실행은 아무것도 하지 않는다(info)."""
+    _root(tmp_path)
+    r = _chain(tmp_path, "evening", "--date", HOLIDAY, "--dart-rc", "0")
+    assert r.rc == 0, r.out + r.log
+    assert r.mods == []
+    assert r.titles("info") == ["저녁 판 휴장 — 건너뜀"]
+
+
+def test_build_lock_covers_stage_only_at_close_and_dart_to_excel_in_the_evening(
+        tmp_path: Path) -> None:
+    """체인 락(fd 7)은 처음에, 빌드 락(fd 6)은 close ② 동안 · evening 저녁 DART 판~⑤ 동안만 — 수집(①)은 빌드 락
+    밖이라 16:00 창이 빌드·배포에 묶이지 않고(T-4), v3 반영(⑥)은 빌드 락을 놓은 뒤다."""
     _root(tmp_path)
     r = _chain(tmp_path, "close", "--date", T)
     assert r.rc == 0, r.out + r.log
+    pick = [c for c in r.calls if c.startswith(("flock", "daily.postclose", "stage "))]
+    assert [c.split(" --")[0] for c in pick] == ["flock -n 7", "daily.postclose", "flock -n 6",
+                                                 "stage", "flock -u 6"]
+    (tmp_path / "quant-ledger/calls.txt").unlink()
+    r = _evening_chain(tmp_path)
+    assert r.rc == 0, r.out + r.log
     order = [c.split(" | ")[0] if c.startswith("v3_post") else c for c in r.calls]
-    pick = [c for c in order if c.startswith(("flock", "daily.postclose", "stage ", "deliver",
-                                              "v3_post"))]
+    pick = [c for c in order if c.startswith(("flock", "daily.evening_dart", "deliver", "v3_post"))]
     assert [c.split(" --")[0] for c in pick] == [
-        "flock -n 7", "daily.postclose", "flock -n 6", "stage", "deliver model-daily",
+        "flock -n 7", "flock -n 6", "daily.evening_dart build", "deliver model-daily",
         "flock -u 6", "v3_post.sh"]
+
+
+def test_evening_waits_for_a_running_chain(tmp_path: Path) -> None:
+    """체인 락이 쥐여 있으면(손으로 돌린 close 등) 건너뛰지 않고 기다렸다 잇는다(P9) — 대기 info 1건."""
+    _root(tmp_path)
+    r = _evening_chain(tmp_path, FLOCK_CHAIN_RC="1")
+    assert r.rc == 0, r.out + r.log
+    assert [c for c in r.calls if c.startswith("flock")][:2] == ["flock -n 7", "flock 7"]
+    assert r.mods == EVENING_MODULES
+    assert "저녁 판 체인 락 대기" in r.titles("info")
 
 
 @pytest.mark.parametrize(("module", "rc", "source", "name"), [
     ("stage", 1, "postclose_stage", "stage 단독 빌드"),
     ("stage.health", 2, "postclose_stage", "stage 단독 빌드"),
+])
+def test_close_step_failure_is_one_crit(tmp_path: Path, module: str, rc: int, source: str,
+                                        name: str) -> None:
+    """close ② 가 실패하면 런 로그 failed · crit 1건 — 그날 저녁 판은 없다(evening 이 이 런 로그를 본다)."""
+    _root(tmp_path)
+    r = _chain(tmp_path, "close", "--date", T, **{f"RC_{module.replace('.', '_')}": str(rc)})
+    assert r.rc == 2, r.out + r.log
+    assert r.mods == CLOSE_MODULES[:CLOSE_MODULES.index(module) + 1]
+    assert r.runs == [(source, "failed")]
+    assert r.titles("crit") == [f"장 마감 체인 실패: {name}(rc={rc})"]
+    assert "flock -u 6" in r.calls       # 실패해도 빌드 락은 놓는다
+
+
+@pytest.mark.parametrize(("module", "rc", "source", "name"), [
     ("factor_inputs", 1, "postclose_fi", "fi 장 마감 판"),
     ("model", 2, "postclose_model", "모델 장 마감 판"),
     ("deliver", 3, "postclose_excel", "엑셀"),
     ("v3_post.sh", 2, "postclose_v3", "v3 반영"),
     ("v3_post.sh", 6, "postclose_v3", "v3 반영"),
 ])
-def test_step_failure_stops_later_steps_with_one_crit(tmp_path: Path, module: str, rc: int,
-                                                      source: str, name: str) -> None:
-    """단계가 실패하면 뒤 단계는 돌지 않는다 — 그 단계 런 로그는 failed, 뒤 단계 행은 없다. crit 1건(기록만).
+def test_evening_step_failure_stops_later_steps_with_one_crit(tmp_path: Path, module: str, rc: int,
+                                                              source: str, name: str) -> None:
+    """저녁 판 단계가 실패하면 뒤 단계는 돌지 않는다 — 그 단계 런 로그는 failed, 뒤 단계 행은 없다. crit 1건(기록만).
     v3_post rc 6(반영 COMMIT 뒤 daily_post 실패)도 실패로 센다."""
     _root(tmp_path)
     key = "RC_v3_post" if module == "v3_post.sh" else f"RC_{module.replace('.', '_')}"
-    r = _chain(tmp_path, "close", "--date", T, **{key: str(rc)})
+    r = _evening_chain(tmp_path, **{key: str(rc)})
     assert r.rc == 2, r.out + r.log
-    assert r.mods == STEP_MODULES[:STEP_MODULES.index(module) + 1]
-    steps = list(runlog.POSTCLOSE_STEPS)
+    assert r.mods == EVENING_MODULES[:EVENING_MODULES.index(module) + 1]
+    steps = list(runlog.POSTCLOSE_EVENING_STEPS)
     i = steps.index(source)
-    assert r.runs == [(s, "ok") for s in steps[:i]] + [(source, "failed")]
-    assert r.titles("crit") == [f"장 마감 체인 실패: {name}(rc={rc})"]
+    assert r.runs == [(runlog.POSTCLOSE_DART, "ok"), *((s, "ok") for s in steps[:i]),
+                      (source, "failed")]
+    assert r.titles("crit") == [f"저녁 판 실패: {name}(rc={rc})"]
     assert not any(t.startswith("장 마감 판 준비") for t in r.titles("info"))
     if module != "v3_post.sh":
         assert "flock -u 6" in r.calls       # 실패해도 빌드 락은 놓는다
@@ -341,7 +461,8 @@ def _silent_loss(root: Path, d: str, *, unexplained: int, undecidable: int = 0) 
 def test_silent_loss_gate_blocks_before_the_build_lock_only_when_switched_on(
         tmp_path: Path, block: str, unexplained: int, blocked: bool) -> None:
     """K1-4a — 조용한 손실 차단 스위치(config/silent_loss.env)가 켜져 있고 D' 아침 확정판 검사에 미설명이 있으면
-    고정 판 확인 뒤·빌드 락 전에 crit(그날 장 마감 판 없음 — T-7 대체 발송 경로). 꺼져 있으면 지금처럼 다 돈다."""
+    고정 판 확인 뒤·빌드 락 전에 crit(그날 장 마감 판 없음 — stage 를 짓지 않아 저녁 판도 없다, T-7 대체 발송 경로).
+    꺼져 있으면 지금처럼 stage 까지 다 돈다."""
     root = _root(tmp_path)
     (root / "config/silent_loss.env").write_text(f"SILENT_LOSS_BLOCK={block}\n", encoding="utf-8")
     _silent_loss(root, D_PREV, unexplained=unexplained)
@@ -354,7 +475,7 @@ def test_silent_loss_gate_blocks_before_the_build_lock_only_when_switched_on(
         assert "미설명 3" in r.notify[0]
     else:
         assert r.rc == 0, r.out + r.log
-        assert r.mods == STEP_MODULES
+        assert r.mods == CLOSE_MODULES
         assert r.titles("crit") == []
 
 
@@ -373,7 +494,7 @@ def test_silent_loss_gate_blocks_a_missing_result_when_switched_on(tmp_path: Pat
 @pytest.mark.parametrize("state", ["missing", "broken_json", "rc1", "rc2", "rc3", "gate_crash"])
 def test_silent_loss_gate_never_blocks_when_switched_off(tmp_path: Path, conf: str | None, state: str) -> None:
     """K1-4a 꺼짐 보장 — 차단 스위치가 꺼져 있으면(파일 없음·0·이상한 값·빈 값) D' 검사 결과가 어떤 상태든(없음·깨진 JSON·
-    미설명 rc 1·판정 불가 rc 2·차단 rc 3) 관문 파이썬이 죽어도(예외·import 실패) 15:41 장 마감 체인은 끝까지 돈다."""
+    미설명 rc 1·판정 불가 rc 2·차단 rc 3) 관문 파이썬이 죽어도(예외·import 실패) 15:41 장 마감 체인은 stage 까지 다 돈다."""
     root = _root(tmp_path)
     if conf is not None:
         (root / "config/silent_loss.env").write_text(conf, encoding="utf-8")
@@ -387,7 +508,7 @@ def test_silent_loss_gate_never_blocks_when_switched_off(tmp_path: Path, conf: s
     env = {"SL_GATE_RC": "1"} if state == "gate_crash" else {}
     r = _chain(tmp_path, "close", "--date", T, **env)
     assert r.rc == 0, r.out + r.log
-    assert r.mods == STEP_MODULES
+    assert r.mods == CLOSE_MODULES
     assert r.titles("crit") == []
     assert "차단 스위치 off" in r.log
 
@@ -443,12 +564,12 @@ def test_fg5_warn_reaches_the_runlog_and_notify(tmp_path: Path) -> None:
     """PR-5 리뷰 MINOR-1 — fi 가 rc 0 이어도 판 manifest 게이트에 metrics.warn 이 있으면(FG5 후보 중 T-6 보류,
     T-37) 그 단계 런 로그 detail 에 warn:FG5 를 남기고 warn 한 줄을 낸다. 판정·뒤 단계는 그대로다."""
     root = _root(tmp_path)
-    r = _chain(tmp_path, "close", "--date", T, FI_WARN="1")
+    r = _evening_chain(tmp_path, FI_WARN="1")
     assert r.rc == 0, r.out + r.log
-    assert r.mods == STEP_MODULES
+    assert r.mods == EVENING_MODULES
     fi = [run for run in _all_runs(root) if run.source == "postclose_fi"]
     assert len(fi) == 1 and fi[0].status == "ok" and "warn:FG5" in (fi[0].detail or "")
-    assert r.titles("warn") == ["장 마감 체인 게이트 경고"]
+    assert r.titles("warn") == ["저녁 판 게이트 경고"]
     assert "FG5" in r.notify[-1] and "T-6 보류 20/600" in r.notify[-1]
     assert r.titles("info")[-1].startswith("장 마감 판 준비 ")
 
@@ -457,7 +578,7 @@ def test_shadow_switch_never_sends_or_writes_v3(tmp_path: Path) -> None:
     """T-7 — 그림자 기간: 엑셀은 짓되 --send 없음, v3 는 --shadow, daily_post 명령 없음.
     환경에 QL_V3_POST_CMD 가 남아 있어도 v3_post 에 새지 않는다."""
     _root(tmp_path)
-    r = _chain(tmp_path, "close", "--date", T, QL_V3_POST_CMD="echo leaked")
+    r = _evening_chain(tmp_path, QL_V3_POST_CMD="echo leaked")
     assert r.rc == 0, r.out + r.log
     assert "--send" not in r.call("deliver")
     v3 = r.call("v3_post.sh")
@@ -468,13 +589,14 @@ def test_shadow_switch_never_sends_or_writes_v3(tmp_path: Path) -> None:
                                   "POSTCLOSE_ENABLED=0\nPOSTCLOSE_SEND=1\nPOSTCLOSE_V3=in-place\n",
                                   "POSTCLOSE_ENABLED=$UNDEFINED_VAR\n"],
                          ids=["no_file", "empty", "near_miss", "blank", "off_with_live", "bad_line"])
-@pytest.mark.parametrize("mode", ["close", "refill", "morning"])
+@pytest.mark.parametrize("mode", ["close", "evening", "refill", "morning"])
 def test_disabled_chain_does_nothing(tmp_path: Path, conf: str | None, mode: str) -> None:
-    """MINOR-1 — POSTCLOSE_ENABLED=1 이 아니면(파일 없음·빈 값·비슷한 값) 세 모드 모두 info 한 줄·rc 0 이고
+    """MINOR-1 — POSTCLOSE_ENABLED=1 이 아니면(파일 없음·빈 값·비슷한 값) 네 모드 모두 info 한 줄·rc 0 이고
     아무 단계도 돌지 않는다. 설정 읽기는 set +u 안이라 정의 안 된 변수 참조가 셸을 조용히 끝내지 않는다."""
     root = _root(tmp_path, conf=conf)
     _seed(root, T, "postclose_model", "ok")
-    r = _chain(tmp_path, mode, "--date", T)
+    extra = ("--dart-rc", "0") if mode == "evening" else ()
+    r = _chain(tmp_path, mode, "--date", T, *extra)
     assert r.rc == 0, r.out + r.log
     assert r.calls == [] and r.runs == []
     assert r.titles("info") == [f"장 마감 체인 꺼짐 — {mode} 건너뜀"]
@@ -487,7 +609,7 @@ def test_disabled_chain_does_nothing(tmp_path: Path, conf: str | None, mode: str
 def test_switch_turns_on_only_with_exact_values(tmp_path: Path, conf: str) -> None:
     """발송·제자리 반영은 정확한 값일 때만 — 그 밖은 그림자(미발송·--shadow)다(P1)."""
     _root(tmp_path, conf=conf)
-    r = _chain(tmp_path, "close", "--date", T)
+    r = _evening_chain(tmp_path)
     assert r.rc == 0, r.out + r.log
     assert "--send" not in r.call("deliver")
     assert "--shadow" in r.call("v3_post.sh")
@@ -497,7 +619,7 @@ def test_live_switch_sends_and_reflects_in_place_with_daily_post(tmp_path: Path)
     """PR-9 가 켤 자리 — POSTCLOSE_SEND=1 이면 --send, POSTCLOSE_V3=in-place 면 --shadow 없이 제자리 반영 +
     --v3-post-cmd(설정의 명령)."""
     _root(tmp_path, conf=LIVE_CONF)
-    r = _chain(tmp_path, "close", "--date", T)
+    r = _evening_chain(tmp_path)
     assert r.rc == 0, r.out + r.log
     assert r.call("deliver").endswith("--out-root data/model_db/deliver --send")
     v3 = r.call("v3_post.sh")
@@ -511,7 +633,7 @@ def test_server_local_conf_is_read_last_and_wins(tmp_path: Path) -> None:
     root = _root(tmp_path, conf=LIVE_CONF)
     (root / "local").mkdir()
     (root / "local/postclose_chain.env").write_text("POSTCLOSE_V3_POST_CMD=''\n", encoding="utf-8")
-    r = _chain(tmp_path, "close", "--date", T)
+    r = _evening_chain(tmp_path)
     assert r.rc == 0, r.out + r.log
     assert r.call("deliver").endswith("--send")
     v3 = r.call("v3_post.sh")
@@ -519,12 +641,13 @@ def test_server_local_conf_is_read_last_and_wins(tmp_path: Path) -> None:
     assert "local/postclose_chain.env" in r.log
 
 
-@pytest.mark.parametrize("mode", ["close", "refill", "morning"])
+@pytest.mark.parametrize("mode", ["close", "evening", "refill", "morning"])
 def test_in_place_without_send_is_refused(tmp_path: Path, mode: str) -> None:
     """NIT — 제자리 반영인데 발송이 꺼져 있으면 보내지 않은 점수가 v3 에 들어간다 — rc 5 로 거부(crit),
     아무 단계도 돌지 않는다. PR-9 가 켤 때의 안전장치."""
     _root(tmp_path, conf="POSTCLOSE_ENABLED=1\nPOSTCLOSE_SEND=0\nPOSTCLOSE_V3=in-place\n")
-    r = _chain(tmp_path, mode, "--date", T)
+    extra = ("--dart-rc", "0") if mode == "evening" else ()
+    r = _chain(tmp_path, mode, "--date", T, *extra)
     assert r.rc == 5, r.out + r.log
     assert r.calls == [] and r.runs == []
     assert r.titles("crit") == [f"장 마감 체인 설정 오류 — {mode} 거부"]
@@ -547,14 +670,14 @@ def test_held_build_lock_is_waited_for(tmp_path: Path) -> None:
     assert r.rc == 0, r.out + r.log
     locks = [c for c in r.calls if c.startswith("flock")]
     assert locks == ["flock -n 7", "flock -n 6", "flock 6", "flock -u 6"]
-    assert r.mods == STEP_MODULES
+    assert r.mods == CLOSE_MODULES
     assert "장 마감 체인 빌드 락 대기" in r.titles("info")
 
 
 @pytest.mark.parametrize("conf", [SHADOW_CONF, None], ids=["enabled", "disabled"])
 def test_dry_run_prints_the_plan_only(tmp_path: Path, conf: str | None) -> None:
     """dry-run 은 계획만 — 락·단계·런 로그·알림 없음. 꺼져 있어도 계획은 보여 준다(꺼짐 표시).
-    스냅샷 GC keep 은 상수(snapshot.KEEP_DEFAULT)에서 읽는다."""
+    close 는 stage 까지(스냅샷 GC keep 은 상수 snapshot.KEEP_DEFAULT), evening 은 저녁 DART 판 → fi(인계) → v3."""
     from stage import snapshot
 
     root = _root(tmp_path, conf=conf)
@@ -562,17 +685,27 @@ def test_dry_run_prints_the_plan_only(tmp_path: Path, conf: str | None) -> None:
     assert r.rc == 0, r.out
     assert r.calls == [] and r.notify == [] and r.runs == []
     assert not (root / "data/raw/daily_run.db").exists()
+    assert f"D'={D_PREV}" in r.out and "--send" not in r.out
+    assert f"keep {snapshot.KEEP_DEFAULT} = snapshot.KEEP_DEFAULT" in r.out
+    assert "factor_inputs" not in r.out and "evening 모드" in r.out
+    assert ("꺼짐" in r.out) == (conf is None)
+    r = _chain(tmp_path, "evening", "--date", T, "--dart-rc", "0", "--dry-run")
+    assert r.rc == 0, r.out
+    assert r.calls == [] and r.notify == [] and r.runs == []
     assert f"D'={D_PREV}" in r.out and "--shadow" in r.out and "--send" not in r.out
     assert f"--builds-from {H_PREV}" in r.out and "health ok" in r.out
-    assert f"keep {snapshot.KEEP_DEFAULT} = snapshot.KEEP_DEFAULT" in r.out
+    assert f"daily.evening_dart build --date {T}" in r.out
+    assert f"--dart-builds-from {DART_HANDOFF}" in r.out
     assert "--model-root data/model_db/model --trend-fallback-root data/model " in r.out   # T-50
     assert ("꺼짐" in r.out) == (conf is None)
 
 
-@pytest.mark.parametrize("args", [("refill",), ("morning",), ("bogus", "--date", T),
-                                  ("close", "--date", "2026108")])
+@pytest.mark.parametrize("args", [("refill",), ("morning",), ("evening", "--dart-rc", "0"),
+                                  ("evening", "--date", T), ("evening", "--date", T, "--dart-rc", "x"),
+                                  ("bogus", "--date", T), ("close", "--date", "2026108")])
 def test_argument_errors(tmp_path: Path, args: tuple[str, ...]) -> None:
-    """refill·morning 은 --date 기본값이 없다(전날 D 를 오늘로 잘못 잡지 않게). 모르는 모드·형식 오류는 rc 2."""
+    """refill·morning·evening 은 --date 기본값이 없다(전날 D 를 오늘로 잘못 잡지 않게). evening 은 DART 갈래 rc 가
+    있어야 한다. 모르는 모드·형식 오류는 rc 2."""
     _root(tmp_path)
     r = _chain(tmp_path, *args)
     assert r.rc == 2, r.out
@@ -790,14 +923,14 @@ def _compat(r: Run, sub: str) -> list[str]:
 
 @pytest.mark.parametrize("conf", [SHADOW_CONF, LIVE_CONF], ids=["shadow", "live"])
 def test_real_v3_post_accepts_all_three_call_shapes(tmp_path: Path, conf: str) -> None:
-    """체인의 세 호출(⑥ · refill · 아침)이 실물 v3_post.sh 인자 계약을 통과한다(rc 5 인자 오류 없음).
-    refill 은 `--no-scores` 가 v3-tables·apply 까지 가고 스테이징 기본 경로가 `_noscores` 를 붙인다. 셋 다
+    """체인의 세 호출(⑥ — D13 부터 evening · refill · 아침)이 실물 v3_post.sh 인자 계약을 통과한다(rc 5 인자 오류
+    없음). refill 은 `--no-scores` 가 v3-tables·apply 까지 가고 스테이징 기본 경로가 `_noscores` 를 붙인다. 셋 다
     `--builds-from` 이 compat export 에 닿는다. 제자리(live)는 ⑥ 에만 daily_post 를 부른다."""
     root = _real_v3(tmp_path, conf)
     _seed(root, T, "postclose_model", "ok")
     env = {"QL_V3_LOCK_FILE": str(tmp_path / "v3.lock"), "QL_V3_POST_TODAY": T}
     shadow = "_shadow" if conf == SHADOW_CONF else ""
-    close = _chain(tmp_path, "close", "--date", T, **env)
+    close = _evening_chain(tmp_path, **env)
     assert close.rc == 0, close.out + close.log
     assert close.runs[-1] == ("postclose_v3", "ok")
     (stage,) = _compat(close, "stage")
@@ -850,7 +983,7 @@ def test_shipped_config_is_cutover(tmp_path: Path) -> None:
     v3 daily_post 를 부른다. 꺼짐 동작은 test_disabled_chain_does_nothing 이 본다."""
     shipped = (DB_ROOT / "config/postclose_chain.env").read_text(encoding="utf-8")
     _root(tmp_path, conf=shipped)
-    on = _chain(tmp_path, "close", "--date", T)
+    on = _evening_chain(tmp_path)
     assert on.rc == 0, on.out + on.log
     assert "--send" in on.call("deliver")
     v3 = on.call("v3_post.sh")
@@ -926,6 +1059,7 @@ if [ "$1" = "-c" ]; then
 fi
 if [ "$1" = "-m" ]; then
   [ "$2" = daily.kw_daily ] && exit "${KW_RC:-0}"
+  [ "$2" = daily.dart_daily ] && exit "${DART_RC:-0}"
   exit 0
 fi
 exit 0
@@ -939,8 +1073,8 @@ class Hooked(NamedTuple):
     notify: list[str]
 
 
-def _evening(home: Path, *, kw_rc: int = 0, dry: bool = False, inherited: bool = True,
-             hook_rc: int = 0) -> Hooked:
+def _evening(home: Path, *, kw_rc: int = 0, dart_rc: int = 0, dry: bool = False,
+             inherited: bool = True, hook_rc: int = 0) -> Hooked:
     root = home / "quant-ledger"
     for sub in ("scripts", "logs", ".venv/bin", "data/raw"):
         (root / sub).mkdir(parents=True, exist_ok=True)
@@ -956,7 +1090,8 @@ def _evening(home: Path, *, kw_rc: int = 0, dry: bool = False, inherited: bool =
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)
     env = dict(os.environ, HOME=str(home), TMPDIR=str(home / "tmp"), QL_KW_EVENING_HHMM="0000",
-               REAL_PY=sys.executable, KW_RC=str(kw_rc), HOOK_RC=str(hook_rc),
+               REAL_PY=sys.executable, KW_RC=str(kw_rc), DART_RC=str(dart_rc),
+               HOOK_RC=str(hook_rc),
                QL_RAW_LOCK_FILE=str(home / "raw.lock"),
                PATH=f"{home / 'fakebin'}:{os.environ['PATH']}")
     for k in ("QL_HOME", "PYTHONPATH", "QL_RAW_LOCK_HELD"):
@@ -973,13 +1108,14 @@ def _evening(home: Path, *, kw_rc: int = 0, dry: bool = False, inherited: bool =
 
 def test_daily_evening_calls_refill_at_the_end_of_the_chain(tmp_path: Path) -> None:
     """⑦ — 21:05 키움 원장 커밋(rc 0)이 끝난 저녁 체인의 끝(런 로그 종료·최종 인계 파일 뒤)에 재반영을 잇는다
-    (고정 시각 크론이 아니다). 물려받은 원장 락은 놓지 않는다."""
+    (고정 시각 크론이 아니다). 물려받은 원장 락은 놓지 않는다. 그 앞에 DART 갈래 안 저녁 판 훅(D13)이 한 번 돈다."""
     h = _evening(tmp_path)
     assert h.rc == 0, h.log
-    assert h.hook == [f"postclose_chain.sh refill --date {T} fd9=closed held=1"]
+    assert h.hook == [f"postclose_chain.sh evening --date {T} --dart-rc 0 fd9=closed held=1",
+                      f"postclose_chain.sh refill --date {T} fd9=closed held=1"]
     writes = [i for i, ln in enumerate(h.log.splitlines()) if "deliver/ledger_evening.json 기록" in ln]
     lines = h.log.splitlines()
-    mark = lines.index("HOOK_MARK")
+    mark = len(lines) - 1 - lines[::-1].index("HOOK_MARK")      # 마지막 HOOK_MARK = refill
     assert len(writes) == 2 and writes[-1] < mark
     assert lines.index("RUNLOG_FINISH") < mark
     assert "장 마감 재반영 rc=0" in h.log
@@ -991,7 +1127,7 @@ def test_daily_evening_releases_its_own_raw_lock_before_refill(tmp_path: Path) -
     원장 락 fd 도 QL_RAW_LOCK_HELD 도 넘어가지 않는다."""
     h = _evening(tmp_path, inherited=False)
     assert h.rc == 0, h.log
-    assert h.hook == [f"postclose_chain.sh refill --date {T} fd9=closed held=unset"]
+    assert h.hook[-1] == f"postclose_chain.sh refill --date {T} fd9=closed held=unset"
     assert "원장 락 반납" in h.log
 
 
@@ -1007,9 +1143,21 @@ def test_daily_evening_warns_when_refill_ends_badly(tmp_path: Path, hook_rc: int
 
 
 def test_daily_evening_skips_refill_when_the_kiwoom_branch_failed(tmp_path: Path) -> None:
+    """키움 갈래가 실패하면 refill 은 없다 — 저녁 판(DART 갈래 훅)은 키움과 무관하게 돈다."""
     h = _evening(tmp_path, kw_rc=1)
     assert h.rc == 2, h.log
-    assert h.hook == []
+    assert h.hook == [f"postclose_chain.sh evening --date {T} --dart-rc 0 fd9=closed held=1"]
+
+
+def test_daily_evening_passes_the_dart_rc_and_keeps_it_as_the_branch_rc(tmp_path: Path) -> None:
+    """D13 — DART 가 실패하면 그 rc 를 저녁 판에 넘긴다(저녁 판이 전 거래일 공시로 간다). 갈래 rc 는 DART rc 그대로라
+    저녁 판 rc 가 저녁 체인 판정(crit)·인계 파일 dart_rc 를 바꾸지 않는다."""
+    h = _evening(tmp_path, dart_rc=3, hook_rc=2)
+    assert h.rc == 2, h.log
+    assert h.hook[0] == f"postclose_chain.sh evening --date {T} --dart-rc 3 fd9=closed held=1"
+    assert "DART 종료 rc=3" in h.log and "저녁 판 rc=2" in h.log
+    assert [n.split("|")[1] for n in h.notify if n.startswith("crit|")] == [
+        "daily_evening 실패: DART(rc=3)"]
 
 
 def test_daily_evening_dry_run_never_calls_refill(tmp_path: Path) -> None:
@@ -1096,7 +1244,7 @@ def test_daily_build_reports_the_morning_follow_up_rc(tmp_path: Path, prc: int) 
     assert warns == ([] if prc in (0, 1) else [f"daily_build 장 마감 판 아침 잇기 rc={prc}"])
 
 
-# ── 16:30 워치독 postclose_board ─────────────────────────────────────────────────
+# ── 16:30 워치독 postclose_board · 저녁 워치독 evening_board(D13) ─────────────────────
 
 _WD_CALENDAR = """import datetime as dt
 import os
@@ -1143,23 +1291,23 @@ def _wd_root(home: Path) -> Path:
 
 def _seed_board(root: Path, overrides: dict[str, str] | None = None, *,
                 skip: tuple[str, ...] = ()) -> None:
-    """오늘(KST) 장 마감 체인 런 로그 — 수집 ok + 체인 단계 전부 ok. overrides 로 상태를 바꾸고, skip 은 뺀다."""
+    """오늘(KST) 장 마감 판 런 로그 — 수집 ok + 저녁 DART 판·판 단계 전부 ok. overrides 로 상태를 바꾸고, skip 은 뺀다."""
     statuses = {"kiwoom_postclose": "ok", **{s: "ok" for s in runlog.POSTCLOSE_STEPS},
-                **(overrides or {})}
+                runlog.POSTCLOSE_DART: "ok", **(overrides or {})}
     for src, status in statuses.items():
         if src not in skip:
             _seed(root, _today(), src, status)
 
 
-def _watch(home: Path, **env: str) -> tuple[int, list[str]]:
+def _watch(home: Path, check: str = "postclose_board", **env: str) -> tuple[int, list[str]]:
     root = home / "quant-ledger"
     e = dict(os.environ, HOME=str(home), **env)
     for k in ("QL_HOME", "PYTHONPATH"):
         e.pop(k, None)
-    p = subprocess.run(["bash", str(root / "scripts/watchdog.sh"), "postclose_board"],
+    p = subprocess.run(["bash", str(root / "scripts/watchdog.sh"), check],
                        env=e, capture_output=True, text=True, timeout=60, check=False)
     note = _read(root / "notify.txt").splitlines()
-    extra = [f"OUT|{p.stdout}{p.stderr}"] if p.returncode not in (0, 2) else []
+    extra = [f"OUT|{p.stdout}{p.stderr}"] if p.returncode not in (0, 1, 2) else []
     return p.returncode, note + extra
 
 
@@ -1182,9 +1330,9 @@ def test_watchdog_collect_cutoff_is_normal(tmp_path: Path, status: str) -> None:
 
 
 @pytest.mark.parametrize(("overrides", "skip", "expect"), [
-    ({"postclose_fi": "failed"}, (), "postclose_fi failed"),
-    ({"postclose_v3": "running"}, (), "postclose_v3 running"),
-    ({}, ("postclose_excel", "postclose_v3"), "postclose_excel 없음"),
+    ({"postclose_stage": "failed"}, (), "postclose_stage failed"),
+    ({"postclose_stage": "running"}, (), "postclose_stage running"),
+    ({}, ("postclose_stage",), "postclose_stage 없음"),
     ({"kiwoom_postclose": "error"}, (), "kiwoom_postclose error"),
     ({}, ("kiwoom_postclose",), "kiwoom_postclose 없음"),
 ], ids=["failed", "running", "missing", "collect_error", "collect_missing"])
@@ -1196,8 +1344,17 @@ def test_watchdog_board_missing_or_failed_is_crit(tmp_path: Path, overrides: dic
     assert rc == 2, note
     assert len(note) == 1
     level, title, body = note[0].split("|", 2)
-    assert (level, title) == ("crit", "watchdog: 16:30 까지 장 마감 판 보고 없음/실패")
+    assert (level, title) == ("crit", "watchdog: 16:30 까지 장 마감 수집·stage 보고 없음/실패")
     assert expect in body
+
+
+def test_watchdog_board_does_not_wait_for_the_evening_steps(tmp_path: Path) -> None:
+    """D13 — 16:30 에는 fi~v3 가 아직 없다(저녁 판은 DART 수집 뒤). 수집·stage 가 ok 면 정상이다."""
+    root = _wd_root(tmp_path)
+    _seed_board(root, skip=(runlog.POSTCLOSE_DART, *runlog.POSTCLOSE_EVENING_STEPS))
+    rc, note = _watch(tmp_path)
+    assert rc == 0, note
+    assert note[0].startswith("info|watchdog postclose_board 정상 ")
 
 
 def test_watchdog_no_runs_at_all_is_crit(tmp_path: Path) -> None:
@@ -1205,13 +1362,13 @@ def test_watchdog_no_runs_at_all_is_crit(tmp_path: Path) -> None:
     _wd_root(tmp_path)
     rc, note = _watch(tmp_path)
     assert rc == 2, note
-    assert note[0].startswith("crit|watchdog: 16:30 까지 장 마감 판 보고 없음/실패|")
+    assert note[0].startswith("crit|watchdog: 16:30 까지 장 마감 수집·stage 보고 없음/실패|")
 
 
 def test_watchdog_last_run_wins(tmp_path: Path) -> None:
     """같은 날 손으로 다시 돌려 성공했으면 마지막 런 기준으로 정상이다."""
     root = _wd_root(tmp_path)
-    _seed(root, _today(), "postclose_fi", "failed")
+    _seed(root, _today(), "postclose_stage", "failed")
     _seed_board(root)
     rc, note = _watch(tmp_path)
     assert rc == 0, note
@@ -1231,3 +1388,53 @@ def test_watchdog_holiday_is_normal(tmp_path: Path) -> None:
     rc, note = _watch(tmp_path, WD_TRADING="0")
     assert rc == 0, note
     assert note == ["info|watchdog postclose_board — 휴장|" + f"{_today()}(KST)는 거래일이 아니다 — 판정 건너뜀"]
+
+
+@pytest.mark.parametrize(("dart", "fell"), [("ok", False), ("fallback", True)])
+def test_evening_watchdog_ok(tmp_path: Path, dart: str, fell: bool) -> None:
+    """저녁 판 단계가 모두 ok 면 정상 — 전 거래일 공시로 간 날(postclose_dart fallback)은 본문에 적는다."""
+    root = _wd_root(tmp_path)
+    _seed_board(root, {runlog.POSTCLOSE_DART: dart})
+    rc, note = _watch(tmp_path, "evening_board")
+    assert rc == 0, note
+    assert len(note) == 1 and note[0].startswith("info|watchdog evening_board 정상 ")
+    assert ("전 거래일 공시로" in note[0]) is fell
+
+
+@pytest.mark.parametrize(("overrides", "skip", "expect"), [
+    ({"postclose_fi": "running"}, (), "postclose_fi"),
+    ({}, ("postclose_excel", "postclose_v3"), "postclose_excel"),
+    ({}, (runlog.POSTCLOSE_DART, *runlog.POSTCLOSE_EVENING_STEPS), runlog.POSTCLOSE_DART),
+], ids=["running", "missing_tail", "not_started"])
+def test_evening_watchdog_late_board_is_warn_only(tmp_path: Path, overrides: dict[str, str],
+                                                  skip: tuple[str, ...], expect: str) -> None:
+    """갈래 1(사용자 10-29) — 저녁 판이 아직 도는 중이면(단계 없음·running) warn 만 낸다(기다렸다 늦게 보낸다)."""
+    root = _wd_root(tmp_path)
+    _seed_board(root, overrides, skip=skip)
+    rc, note = _watch(tmp_path, "evening_board")
+    assert rc == 1, note
+    level, title, body = note[0].split("|", 2)
+    assert (level, title) == ("warn", "watchdog: 저녁 판 아직 진행 중")
+    assert expect in body and "늦음" in body
+
+
+def test_evening_watchdog_failed_step_is_crit(tmp_path: Path) -> None:
+    root = _wd_root(tmp_path)
+    _seed_board(root, {"postclose_excel": "failed"}, skip=("postclose_v3",))
+    rc, note = _watch(tmp_path, "evening_board")
+    assert rc == 2, note
+    level, title, body = note[0].split("|", 2)
+    assert (level, title) == ("crit", "watchdog: 저녁 판 실패")
+    assert "postclose_excel" in body
+
+
+@pytest.mark.parametrize("stage", [None, "failed"])
+def test_evening_watchdog_without_the_close_stage_is_normal(tmp_path: Path, stage: str | None) -> None:
+    """그날 close stage 가 ok 가 아니면 저녁 판이 없는 날이다 — 그날 경보는 close·16:30 워치독 몫이라 정상."""
+    root = _wd_root(tmp_path)
+    _seed_board(root, {} if stage is None else {"postclose_stage": stage},
+                skip=(runlog.POSTCLOSE_DART, *runlog.POSTCLOSE_EVENING_STEPS)
+                + (("postclose_stage",) if stage is None else ()))
+    rc, note = _watch(tmp_path, "evening_board")
+    assert rc == 0, note
+    assert note[0].startswith("info|watchdog evening_board 정상") and "저녁 판이 없는 날" in note[0]

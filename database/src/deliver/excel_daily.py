@@ -40,6 +40,7 @@ from .common import (
     bucket_label,
     cap_candidates,
     coverage_label,
+    dart_note,
     exclude_label,
     ind_meta,
     market_label,
@@ -1618,6 +1619,15 @@ def gates_text(g: object) -> str:
                       for k, v in items)
 
 
+def _dart_board_pairs(board: object) -> list[tuple[str, object]]:
+    """저녁 DART 판(N-62)을 읽은 장 마감 판만 — 공시·재무(fi DART 표·Events 시트)를 읽은 데이터 id."""
+    if not isinstance(board, Mapping):
+        return []
+    eq, st = _builds_text(board.get("equity_builds")), _builds_text(board.get("stage_builds"))
+    return [("저녁 공시 데이터 id", " · ".join(x for x in (f"equity {eq}" if eq else "",
+                                                          f"stage {st}" if st else "") if x))]
+
+
 def _builds_text(v: object) -> str:
     if isinstance(v, Mapping):
         ids = sorted({str(x.get("build_id", x)) if isinstance(x, Mapping) else str(x)
@@ -1660,6 +1670,8 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None,
     pairs: list[tuple[str, object]] = [("기준일", view.date), ("basis", run.basis)]
     if run.basis in BASIS_NOTES:     # 장 마감(evening) · 주말 보강(supplement)만 — 아침은 줄 없음(PR-6)
         pairs.append(("데이터 성격", BASIS_NOTES[run.basis]))
+    if (note := dart_note(run.basis, fi_meta)) is not None:   # 장 마감 판 공시·재무 시점(D13 · N-62)
+        pairs.append(("공시·재무", note))
     if run.basis == "supplement":    # 휴일 아침 WISE 재수집일 W = fi 판 JSON wise_asof(N-45)
         pairs.append(("WISE 재수집일", fi_meta.get("wise_asof") or "알 수 없음(fi 기록에 없음)"))
     pairs += [
@@ -1676,6 +1688,7 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None,
         ("model 데이터 id", run.build_id), ("model 생성 시각", run.generated_at),
         ("factor_inputs 데이터 id", run.fi_build_id),
         ("equity 데이터 id", _builds_text(fi_meta.get("equity_builds")) or "(fi manifest 없음)"),
+        *_dart_board_pairs(fi_meta.get("dart_board")),
         ("유니버스 규칙", universe_text(view)),
         ("종목 수", f"모집단 {len(view.rows)} · 순위 {len(view.ranked)} · "
                    f"제외 {len(view.rows) - len(view.ranked)}"),
@@ -1754,6 +1767,7 @@ class DailyResult:
     sheets: list[str]
     build_id: str                       # model 데이터 id — 발송 장부·정정 캡션용(N-25 Q9)
     generated_at: str                   # model 생성 시각(JSON generated_at)
+    dart_note: str | None = None        # 장 마감 판 공시·재무 시점(캡션 — `common.dart_note`, D13 · N-62)
 
 
 def daily_path(out_root: Path, d: str, basis: str) -> Path:
@@ -1921,7 +1935,8 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     return DailyResult(path, run.date, basis, view.spec_id, top, len(view.rows),
                        len(view.ranked),
                        [ws.title for ws in wb.worksheets if ws.sheet_state == "visible"],
-                       build_id=run.build_id, generated_at=run.generated_at)
+                       build_id=run.build_id, generated_at=run.generated_at,
+                       dart_note=dart_note(basis, fi_meta))
 
 
 __all__ = ["DailyResult", "FiData", "build_daily", "daily_path", "id_cols", "id_values",

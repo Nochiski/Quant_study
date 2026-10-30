@@ -46,6 +46,13 @@ rc 2). 읽은 판 id 는 판 manifest `postclose_builds`·`tables.<표>.inputs` 
 `_runs/<D'>_morning.json`, 수집기 `daily.postclose.fi_candidates` 와 같은 함수)도 여기서 읽는다.
 후보를 못 읽으면 FG5 가 FAIL 이다(판 실패 rc 1).
 
+저녁 DART 판(`--dart-builds-from`, D13 · N-62 — 장 마감 판만): 18:05 DART 수집이 끝나면 장 마감 체인이 그날 공시로
+DART 폐포를 모델 DB 루트에 저녁 판(e_)으로 다시 짓고 그 판 목록을 인계(`daily.evening_dart.handoff_path`)에 쓴다. fi 는
+DART 표(`DART_EQUITY_SOURCES`)를 그 인계의 판에서 읽고 DART 정보 시점(dart_asof)을 T 로 연다 — 나머지 입력과 asof(D')는
+그대로다. 인계가 그날 저녁 판 · health ok · 폐포 표만 · 저녁 판 id · 연구 루트 아님이 아니면 rc 2(`_load_dart_handoff`).
+판 manifest 에 `dart_asof`·`dart_board`(인계 전체 — 엑셀 Events 시트가 같은 판을 읽는다)를 남기고, `equity_builds` 는 고정한
+연구 판에서 읽은 표만 싣는다. 인계가 없으면 dart_asof = asof 라 SQL·게이트 판정은 지금 장 마감 판과 글자 그대로다.
+
 재생(`--replay`, 컷오버 PR-8b — `scripts/replay.sh --basis evening` 만 쓴다): 과거 D 의 판을
 현판(최근 세션까지 온 equity)에서 짓는다(X-1 '현판 + D 시점 자르기'). 정보 입력은 SQL 이 이미
 asof 로 자르지만 세션 축은 자르지 않는다 — 현판으로는 MD-SEAM 이 서지 않고(장 마감 판), 달력 뒤
@@ -80,6 +87,7 @@ from pathlib import Path
 
 import duckdb
 from daily import calendar as daily_calendar
+from daily import evening_dart
 from equity import handoff, inputs
 from equity.rules_s10 import FIELDS as CREDIT_FIELDS
 from model.contracts import FI_COVERAGE_GRACE_MAX, FI_TABLES, UniverseRule
@@ -124,7 +132,10 @@ from . import gates, queries
 # (창은 `--grace-days` 로 덮을 수 있다) · FG-fresh grace 종목 수 경고(기록형 `GRACE_WARN_MAX`)
 # (1.10.0 에 더함, 2026-10-12 N-45 · 엑셀 확정분 E5): basis supplement — wise_asof = 휴일 수집일 W(판 manifest
 # 에 기록). 아침·장 마감 판의 SQL·게이트 판정은 글자 그대로다
-RULES_VERSION = "fi1.10.0"
+# 1.11.0(2026-10-29, D13 · N-62): 장 마감 판 DART 정보 시점 `dart_asof` — 저녁 DART 인계(`--dart-builds-from`)를 읽으면
+# DART 재무·배당·감사·공시·4Q 파생 공개일이 T 까지, 나머지는 asof(D') 그대로 · FG1 DART 행 상한 = dart_asof. 인계 없는
+# 판(아침·보강·인계 없는 장 마감)은 SQL·게이트 판정이 글자 그대로다
+RULES_VERSION = "fi1.11.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning", BASIS_SUPPLEMENT)
 # fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)
@@ -145,6 +156,8 @@ EQUITY_SOURCES = ("trading_calendar", "universe_daily", "security", "price_daily
                   "sector_snapshot", "coverage_daily", "fin_std", "dividend_event",
                   "audit_opinion", "disclosure_version", "corp")
 STAGE_SOURCES = ("stg_consensus_annual", "stg_consensus_matrix", "stg_fin_wise", "stg_fin_wise_q")
+# 저녁 DART 인계(`--dart-builds-from`, D13 · N-62)에서 읽는 표 — fi equity 원천 중 저녁 DART 판 폐포에 든 것
+DART_EQUITY_SOURCES = tuple(t for t in EQUITY_SOURCES if t in evening_dart.EQUITY_TABLES)
 # 있으면 쓰는 stage 원천 — 판이 없으면 같은 열의 빈 표로 대신한다(판 id 'absent'). stg_fin_wise_q(WISE 분기,
 # 10-01 T-Q4)는 수집 첫날 이전 날짜에 스냅샷이 없으므로 그 날짜의 분기는 DART(fin_std)로 돌아간다.
 _EMPTY_FIN_WISE_Q = (
@@ -346,6 +359,52 @@ def _t_candidates(fi_root: Path, dprime: date) -> tuple[tuple[str, ...] | None, 
     return tuple(tickers), bid
 
 
+@dataclass(frozen=True)
+class _DartPin:
+    """저녁 DART 인계 — 판 목록과 그 판을 해석할 모델 DB equity 루트."""
+    pin: handoff.Handoff
+    equity_root: Path
+
+
+def _load_dart_handoff(path: Path, t: date, research_equity_root: Path) -> _DartPin:
+    """저녁 DART 인계(D13 · N-62)를 읽고 다음을 본다 — 하나라도 아니면 rc 2(D' 판으로 대신하지 않는다, P1).
+    ① 그날 저녁 판(basis evening · date T) ② stage·equity health ok ③ DART 폐포(`daily.evening_dart`) 표만 싣고
+    fi 가 읽는 DART 표가 다 있다 ④ 판이 저녁 판(e_) ⑤ equity 루트가 있고 연구 equity 루트가 아니다."""
+    try:
+        h = handoff.load(path)
+    except handoff.HandoffError as e:
+        raise FactorInputsError(str(e)) from e
+    where = f"인계={path}"
+    if h.basis != evening_dart.BASIS:
+        raise FactorInputsError(f"저녁 DART 인계가 저녁 판(basis=evening) 것이 아니다: {where} "
+                                f"basis={h.basis}")
+    if h.date != t.strftime("%Y%m%d"):
+        raise FactorInputsError(f"저녁 DART 인계 날짜가 판 날짜 T 와 다르다(그날 저녁 판만 읽는다): {where} "
+                                f"date={h.date} --date={t.strftime('%Y%m%d')}")
+    if not h.health_ok:
+        raise FactorInputsError(f"저녁 DART 인계의 health 가 ok 가 아니다(그날 저녁 DART 판 실패): {where} "
+                                f"health={h.health} 기대={{'stage': 'ok', 'equity': 'ok'}}")
+    extra = sorted(set(h.equity_builds) - set(evening_dart.EQUITY_TABLES))
+    if extra:
+        raise FactorInputsError(f"저녁 DART 인계에 DART 폐포 밖 equity 표가 있다: {where} 표={extra} "
+                                f"— 폐포는 daily.evening_dart.EQUITY_TABLES {evening_dart.EQUITY_TABLES}")
+    missing = [x for x in DART_EQUITY_SOURCES if x not in h.equity_builds]
+    if missing:
+        raise FactorInputsError(f"저녁 DART 인계에 fi 가 읽는 DART 표가 없다: {where} 없는 표={missing}")
+    not_evening = {x: b for x, b in sorted(h.equity_builds.items())
+                   if basis_of_build_id(b) != evening_dart.BASIS}
+    if not_evening:
+        raise FactorInputsError(f"저녁 DART 인계의 판이 저녁 판(e_)이 아니다: {where} {not_evening}")
+    if h.equity_root is None:
+        raise FactorInputsError(f"저녁 DART 인계에 equity_root 가 없다: {where}")
+    root = Path(h.equity_root)
+    if root.resolve() == Path(research_equity_root).resolve():
+        raise FactorInputsError(
+            f"저녁 DART 인계의 equity 루트가 연구 equity 루트다: {where} equity_root={root} — 저녁 판은 모델 DB "
+            "루트(data/model_db/equity)에 짓는다(연구 인계 이력에 저녁 판이 섞이지 않게)")
+    return _DartPin(h, root)
+
+
 def _check_basis(equity_builds: dict[str, str], basis: str) -> None:
     """fi 는 아침 확정판(`m_`)과 수동 재빌드(`b_`) equity 판만 읽는다(compat R5 와 같다). 장 마감
     판도 직전 거래일 확정판을 `--builds-from` 으로 고정해 읽으므로(T-2 — 고정 없음은 `build` 가
@@ -421,7 +480,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
           build_id: str | None = None, builds_from: Path | None = None,
           calendar_dir: Path | None = None, postclose_stage_root: Path | None = None,
           candidates_root: Path | None = None, replay: bool = False,
-          wise_asof: str | None = None) -> BuildResult:
+          wise_asof: str | None = None, dart_builds_from: Path | None = None) -> BuildResult:
     """판 기준일 D(YYYYMMDD)의 factor_inputs 8표를 굽는다. 게이트 FAIL 은 결과 status 로,
     입력·인자 오류는 `FactorInputsError` 로 낸다. `builds_from`(인계 이력 JSON)을 주면 원천 판을
     current 가 아니라 그 이력의 판으로 고정한다(모듈 docstring '날짜로 고정'). `calendar_dir` 는
@@ -430,7 +489,9 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     `default_postclose_stage_root()`) · `candidates_root`(직전 판 모델 후보를 읽을 연구 fi 루트,
     없으면 `research_root()`). `replay` 는 재생 전용 — 세션 축 뷰를 asof 에서 자른다(모듈 docstring
     '재생'). `wise_asof`(YYYYMMDD)는 WISE 컨센서스 입력의 시점 — 보강판은 필수(D 보다 뒤), 그 밖은
-    비우거나 판 날짜와 같아야 한다(N-53 — 모듈 docstring '주말 보강판')."""
+    비우거나 판 날짜와 같아야 한다(N-53 — 모듈 docstring '주말 보강판'). `dart_builds_from`(저녁 DART 인계 JSON,
+    장 마감 판만)을 주면 DART 표(`DART_EQUITY_SOURCES`)를 그 인계의 판에서 읽고 DART 정보 시점을 T 로 연다
+    (D13 · N-62 — 모듈 docstring '저녁 DART 판')."""
     t0 = time.time()
     d = _parse_date(date_s)
     if basis not in BASES_KNOWN:
@@ -446,6 +507,10 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         raise FactorInputsError(
             "--basis supplement 는 --builds-from(D 아침 확정판 인계 이력 <D>_morning.json)으로 "
             "판을 고정해야만 짓는다 — current 판은 그 뒤 손 재빌드로 바뀌었을 수 있다(P1)")
+    if dart_builds_from is not None and not evening:
+        raise FactorInputsError(
+            f"--dart-builds-from(저녁 DART 인계)은 장 마감 판(--basis evening)에만 준다: --basis={basis} "
+            "— 아침판·보강판의 DART 는 그 판이 고정한 확정판이다")
     try:
         wise_d = None if wise_asof is None else datetime.strptime(wise_asof, "%Y%m%d").date()
     except ValueError as e:
@@ -479,9 +544,17 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         raise FactorInputsError(f"build_id 접두어가 --basis 와 다르다: {bid} vs {basis}")
 
     pin = None if builds_from is None else _load_handoff(Path(builds_from), d)
-    equity_builds, eq_exprs = _resolve(Path(equity_root), EQUITY_SOURCES, stage=False,
+    dart = (None if dart_builds_from is None
+            else _load_dart_handoff(Path(dart_builds_from), d, Path(equity_root)))
+    # 저녁 DART 인계가 있으면 DART 표는 그 판에서 읽고, 고정한 연구 판에서는 나머지 표만 읽는다
+    research_sources = (EQUITY_SOURCES if dart is None
+                        else tuple(t for t in EQUITY_SOURCES if t not in DART_EQUITY_SOURCES))
+    equity_builds, eq_exprs = _resolve(Path(equity_root), research_sources, stage=False,
                                        pinned=None if pin is None else pin.equity_builds,
                                        origin=builds_from)
+    dart_builds, dart_exprs = ({}, {}) if dart is None else _resolve(
+        dart.equity_root, DART_EQUITY_SOURCES, stage=False, pinned=dart.pin.equity_builds,
+        origin=dart_builds_from)
     stage_builds, st_exprs = _resolve(Path(stage_root), STAGE_SOURCES, stage=True,
                                       pinned=None if pin is None else pin.stage_builds,
                                       origin=builds_from)
@@ -501,12 +574,14 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     tmp_root.mkdir(parents=True)
     d_iso = d.isoformat()
     asof = d_iso if dprime is None else dprime.isoformat()
+    # DART 정보 시점 — 저녁 DART 인계를 읽은 장 마감 판만 T(N-62), 그 밖은 asof
+    dart_iso = asof if dart is None else d_iso
     con = duckdb.connect()
     try:
         con.execute(f"SET threads = {DUCKDB_THREADS}")
         con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
         con.execute("SET enable_progress_bar = false")
-        for name, expr in {**eq_exprs, **st_exprs}.items():
+        for name, expr in {**eq_exprs, **dart_exprs, **st_exprs}.items():
             # 재생만 세션 축을 asof 에서 자른다 — 재생이 아니면 꼬리가 비어 운영 SQL 그대로다.
             # 보강판 재생만 coverage_daily 를 wise_asof(휴일 수집일)에서 자른다 — asof 에서 자르면 휴일 수집분의
             # 추정기관 수가 빠진다. 정규 판의 추정기관 수는 asof(장 마감 판 D' — N-53 '열린 것' 3)
@@ -537,7 +612,8 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             d=d_iso, fy=f"{d.year}12",
             price_from=(d - timedelta(days=queries.PRICE_WINDOW_DAYS)).isoformat(),
             flow_from=str(flow_from), grace_days=rule.coverage_grace_days,
-            credit_lag=_credit_lag_sessions(), basis=basis, asof=asof, wise_asof=wise_iso)
+            credit_lag=_credit_lag_sessions(), basis=basis, asof=asof, wise_asof=wise_iso,
+            dart_asof=dart_iso)
         for sql in queries.coverage_sqls(p):
             con.execute(sql)
         dstar = _one(con, "SELECT dstar FROM _dstar")
@@ -553,7 +629,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         tables: dict[str, dict[str, object]] = {}
         table_inputs: dict[str, dict[str, str]] = {}
         sources = queries.table_sources(basis)
-        read_builds = {**stage_builds, **post_builds, **equity_builds}
+        read_builds = {**stage_builds, **post_builds, **equity_builds, **dart_builds}
         for name in FI_TABLES:
             out = tmp_root / name / "part0.parquet"
             out.parent.mkdir(parents=True)
@@ -571,7 +647,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             collection_lag_sessions=lag, golden=gates.load_golden(golden_path), asof=asof,
             t_candidates=t_cands, t_candidates_from=t_from,
             t_source_build=post_builds.get(queries.T_SOURCE_TABLE, ""),
-            t_source_max_date=t_src_max, wise_asof=wise_iso)
+            t_source_max_date=t_src_max, wise_asof=wise_iso, dart_asof=dart_iso)
         results = gates.run_all(ctx)
     except BaseException:
         shutil.rmtree(tmp_root, ignore_errors=True)
@@ -598,6 +674,8 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         "asof": asof,
         # WISE 컨센서스 입력 시점 — 정규 판은 판 날짜(N-53), 보강판은 휴일 수집일(N-45)
         "wise_asof": wise_iso,
+        # DART 정보 시점 — 저녁 DART 인계를 읽은 장 마감 판만 T(N-62), 그 밖은 asof
+        "dart_asof": dart_iso,
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "rules_version": RULES_VERSION,
         "equity_root": str(Path(equity_root).resolve()),
@@ -605,6 +683,13 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         "builds_from": None if builds_from is None else str(Path(builds_from).resolve()),
         "builds_from_date": None if pin is None else pin.date,
         "equity_builds": equity_builds, "stage_builds": stage_builds,
+        # 저녁 DART 판(N-62) — fi 는 그 equity 판에서 DART 표를 읽었다(`equity_builds` 는 고정한 연구 판에서 읽은 표만).
+        # 엑셀 Events 시트가 같은 판(stage·equity)을 읽는다(`deliver.sources`). 인계 없는 판은 None
+        "dart_board": None if dart is None else {
+            "builds_from": str(Path(str(dart_builds_from)).resolve()),
+            "equity_root": str(dart.equity_root.resolve()),
+            "stage_root": dart.pin.stage_root,
+            "equity_builds": dart.pin.equity_builds, "stage_builds": dart.pin.stage_builds},
         # 장 마감 판 T 행 원천(T-29) — 연구 stage 판 목록과 루트가 달라 따로 적는다(아침판 None)
         "postclose_stage_root": None if post_root is None else str(post_root.resolve()),
         "postclose_builds": post_builds or None,

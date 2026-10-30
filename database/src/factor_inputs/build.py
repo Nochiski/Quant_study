@@ -359,50 +359,12 @@ def _t_candidates(fi_root: Path, dprime: date) -> tuple[tuple[str, ...] | None, 
     return tuple(tickers), bid
 
 
-@dataclass(frozen=True)
-class _DartPin:
-    """저녁 DART 인계 — 판 목록과 그 판을 해석할 모델 DB equity 루트."""
-    pin: handoff.Handoff
-    equity_root: Path
-
-
-def _load_dart_handoff(path: Path, t: date, research_equity_root: Path) -> _DartPin:
-    """저녁 DART 인계(D13 · N-62)를 읽고 다음을 본다 — 하나라도 아니면 rc 2(D' 판으로 대신하지 않는다, P1).
-    ① 그날 저녁 판(basis evening · date T) ② stage·equity health ok ③ DART 폐포(`daily.evening_dart`) 표만 싣고
-    fi 가 읽는 DART 표가 다 있다 ④ 판이 저녁 판(e_) ⑤ equity 루트가 있고 연구 equity 루트가 아니다."""
+def _load_dart_handoff(path: Path, t: date, research_equity_root: Path) -> evening_dart.DartPin:
+    """저녁 DART 인계(D13 · N-62) — 검사는 `daily.evening_dart.load_handoff` 한 곳(compat 과 같다). 거절이면 rc 2."""
     try:
-        h = handoff.load(path)
-    except handoff.HandoffError as e:
+        return evening_dart.load_handoff(path, t.strftime("%Y%m%d"), research_equity_root, DART_EQUITY_SOURCES)
+    except evening_dart.HandoffRejected as e:
         raise FactorInputsError(str(e)) from e
-    where = f"인계={path}"
-    if h.basis != evening_dart.BASIS:
-        raise FactorInputsError(f"저녁 DART 인계가 저녁 판(basis=evening) 것이 아니다: {where} "
-                                f"basis={h.basis}")
-    if h.date != t.strftime("%Y%m%d"):
-        raise FactorInputsError(f"저녁 DART 인계 날짜가 판 날짜 T 와 다르다(그날 저녁 판만 읽는다): {where} "
-                                f"date={h.date} --date={t.strftime('%Y%m%d')}")
-    if not h.health_ok:
-        raise FactorInputsError(f"저녁 DART 인계의 health 가 ok 가 아니다(그날 저녁 DART 판 실패): {where} "
-                                f"health={h.health} 기대={{'stage': 'ok', 'equity': 'ok'}}")
-    extra = sorted(set(h.equity_builds) - set(evening_dart.EQUITY_TABLES))
-    if extra:
-        raise FactorInputsError(f"저녁 DART 인계에 DART 폐포 밖 equity 표가 있다: {where} 표={extra} "
-                                f"— 폐포는 daily.evening_dart.EQUITY_TABLES {evening_dart.EQUITY_TABLES}")
-    missing = [x for x in DART_EQUITY_SOURCES if x not in h.equity_builds]
-    if missing:
-        raise FactorInputsError(f"저녁 DART 인계에 fi 가 읽는 DART 표가 없다: {where} 없는 표={missing}")
-    not_evening = {x: b for x, b in sorted(h.equity_builds.items())
-                   if basis_of_build_id(b) != evening_dart.BASIS}
-    if not_evening:
-        raise FactorInputsError(f"저녁 DART 인계의 판이 저녁 판(e_)이 아니다: {where} {not_evening}")
-    if h.equity_root is None:
-        raise FactorInputsError(f"저녁 DART 인계에 equity_root 가 없다: {where}")
-    root = Path(h.equity_root)
-    if root.resolve() == Path(research_equity_root).resolve():
-        raise FactorInputsError(
-            f"저녁 DART 인계의 equity 루트가 연구 equity 루트다: {where} equity_root={root} — 저녁 판은 모델 DB "
-            "루트(data/model_db/equity)에 짓는다(연구 인계 이력에 저녁 판이 섞이지 않게)")
-    return _DartPin(h, root)
 
 
 def _check_basis(equity_builds: dict[str, str], basis: str) -> None:

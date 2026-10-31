@@ -31,6 +31,8 @@ stage 판 기록에는 파티션 해시가 없어 표 전체를 조인한다.
   · 정정 공시 — available_date 계열 칸이 바뀌어 새 값이 그 법인(`corp_code`)의 (D', D] 정정 접수일
     (`disclosure_version` is_correction · rcept_dt, 오늘 인계 판)과 같으면 설명됨으로 보되 수는 남긴다. 정정된 값은
     정정 접수일부터 공개다(연구 DB S1 · e1.32.0) — 10-30 정정 4개 회사의 공개일 11칸이 미설명으로 떴다(10-31).
+    창 밖 값→NULL 도 그 행의 available_date 가 그 법인의 (D', D] 정정 접수일로 옮겨 갔으면 정정이다(정정 재작성본에
+    계정이 없음 — 10-30 079000 lease_liab). 공개일이 그대로인 행의 값→NULL 은 미설명이다.
   · 미설명 — 그 밖의 값→NULL(창 밖) · 행 삭제(창 안 포함) · available_date 계열 변경(창 안 포함 — 공개시점 축은 창으로
     설명하지 않는다). 창 밖 값 변경은 보고만 한다(equity_diff 게이트와 같은 세 축).
   날짜 열이 없는 표(마스터·접수 축)는 grain 으로 비교하고 재수집 창 없이 같은 규칙이다.
@@ -403,11 +405,19 @@ def _classify(out: dict, ed: ModuleType, con: Any, core: Any, split: str | None,
     removed = tot(ed.ROW_COLUMN, "rows_removed")
     v2n_out = {c: tot(c, "value_to_null") - ins(c, "value_to_null") for c in plain}
     avail_n = {(c, k): tot(c, k) for c in avail for k in ed.KINDS_COLUMN}
-    # 정정 공시 갈래 — 새 공개일이 그 법인의 그날 정정 접수일인 칸(값→NULL 은 정정으로 설명하지 않는다)
+    # 정정 공시 갈래 — 새 공개일이 그 법인의 그날 정정 접수일인 칸(공개일 열의 값→NULL 은 정정으로 설명하지 않는다).
+    # 창 밖 값→NULL 은 그 행의 available_date 가 정정 접수일로 옮겨 갔을 때만 정정이다 — 정정 재작성본에 계정이
+    # 없다(10-30 079000 lease_liab, 10-31). 공개일이 그대로인 행의 값→NULL 은 미설명으로 남는다
     corp = ed.q(ed.KEY_PREFIX + "corp_code") if "corp_code" in key else (
         ed.q("corp_code") if "corp_code" in a_types else None)
     fixed: dict[tuple[str, str], str] = {}
     corrected = 0
+
+    def v2n_cond(col: str) -> str:
+        cond = ed.change_cond(col, "value_to_null", numeric=ed.is_numeric(a_types.get(col, "VARCHAR")),
+                              tol=ed.DEFAULT_TOL)
+        return f"({cond}) AND NOT coalesce({split}, FALSE)" if split else cond
+
     if corrections and corp is not None:
         con.execute("CREATE OR REPLACE TEMP TABLE _corr (corp_code VARCHAR, d DATE)")
         con.executemany("INSERT INTO _corr VALUES (?, ?)", list(corrections))
@@ -421,6 +431,17 @@ def _classify(out: dict, ed: ModuleType, con: Any, core: Any, split: str | None,
                           .fetchone()[0])
                 avail_n[(col, k)] = n - hit
                 corrected += hit
+        if "available_date" in avail:
+            av = ed.q("available_date")
+            moved = (f"{ed.q(ed.BEFORE_PREFIX + 'available_date')} IS DISTINCT FROM {av} AND "
+                     f"({corp}, TRY_CAST({av} AS DATE)) IN (SELECT corp_code, d FROM _corr)")
+            for col, n in v2n_out.items():
+                if n:
+                    fixed[(col, "value_to_null")] = moved
+                    hit = int(con.execute(f"SELECT count(*) FROM j WHERE ({v2n_cond(col)}) AND {moved}")
+                              .fetchone()[0])
+                    v2n_out[col] = n - hit
+                    corrected += hit
     by_kind = {"value_to_null": sum(v2n_out.values()), "rows_removed": removed,
                "available_date": sum(avail_n.values())}
     candidate = sum(by_kind.values())
@@ -442,10 +463,10 @@ def _classify(out: dict, ed: ModuleType, con: Any, core: Any, split: str | None,
     picks: list[tuple[int, str, str, str]] = []
     for col, n in v2n_out.items():
         if n:
-            cond = ed.change_cond(col, "value_to_null", numeric=ed.is_numeric(a_types.get(col, "VARCHAR")),
-                                  tol=ed.DEFAULT_TOL)
+            cond = v2n_cond(col)
             picks.append((n, col, "value_to_null",
-                          f"({cond}) AND NOT coalesce({split}, FALSE)" if split else cond))
+                          f"({cond}) AND NOT coalesce({fixed[(col, 'value_to_null')]}, FALSE)"
+                          if (col, "value_to_null") in fixed else cond))
     if removed:
         picks.append((removed, ed.ROW_COLUMN, "rows_removed",
                       ed.change_cond(ed.ROW_COLUMN, "rows_removed", numeric=False, tol=0)))

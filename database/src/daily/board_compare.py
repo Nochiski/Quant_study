@@ -18,6 +18,9 @@
     미설명이다. 정보 시점은 D' 이고 WISE 행만 장 마감 판 기록의 `wise_asof`(N-53 — 그날 06:00 수집이라 T,
     키가 없는 옛 판은 D')다 — 재무 표는 `fs_basis` 가 'DART:' 인 행만 D'.
     연초 첫 거래일(D' 와 T 의 해가 다름)의 연도 창 차이만 3자 대조 없이 인정한다.
+    3자 대조가 서지 않는 정보 시점 두 갈래는 다른 증거로 받는다(S2 ② — 새 범주 없이 정보 시점에 메모):
+    커버 유예 만료(장 마감 판 grace · 연구 판 T lapsed 이고 연구 판이 WISE 없는 모양 — `_lapse`) ·
+    추정기관 수 D′↔T(장 마감 판 = 연구 판 equity coverage_daily 의 D' 값, 연구 판 = T 값 — `_Ctx.analysts_dt`).
   · T 행: 종가 차이는 실운영 미설명(N-35 ①), `--replay`(T 행 = 21:05 원장)이고 T ≥ 애프터마켓 시행일
     (`AFTER_MARKET_START`)일 때만 종가 정의(그 전 날은 21:05 키움 종가 = 정규장 종가라 미설명). 거래량은
     장 마감 값 ≤ 연구 값이면 거래량 정의. 수급은 주체별 판 통계(중앙 상대 차이·부호 반전)가 상한 안이면
@@ -166,7 +169,9 @@ CATEGORIES: dict[str, Category] = {c.key: c for c in (
     Category(INFO, "정보 시점", "T-2·T-5·T-36·FACTOR_INPUTS §2-1·PR-5 리뷰 MINOR-1",
              "3자 대조 — 장 마감 판 = 연구 판 D' 이고 연구 판 T 가 다르며, 정보 표는 연구 판 수집·공개일이 "
              "장 마감 판보다 늦다(WISE·DART·WICS·추정기관 수). 수정주가 계수·표식은 (D', T] 에 공개된 "
-             "기업행위가 있을 때(T 전 행은 적용일부터 T−1 까지 끝 구간 모양)"),
+             "기업행위가 있을 때(T 전 행은 적용일부터 T−1 까지 끝 구간 모양). 3자 대조 대신 받는 증거 둘(S2 ②): "
+             "커버 유예 만료 — 장 마감 판 grace · 연구 판 T lapsed 이고 연구 판이 WISE 칸이 빠진 모양 / 추정기관 "
+             "수 D′↔T — 장 마감 판 = 연구 판 equity coverage_daily 의 D' 값, 연구 판 = T 값"),
     Category(T6, "T-6 당일 기업행위", "T-6·T-36·I-1·PR-7 재리뷰 MAJOR-1",
              "장 마감 판 corp_action_pending 보류 — T-6 정의의 갈래만큼 증거가 있을 때만: KRX 기준가"
              "(연구 판 equity base_price_krw) ≠ D' 종가 · 키움 pred_pre 없음(장 마감 stage)·연구 판 D' 종가 "
@@ -231,6 +236,11 @@ WISE_DPRIME_COLS: Mapping[str, frozenset[str]] = {
     "fi_fin_summary": frozenset({"roe", "roa", "debt_ratio", "fcf", "capex", "total_assets",
                                  "period_months", "dps", "capex_basis"})}
 WISE_REFETCH = "같은 값 · 다른 수집일(장 마감 판은 고정한 확정판의 WISE 수집분 — N-53)"
+# 커버 유예 만료(S2 ② 가) — 연구 판 T 가 lapsed 면 WISE 칸이 빠지는 표(fi `fin_summary_sql`·`consensus_sql` 은
+# 신선·유예 종목만 WISE 를 싣는다). 연간 컨센서스는 신선도와 무관한 최신 판이라 들지 않는다
+LAPSE_TABLES = frozenset({"fi_consensus", "fi_fin_summary"})
+LAPSE = "커버 유예 만료 — 장 마감 판 grace · 연구 판 T lapsed 라 WISE 칸이 빠졌다(N-47)"
+ANALYSTS_DT = "추정기관 수 D′↔T — 장 마감 판 = coverage_daily(D') · 연구 판 = coverage_daily(T)"
 # 수정주가 미해결 사건 표식(adj_jump_ok 는 H1-4 · fi1.6.0)과 계수
 ADJ_FLAG_COLS = frozenset({"adj_ok", "adj_jump_ok"})
 ADJ_EVENT_COLS = ADJ_FLAG_COLS | {"adj_factor"}
@@ -404,6 +414,8 @@ class Evidence:
     targeted: frozenset[str]                       # 장 마감 수집 대상(`read_targets`)
     krx_base: Mapping[str, object] = field(default_factory=dict)   # 연구 판 equity T 기준가
     pred_pre_missing: frozenset[str] = frozenset()  # 장 마감 stage T 행 중 키움 pred_pre 가 없는 종목
+    # 연구 판 equity coverage_daily 의 추정기관 수 — 종목 → (D' 까지 마지막 값, T 까지 마지막 값)(`read_analysts`)
+    analysts: Mapping[str, tuple[object, object]] = field(default_factory=dict)
 
 
 @dataclass
@@ -453,6 +465,14 @@ class _Ctx:
         e, r, d = self.uni_e.get(tk), self.uni_r.get(tk), self.uni_d.get(tk)
         return (e is not None and r is not None and d is not None
                 and _same(e.get(col), d.get(col)) and not _same(r.get(col), d.get(col)))
+
+    def analysts_dt(self, tk: str, e_v: object, r_v: object) -> bool:
+        """추정기관 수 D′↔T(S2 ② 나) — 장 마감 판 n_analysts 는 coverage_daily 를 D' 까지(N-53 '열린 것' 3), 연구 판
+        T 는 T 까지 읽는다. 장 마감 판 값 = coverage_daily(D') ∧ 연구 판 값 = coverage_daily(T) 를 3자 대조 대신
+        받는다 — 연구 D' 판에 그 종목 컨센서스 행이 없거나(10-28 005950) 유예로 옛 값을 이어 실어(476060) 3자
+        대조가 서지 않는 날."""
+        got = self.ev.analysts.get(tk)
+        return got is not None and _same(e_v, got[0]) and _same(r_v, got[1])
 
     def close_differs(self, tk: str) -> bool:
         return not _same(self.tclose_e.get(tk), self.tclose_r.get(tk))
@@ -530,7 +550,12 @@ def _rule_universe(p: _Pair, c: _Ctx) -> list[_Verdict]:
         if col in UNI_CARRY:
             items.append((col, CARRY, "") if c.uni3(tk, col) else (col, UNEXPLAINED, NO_3WAY))
         elif col in UNI_INFO:
-            items.append((col, INFO, "") if c.uni3(tk, col) else (col, UNEXPLAINED, NO_3WAY))
+            if c.uni3(tk, col):
+                items.append((col, INFO, ""))
+            elif col == "n_analysts" and c.analysts_dt(tk, p.e.get(col), p.r.get(col)):
+                items.append((col, INFO, ANALYSTS_DT))
+            else:
+                items.append((col, UNEXPLAINED, NO_3WAY))
         elif col in UNI_WISE:
             items.append((col, *_wise(c, tk, col)))
         elif col == "filing_late":
@@ -704,6 +729,9 @@ def _rule_info(table: str) -> Callable[[_Pair, _Ctx], list[_Verdict]]:
             return [(UNEXPLAINED, p.diff, f"장 마감 판 {col} {got.isoformat()} > {what} — D' 자르기 위반")]
         if c.boundary and (table == "fi_consensus_annual" or c.cov_differs(tk)):
             return [(FY, p.diff, "")]
+        lapse = _lapse(table, p, c)
+        if lapse is not None:
+            return lapse
         split = _wise_split(table, p, c)
         if split is not None:
             return split
@@ -711,6 +739,25 @@ def _rule_info(table: str) -> Callable[[_Pair, _Ctx], list[_Verdict]]:
             return [(UNEXPLAINED, p.diff, f"{NO_3WAY} 또는 연구 판 {col} 가 늦지 않다")]
         return [(INFO, p.diff, "")]
     return rule
+
+
+def _lapse(table: str, p: _Pair, c: _Ctx) -> list[_Verdict] | None:
+    """커버 유예 만료(S2 ② 가 — 10-26 141000·460850) — 장 마감 판 유니버스는 grace(WISE 를 싣는다)인데 연구 판 T 는
+    lapsed(유예 5거래일 초과, N-47)라 WISE 칸이 빠진 행. N-53 장 마감 판 WISE 는 T 스냅샷이라 행 단위 3자 대조가
+    서지 않는다. 연구 판에서 행이 빠졌거나, 다른 칸이 전부 'WISE 없는 모양'(값 → NULL · 재무 표 fs_basis → 'DART:' ·
+    수집·공개일은 남은 원천의 날짜)이면 정보 시점. 연구 판 값이 다른 값으로 바뀐 칸이 하나라도 있으면 None — 종전
+    규칙으로 간다."""
+    tk = p.ticker
+    states = (c.uni_e.get(tk, {}).get("coverage_state"), c.uni_r.get(tk, {}).get("coverage_state"))
+    if table not in LAPSE_TABLES or not p.in_e or states != ("grace", "lapsed"):
+        return None
+    if p.in_r:
+        dates = WISE_DATE_COLS[table]
+        for col in p.diff:
+            v = p.r.get(col)
+            if not (v is None or col in dates or (col == "fs_basis" and str(v).startswith("DART:"))):
+                return None
+    return [(INFO, p.diff, LAPSE)]
 
 
 def _wise_split(table: str, p: _Pair, c: _Ctx) -> list[_Verdict] | None:
@@ -730,8 +777,12 @@ def _wise_split(table: str, p: _Pair, c: _Ctx) -> list[_Verdict] | None:
     items: list[tuple[str, str, str]] = []
     for col in p.diff:
         if col in dprime:
-            ok = p.in_d and _same(p.e.get(col), p.d.get(col)) and not _same(p.r.get(col), p.d.get(col))
-            items.append((col, INFO, "") if ok else (col, UNEXPLAINED, NO_3WAY))
+            if p.in_d and _same(p.e.get(col), p.d.get(col)) and not _same(p.r.get(col), p.d.get(col)):
+                items.append((col, INFO, ""))
+            elif col == "n_analysts" and c.analysts_dt(p.ticker, p.e.get(col), p.r.get(col)):
+                items.append((col, INFO, ANALYSTS_DT))
+            else:
+                items.append((col, UNEXPLAINED, NO_3WAY))
             continue
         e_v, r_v = p.e.get(col), p.r.get(col)
         ok = isinstance(e_v, date) and isinstance(r_v, date) and e_v < r_v <= c.t
@@ -1231,6 +1282,25 @@ def read_krx_base(rt: Side, t: date) -> dict[str, object]:
     return {str(tk): v for tk, v in rows}
 
 
+def read_analysts(rt: Side, dprime: date, t: date) -> dict[str, tuple[object, object]]:
+    """연구 판 T 가 읽은 equity `coverage_daily` 의 종목별 추정기관 수 — (D' 까지 마지막 행 값, T 까지 마지막 행
+    값). fi 가 n_analysts 를 그 날짜까지 ASOF 로 읽는 것과 같은 축이다(S2 ② 나 · `_Ctx.analysts_dt`)."""
+    lit = _research_equity(rt, "coverage_daily")
+    con = _connect()
+    try:
+        last = {day: dict(con.execute(
+            f"SELECT ticker, CAST(analyst_count AS BIGINT) FROM read_parquet([{lit}], hive_partitioning=false) "
+            f"WHERE date <= DATE '{day.isoformat()}' "
+            "QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY date DESC) = 1").fetchall())
+            for day in (dprime, t)}
+    except duckdb.Error as e:
+        raise CompareInputError(f"연구 판 equity coverage_daily 의 analyst_count 를 읽지 못했다: "
+                                f"{type(e).__name__}: {e}") from e
+    finally:
+        con.close()
+    return {str(tk): (last[dprime].get(tk), n) for tk, n in last[t].items()}
+
+
 def read_new_events(rt: Side, dprime: date, t: date) -> dict[str, tuple[date, ...]]:
     """(D', T] 에 공개된 기업행위 — 연구 판 T 가 읽은 equity `adj_factor` 판. 장 마감 판은
     available ≤ D' 만 센다(asof)."""
@@ -1484,7 +1554,7 @@ def compare(t: date, evening_root: Path, research_root: Path, *, calendar_dir: P
     _check_versions(ev, rt, rd)
     stage, no_pred = read_stage(ev, t)
     evidence = Evidence(stage, read_new_events(rt, dprime, t), read_targets(rt, rd, dprime),
-                        read_krx_base(rt, t), no_pred)
+                        read_krx_base(rt, t), no_pred, read_analysts(rt, dprime, t))
     fi = compare_fi(ev.fi, rt.fi, FiBoard(rt.fi_root, str(rd["build_id"])), t, dprime, evidence,
                     replay=replay, wise_cut=_wise_cut(ev, t))
     pinned_research = _research_pinned(ev.fi_run, rd.get("equity_builds"))

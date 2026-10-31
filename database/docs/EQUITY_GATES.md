@@ -2743,6 +2743,7 @@ CLI 출력은 그대로다(로컬 price_daily 두 판 JSON 보고서가 바꾸�
 | 새 행 · NULL→값 | `rows_added` · `null_to_value` | 정상(수만 남김) |
 | 재수집 창 | 날짜 열(date_axis 파티션 표의 날짜형 grain 열 — `date`·`snapshot_date`·`effective_date`·`fetched_date`)이 D 와 그 앞 `ledger_health.KRX_RECHECK_SESSIONS`(10)세션 안인 행의 값 변경 · 값→NULL(available_date 계열 열 제외) | 설명됨, 수는 남김 |
 | 규칙 변경 | 두 판의 `rules_version`(equity `e*` · stage 판본)이 다른 표 — 아래 미설명 후보 전부가 이 갈래로 간다 | 설명됨, 수는 남김 |
+| 정정 공시(S2, 10-31) | available_date 계열 칸의 새 값이 그 법인(`corp_code`)의 (D', D] 정정 접수일(오늘 인계 판 `disclosure_version` is_correction · rcept_dt)과 같은 칸 · 그렇게 `available_date` 가 옮겨 간 행의 창 밖 값→NULL(정정 재작성본에 계정이 없음). 정정된 값은 정정 접수일부터 공개다(e1.32.0) | 설명됨, 수는 남김 |
 | **미설명** | 창 밖 값→NULL · **행 삭제(창 안 포함)** · **available_date 계열 변경(창 안 포함 — 공개시점 축은 창으로 설명하지 않는다)** | 기록형: warn · 차단형: crit + 다음 모델 단계 차단 |
 | 보고만 | 창 밖 값 변경 | 12-3 과 같은 이유(정의 교정·결측 복구의 정상 산출) |
 

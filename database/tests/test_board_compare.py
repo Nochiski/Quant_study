@@ -148,11 +148,13 @@ def _pair(base: Path, rs: dict[str, list[dict[str, object]]],
     _make_stage_tree(base / "eq", "price_daily",
                      [{"ticker": tk, "date": T_DATE, "basis": "krx", "base_price_krw": int(str(b))}
                       for tk, b in sorted(bases.items())], build_id=EQ_T)
+    _make_stage_tree(base / "eq", "coverage_daily",
+                     [{"ticker": "999999", "date": T_DATE, "analyst_count": 1}], build_id=EQ_T)
     write_fi(data / "factor_inputs", rd, basis="morning", bid=RD_FI, day=DP, asof=DP,
              latest=False, equity_builds=pinned)
     write_fi(data / "factor_inputs", rs, basis="morning", bid=RS_FI, day=T, asof=T,
              equity_root=str(base / "eq" / "stage"),
-             equity_builds={"price_daily": EQ_T, "adj_factor": EQ_T})
+             equity_builds={"price_daily": EQ_T, "adj_factor": EQ_T, "coverage_daily": EQ_T})
     res = model_build(T_S, "morning", data / "model", data / "factor_inputs", **SMALL)
     assert res.ok, res.summary()
 
@@ -862,9 +864,11 @@ def _fi3(tmp: Path, mutate: Mut, *, t: dt.date = T_DATE, dp: dt.date = DP_DATE,
          stage: dict[str, str] | None = None,
          events: dict[str, tuple[dt.date, ...]] | None = None,
          krx_base: dict[str, int] | None = None, no_pred: frozenset[str] = frozenset(),
-         replay: bool = False, wise_cut: dt.date | None = None) -> bc.FiResult:
+         replay: bool = False, wise_cut: dt.date | None = None,
+         analysts: dict[str, tuple[object, object]] | None = None) -> bc.FiResult:
     """기준 판 → (장 마감 e, 연구 T r, 연구 D' d) 를 `mutate(e, r, d)` 로 고쳐 `compare_fi`. KRX T 기준가는
-    기본으로 D' 종가(10,000 — 기업행위 없음), `krx_base` 가 덮는다."""
+    기본으로 D' 종가(10,000 — 기업행위 없음), `krx_base` 가 덮는다. `analysts` = 연구 판 coverage_daily 의
+    (D', T) 추정기관 수."""
     base = _mini()
     e, r = copy.deepcopy(base), copy.deepcopy(base)
     d = {k: [dict(x) for x in v if k not in bc.DATED_TABLES or x["date"] < t]
@@ -881,7 +885,7 @@ def _fi3(tmp: Path, mutate: Mut, *, t: dt.date = T_DATE, dp: dt.date = DP_DATE,
         boards.append(bc.FiBoard(tmp / name, bid))
     ev = bc.Evidence({A: bc.STAGE_USABLE, B: bc.STAGE_USABLE} if stage is None else stage,
                      events or {}, frozenset({A, B}),     # C 는 우선주·후보 아님 — 수집 대상 밖
-                     {A: 10_000, B: 10_000, C: 10_000, **(krx_base or {})}, no_pred)
+                     {A: 10_000, B: 10_000, C: 10_000, **(krx_base or {})}, no_pred, analysts or {})
     return bc.compare_fi(*boards, t, dp, ev, replay=replay, wise_cut=wise_cut)
 
 
@@ -1217,6 +1221,63 @@ def test_evening_monday_annual_refetch_is_info(tmp_path) -> None:
     res = _fi3(tmp_path, mutate, wise_cut=T_DATE)
     found = [f for fs in res.tally.samples.values() for f in fs if f.table == "fi_consensus_annual"]
     assert found and all(f.category == bc.INFO and f.note == bc.WISE_REFETCH for f in found), found
+
+
+@pytest.mark.parametrize(("r_ni", "want"), [(None, bc.INFO), (3.0, bc.UNEXPLAINED)],
+                         ids=["wise_dropped", "research_value_differs"])
+def test_evening_grace_research_lapsed_fin_row_is_info(tmp_path, r_ni: float | None, want: str) -> None:
+    """커버 유예 만료(S2 ② 가 — 10-26 141000·460850) — 장 마감 판은 grace 라 WISE 값을 싣고, 연구 판 T 는 lapsed 라
+    WISE 칸이 빠져 DART 행(fs_basis 'DART:' · 공개일 = DART 날짜)만 남는다. 장 마감 판 WISE 는 T 스냅샷이라 연구 판 D'
+    와 달라 3자 대조가 서지 않는다 — 옛 코드는 미설명이었다. 연구 판 값이 NULL 이 아니라 다른 값이면 종전 규칙(미설명)."""
+    def mutate(e: dict[str, Any], r: dict[str, Any], d: dict[str, Any]) -> None:
+        _uni(e, A, coverage_state="grace", coverage_age_days=5)
+        _uni(d, A, coverage_state="grace", coverage_age_days=5)
+        _uni(r, A, coverage_state="lapsed", coverage_age_days=6, has_estimates=False, eligible=False,
+             exclude_reason="estimates_lapsed")
+        e["fi_fin_summary"].append(_fin_row(T_DATE, "IFRS연결", 2.0))
+        r["fi_fin_summary"].append(_fin_row(dt.date(2026, 3, 17), "DART:CFS", r_ni))
+        d["fi_fin_summary"].append(_fin_row(DP_DATE, "IFRS연결", 1.0))
+    res = _fi3(tmp_path, mutate, wise_cut=T_DATE)
+    found = [f for fs in res.tally.samples.values() for f in fs if f.table == "fi_fin_summary"]
+    assert [f.category for f in found] == [want], found
+    if want == bc.INFO:
+        assert found[0].note == bc.LAPSE and set(found[0].columns) == {"ni", "fs_basis", "available_date"}
+
+
+@pytest.mark.parametrize(("e_n", "want"), [(None, bc.INFO), (2, bc.UNEXPLAINED)],
+                         ids=["evening_is_dprime_value", "evening_not_dprime_value"])
+def test_analyst_count_dprime_to_t_is_info_by_coverage_daily(tmp_path, e_n: int | None, want: str) -> None:
+    """추정기관 수 D′↔T(S2 ② 나 — 10-28 005950·476060) — 장 마감 판 n_analysts 는 coverage_daily 를 D' 까지, 연구
+    판 T 는 T 까지 읽는다. 연구 D' 판에 컨센서스 행이 없거나(005950 — D' 에 추정치 없음) 유예로 옛 값을 이어 실어
+    (476060) 3자 대조가 서지 않는다 — 옛 코드는 미설명이었다. 장 마감 판 = coverage_daily(D') ∧ 연구 판 =
+    coverage_daily(T) 면 정보 시점, 장 마감 판 값이 coverage_daily(D') 와 다르면 미설명."""
+    def mutate(e: dict[str, Any], r: dict[str, Any], d: dict[str, Any]) -> None:
+        e["fi_consensus"].append(_cons(T_DATE, e_n))
+        r["fi_consensus"].append(_cons(T_DATE, 0))
+        _uni(e, B, n_analysts=0 if e_n is None else e_n)
+        _uni(d, B, n_analysts=1)
+        _uni(r, B, n_analysts=1)
+    res = _fi3(tmp_path, mutate, wise_cut=T_DATE, analysts={A: (None, 0), B: (0, 1)})
+    found = {(f.table, f.ticker): (f.category, f.note) for fs in res.tally.samples.values() for f in fs}
+    assert {k: v[0] for k, v in found.items()} == {("fi_consensus", A): want, ("fi_universe", B): want}, found
+    if want == bc.INFO:
+        assert {v[1] for v in found.values()} == {bc.ANALYSTS_DT}
+
+
+def test_read_analysts_takes_the_last_row_up_to_each_day(tmp_path) -> None:
+    """(나) 증거 — 연구 판 equity coverage_daily 를 D'·T 까지 종목별 마지막 행으로 읽는다(fi 의 ASOF 와 같은 축).
+    D' 행의 값이 NULL 이거나(Y — 커버 시작 전) D' 까지 행이 없으면(Z) D' 값은 None."""
+    rows = [{"ticker": "X", "date": PRE[0], "analyst_count": 2},
+            {"ticker": "X", "date": T_DATE, "analyst_count": 3},
+            {"ticker": "Y", "date": DP_DATE, "analyst_count": None},
+            {"ticker": "Y", "date": T_DATE, "analyst_count": 0},
+            {"ticker": "Z", "date": T_DATE, "analyst_count": 1}]
+    _make_stage_tree(tmp_path / "eq", "coverage_daily", rows, build_id=EQ_T,
+                     types={"analyst_count": "DECIMAL(5,0)"})
+    side = bc.Side("연구 판", "morning", tmp_path, {"equity_root": str(tmp_path / "eq" / "stage"),
+                                                  "equity_builds": {"coverage_daily": EQ_T}},
+                   None)  # type: ignore[arg-type]  # reason: 증거 읽기는 판 기록만 본다(모델 판 불필요)
+    assert bc.read_analysts(side, DP_DATE, T_DATE) == {"X": (2, 3), "Y": (None, 0), "Z": (None, 1)}
 
 
 @pytest.mark.parametrize(("t", "dp", "want_annual", "want_uni"), [

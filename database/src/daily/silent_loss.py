@@ -28,6 +28,11 @@ stage 판 기록에는 파티션 해시가 없어 표 전체를 조인한다.
   · 규칙 변경 — 판본 차이 ∧ 전파 집합 안인 표(`rules_scope`, 연구 DB S1-a). 아래 미설명 후보 전부가 이 갈래로 간다.
     전파 집합은 그날 두 판의 판본 쌍으로 한 번 정한다 — 판본 사이 선언(stage·equity `RULES_CHANGED`)에 든 표와 그것을
     공개일 참조표·입력으로 읽는 표. 선언이 없는 판본 쌍은 그 층 표가 전부 바뀐 것으로 본다(선언 전 동작).
+  · 정정 공시 — available_date 계열 칸이 바뀌어 새 값이 그 법인(`corp_code`)의 (D', D] 정정 접수일
+    (`disclosure_version` is_correction · rcept_dt, 오늘 인계 판)과 같으면 설명됨으로 보되 수는 남긴다. 정정된 값은
+    정정 접수일부터 공개다(연구 DB S1 · e1.32.0) — 10-30 정정 4개 회사의 공개일 11칸이 미설명으로 떴다(10-31).
+    창 밖 값→NULL 도 그 행의 available_date 가 그 법인의 (D', D] 정정 접수일로 옮겨 갔으면 정정이다(정정 재작성본에
+    계정이 없음 — 10-30 079000 lease_liab). 공개일이 그대로인 행의 값→NULL 은 미설명이다.
   · 미설명 — 그 밖의 값→NULL(창 밖) · 행 삭제(창 안 포함) · available_date 계열 변경(창 안 포함 — 공개시점 축은 창으로
     설명하지 않는다). 창 밖 값 변경은 보고만 한다(equity_diff 게이트와 같은 세 축).
   날짜 열이 없는 표(마스터·접수 축)는 grain 으로 비교하고 재수집 창 없이 같은 규칙이다.
@@ -264,15 +269,39 @@ def _q(name: str) -> str:
 
 def _empty_counts() -> dict[str, int]:
     return {k: 0 for k in ("rows_added", "rows_removed", "value_to_null", "null_to_value",
-                           "value_changed", "window", "rules_change", "unexplained")}
+                           "value_changed", "window", "correction", "rules_change", "unexplained")}
+
+
+def corrections_of(home: Path, bid: str | None, prev: dt.date, d: dt.date) -> list[tuple[str, dt.date]]:
+    """오늘 인계 판 `disclosure_version` 의 (D', D] 정정 접수 (corp_code, rcept_dt). 판이 없거나 못 읽으면 빈 목록 —
+    정정 갈래가 비어 그 칸은 미설명으로 남는다(조용히 통과시키지 않는다)."""
+    if bid is None:
+        return []
+    ed = _ed()
+    try:
+        files = ed.build_files(home / ROOTS[EQUITY] / "disclosure_version", bid)
+    except ed.UsageError:
+        return []
+    import duckdb
+
+    con = duckdb.connect()
+    try:
+        rows = con.execute(
+            f"SELECT DISTINCT corp_code, rcept_dt FROM {ed.read_parquet_sql(files)} "
+            "WHERE is_correction AND rcept_dt > ? AND rcept_dt <= ?", [prev, d]).fetchall()
+    finally:
+        con.close()
+    return [(str(c), r) for c, r in rows]
 
 
 def compare_table(home: Path, layer: str, table: str, before: str | None, after: str | None, *,
                   window: tuple[dt.date, dt.date], scope: frozenset[str], threads: int = THREADS,
-                  memory_limit: str = MEMORY_LIMIT, samples: int = SAMPLE_N) -> dict:
+                  memory_limit: str = MEMORY_LIMIT, samples: int = SAMPLE_N,
+                  corrections: Sequence[tuple[str, dt.date]] = ()) -> dict:
     """표 하나의 두 판을 대조해 갈래 수를 낸다. 판정할 수 없으면 status undecidable + 사유(예외를 올리지 않는다).
 
-    `scope` 는 그날의 규칙 변경 표(`rules_scope`) — 여기 든 표의 미설명 후보는 규칙 변경 갈래로 간다."""
+    `scope` 는 그날의 규칙 변경 표(`rules_scope`) — 여기 든 표의 미설명 후보는 규칙 변경 갈래로 간다.
+    `corrections` 는 그날의 정정 접수 (corp_code, rcept_dt)(`corrections_of`) — 정정 공시 갈래."""
     t0 = time.monotonic()
     out: dict = {"table": table, "layer": layer, "before": before, "after": after, "status": None,
                  "reason": "", "rules_before": None, "rules_after": None, "rules_changed": False,
@@ -350,14 +379,14 @@ def compare_table(home: Path, layer: str, table: str, before: str | None, after:
             issues = {s: {k: v[k] for k in ("duplicate_keys", "null_keys")}
                       for s, v in core.key_issues.items()}
             return done(TABLE_UNDECIDABLE, f"grain {list(spec.key)} 에 중복 키가 있다 — {issues}")
-        _classify(out, ed, con, core, split, samples=samples)
+        _classify(out, ed, con, core, split, samples=samples, corrections=corrections)
     finally:
         con.close()
     return done(COMPARED)
 
 
 def _classify(out: dict, ed: ModuleType, con: Any, core: Any, split: str | None, *,
-              samples: int) -> None:
+              samples: int, corrections: Sequence[tuple[str, dt.date]] = ()) -> None:
     """diff_core 카운터(`equity_diff.DiffCore`)를 갈래로 나누고 미설명 표본을 뽑는다(조인 뷰 j 가 살아 있는 연결 위에서)."""
     counters = core.counters
     compared: list[str] = core.compared
@@ -376,6 +405,43 @@ def _classify(out: dict, ed: ModuleType, con: Any, core: Any, split: str | None,
     removed = tot(ed.ROW_COLUMN, "rows_removed")
     v2n_out = {c: tot(c, "value_to_null") - ins(c, "value_to_null") for c in plain}
     avail_n = {(c, k): tot(c, k) for c in avail for k in ed.KINDS_COLUMN}
+    # 정정 공시 갈래 — 새 공개일이 그 법인의 그날 정정 접수일인 칸(공개일 열의 값→NULL 은 정정으로 설명하지 않는다).
+    # 창 밖 값→NULL 은 그 행의 available_date 가 정정 접수일로 옮겨 갔을 때만 정정이다 — 정정 재작성본에 계정이
+    # 없다(10-30 079000 lease_liab, 10-31). 공개일이 그대로인 행의 값→NULL 은 미설명으로 남는다
+    corp = ed.q(ed.KEY_PREFIX + "corp_code") if "corp_code" in key else (
+        ed.q("corp_code") if "corp_code" in a_types else None)
+    fixed: dict[tuple[str, str], str] = {}
+    corrected = 0
+
+    def v2n_cond(col: str) -> str:
+        cond = ed.change_cond(col, "value_to_null", numeric=ed.is_numeric(a_types.get(col, "VARCHAR")),
+                              tol=ed.DEFAULT_TOL)
+        return f"({cond}) AND NOT coalesce({split}, FALSE)" if split else cond
+
+    if corrections and corp is not None:
+        con.execute("CREATE OR REPLACE TEMP TABLE _corr (corp_code VARCHAR, d DATE)")
+        con.executemany("INSERT INTO _corr VALUES (?, ?)", list(corrections))
+        for (col, k), n in avail_n.items():
+            if n and k != "value_to_null":
+                fixed[(col, k)] = (f"({corp}, TRY_CAST({ed.q(col)} AS DATE)) "
+                                   "IN (SELECT corp_code, d FROM _corr)")
+                cond = ed.change_cond(col, k, numeric=ed.is_numeric(a_types.get(col, "VARCHAR")),
+                                      tol=ed.DEFAULT_TOL)
+                hit = int(con.execute(f"SELECT count(*) FROM j WHERE ({cond}) AND {fixed[(col, k)]}")
+                          .fetchone()[0])
+                avail_n[(col, k)] = n - hit
+                corrected += hit
+        if "available_date" in avail:
+            av = ed.q("available_date")
+            moved = (f"{ed.q(ed.BEFORE_PREFIX + 'available_date')} IS DISTINCT FROM {av} AND "
+                     f"({corp}, TRY_CAST({av} AS DATE)) IN (SELECT corp_code, d FROM _corr)")
+            for col, n in v2n_out.items():
+                if n:
+                    fixed[(col, "value_to_null")] = moved
+                    hit = int(con.execute(f"SELECT count(*) FROM j WHERE ({v2n_cond(col)}) AND {moved}")
+                              .fetchone()[0])
+                    v2n_out[col] = n - hit
+                    corrected += hit
     by_kind = {"value_to_null": sum(v2n_out.values()), "rows_removed": removed,
                "available_date": sum(avail_n.values())}
     candidate = sum(by_kind.values())
@@ -384,7 +450,8 @@ def _classify(out: dict, ed: ModuleType, con: Any, core: Any, split: str | None,
              value_to_null=sum(tot(x, "value_to_null") for x in compared),
              null_to_value=sum(tot(x, "null_to_value") for x in compared),
              value_changed=sum(tot(x, "value_changed") for x in compared),
-             window=sum(ins(x, "value_changed") + ins(x, "value_to_null") for x in plain))
+             window=sum(ins(x, "value_changed") + ins(x, "value_to_null") for x in plain),
+             correction=corrected)
     if out["rules_changed"]:
         c["rules_change"] = candidate
         return
@@ -396,17 +463,18 @@ def _classify(out: dict, ed: ModuleType, con: Any, core: Any, split: str | None,
     picks: list[tuple[int, str, str, str]] = []
     for col, n in v2n_out.items():
         if n:
-            cond = ed.change_cond(col, "value_to_null", numeric=ed.is_numeric(a_types.get(col, "VARCHAR")),
-                                  tol=ed.DEFAULT_TOL)
+            cond = v2n_cond(col)
             picks.append((n, col, "value_to_null",
-                          f"({cond}) AND NOT coalesce({split}, FALSE)" if split else cond))
+                          f"({cond}) AND NOT coalesce({fixed[(col, 'value_to_null')]}, FALSE)"
+                          if (col, "value_to_null") in fixed else cond))
     if removed:
         picks.append((removed, ed.ROW_COLUMN, "rows_removed",
                       ed.change_cond(ed.ROW_COLUMN, "rows_removed", numeric=False, tol=0)))
     for (col, k), n in avail_n.items():
         if n:
-            picks.append((n, col, k, ed.change_cond(col, k, numeric=ed.is_numeric(a_types.get(col, "VARCHAR")),
-                                                    tol=ed.DEFAULT_TOL)))
+            cond = ed.change_cond(col, k, numeric=ed.is_numeric(a_types.get(col, "VARCHAR")), tol=ed.DEFAULT_TOL)
+            picks.append((n, col, k, f"({cond}) AND NOT coalesce({fixed[(col, k)]}, FALSE)"
+                          if (col, k) in fixed else cond))
     left = samples
     for _n, col, k, pred in sorted(picks, key=lambda p: -p[0]):
         if left <= 0:
@@ -456,7 +524,8 @@ class Result:
         if self.error is not None:
             return f"판정 불가 — {self.error[:160]}"
         return (f"미설명 {self.totals['unexplained']:,} · 판정 불가 표 {self.totals['undecidable']} · "
-                f"재수집 창 {self.totals['window']:,} · 규칙 변경 {self.totals['rules_change']:,}")
+                f"재수집 창 {self.totals['window']:,} · 정정 공시 {self.totals['correction']:,} · "
+                f"규칙 변경 {self.totals['rules_change']:,}")
 
     def to_dict(self) -> dict:
         lo_hi = None if self.window is None else {"lo": self.window[0].isoformat(),
@@ -502,11 +571,12 @@ def check(home: Path, d: str, *, prev: str | None = None, tables: Sequence[tuple
         versions = {(la, t): v for la, t in res.closure
                     if (v := _rules_versions(home, la, t, *ids(la, t))) is not None}
         scope = rules_scope(versions)
+        corrections = corrections_of(home, today.equity_builds.get("disclosure_version"), _ymd(res.prev), dd)
         for layer, table in res.closure:
             try:
                 res.tables.append(compare_table(
                     home, layer, table, *ids(layer, table), window=res.window, scope=scope,
-                    threads=threads, memory_limit=memory_limit, samples=samples))
+                    threads=threads, memory_limit=memory_limit, samples=samples, corrections=corrections))
             except Exception as e:  # noqa: BLE001  # reason: 표 하나의 예상 밖 예외가 나머지 표 판정을 막지 않게(그 표는 판정 불가)
                 traceback.print_exc()
                 res.tables.append({**compare_table(home, layer, table, None, None, window=res.window,

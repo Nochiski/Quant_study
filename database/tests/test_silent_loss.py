@@ -192,6 +192,62 @@ def test_창_밖_값_NULL_행_삭제_공개일_변경은_미설명(tmp_path: Pat
     assert res.verdict == "unexplained" and res.rc == 1
 
 
+FIN_SCHEMA = {"corp_code": "VARCHAR", "period_end": "DATE", "report_code": "VARCHAR", "fs_div": "VARCHAR",
+              "vintage_kind": "VARCHAR", "revenue": "DOUBLE", "available_date": "DATE",
+              "cf_q_available_date": "DATE"}
+DV_SCHEMA = {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "rcept_dt": "DATE", "is_correction": "BOOLEAN"}
+
+
+def _fin(corp: str, avail: str) -> dict:
+    return {"corp_code": corp, "period_end": "2026-06-30", "report_code": "11012", "fs_div": "CFS",
+            "vintage_kind": "api_restated", "revenue": 10.0, "available_date": avail,
+            "cf_q_available_date": avail}
+
+
+def test_그날_정정_공시로_공개일이_접수일로_옮겨_간_칸만_정정_갈래(tmp_path: Path) -> None:
+    """S1(e1.32.0) 뒤 정정된 값은 정정 접수일부터 공개다 — 10-30 정정 4개 회사의 공개일 11칸이 미설명으로 떴다.
+    X: D 정정 접수 + 공개일 → D(설명) · Y: 공시 없음(미설명) · W: D 정정은 있으나 공개일이 다른 날(미설명)."""
+    home = _home(tmp_path)
+    before = [_fin("X", "2026-08-14"), _fin("Y", "2026-08-14"), _fin("W", "2026-08-14")]
+    after = [_fin("X", "2026-10-08"), _fin("Y", "2026-10-08"), _fin("W", "2026-10-07")]
+    _build(home, "equity", "fin_std", "m_b", before, schema=FIN_SCHEMA)
+    _build(home, "equity", "fin_std", "m_a", after, schema=FIN_SCHEMA)
+    _build(home, "equity", "disclosure_version", "m_dv",
+           [{"rcept_no": "1", "corp_code": "X", "rcept_dt": "2026-10-08", "is_correction": True},
+            {"rcept_no": "2", "corp_code": "Y", "rcept_dt": "2026-10-08", "is_correction": False},
+            {"rcept_no": "3", "corp_code": "W", "rcept_dt": "2026-10-08", "is_correction": True}],
+           schema=DV_SCHEMA)
+    _handoff(home, DP, stage={}, equity={"fin_std": "m_b"})
+    _handoff(home, D, stage={}, equity={"fin_std": "m_a", "disclosure_version": "m_dv"})
+    t = _tbl(sl.check(home, D, tables=[("equity", "fin_std")]), "fin_std")
+    assert t["counts"]["unexplained"] == 4                # Y 2칸 · W 2칸
+    assert t["counts"]["correction"] == 2                 # X 의 공개일 열 2칸
+    assert t["unexplained_by_kind"]["available_date"] == 4
+    assert {s["key"]["corp_code"] for s in t["samples"]} == {"Y", "W"}
+
+
+def test_정정_공시로_공개일이_옮겨_간_행의_값_NULL_은_정정_갈래(tmp_path: Path) -> None:
+    """10-30 079000 2025 연간 OFS lease_liab → NULL — 정정 재작성본에 그 계정이 없고 행 공개일은 정정 접수일로 옮겨 갔다
+    (10-31 남은 미설명 1). X: 정정 접수 + 공개일 이동 + 값→NULL(정정) · Z: 같은 날 정정 접수는 있으나 공개일이 그대로인
+    행의 값→NULL(미설명)."""
+    home = _home(tmp_path)
+    before = [_fin("X", "2026-08-14"), _fin("Z", "2026-08-14")]
+    after = [{**_fin("X", "2026-10-08"), "revenue": None}, {**_fin("Z", "2026-08-14"), "revenue": None}]
+    _build(home, "equity", "fin_std", "m_b", before, schema=FIN_SCHEMA)
+    _build(home, "equity", "fin_std", "m_a", after, schema=FIN_SCHEMA)
+    _build(home, "equity", "disclosure_version", "m_dv",
+           [{"rcept_no": "1", "corp_code": "X", "rcept_dt": "2026-10-08", "is_correction": True},
+            {"rcept_no": "2", "corp_code": "Z", "rcept_dt": "2026-10-08", "is_correction": True}],
+           schema=DV_SCHEMA)
+    _handoff(home, DP, stage={}, equity={"fin_std": "m_b"})
+    _handoff(home, D, stage={}, equity={"fin_std": "m_a", "disclosure_version": "m_dv"})
+    t = _tbl(sl.check(home, D, tables=[("equity", "fin_std")]), "fin_std")
+    assert t["counts"]["correction"] == 3                 # X 값→NULL 1 + 공개일 열 2
+    assert t["counts"]["unexplained"] == 1                # Z 값→NULL
+    assert t["unexplained_by_kind"]["value_to_null"] == 1
+    assert [s["key"]["corp_code"] for s in t["samples"]] == ["Z"]
+
+
 def test_규칙_판본이_바뀐_표는_규칙_갈래(tmp_path: Path) -> None:
     home = _home(tmp_path)
     after = [_px("A", WIN_OUT, None), _px("A", WIN_IN, 101.0), _px("A", "2026-10-07", 102.0)]

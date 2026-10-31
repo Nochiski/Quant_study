@@ -29,7 +29,9 @@ backfill_end 이고 시작은 달력 첫 세션이다(④만 사건일부터).
           EGC-01 과 같은 축으로 맞고 기준가 행이 1 이상 빠진다.
   EGC-10  `security_span.end_reason='delisted'` 구간 중 `security.delist_sample_seed`·
           `delist_sample_n` 으로 고정 추출한 표본의 `{ticker}:{span_seq}` 전 구간 질의 → 예외 없음
-          ∧ bar 를 낸 종목 id 집합 = 요청 집합.
+          ∧ bar 를 낸 종목 id 집합 = 요청 집합 − 기준가만 남은 구간. 구간 안 확정 행이 전부 거래정지
+          기준가(`price_kind='reference'`)인 구간은 어댑터가 bar 를 내지 않는 것이 맞다(EGC-05 와 같은
+          규칙 — 서버 097959:1, 2010-01-04~12 기준가 7행). 그 구간은 `reference_only` 로 남긴다.
 
 `snapshot_id` 대조: 어댑터는 카탈로그 meta 의 `snapshot_id`(`equity.catalog.snapshot_id` 가 씀)를
 자기 사본 규칙으로 다시 계산한 값과 대조해, 다르면 카탈로그를 낡은 것으로 보고 백테스트 데이터를
@@ -605,16 +607,23 @@ def egc10_delisted_sample(ctx: _Ctx) -> GateResult:
     if not candidates:
         raise SkipGate("no_coverage", {"reason": "no delisted span"})
     sample = sorted(random.Random(seed).sample(candidates, min(n, len(candidates))))
+    traded = {_sid(str(t), int(str(s))) for t, s in ctx.rows(
+        f"SELECT DISTINCT s.ticker, s.span_seq FROM {ctx.source('security_span')} s "
+        f"JOIN {confirmed_source(ctx, 'price_daily')} p ON p.ticker = s.ticker "
+        "AND p.date BETWEEN s.first_date AND s.last_date "
+        "WHERE s.end_reason = 'delisted' AND p.price_kind <> 'reference'")}
+    reference_only = [sid for sid in sample if sid not in traded]
     dataset, error = ctx.dataset(sample)
     returned = sorted({b.security_id for b in dataset.bars}) if dataset is not None else []
     metrics: dict[str, object] = {
         "seed": seed, "n_requested": n, "n_candidates": len(candidates), "sample": sample,
         "error": error, "n_bars": len(dataset.bars) if dataset is not None else 0,
-        "returned": returned}
-    ok = error is None and returned == sample
+        "returned": returned, "reference_only": reference_only}
+    ok = error is None and returned == [sid for sid in sample if sid in traded]
     return GateResult("EGC-10", GateStatus.PASS if ok else GateStatus.FAIL,
-                      f"폐지 표본 {len(sample)}구간 OK, 반환 = 요청" if ok else
-                      f"delisted sample: error={error} returned={len(returned)}/{len(sample)}",
+                      f"폐지 표본 {len(sample)}구간 OK, 반환 = 요청 − 기준가만 {len(reference_only)}" if ok else
+                      f"delisted sample: error={error} returned={len(returned)}/{len(sample)} "
+                      f"reference_only={len(reference_only)}",
                       metrics)
 
 

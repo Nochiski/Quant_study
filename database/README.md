@@ -422,8 +422,9 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 - **판**: `data/deliver/history/<D>_morning.json` 대 직전 거래일(판정 달력) `<D'>_morning.json` 의 판. 판이 GC 돼 없으면 그 표는
   판정 불가(P1).
 - **갈래**: 새 행·NULL→값은 정상 · 재수집 창(D 와 그 앞 10세션, `ledger_health.KRX_RECHECK_SESSIONS`) 안 행의 값 변경·값→NULL 은
-  '재수집 창' · 두 판의 규칙 판본이 다른 표는 '규칙 변경' · 그 밖의 값→NULL·행 삭제·available_date 변경은 **미설명**. 앞의 둘(창·
-  규칙)은 설명됨으로 보되 수를 남긴다.
+  '재수집 창' · 두 판의 규칙 판본이 다른 표는 '규칙 변경' · available_date 계열 칸이 그 법인의 (D', D] 정정 접수일로 옮겨 갔거나
+  그렇게 공개일이 옮겨 간 행의 창 밖 값→NULL 은 '정정 공시'(S2, 10-31) · 그 밖의 값→NULL·행 삭제·available_date 변경은
+  **미설명**. 앞의 셋(창·규칙·정정)은 설명됨으로 보되 수를 남긴다.
 - **결과**: `logs/silent_loss/<D>.json`(표별 갈래 수·미설명 표본 상위 5) · 런 로그 source `silent_loss`(상태 ok · unexplained ·
   undecidable · blocked — unexplained·undecidable 은 일일 리포트 '주의 런', blocked 는 crit) · 미설명 > 0 또는 판정 불가면 notify
   warn 한 줄 '조용한 손실 기록 D=…'. 모듈이 rc 0~3 밖으로 죽으면 `daily_build.sh` 가 warn 1건. 체인 rc·요약 등급은 그대로다(요약에

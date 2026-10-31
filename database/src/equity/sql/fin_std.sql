@@ -529,7 +529,15 @@ judged AS (
      AND s.reprt_code = j.reprt_code AND s.fs_div = j.fs_div
 ),
 dup AS (
-    SELECT corp_code, period_end, report_code, fs_div, count(*) AS n_grain
+    -- 같은 grain 이 둘 이상이면 어느 판본이 옳은지 규칙이 못 고르므로 전부 `duplicate_vintage` 로 격리한다. 예외 하나 —
+    -- 같은 접수가 두 bsns_year 로 온 grain(앞 해 보고서가 없어 그해 조회 응답에 다음 해 보고서가 실려 옴 — 082660
+    -- 2024·2025, 10-31)은 같은 보고서라 bsns_year = 기말일 연도인 행이 정확히 하나면 그 행(`keep_year`)을 남긴다.
+    -- DART `bsns_year` 는 기간 말일의 연도다(`kept` 주석 · #236). 남는 행 = `n_grain = 1 OR keep_year = bsns_year`.
+    SELECT corp_code, period_end, report_code, fs_div, count(*) AS n_grain,
+           CASE WHEN count(DISTINCT rcept_no) = 1
+                     AND count(*) FILTER (WHERE TRY_CAST(bsns_year AS INTEGER) = year(period_end)) = 1
+                THEN max(bsns_year) FILTER (WHERE TRY_CAST(bsns_year AS INTEGER) = year(period_end))
+           END                                                   AS keep_year
     FROM judged
     WHERE pre_reject IS NULL
     GROUP BY corp_code, period_end, report_code, fs_div
@@ -547,7 +555,7 @@ kept AS (
     JOIN dup d
       ON d.corp_code = j.corp_code AND d.period_end = j.period_end
      AND d.report_code = j.report_code AND d.fs_div = j.fs_div
-    WHERE j.pre_reject IS NULL AND d.n_grain = 1
+    WHERE j.pre_reject IS NULL AND (d.n_grain = 1 OR d.keep_year = j.bsns_year)
 ),
 q4member AS (
     -- 사업보고서 행과 같은 회계연도의 1Q·반기·3Q 행
@@ -779,7 +787,7 @@ basis_prev AS (
     LEFT JOIN wide w
       ON w.corp_code = j.corp_code AND w.bsns_year = j.bsns_year
      AND w.reprt_code = j.reprt_code AND w.fs_div = j.fs_div
-    WHERE j.pre_reject IS NULL AND d.n_grain = 1
+    WHERE j.pre_reject IS NULL AND (d.n_grain = 1 OR d.keep_year = j.bsns_year)
     GROUP BY j.corp_code, TRY_CAST(j.bsns_year AS INTEGER), j.report_code, j.fs_div
 ),
 q4gate AS (
@@ -877,7 +885,8 @@ SELECT
     j.avail_dt                                                  AS available_date,
     'derived'                                                   AS available_basis,
     coalesce(j.pre_reject,
-             CASE WHEN d.n_grain > 1 THEN 'duplicate_vintage' END) AS reject_reason
+             CASE WHEN d.n_grain > 1 AND d.keep_year IS DISTINCT FROM j.bsns_year
+                  THEN 'duplicate_vintage' END)                 AS reject_reason
 FROM judged j
 LEFT JOIN wide w
   ON w.corp_code = j.corp_code AND w.bsns_year = j.bsns_year

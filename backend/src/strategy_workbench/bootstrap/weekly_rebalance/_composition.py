@@ -9,7 +9,7 @@
     <작업 폴더>/ledger/kiwoom-reference.sqlite 키움 모의 참조 원장
     <작업 폴더>/plans/                         주문안·승인
     <작업 폴더>/records/                       실행 사건·하루 기록
-    <작업 폴더>/risk/                          리스크 판정·장 마감 점검·사람의 명령
+    <작업 폴더>/risk/                          리스크 판정·장 마감 점검·사람의 명령·위험 보고
 
 리스크 한도는 저장소의 `backend/scripts/weekly_rebalance_risk_limits.json` 하나에서 읽는다(전략 코드
 밖, 배포 절차가 `scripts/`를 그대로 옮긴다).
@@ -44,11 +44,15 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.stream import (
     mock_connect,
     record_fills,
 )
+from strategy_workbench.adapters.outbound.ledger_prices.facade.prices import LedgerPriceHistory
 from strategy_workbench.adapters.outbound.rebalance_files.facade.plans import (
     JsonExecutionLog,
     JsonPlanStore,
 )
-from strategy_workbench.adapters.outbound.rebalance_files.facade.risk import JsonRiskStore
+from strategy_workbench.adapters.outbound.rebalance_files.facade.risk import (
+    JsonRiskReportStore,
+    JsonRiskStore,
+)
 from strategy_workbench.adapters.outbound.scope_signal.facade.source import ScopeSignalSource
 from strategy_workbench.application.offline_execution.facade.execution import (
     BrokerError,
@@ -60,6 +64,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountUnavailableError,
     LedgerRepairService,
     RiskGuardService,
+    RiskReportService,
     WeeklyExecutionService,
     WeeklyRebalanceService,
 )
@@ -147,6 +152,21 @@ def build_risk_guard(workdir: Path) -> RiskGuardService:
     root = outside_repository(workdir)
     return RiskGuardService(
         JsonRiskStore(root, RISK_LIMITS_FILE), JsonExecutionLog(root), now=lambda: datetime.now(KST)
+    )
+
+
+def build_risk_report(workdir: Path, equity_root: Path | None) -> RiskReportService:
+    """일일 위험 보고. 주문·키움 접속 없이 기록과 원장 가격만 읽는다.
+
+    보고 보기(`equity_root`가 None)는 가격을 읽지 않는다 — 원장 자리는 쓰이지 않는 이름이다.
+    """
+    root = outside_repository(workdir)
+    return RiskReportService(
+        JsonExecutionLog(root),
+        JsonRiskStore(root, RISK_LIMITS_FILE),
+        JsonRiskReportStore(root),
+        LedgerPriceHistory(equity_root if equity_root is not None else root / "no-ledger"),
+        JsonPlanStore(root),
     )
 
 
@@ -242,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
             telegram_notice,
             open_ledger_repair,
             build_risk_guard,
+            build_risk_report,
         ),
         argv,
     )

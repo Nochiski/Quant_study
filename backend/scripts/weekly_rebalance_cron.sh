@@ -10,12 +10,14 @@
 #   S07_REQUIRE_APPROVAL  1이면 승인한 주문안만 보낸다(매주 승인, 10-21 사용자 결정), 0이면 승인 없이 보낸다
 #   STRATEGY_WORKBENCH_KIWOOM_ENV_FILE · STRATEGY_WORKBENCH_KIWOOM_KEY_PAIR  키를 읽을 .env와 쌍 번호
 #   STRATEGY_WORKBENCH_TELEGRAM_ENV_FILE · _TOKEN_VAR · _CHAT_ID  주문지를 보낼 봇 토큰(.env의 이름)과 채팅
+#   S07_AFTER_RISK_REPORT 선택. 위험 보고를 남긴 뒤 부를 서버 전용 명령(인자: 오늘, 다음 거래일).
+#                         보낼 곳·때는 그 명령이 정한다(저장소에 두지 않는다, 2026-10-27 사용자 결정)
 #
 # 단계(prepare 밖의 단계는 휴장일에 아무것도 하지 않는다):
 #   fills    장중 실시간 체결 알림 기록(두 번째 인자 HH:MM 까지, crontab 이 넣는다)
 #   open     직전 거래일 주문안이 있으면 전 종목을 낸다(매도 먼저)
 #   chase    잔량을 취소하고 그때 2호가로 다시 낸다(마지막 회차 주문은 장 마감까지)
-#   close    장 마감 대사·하루 기록·키움 원본
+#   close    장 마감 대사·하루 기록·키움 원본, 이어서 일일 위험 보고(판단에 쓰지 않는다)
 #   prepare  휴장이 이어지는 첫날(보통 토요일)이고 그 전날이 그 주 마지막 거래일이면, 그날 분 WISE
 #            추정치까지 넣은 주말 보강판이 준비된 것을 확인한 뒤 그 거래일 순위로 주문안을 만들고
 #            텔레그램으로 주문지를 보낸다(만들지 못했으면 보류·실패 알림). 금요일 추정치가 토요일
@@ -118,7 +120,20 @@ case "$PHASE" in
       log "주문안이 아직 없음 — 건너뜀"
       exit 0
     fi
-    wr close --workdir "$S07_WORKDIR"
+    CLOSE_RC=0
+    wr close --workdir "$S07_WORKDIR" || CLOSE_RC=$?
+    # 일일 위험 보고(판단에 쓰지 않는다, 2026-10-31 사용자 승인). close 가 남긴 오늘 하루 기록을 읽고
+    # 원장 가격으로 잰다. close 가 끝난 뒤 이어서 돌고, 실패해도 close 결과·리스크 판정은 그대로다.
+    if wr risk-report --workdir "$S07_WORKDIR" --equity-root "$S07_LEDGER_HOME/data/equity" \
+      --day "$TODAY"; then
+      if [ -n "${S07_AFTER_RISK_REPORT:-}" ]; then
+        NEXT="$(calendar next)" || NEXT=""
+        "$S07_AFTER_RISK_REPORT" "$TODAY" "$NEXT" || log "위험 보고 후속 명령 실패(rc=$?)"
+      fi
+    else
+      log "위험 보고를 만들지 못함 — close 결과는 그대로"
+    fi
+    exit "$CLOSE_RC"
     ;;
   prepare)
     # 대입문에서 판정해야 실패가 set -e 로 멈춘다. `[ "$(…)" ]` 안의 실패는 빈 값이 되어 건너뜀으로 가려진다.

@@ -23,9 +23,13 @@
     risk-status --workdir <폴더>   # 낙폭 단계·고점·한도 판
     risk-reset --workdir <폴더> --operator <이름> [--note]    # 고점을 마지막 장 마감 총자산으로
     risk-resume --workdir <폴더> --operator <이름> [--note]   # 신규 매수 정지를 풀어 축소 단계로
+    risk-report --workdir <폴더> --equity-root <원장 equity 루트> [--day YYYY-MM-DD]
+             # 일일 위험 보고를 만들어 risk/report-<날짜>.json 에 남긴다(판단에 쓰지 않는다)
+    risk-show --workdir <폴더> --day YYYY-MM-DD [--telegram]   # 남긴 보고 글(--telegram 은 HTML)
 
 리스크 명령(risk-*)은 주문을 보내지 않는다. 사람의 명령은 리스크 기록에 남고, 낙폭 단계는 장 마감
-기록과 그 명령으로 다시 낸다(2026-10-26 리스크 가드).
+기록과 그 명령으로 다시 낸다(2026-10-26 리스크 가드). 위험 보고(risk-report·risk-show)는 글만 만들고
+보내지 않는다 — 어디로 보낼지는 서버 전용 설정이 정한다(2026-10-27 사용자 결정).
 
 원장 고치기(ledger-*)는 원장 파일을 손으로 고치지 않게 하는 명령이다(2026-10-22 리뷰 #593).
 고친 일은 실행 사건 기록에 남고, 고친 뒤 다시 대사해 일치하면 신규 주문 정지가 풀린다.
@@ -71,6 +75,8 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     RiskCommandStatus,
     RiskDay,
     RiskGuardService,
+    RiskReportResult,
+    RiskReportService,
     RiskStatusResult,
     RiskUnavailableError,
     RiskVerdict,
@@ -84,7 +90,15 @@ from strategy_workbench.domain.rebalance.facade.rebalance import (
     RebalanceAction,
     RebalanceLine,
 )
-from strategy_workbench.domain.risk.facade.risk import GuardReason, RiskLevel
+from strategy_workbench.domain.risk.facade.risk import (
+    CIRCUIT_SCENARIO,
+    GAP_SCENARIO,
+    GuardReason,
+    RiskLevel,
+    RiskReport,
+    ScenarioResult,
+    annualized,
+)
 
 ServiceFactory = Callable[[Path, Path | None], WeeklyRebalanceService]
 # (작업 폴더, 보내는가, 승인이 필요한가) → 실행기. 끝나면 원장·연결을 닫는다.
@@ -107,6 +121,8 @@ NoticeFactory = Callable[[], NoticeSender]
 RepairFactory = Callable[[Path], AbstractContextManager[LedgerRepairService]]
 # 작업 폴더 → 리스크 단계 보기·고치기(주문·키움 접속 없음)
 RiskFactory = Callable[[Path], RiskGuardService]
+# (작업 폴더, 원장 equity 루트) → 위험 보고. 보고 보기(risk-show)는 원장을 읽지 않아 루트가 None.
+RiskReportFactory = Callable[[Path, Path | None], RiskReportService]
 # `signal-status`가 "아직 빌드가 없다(기다린다)"를 알리는 종료 코드. 예약 스크립트가 읽는다.
 SIGNAL_NOT_READY_EXIT = 3
 
@@ -119,6 +135,7 @@ class CliFactories:
     notifier: NoticeFactory
     repair: RepairFactory | None = None
     risk: RiskFactory | None = None
+    risk_report: RiskReportFactory | None = None
 
 
 _ACTION_LABELS = {
@@ -206,12 +223,22 @@ def _parser() -> argparse.ArgumentParser:
         "risk-reset", help="고점을 마지막 장 마감 총자산으로 바꾸고 정상 단계로(입출금 반영 등)"
     )
     risk_resume = commands.add_parser("risk-resume", help="신규 매수 정지를 풀어 축소 단계로")
+    risk_report = commands.add_parser(
+        "risk-report", help="일일 위험 보고를 만들어 남긴다(판단에 쓰지 않는다)"
+    )
+    risk_report.add_argument(
+        "--equity-root", type=Path, required=True, help="원장 equity 루트(quant-ledger data/equity)"
+    )
+    risk_report.add_argument("--day", type=date.fromisoformat, help="생략하면 마지막 장 마감 기록")
+    risk_show = commands.add_parser("risk-show", help="남긴 위험 보고 글을 보인다")
+    risk_show.add_argument("--day", type=date.fromisoformat, required=True)
+    risk_show.add_argument("--telegram", action="store_true", help="텔레그램 HTML 글로")
     for command in (bind, reject, clear, resume, risk_reset, risk_resume):
         command.add_argument("--operator", required=True, help="고친 사람(기록에 남는다)")
         command.add_argument("--note", default="")
     planning = (prepare, signal, show, approve, notify)
     running = (execute, close, report, export, fills)
-    risks = (risk_status, risk_reset, risk_resume)
+    risks = (risk_status, risk_reset, risk_resume, risk_report, risk_show)
     for command in (*planning, *running, status, bind, reject, clear, resume, *risks):
         command.add_argument(
             "--workdir", type=Path, required=True, help="원장·주문안 폴더(저장소 밖)"
@@ -233,6 +260,11 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             return 1
         print(f"[ok] received={recording.received}")
         return 0
+    if args.command in ("risk-report", "risk-show"):
+        if factories.risk_report is None:
+            print("[unavailable] 위험 보고를 이 명령줄에 연결하지 않았다")
+            return 1
+        return _run_risk_report(factories.risk_report, args)
     if args.command.startswith("risk-"):
         if factories.risk is None:
             print("[unavailable] 리스크 명령을 이 명령줄에 연결하지 않았다")
@@ -366,6 +398,28 @@ def _run_risk(guard: RiskGuardService, args: argparse.Namespace) -> int:
         print(render_risk_status(result))
     print(f"[{result.status.value}] {result.detail}".rstrip())
     return 0 if result.status is RiskCommandStatus.OK else 1
+
+
+def _run_risk_report(factory: RiskReportFactory, args: argparse.Namespace) -> int:
+    if args.command == "risk-report":
+        result: RiskReportResult = factory(args.workdir, args.equity_root.expanduser()).build(
+            args.day
+        )
+        if result.report is not None:
+            print(render_risk_report(result.report))
+    else:
+        result = factory(args.workdir, None).saved(args.day)
+        if result.report is not None:
+            text = (
+                render_risk_report_telegram(result.report)
+                if args.telegram
+                else render_risk_report(result.report)
+            )
+            print(text)
+            # 후속 명령이 글만 받게 상태 줄을 붙이지 않는다
+            return 0
+    print(f"[{result.status.value}] {result.detail}".rstrip())
+    return 0 if result.ok else 1
 
 
 def _send(factories: CliFactories, text: str) -> bool:
@@ -901,3 +955,132 @@ def _particle(word: str, after_final: str, after_vowel: str) -> str:
 
 def _html(text: str) -> str:
     return html.escape(text, quote=False)
+
+
+# 위험 보고 시나리오 이름(2026-10-31 사용자 승인 B1~B5). 구간은 보고에 실린 날짜로 붙인다.
+_SCENARIO_LABELS = {
+    "2020-03": "2020년 3월 급락",
+    "2024-08-05": "2024-08-05 폭락",
+    "2026-07": "2026년 7월 급락",
+    GAP_SCENARIO: "종목 하나 −30% 갭",
+    CIRCUIT_SCENARIO: "서킷브레이커(코스피 −20%, 그날 매도 불가)",
+}
+
+
+def _signed(value: float) -> str:
+    """수익률을 `−3.2%`·`+1.0%`로(음수는 리스크 단계 글과 같은 − 기호)."""
+    return f"{'−' if value < 0 else '+'}{abs(value) * 100:.1f}%"
+
+
+def _scenario_text(item: ScenarioResult, names: dict[str, str]) -> str:
+    label = _SCENARIO_LABELS.get(item.key, item.key)
+    if item.start is not None and item.end is not None:
+        label += f" {item.start.isoformat()}→{item.end.isoformat()}"
+    if not item.lines:
+        return f"{label}: 가격이 없어 계산하지 못함"
+    parts = [f"{label}: {_signed(item.portfolio_return)} ({_signed_won(item.loss_krw)})"]
+    if item.key == GAP_SCENARIO:
+        symbol = item.lines[0].symbol
+        parts.append(names.get(symbol, symbol))
+    if item.kospi_return is not None and item.key != CIRCUIT_SCENARIO:
+        parts.append(f"코스피 {_signed(item.kospi_return)}")
+    parts.append(f"낙폭 단계 {_LEVEL_LABELS[item.level_after]}")
+    proxies = [names.get(line.symbol, line.symbol) for line in item.lines if line.proxy]
+    if proxies:
+        parts.append(f"대용 {', '.join(proxies)}(베타 × 코스피)")
+    if item.missing:
+        parts.append(f"뺀 종목 {', '.join(names.get(s, s) for s in item.missing)}")
+    return " · ".join(parts)
+
+
+def _signed_won(amount_krw: int) -> str:
+    return f"{'−' if amount_krw < 0 else '+'}{_won(abs(amount_krw))}원"
+
+
+def _risk_report_lines(report: RiskReport) -> tuple[list[str], list[str], list[str], list[str]]:
+    """(머리, 변동성·손실, 시나리오, 알림) 줄. 글 모양만 다르고 숫자는 둘이 같다."""
+    names = dict(report.names)
+    state = report.state
+    head = [
+        f"총자산 {report.equity_krw:,}원 · 고점 대비 −{state.loss_bp / 100:.2f}% "
+        f"(단계 {_LEVEL_LABELS[state.level]})"
+    ]
+    period = report.account_period
+    if period is not None:
+        head.append(
+            f"계좌 {period.start.isoformat()}→{period.end.isoformat()} "
+            f"{_signed(period.account_return)} · 같은 기간 코스피 {_signed(period.kospi_return)}"
+        )
+    for stat in report.account_volatility:
+        if stat.value is not None:
+            yearly = annualized(stat.value) * 100
+            head.append(f"계좌 실적 변동성(연) {stat.sessions}일 {yearly:.0f}%")
+    vol = " · ".join(
+        f"{stat.sessions}일 {annualized(stat.value) * 100:.0f}%"
+        if stat.value is not None
+        else f"{stat.sessions}일 표본 부족({stat.used})"
+        for stat in report.volatility
+    )
+    tail = report.tail
+    if tail.expected_shortfall is not None:
+        es = (
+            f"하루 기대 손실(97.5% ES) {_signed(tail.expected_shortfall)} "
+            f"({_signed_won(round(report.equity_krw * tail.expected_shortfall))}) · "
+            f"{tail.used}일 중 나쁜 {tail.tail}일 평균"
+        )
+    else:
+        es = f"하루 기대 손실(97.5% ES) 표본 부족({tail.used})"
+    beta = " · ".join(
+        f"{stat.sessions}일 {stat.value:.2f}"
+        if stat.value is not None
+        else f"{stat.sessions}일 표본 부족({stat.used})"
+        for stat in report.beta
+    )
+    top = report.concentration
+    risk = [
+        f"변동성(연) {vol}",
+        es,
+        f"코스피 베타 {beta}",
+        f"비중 1위 {top.top1 * 100:.1f}% · 상위 3 {top.top3 * 100:.1f}% · "
+        f"상위 5 {top.top5 * 100:.1f}% · 현금 {top.cash * 100:.1f}% · {top.count}종목",
+    ]
+    scenarios = [_scenario_text(item, names) for item in report.scenarios]
+    notes: list[str] = []
+    if report.dropped:
+        dropped = ", ".join(
+            f"{names.get(d.symbol, d.symbol)} {d.day.isoformat()} {_signed(d.stock_return)}"
+            for d in report.dropped
+        )
+        notes.append(f"가격제한 밖이라 뺀 하루 수익률: {dropped}")
+    if report.missing_pairs:
+        notes.append(f"최근 {tail.sessions}일 중 가격이 없어 뺀 날 {report.missing_pairs}일")
+    return head, risk, scenarios, notes
+
+
+def _history_note(report: RiskReport) -> str:
+    end = "없음" if report.history_end is None else report.history_end.isoformat()
+    return f"지금 보유를 과거 가격에 대입, 가격은 {end}까지"
+
+
+def render_risk_report(report: RiskReport) -> str:
+    """사람이 읽는 위험 보고(장 마감 로그용). 판단에 쓰지 않는다."""
+    head, risk, scenarios, notes = _risk_report_lines(report)
+    lines = [f"위험 보고 {report.day.isoformat()} 장 마감 · 판단에 쓰지 않음", *head]
+    lines += [f"[{_history_note(report)}]", *risk, "스트레스:", *(f"  {s}" for s in scenarios)]
+    return "\n".join([*lines, *notes])
+
+
+def render_risk_report_telegram(report: RiskReport) -> str:
+    """텔레그램 위험 보고(HTML, 주문지와 같은 굵게·인용 상자). 보내는 곳·때는 서버 설정이 정한다."""
+    head, risk, scenarios, notes = _risk_report_lines(report)
+    parts = [
+        f"<b>S07 위험 보고</b> · {_day(report.day)} 장 마감",
+        f"<blockquote>{_html(chr(10).join(head))}</blockquote>",
+        f"<b>변동성·손실</b> ({_html(_history_note(report))})",
+        f"<blockquote>{_html(chr(10).join(risk))}</blockquote>",
+        "<b>스트레스</b> (손실 · 그때 코스피 · 그 손실이면 낙폭 단계)",
+        f"<blockquote>{_html(chr(10).join(scenarios))}</blockquote>",
+    ]
+    parts += [_html(note) for note in notes]
+    parts.append("판단에 쓰지 않는 보고입니다.")
+    return "\n".join(parts)

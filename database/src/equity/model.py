@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.33.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.34.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -365,6 +365,11 @@ RULES_VERSION = "e1.33.0"                # BuildRecord.rules_version 에 실린�
 #          EG3_price_daily 저녁 지표 대신 불변식 `n_corp_action_pending_true`, EG14·EG20·S23 의 저녁 지표 삭제.
 #          서버 운영 판 10개(10-15~10-29 m_)에 evening 행 0 — price_daily·price_adj_daily 산출 불변 기대. 바뀌는 것은
 #          `dataset_profile` 의 `source_stage_tables`(price_daily 를 거치는 필드의 stage 폐포에서 키움 표가 빠짐)뿐이다.
+# e1.34.0: `fin_std` duplicate_vintage 예외 — 같은 접수가 두 bsns_year 로 와 같은 grain 이 된 묶음은 bsns_year = 기말일
+#          연도인 행이 정확히 하나면 그 행을 남기고 나머지만 격리한다(앞 해 보고서가 없어 그해 조회 응답에 다음 해
+#          보고서가 실려 옴). 서버 e1.33.0 판의 duplicate_vintage 격리는 082660 2025 연간 CFS 1묶음 2행이 전부였고 진짜
+#          2025 행까지 빠져 있었다(10-31) — 산출 +1행 · 격리 −1(2024 꼬리표 행은 그대로 격리). 그림자(10-31 D=10-30):
+#          그 행은 계정 값이 모두 NULL 이라 fi·모델 해시는 그대로였다. 접수가 다른 grain 충돌은 그대로 둘 다 격리.
 
 # 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a, 규약은 `stage.model.RULES_CHANGED`) — 판본을 올리면 한 줄을 더한다.
 # 그 표를 입력으로 읽는 하류 표는 적지 않는다(읽는 쪽이 `RULES[t].inputs` 를 따라 닫는다). 선언 시작은 e1.31.0 이다 —
@@ -382,6 +387,8 @@ RULES_CHANGED: dict[str, frozenset[str]] = {
     # PR-10 — price_daily 저녁 분기를 걷었지만 운영 아침 판에는 그 행이 없었다(price_daily 산출 불변 기대).
     # 입력에서 stg_flow_daily_kiwoom 이 빠져 dataset_profile 의 source_stage_tables 만 바뀐다.
     "e1.33.0": frozenset({"dataset_profile"}),
+    # 같은 접수가 두 bsns_year 로 온 grain 은 기말일 연도 행을 남긴다(fin_std 산출 +1 · 격리 −1).
+    "e1.34.0": frozenset({"fin_std"}),
 }
 
 

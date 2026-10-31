@@ -334,6 +334,38 @@ def test_FX_N_close_변조_사본은_EGC01_만_FAIL(built: Path, tmp_path: Path)
     assert not r.ok and r.failed_report is not None and r.failed_report.exists()
 
 
+def test_FX_N_기준가만_남은_폐지_구간은_bar_0_이_맞아_EGC10_PASS(built: Path, tmp_path: Path) -> None:
+    """폐지 구간의 남은 행이 전부 거래정지 기준가면 어댑터는 bar 를 내지 않는다(EGC-05 와 같은 규칙).
+    10-31 서버에서 097959:1(2010-01-04~12 기준가 7행)이 표본에 들어 반환 19/20 으로 거짓 FAIL 이 났다."""
+    root = _copy_root(built, tmp_path / "equity")
+    _rewrite_partition(root, "price_daily",
+                       "SELECT * REPLACE (CASE WHEN ticker = '900060' THEN 'reference' "
+                       "ELSE price_kind END AS price_kind) FROM {src}")
+    r = contract.run(root, seed())
+    m = _metrics(r, "EGC-10")
+    assert _gate(r, "EGC-10").status is GateStatus.PASS, m
+    assert m["reference_only"] == ["900060:1"]
+    assert m["returned"] == ["000030:1", "036220:1", "101970:1", "900050:1"]
+
+
+def test_FX_N_거래_행이_있는_폐지_구간을_빠뜨리면_EGC10_FAIL(
+    built: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """기준가만 남은 구간을 기대에서 빼도, 거래 행이 있는 구간의 누락은 그대로 잡는다."""
+    wb = contract.load_adapter(contract.default_engine_src())
+    adapter_type = wb.provider.EquityDuckdbAdapter
+    load_dataset = adapter_type.load_backtest_dataset
+
+    def drop(self: EquityDuckdbAdapter, query: BacktestDataQuery) -> BacktestDataset:
+        data = load_dataset(self, query)
+        return replace(data, bars=tuple(b for b in data.bars if b.security_id != "900050:1"))
+
+    monkeypatch.setattr(adapter_type, "load_backtest_dataset", drop)
+    r = contract.run(built, seed())
+    assert _metrics(r, "EGC-10")["reference_only"] == []
+    assert _gate(r, "EGC-10").status is GateStatus.FAIL
+
+
 @pytest.mark.parametrize("price", ["open", "high", "low", "close"])
 def test_EGC04_NULL_OHLC_행은_사건_정산_bar가_아니다(
     built: Path, tmp_path: Path, price: str,

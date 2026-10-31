@@ -104,6 +104,16 @@ def drawdown_state(
     )
 
 
+def level_after_close(state: DrawdownState, equity_krw: int, limits: DrawdownLimits) -> RiskLevel:
+    """지금 상태에서 다음 장 마감 총자산이 `equity_krw`라면 될 단계(위험 보고의 시나리오용).
+
+    `drawdown_state`가 장 마감 하나를 접는 규칙과 같다. 기록하지 않는다.
+    """
+    peak = max(state.peak_krw, equity_krw)
+    loss = max(peak - equity_krw, 0) * BP // peak
+    return _next_level(state.level, state.loss_bp, loss, limits)
+
+
 def exposure_bp(level: RiskLevel, limits: DrawdownLimits) -> int:
     """그 단계에서 목표 주식 수에 곱하는 비율."""
     if level in (RiskLevel.REDUCE, RiskLevel.HALT):

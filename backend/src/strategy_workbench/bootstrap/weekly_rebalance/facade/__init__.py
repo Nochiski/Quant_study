@@ -6,6 +6,7 @@ DEPENDS_ON: tuple[str, ...] = (
     "adapters.inbound.weekly_rebalance_cli",
     "adapters.outbound.execution_sqlite",
     "adapters.outbound.kiwoom_mock",
+    "adapters.outbound.ledger_prices",
     "adapters.outbound.rebalance_files",
     "adapters.outbound.scope_signal",
     "adapters.outbound.secrets_local",

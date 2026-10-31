@@ -98,6 +98,8 @@ bootstrap ─> application + adapters
   방식, 새 application → application 화살표 없음). 리스크 가드(2026-10-26)의 순수 판정(한도·낙폭
   단계·목표 축소·주문 직전 판정·체결 후 점검)은 의존 없는 `domain/risk`가 소유하고, 유스케이스는 자체 outgoing
   `RiskStore`(구현 `rebalance_files`)로 판정·기록을 남긴다. 종목 상태는 `MarketSource`가 `domain/risk` 값으로 답한다.
+  일일 위험 보고(2026-10-31)는 자체 outgoing `PriceHistorySource`·`RiskReportStore`로 읽고 쓰며, 원장 가격은
+  `adapters/outbound/ledger_prices`(pyarrow, `application.weekly_rebalance` facade에만 의존)가 읽는다.
   상세는 `docs/planning/research-to-trading/S07-weekly-rebalance.md`다.
 - 완료 run의 계좌 보고서는 `domain/backtest`의 순수 projection·전용
   `facade/account_report.py`가 금액·상태·초기자본 기준 해석을 소유한다.

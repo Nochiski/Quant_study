@@ -65,7 +65,7 @@ def _closes() -> dict[str, dict[date, float]]:
     return {"A": dict(_index()), "B": b}
 
 
-def _report(
+def sample_report(
     closes: dict[str, dict[date, float]] | None = None,
     account: list[tuple[date, int]] | None = None,
 ) -> RiskReport:
@@ -88,7 +88,7 @@ def _scenario(report: RiskReport, key: str) -> ScenarioResult:
 
 
 def test_holding_returns_use_today_weights_and_adjusted_ratios() -> None:
-    report = _report()
+    report = sample_report()
     expected = [0.9 * move for move in MOVES]
     volatility = report.volatility[0]
     assert (volatility.sessions, volatility.used) == (20, len(MOVES))
@@ -104,7 +104,7 @@ def test_holding_returns_use_today_weights_and_adjusted_ratios() -> None:
 
 
 def test_tail_averages_the_worst_two_and_a_half_percent() -> None:
-    report = _report()
+    report = sample_report()
     tail = report.tail
     # 6일 → ⌈0.15⌉ = 1일: 가장 나쁜 날 하나가 ES 이자 VaR
     assert (tail.used, tail.tail) == (len(MOVES), 1)
@@ -121,7 +121,7 @@ def test_missing_price_drops_the_pair_instead_of_filling_zero() -> None:
     closes = _closes()
     gone = _sessions()[3]
     del closes["B"][gone]
-    report = _report(closes)
+    report = sample_report(closes)
     # 빠진 날 앞뒤 두 쌍을 뺀다(0 으로 채우면 쌍 수가 그대로다)
     kept = [0.9 * move for i, move in enumerate(MOVES) if i not in (2, 3)]
     assert report.volatility[0].used == len(kept)
@@ -133,14 +133,14 @@ def test_return_beyond_price_limit_is_listed_and_left_out() -> None:
     closes = _closes()
     jump = _sessions()[2]
     closes["A"] = {day: value * (1.5 if day >= jump else 1) for day, value in closes["A"].items()}
-    report = _report(closes)
+    report = sample_report(closes)
     assert [(item.symbol, item.day) for item in report.dropped] == [("A", jump)]
     assert report.dropped[0].stock_return == pytest.approx((1 + MOVES[1]) * 1.5 - 1)
     assert report.volatility[0].used == len(MOVES) - 1
 
 
 def test_history_scenario_proxies_unlisted_holding_with_beta() -> None:
-    report = _report()
+    report = sample_report()
     july = _scenario(report, "2026-07")
     assert july.kospi_return == pytest.approx(-0.3)
     lines = {line.symbol: line for line in july.lines}
@@ -155,7 +155,7 @@ def test_history_scenario_proxies_unlisted_holding_with_beta() -> None:
 
 
 def test_gap_and_circuit_scenarios() -> None:
-    report = _report()
+    report = sample_report()
     gap = _scenario(report, GAP_SCENARIO)
     assert [(line.symbol, line.stock_return) for line in gap.lines] == [("B", -0.3)]
     assert gap.portfolio_return == pytest.approx(-0.12)
@@ -170,7 +170,7 @@ def test_gap_and_circuit_scenarios() -> None:
 def test_account_volatility_needs_full_window_and_period_compares_kospi() -> None:
     days = _sessions()
     short = [(day, 100_000 + i * 1_000) for i, day in enumerate(days)]
-    report = _report(account=short)
+    report = sample_report(account=short)
     assert (report.account_volatility[0].used, report.account_volatility[0].value) == (6, None)
     period = report.account_period
     assert period is not None
@@ -179,10 +179,10 @@ def test_account_volatility_needs_full_window_and_period_compares_kospi() -> Non
     assert period.kospi_return == pytest.approx(_index()[days[-1]] / _index()[days[0]] - 1)
     # 오늘 코스피가 아직 없으면 그 전 날까지만 견준다
     today = days[-1] + timedelta(days=1)
-    later = _report(account=[*short, (today, 120_000)]).account_period
+    later = sample_report(account=[*short, (today, 120_000)]).account_period
     assert later is not None and later.end == days[-1]
     long = [(date(2026, 1, 1) + timedelta(days=i), 100_000 + i) for i in range(22)]
-    assert _report(account=long).account_volatility[0].value is not None
+    assert sample_report(account=long).account_volatility[0].value is not None
 
 
 def test_level_after_close_follows_drawdown_rules() -> None:

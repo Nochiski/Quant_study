@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter
 from dataclasses import dataclass, field
+from decimal import Decimal
 from enum import Enum
 from html.parser import HTMLParser
 
@@ -24,7 +25,9 @@ from .doc_vocab import DocVocab
 # p1.5(2026-09-28): 정정신고 첫 장 2025년 서식. 값이 앵커와 **다른 셀·다른 줄**로 갈라졌고
 #   (`2. …최초제출일 :` 다음 줄에 `2024.03.20`), `3. 정정사유` 앵커가 사라져 정정사유가
 #   정정사항 표의 항목별 열이 됐다 — 세 원문 필드가 2025년 96.6% · 2026년 99.1% NULL 이었다.
-PARSER_VERSION = "p1.5"
+# p1.6(2026-11-01): 잠정실적 공정공시(xforms HTML) 서식 표 → stg_doc_prelim(N-64). html 갈래의 meta ·
+#   parse_log 행은 그대로이고, 제목이 '영업(잠정)실적' 인 문서에만 잠정 행 1개가 더 생긴다.
+PARSER_VERSION = "p1.6"
 STD_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
 
 
@@ -541,6 +544,146 @@ def table_census(root: ET.Element) -> dict[str, str | None]:
     }
 
 
+# ── 잠정실적 공정공시 (N-64) ────────────────────────────────────────────────────
+# '영업(잠정)실적(공정공시)' 원문은 보고서 XML 이 아니라 xforms HTML 서식이다(11-01 표본 20건). 표 둘 —
+# 실적기간 표(첫 칸 '실적기간') · 실적내용 표(항목 행 '매출액 | 당해실적 | 당기 | 전기 | 증감 | 전환 | 전년동기 | …').
+# 표 id(Table0/1 · RepeatTable0/1)는 서식마다 갈려 내용으로 찾는다. 정정 공시 앞의 정정표(XFormD8)는 두 꼴
+# 어디에도 맞지 않아 저절로 빠진다. 단위를 못 읽거나 숫자를 하나라도 못 읽으면 값을 비우고 failed 로 둔다.
+_PRELIM_TITLE_RE = re.compile(r"<title>[^<]*영업\(잠정\)실적", re.I)
+_PRELIM_ITEMS = {"매출액": "revenue", "영업이익": "op_profit", "법인세비용차감전계속사업이익": "pretax",
+                 "당기순이익": "net_income", "지배기업소유주지분순이익": "ni_owner"}
+_PRELIM_PY = ("revenue", "op_profit", "net_income")       # 전년동기 당해값 — 확정 재무와 단위 검산용
+_PRELIM_UNIT = {"원": 1, "천원": 10**3, "백만원": 10**6, "억원": 10**8}
+_PRELIM_UNIT_RE = re.compile(r"단위\s*:\s*([^,)\s]+)")
+_PRELIM_NUM_RE = re.compile(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
+_PRELIM_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
+
+class _HtmlTables(HTMLParser):
+    """HTML 표 → 표마다 행 목록(칸 텍스트, 공백 정규화). 서식에 표 안 표는 없어 평평하게 모은다."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.tables: list[list[list[str]]] = []
+        self._row: list[str] | None = None
+        self._cell: list[str] | None = None
+
+    def _close_cell(self) -> None:
+        if self._cell is not None and self._row is not None:
+            self._row.append(" ".join("".join(self._cell).split()))
+        self._cell = None
+
+    def _close_row(self) -> None:
+        self._close_cell()
+        if self._row is not None and self.tables:
+            self.tables[-1].append(self._row)
+        self._row = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "table":
+            self.tables.append([])
+        elif tag == "tr":
+            self._close_row()
+            self._row = []
+        elif tag in ("td", "th"):
+            self._close_cell()
+            self._cell = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("td", "th"):
+            self._close_cell()
+        elif tag in ("tr", "table"):
+            self._close_row()
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None:
+            self._cell.append(data)
+
+
+def _prelim_won(cell: str, mult: int) -> str | None:
+    """'1,237,395' × 단위 → 원 단위 정수 문자열. '-'·빈칸은 NULL. 그 밖의 꼴(△·괄호·글자)은 ValueError."""
+    s = cell.strip()
+    if s in ("", "-"):
+        return None
+    if not _PRELIM_NUM_RE.fullmatch(s):
+        raise ValueError(s)
+    v = Decimal(s.replace(",", "")) * mult
+    if v != v.to_integral_value():
+        raise ValueError(s)
+    return str(int(v))
+
+
+def _prelim_period(row: list[str]) -> tuple[str, str] | None:
+    """'당기실적 | 2026-07-01 | ~ | 2026-09-30' → ('20260701', '20260930')."""
+    ds = [m.group(1) + m.group(2) + m.group(3) for c in row[1:] for m in [_PRELIM_DATE_RE.fullmatch(c)] if m]
+    return (ds[0], ds[1]) if len(ds) == 2 else None
+
+
+def prelim_row(rcept_no: str, member_name: str, text: str,
+               fetched_at: str) -> dict[str, str | None] | None:
+    """잠정실적 서식이면 stg_doc_prelim 1행, 아니면 None. 값은 원 단위 정수 문자열(당해실적 당기 · 전년동기)."""
+    if not _PRELIM_TITLE_RE.search(text[:4000]):
+        return None
+    vals = {f"{k}_krw": None for k in _PRELIM_ITEMS.values()} | {f"{k}_py_krw": None for k in _PRELIM_PY}
+    row: dict[str, str | None] = {
+        "rcept_no": rcept_no, "member_name": member_name, "fetched_at": fetched_at, "fs_div": None,
+        "period_from": None, "period_to": None, "py_from": None, "py_to": None, "unit_raw": None,
+        **vals, "n_items": None, "unknown_items": None, "status": "failed", "error": None,
+    }
+    p = _HtmlTables()
+    p.feed(text)
+    p.close()
+    periods = [t for t in p.tables if t and t[0] and t[0][0] == "실적기간"]
+    results = [t for t in p.tables if any(len(r) >= 7 and r[1] == "당해실적" for r in t)]
+    if len(periods) != 1:
+        row["error"] = f"period_table:{len(periods)}"
+        return row
+    if len(results) != 1:
+        row["error"] = f"result_table:{len(results)}"
+        return row
+    span = {r[0]: _prelim_period(r) for r in periods[0][1:] if r}
+    cur, py = span.get("당기실적"), span.get("전년동기실적")
+    if cur is None:
+        row["error"] = "period:당기실적"
+        return row
+    row["period_from"], row["period_to"] = cur
+    row["py_from"], row["py_to"] = py if py else (None, None)
+    flat = "".join("".join(r) for r in results[0]).replace(" ", "")
+    row["fs_div"] = "CFS" if "연결실적내용" in flat else "OFS" if "실적내용" in flat else None
+    units = [m.group(1) for r in results[0] for c in r for m in [_PRELIM_UNIT_RE.search(c)] if m]
+    row["unit_raw"] = units[0] if units else None
+    if row["fs_div"] is None:
+        row["error"] = "fs_div"
+        return row
+    if row["unit_raw"] not in _PRELIM_UNIT:
+        row["error"] = f"unit:{row['unit_raw']}"
+        return row
+    mult = _PRELIM_UNIT[str(row["unit_raw"])]
+    got: dict[str, str | None] = {}
+    unknown: list[str] = []
+    n_items = 0
+    for r in results[0]:
+        if len(r) < 7 or r[1] != "당해실적":
+            continue
+        key = _PRELIM_ITEMS.get(r[0].replace(" ", ""))
+        if key is None:
+            unknown.append(r[0])
+            continue
+        n_items += 1
+        try:
+            got[f"{key}_krw"] = _prelim_won(r[2], mult)
+            if key in _PRELIM_PY:
+                got[f"{key}_py_krw"] = _prelim_won(r[6], mult)
+        except ValueError as e:
+            row["error"] = f"number:{r[0]}={e}"
+            return row
+    row.update(got)
+    row["n_items"] = str(n_items)
+    row["unknown_items"] = json.dumps(unknown, ensure_ascii=False)
+    row["status"] = "ok"
+    return row
+
+
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _PI_RE = re.compile(r"<\?.*?\?>", re.S)
 _ANY_TAG_RE = re.compile(r"""<(?:[^>"']|"[^"]*"|'[^']*')*>""")   # 따옴표 안 `>` 는 태그 끝이 아니다
@@ -553,6 +696,7 @@ class DocRows:
     section: list[dict[str, str | None]] = field(default_factory=list)
     correction: list[dict[str, str | None]] = field(default_factory=list)
     parse_log: list[dict[str, str | None]] = field(default_factory=list)
+    prelim: list[dict[str, str | None]] = field(default_factory=list)   # 잠정실적 서식(html 갈래)
     zip_error: str | None = None        # ZIP 자체를 못 열었을 때 (D0 — D2 분모에서 제외)
 
 
@@ -615,6 +759,9 @@ def parse_member(rcept_no: str, member_name: str, raw: bytes, fetched_at: str,
                               "unknown_tags": "[]", "lenient_unknown_tags": "[]",
                               "t_decode_ms": t_decode, "t_sanitize_ms": "0", "t_parse_ms": "0",
                               **_zero_counters()})
+        prelim = prelim_row(rcept_no, member_name, dec.text, fetched_at)
+        if prelim is not None:
+            out.prelim.append(prelim)
         return out
     t1 = time.perf_counter()
     san = sanitize(dec.text, vocab.tags)
@@ -682,6 +829,7 @@ def parse_zip(rcept_no: str, zip_bytes: bytes, fetched_at: str, vocab: DocVocab)
             out.section += r.section
             out.correction += r.correction
             out.parse_log += r.parse_log
+            out.prelim += r.prelim
     if len(out.correction) > 1:
         role_of = {m["member_name"]: str(m["member_role"]) for m in out.meta}
         out.correction.sort(key=lambda c: _ROLE_PRIORITY.get(role_of.get(str(c["member_name"]),

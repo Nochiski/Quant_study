@@ -34,9 +34,10 @@ from . import parsers_doc
 from .doc_vocab import DocVocab, load_vocab
 
 TABLES: tuple[str, ...] = ("stg_doc_meta", "stg_doc_section", "stg_doc_correction",
-                           "stg_doc_parse_log")
+                           "stg_doc_parse_log", "stg_doc_prelim")
 _ROWS_ATTR = {"stg_doc_meta": "meta", "stg_doc_section": "section",
-              "stg_doc_correction": "correction", "stg_doc_parse_log": "parse_log"}
+              "stg_doc_correction": "correction", "stg_doc_parse_log": "parse_log",
+              "stg_doc_prelim": "prelim"}
 _ROLE_PRIORITY = {"main": 0, "audit_cons": 1, "audit": 2, "other": 3}
 
 
@@ -183,7 +184,9 @@ def _judge(snapshot_id: str, input_hash: str, n_docs: int, modes: Counter[str],
         reasons.append(f"D3 unknown tags/entities over {d3_limit:.0%} of docs: {d3[:10]}")
     if n_eq:
         reasons.append(f"D10 text equality violations={n_eq}")
-    summary = PrepassSummary(snapshot_id, input_hash, n_docs, dict(modes), dict(tables), n_missing,
+    # 표 행수는 표 목록 전부를 싣는다(0행 포함) — `run()` 의 Counter 합은 0을 버리고 캐시 재집계는 남겨 갈렸다
+    summary = PrepassSummary(snapshot_id, input_hash, n_docs, dict(modes),
+                             {t: tables[t] for t in TABLES}, n_missing,
                              n_open_failed, d2, d3, n_eq,
                              "gate_failed" if reasons else "ok", "; ".join(reasons) or "ok")
     extra: dict[str, object] = {"unknown_tags_top": unknown.most_common(50),
@@ -379,8 +382,13 @@ def _cached_rcept_nos(cache: Path) -> set[str]:
 
 
 def _link_shards(base: Path, cache: Path) -> int:
-    """base 샤드를 새 캐시로 하드링크(디스크 0). 하드링크를 못 거는 파일시스템이면 복사."""
+    """base 샤드를 새 캐시로 하드링크(디스크 0). 하드링크를 못 거는 파일시스템이면 복사.
+
+    base 가 새 표가 생기기 전 판이면(p1.6 `stg_doc_prelim`) 그 표는 base 샤드마다 빈 파일로 세운다 — 그날
+    새 문서가 0건이면 표 폴더가 비어 stage `read_json(glob)` 이 '파일 없음'으로 실패한다.
+    """
     n = 0
+    shards = sorted(f.name for f in (base / "stg_doc_parse_log").glob("year=*.jsonl"))
     for t in TABLES:
         (cache / t).mkdir(parents=True, exist_ok=True)
         for f in sorted((base / t).glob("year=*.jsonl")):
@@ -390,6 +398,9 @@ def _link_shards(base: Path, cache: Path) -> int:
             except OSError:
                 shutil.copyfile(f, dst)
             n += 1
+        for name in shards:              # 있는 파일(하드링크)은 건드리지 않는다 — touch 도 base mtime 을 바꾼다
+            if not (cache / t / name).exists():
+                (cache / t / name).touch()
     return n
 
 

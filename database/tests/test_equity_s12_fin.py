@@ -642,6 +642,39 @@ def test_부정_같은_grain_으로_접히면_둘_다_격리된다(make_stage_tr
     assert dict(_gate(r, "EG7").metrics["reject_by_reason"]) == {"duplicate_vintage": 2}
 
 
+@pytest.mark.parametrize(("years", "kept", "rejected"), [
+    (("2024", "2025"), ["2025"], ["2024"]),
+    (("2023", "2024"), [], ["2023", "2024"]),         # 기말일 연도와 맞는 행이 없으면 지금처럼 둘 다 격리
+], ids=["one_matches_period_end_year", "none_matches"])
+def test_같은_접수가_두_사업연도로_오면_기말일_연도_행만_남긴다(make_stage_tree, tmp_path: Path,
+                                                   years: tuple[str, str], kept: list[str],
+                                                   rejected: list[str]) -> None:
+    """082660(00442455) 꼴 — 2024 사업보고서가 없어 2024 연간 조회 응답에 2025 사업보고서(같은 접수)가 실려 왔다.
+    문서 기말일(2025-12-31)로 두 그룹이 같은 grain 이 되어 옛 규칙은 둘 다 격리했고, 진짜 2025 연간 행까지 산출에서
+    빠졌다(10-31 서버 e1.33.0 — duplicate_vintage 격리는 이 1묶음 2행이 전부). 같은 접수면 같은 보고서라 bsns_year =
+    기말일 연도인 행 하나를 남기고 나머지만 격리한다. 접수가 다른 grain 충돌은 위 시험대로 둘 다 격리."""
+    corps = [("00000001", "12"), ("00000002", "12")]
+    rcept = "20260324000091"
+    reports = [
+        ("20260324000003", "00000002", "2025", "11011", date(2026, 3, 24),
+         date(2025, 12, 31), "11011"),        # 충돌 없는 대조군
+        (rcept, "00000001", "2025", "11011", date(2026, 3, 24), date(2025, 12, 31), "11011"),
+    ]
+    fin = [_fin_row("00000002", "2025", "11011", "20260324000003", sj="IS",
+                    account_id="ifrs-full_Revenue", account_nm="매출액", amount=300.0)]
+    fin += [_fin_row("00000001", y, "11011", rcept, sj="IS", account_id="ifrs-full_Revenue",
+                     account_nm="매출액", amount=100.0) for y in years]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260324000003", "period_end", "2025-12-31"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert r.out_dir is not None
+    got = sorted(str(x["bsns_year"]) for x in _rows(r.out_dir) if x["corp_code"] == "00000001")
+    assert got == kept
+    rej = _rejects(r.out_dir)
+    assert sorted((str(x["bsns_year"]), x["reject_reason"]) for x in rej) == [
+        (y, "duplicate_vintage") for y in rejected]
+
+
 # ── 정정본의 원본 공시일 승계 — 값으로 판정 (e1.32.0 연구 DB S1-b) ──────────────────────────────
 # 공개일 = 그 값이 처음 공개된 날. 그룹의 판(최신 접수)이 정정이고 링크된 원본의 첫 장 제출일이
 # 확인되면, 원장(stg_fin)에 남은 원본 판 줄과 정정 판 줄이 fin_std 가 읽는 네 표(BS·IS·CIS·CF)에서

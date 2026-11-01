@@ -473,6 +473,21 @@ def test_docs_gate_allows_014_but_not_other_failures(tmp_path) -> None:
     con.close()
 
 
+def test_docs_gate_counts_todays_preliminary_earnings_but_not_subsidiary_ones(tmp_path) -> None:
+    """N-64 — 그날 잠정실적 공시 원문(P4)도 받았는지 본다. 자회사 실적 공시는 받지 않으므로 대상이 아니다."""
+    rows = [("20260908000001", D, C1, "005930", "연결재무제표기준영업(잠정)실적(공정공시)"),
+            ("20260908000002", D, C2, "000660", "연결재무제표기준영업(잠정)실적(공정공시)(자회사의 주요경영사항)")]
+    home = _make_home(tmp_path, rows=rows)
+    con = _con(home)
+    g = _gates(con, dd.plan(con, D))["documents"]
+    assert not g.ok and g.metrics["n_target"] == 1 and g.metrics["n_never_tried"] == 1
+    _doc_ok(con, "20260908000001")
+    con.commit()
+    g = _gates(con, dd.plan(con, D))["documents"]
+    assert g.ok and g.metrics["n_ok"] == 1
+    con.close()
+
+
 def test_periodic_gate_rejects_ok_logged_before_first_seen(tmp_path) -> None:
     """어제 ok 였던 유닛이 오늘 공시를 반영하지 않은 채 통과하면 안 된다(DEFECT-B01 의 우려).
 

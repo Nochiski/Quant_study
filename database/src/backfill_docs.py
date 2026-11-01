@@ -11,6 +11,8 @@ verdict='empty', DART 의 status='013' 과 동급인 "제대로 받았는가" �
   ① 주식분할·병합 결정   조정계수의 정답지 — KRX 일별 마스터 역산의 검산축
   ② 사업보고서           가동률·직원수·주석의 연간 축
   ③ 반기·분기보고서       분기 해상도
+  ④ 잠정실적 공정공시     분기 확정 전 실적(N-64) — 2026-07-01 접수부터. 그 앞 약 3.4만 건은 받지 않는다
+                         (하한이 없으면 일일 수집이 런마다 3,000건씩 과거분을 받느라 길어진다)
 
 키는 k3 → k2 순서다. backfill_dart 계열(k2 → k3)과 반대로 두어 동시 실행 시
 경합을 늦춘다. kael 은 프로덕션 키라 쓰지 않는다. 예산 창은 KST 자정 리셋이며
@@ -43,12 +45,15 @@ RETRY_MAX, RETRY_BASE = 3, 5.0
 
 # 사업보고서 LIKE 매칭이 "사업보고서제출기한연장신고서" 를 물지 않게 막는다.
 NOT_REPORT = "report_nm NOT LIKE '%연장신고%'"
+# 연결·별도 잠정실적과 그 정정·첨부추가. 자회사 실적 공시는 상장사 본인 숫자가 아니라 뺀다(dart_daily 게이트도 같은 술어)
+PRELIM = "(report_nm LIKE '%영업(잠정)실적(공정공시)%' AND report_nm NOT LIKE '%자회사%')"
 PRIORITIES = {
     1: ("분할·병합", ("(report_nm LIKE '%주식분할결정%' OR report_nm LIKE '%주식병합결정%') "
                     "AND stock_code <> ''")),
     2: ("사업보고서", f"report_nm LIKE '%사업보고서%' AND {NOT_REPORT} AND stock_code <> ''"),
     3: ("반기·분기", ("(report_nm LIKE '%반기보고서%' OR report_nm LIKE '%분기보고서%') "
                     f"AND {NOT_REPORT} AND stock_code <> ''")),
+    4: ("잠정실적", f"{PRELIM} AND stock_code <> '' AND rcept_dt >= '20260701'"),
 }
 
 DDL = """CREATE TABLE IF NOT EXISTS doc_store (
@@ -151,7 +156,7 @@ def build_plan(con: sqlite3.Connection, priorities: list[int],
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--priority", default="1,2,3", help="수집할 우선순위 (쉼표구분)")
+    ap.add_argument("--priority", default="1,2,3,4", help="수집할 우선순위 (쉼표구분)")
     ap.add_argument("--max-calls", type=int, default=0, help="이번 실행의 콜 상한 (0=무제한)")
     ap.add_argument("--retry-014", action="store_true", help="DART 014(문서 없음) 확정 건도 다시 시도")
     a = ap.parse_args()

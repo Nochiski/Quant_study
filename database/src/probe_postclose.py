@@ -14,6 +14,10 @@ DECISIONS Q-1·N-13(모델 데이터는 정규장이 끝나고 최대한 빨리)
   다음 거래일 09:20 grade    KRX 공식 종가(T)·원장 키움 T 행(21:05 수집)과 대조 →
                             `data/evidence/postclose_<T>.md`·`.json`
 
+  18:05·19:05·20:05 flows    블록딜 반영 시각(N-63, 2026-11-02~) — 그날 15:41 장 마감 수집이 받은
+                            종목 전부 ka10060 T 행(KRX). 15:41 값(data/raw/postclose.db)·21:05 원장 값과
+                            견주는 판정은 크론 밖에서 읽기만 한다
+
 판독: ① 가격이 공식 종가와 같아지는 시각과 애프터마켓 체결로 달라지는 시각
 ② 수급이 정규장 확정값이 되는
 시각 ③ 후보 수집 시간(100종목 → 630종목 환산) ④ 거래소(KRX·NXT·통합)별 값 차이.
@@ -41,6 +45,7 @@ from daily.kw_daily import FLOW_KEYS, pick_rows
 
 BASE = Path(os.environ.get("QL_HOME", Path(__file__).resolve().parents[1]))
 DB = BASE / "data" / "evidence" / "postclose.db"
+RAW_CLOSE = BASE / "data" / "raw" / "postclose.db"   # 15:41 장 마감 수집 원장(운영 — 읽기만)
 KST = dt.timezone(dt.timedelta(hours=9))
 UNTIL_DEFAULT = "20261008"
 # 고정 3종목(10-06 사용자 '3종목으로 줄여'): 삼성전자(코스피 대형·NXT 있음) · 에코프로(코스닥·
@@ -355,6 +360,31 @@ def cmd_sweep(target: str) -> None:
         con.close()
 
 
+def close_tickers(target: str) -> list[str]:
+    """그날 15:41 장 마감 수집이 받은 종목 — flows 는 뒤에 15:41 값과 견줄 종목만 다시 부른다."""
+    if not RAW_CLOSE.exists():
+        return []
+    con = _ro(RAW_CLOSE)
+    try:
+        return sorted(t for (t,) in con.execute(
+            "SELECT ticker FROM ka10060_investor_flows WHERE dt = ?", (target,)))
+    finally:
+        con.close()
+
+
+def cmd_flows(target: str) -> None:
+    tickers = close_tickers(target)
+    if not tickers:
+        print(f"flows 건너뜀 — {target} 15:41 장 마감 수집 행 없음")
+        return
+    run = f"flows@{now_kst().strftime('%H%M')}"
+    con, client = connect(DB), _client()
+    try:
+        print(json.dumps(collect(con, client, run, "ka10060", tickers, target), ensure_ascii=False))
+    finally:
+        con.close()
+
+
 # ── 채점 ─────────────────────────────────────────────────────────────────────
 def _ro(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
@@ -592,7 +622,7 @@ def cmd_grade(target: str) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="probe_postclose")
-    p.add_argument("cmd", choices=("minute", "sweep", "grade"))
+    p.add_argument("cmd", choices=("minute", "sweep", "flows", "grade"))
     p.add_argument("--until", default=UNTIL_DEFAULT, help="이 날짜(YYYYMMDD) 뒤엔 아무것도 안 한다")
     p.add_argument("--date", default=None,
                    help="대상 T(YYYYMMDD) — 기본: 오늘, grade 는 직전 거래일")
@@ -610,7 +640,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{a.cmd} 건너뜀 — {today} 거래일 아님 또는 until {a.until} 지남")
         return 0
     target = a.date or today.strftime("%Y%m%d")
-    {"minute": cmd_minute, "sweep": cmd_sweep}[a.cmd](target)
+    {"minute": cmd_minute, "sweep": cmd_sweep, "flows": cmd_flows}[a.cmd](target)
     return 0
 
 

@@ -94,6 +94,7 @@ def _object_nodes(case: EvaluatorCase) -> object:
             observations=case.observations,
             missing=case.missing,
             parameters=case.parameters,
+            keep_intermediate=True,
         )
     except NonFiniteFactorCalculationError as error:
         return Failure(

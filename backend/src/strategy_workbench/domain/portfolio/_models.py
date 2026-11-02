@@ -49,21 +49,21 @@ class PortfolioWarning:
 PortfolioInputValue = float | str | bool | None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PortfolioFieldValue:
     field_id: str
     value: PortfolioInputValue
     available_date: date
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PortfolioFactorValue:
     factor_id: str
     value: float | None
     available_date: date
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PortfolioObservation:
     """One (as_of, security) row the compiler scores.
 
@@ -86,7 +86,7 @@ class PortfolioObservation:
     previous_weight: float = 0.0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CandidateDecision:
     as_of: date
     security_id: str

@@ -19,7 +19,7 @@ class BacktestDataQuery:
     history_sessions_before_start: int = 0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MarketBarRecord:
     session: date
     security_id: str

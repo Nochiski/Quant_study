@@ -22,7 +22,8 @@ from datetime import UTC, datetime
 #        가용일(장 전 수집은 그날 쓴다)을 센다. 기존 열·행 산출 불변, 열 하나 추가.
 #        W 계보(feat/equity-wise-fields)에서 2.9.0 으로 매겼던 것을 갈래 병합 때 다시 매김 — 서버 임시 빌드
 #        snap_20261022T232524Z 의 2.9.0 은 이 변경이다(운영 빌드 기록의 2.9.0 은 위 ka10060 줄)
-RULES_VERSION = "2.10.0"
+# 2.11.0: 문서층 `stg_doc_prelim` 추가 — 잠정실적 공정공시 서식 표(파서 p1.6, N-64). 다른 표 산출 불변
+RULES_VERSION = "2.11.0"
 # 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a) — 판본을 올리면 여기 한 줄을 더한다(규율 테스트가 현재 판본이
 # 키에 있는지 본다). 건전성 C4·조용한 손실 검사는 판본이 바뀐 날 이 선언과 그 전파(공개일 참조표 `rules.affected_between`,
 # equity 는 표 입력)에 든 표만 '규칙 변경'으로 빼고 나머지는 판본을 넘어 대조한다. 맨 앞 판본이 선언 시작이다 —
@@ -32,6 +33,7 @@ RULES_CHANGED: dict[str, frozenset[str]] = {
     "2.10.0": frozenset({"stg_analyst_broker", "stg_analyst_summary", "stg_consensus_annual",
                          "stg_consensus_matrix", "stg_consensus_quarterly", "stg_fin_wise",
                          "stg_fin_wise_q"}),
+    "2.11.0": frozenset({"stg_doc_prelim"}),
 }
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 

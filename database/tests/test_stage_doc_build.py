@@ -6,7 +6,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from test_stage_doc_prepass import _setup
+from test_stage_doc_prepass import _setup, _zip
 
 from stage import build, doc_prepass, gates, rules, snapshot
 
@@ -51,7 +51,8 @@ def _read(stage_root: Path, r: build.BuildResult) -> duckdb.DuckDBPyConnection:
 
 
 def test_rules_doc_declarations() -> None:
-    for name in ("stg_doc_meta", "stg_doc_section", "stg_doc_correction", "stg_doc_parse_log"):
+    for name in ("stg_doc_meta", "stg_doc_section", "stg_doc_correction", "stg_doc_parse_log",
+                 "stg_doc_prelim"):
         rule = rules.RULES[name]
         assert rule.file_source is not None and rule.blob_source is None
         assert rule.partition_class == "receipt_axis"
@@ -99,6 +100,43 @@ def test_build_section_correction_and_parse_log(tmp_path: Path) -> None:
     con = _read(stage_root, results["stg_doc_correction"])
     corr = con.execute("SELECT filed_date, n_items FROM t").fetchone()
     assert corr is not None and str(corr[0]) == "2020-03-30" and corr[1] == 1
+
+
+def test_build_prelim_with_no_preliminary_disclosure_is_an_empty_passing_build(tmp_path: Path) -> None:
+    """N-64 — 잠정 원문이 아직 없는 날(배포 직후 · 시즌 밖)에도 빈 샤드로 빌드가 통과해야 체인이 안 선다."""
+    snap, stage_root = _prepared(tmp_path)
+    r = build.build_table(rules.RULES["stg_doc_prelim"], snap, stage_root)
+    assert r.ok and r.n_rows == 0 and r.n_src == 0, [g.as_dict() for g in r.gates]
+
+
+def test_build_prelim_casts_won_values_dates_and_takes_the_receipt_date(tmp_path: Path) -> None:
+    from test_stage_doc_prelim import _kumho
+    docs, db = _setup(tmp_path)
+    _write_disclosure(db)
+    rno = "20241029800635"
+    (docs / "2024" / f"{rno}.zip").write_bytes(_zip({f"{rno}.xml": _kumho().encode()}))
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO doc_store VALUES (?,10,'s',1,1,'000','2026-11-01T04:00:00')", (rno,))
+    con.execute(f"INSERT INTO dart_disclosure VALUES ({','.join('?' * len(DISC_COLS))})",
+                ("h3", "Y", "00106395", "금호타이어", "금호타이어", "20241029", rno,
+                 "연결재무제표기준영업(잠정)실적(공정공시)", "", "073240", "20241001", "20241031",
+                 "0001", "0", "2026-08-30T10:00:00"))
+    con.commit()
+    con.close()
+    snap = snapshot.make_snapshot({"dart": db}, tmp_path / "snapshots", snapshot_id="snap_prelim")
+    stage_root = tmp_path / "stage"
+    assert build.build_table(rules.RULES["stg_rcept_dt_map"], snap, stage_root).ok
+    assert doc_prepass.run(snap.dir / "dart.db", docs, stage_root / "_tmp" / "doc", "snap_prelim",
+                           workers=1).status == "ok"
+    r = build.build_table(rules.RULES["stg_doc_prelim"], snap, stage_root)
+    assert r.ok and r.n_rows == 1 and r.n_reject == 0, [g.as_dict() for g in r.gates]
+    row = _read(stage_root, r).execute(
+        "SELECT revenue_krw, net_income_py_krw, ni_owner_krw, period_from, period_to, available_date, "
+        "fs_div, status, n_items FROM t").fetchone()
+    assert row is not None
+    assert (int(row[0]), int(row[1]), int(row[2])) == (1237395000000, 91548000000, 6096000000)
+    assert (str(row[3]), str(row[4]), str(row[5])) == ("2026-07-01", "2026-09-30", "2024-10-29")
+    assert (row[6], row[7], row[8]) == ("CFS", "ok", 5)
 
 
 def test_build_without_prepass_cache_raises_with_instructions(tmp_path: Path) -> None:

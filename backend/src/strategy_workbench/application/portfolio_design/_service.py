@@ -93,6 +93,7 @@ from .ports.outgoing.engine_portfolio import EnginePortfolioPort
 from .ports.outgoing.raw_observations import (
     CancellableRawObservationPort,
     ProgressReportingRawObservationPort,
+    RawFieldValue,
     RawObservation,
     RawObservationContractViolation,
     RawObservationPort,
@@ -422,8 +423,9 @@ class PortfolioDesignService:
         )
         checkpoint()
         progress(_PROGRESS_FACTOR_INPUTS, "Preparing factor inputs")
+        factor_cells: _SharedCells[FactorFieldValue] = {}
         factor_observations = tuple(
-            _to_factor_observation(item, checkpoint=checkpoint)
+            _to_factor_observation(item, checkpoint=checkpoint, cells=factor_cells)
             for item in _reported(
                 raw.observations,
                 checkpoint,
@@ -433,6 +435,7 @@ class PortfolioDesignService:
                 ),
             )
         )
+        del factor_cells
         parameters = tuple(
             ResolvedFactorParameter(parameter_id, value)
             for parameter_id, value in prepared.parameter_values.items()
@@ -974,9 +977,47 @@ def _look_ahead_violation(
     )
 
 
+_C = TypeVar("_C")
+# (종목, 필드)마다 직전 원시 셀과 그 셀로 만든 변환 셀. 원시 셀이 같은 객체면 변환 셀도 다시 쓴다
+_SharedCells = dict[tuple[str, str], tuple[RawFieldValue, _C]]
+
+
+def _shared_cell(
+    cells: _SharedCells[_C],
+    security_id: str,
+    field: RawFieldValue,
+    build: Callable[[RawFieldValue], _C],
+) -> _C:
+    """`field` 가 이 종목·필드의 직전 원시 셀과 같은 객체면 직전 변환 셀을, 아니면 새로 만든다.
+
+    분기 재무처럼 세션마다 같은 원장 셀을 행마다 새로 감싸지 않는다. 객체 동일성으로만 가르므로
+    값은 그대로다(5년 실데이터 run 메모리 부족).
+    """
+    key = (security_id, field.field_id)
+    last = cells.get(key)
+    if last is not None and last[0] is field:
+        return last[1]
+    built = build(field)
+    cells[key] = (field, built)
+    return built
+
+
+def _factor_cell(field: RawFieldValue) -> FactorFieldValue:
+    return FactorFieldValue(field.field_id, field.value, masked=field.kind is CellKind.MASKED)
+
+
+def _portfolio_cell(field: RawFieldValue) -> PortfolioFieldValue:
+    return PortfolioFieldValue(field.field_id, field.value, field.available_date)
+
+
 def _to_factor_observation(
-    item: RawObservation, *, checkpoint: Callable[[], None]
+    item: RawObservation,
+    *,
+    checkpoint: Callable[[], None],
+    cells: _SharedCells[FactorFieldValue] | None = None,
 ) -> FactorObservation:
+    """원시 관측 한 행을 팩터 입력으로. `cells` 를 주면 같은 원시 셀의 변환을 행끼리 나눠 쓴다."""
+    shared: _SharedCells[FactorFieldValue] = {} if cells is None else cells
     for field in _checkpointed(item.fields, checkpoint):
         if field.available_date > item.as_of:
             raise _look_ahead_violation(
@@ -989,7 +1030,7 @@ def _to_factor_observation(
         as_of=item.as_of,
         security_id=item.security_id,
         fields=tuple(
-            FactorFieldValue(field.field_id, field.value, masked=field.kind is CellKind.MASKED)
+            _shared_cell(shared, item.security_id, field, _factor_cell)
             for field in _checkpointed(item.fields, checkpoint)
         ),
         # Membership travels with the row so cross-sectional operators score members against
@@ -1017,6 +1058,7 @@ def _to_portfolio_observations(
 
         for value in _reported(record.values, checkpoint, report_record):
             values_by_key[(record.factor_id, value.as_of, value.security_id)] = value.value
+    portfolio_cells: _SharedCells[PortfolioFieldValue] = {}
     opening_weights = (
         None
         if starting_holdings is None
@@ -1041,7 +1083,7 @@ def _to_portfolio_observations(
                 for record in _checkpointed(evaluations, checkpoint)
             ),
             fields=tuple(
-                PortfolioFieldValue(field.field_id, field.value, field.available_date)
+                _shared_cell(portfolio_cells, item.security_id, field, _portfolio_cell)
                 for field in _checkpointed(item.fields, checkpoint)
             ),
             sector_id=item.sector_id,

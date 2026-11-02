@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import dataclasses
 import difflib
+import functools
 import types
 import typing
 from collections.abc import Iterable, Mapping
@@ -412,7 +413,7 @@ def _hydrate_dataclass(tp: type, value: object, pointer: str, issues: list[Struc
             "여기에는 하위 항목을 가진 블록이 와야 합니다 — "
             f"expected=mapping got={type(value).__name__}",
         )
-    hints = get_type_hints(tp)
+    hints = _type_hints(tp)
     fields = {field.name: field for field in dataclasses.fields(tp)}
     failed = False
     for key in value:
@@ -546,8 +547,15 @@ def _hydrate_scalar(tp: Any, value: object, pointer: str, issues: list[Structura
     )
 
 
+@functools.cache
+def _type_hints(tp: type) -> Mapping[str, Any]:
+    """클래스의 타입 힌트. 클래스 정의는 바뀌지 않으므로 한 번만 푼다 — 노드마다 다시 풀면 큰 그래프
+    (노드 수백 개 × 유니언 후보)의 hydrate 가 초 단위로 느려진다(2026-11-02 실측 8,802회 호출)."""
+    return types.MappingProxyType(get_type_hints(tp))
+
+
 def _kind_of(tp: type) -> str | None:
-    hint = get_type_hints(tp).get("kind")
+    hint = _type_hints(tp).get("kind")
     if hint is not None and get_origin(hint) is Literal:
         return typing.cast(str, get_args(hint)[0])
     return None

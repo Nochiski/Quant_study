@@ -908,3 +908,46 @@ def test_sqlite_source_validation_does_not_hold_transaction_or_store_lock(
         reader.close()
         if writer is not reader:
             writer.close()
+
+
+def test_sqlite_recompiles_each_immutable_revision_once_per_process(tmp_path: Path) -> None:
+    # 리비전은 불변이라 한 번 검증한 행은 다시 컴파일하지 않는다. 큰 그래프 전략에서
+    # 목록·단건 조회가 읽을 때마다 원문을 재컴파일해 초 단위로 느려졌다(2026-11-02 실측: 목록 10초).
+    calls: list[str] = []
+
+    def counting(source: str, format: SourceFormat) -> str:
+        calls.append(source)
+        return _source_spec_hash(source, format)
+
+    repository = SQLiteStrategyRepository(tmp_path / "cache.sqlite3", source_spec_hash=counting)
+    repository.add(_document(_document_source(SourceFormat.YAML, title="once"), "once", 1))
+    calls.clear()
+    for _ in range(3):
+        repository.get("once")
+        repository.list_strategies(PageRequest())
+        repository.history("once", PageRequest())
+    assert len(calls) == 1
+
+
+def test_sqlite_still_rejects_a_row_changed_after_it_was_read(tmp_path: Path) -> None:
+    # 기억해 둔 해독 결과는 행 내용 전체가 키라, 읽은 뒤 바뀐 행은 다시 검증해 거절한다.
+    path = tmp_path / "drift-after-read.sqlite3"
+    repository = _sqlite(path)
+    original = _document_source(SourceFormat.YAML, title="original")
+    changed = _document_source(SourceFormat.YAML, title="changed")
+    repository.add(_document(original, "drift", 1))
+    repository.get("drift")
+
+    with sqlite3.connect(path) as connection:
+        _drop_revision_guards(connection)
+        connection.execute(
+            """
+            UPDATE strategy_revisions
+            SET source_text = ?, source_hash = ?
+            WHERE strategy_id = ? AND revision = 1
+            """,
+            (changed, source_hash_of(changed), "drift"),
+        )
+
+    with pytest.raises(StrategyRepositoryStorageError, match="compiles to a different"):
+        repository.get("drift")

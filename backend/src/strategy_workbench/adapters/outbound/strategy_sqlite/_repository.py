@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import ClassVar
 
@@ -30,6 +32,10 @@ LIMIT ? OFFSET ?
 """
 
 
+# 기억해 둘 해독 결과 수. 행 하나가 원문(수십 KB)과 해독된 spec 을 함께 쥔다.
+_DECODED_ROWS_KEPT = 256
+
+
 class SQLiteStrategyRepository:
     """SQLite adapter for immutable strategy revisions.
 
@@ -49,6 +55,9 @@ class SQLiteStrategyRepository:
         busy_timeout_seconds: float = 5.0,
     ) -> None:
         self._source_spec_hash = source_spec_hash
+        # 검증을 마친 행의 해독 결과. 키가 행 내용 전체라 어느 칸이든 바뀌면 다시 검증한다.
+        self._decoded: OrderedDict[tuple[object, ...], StrategyRevisionRecord] = OrderedDict()
+        self._decoded_lock = threading.Lock()
         self._database = SqliteDatabase(
             path,
             label="strategy repository",
@@ -238,7 +247,23 @@ class SQLiteStrategyRepository:
         )
 
     def _decode(self, row: sqlite3.Row) -> StrategyRevisionRecord:
-        return decode_record(row, source_spec_hash=self._source_spec_hash)
+        """행을 해독하고 원문 재컴파일로 해시를 검증한다. 같은 행은 프로세스에서 한 번만 검증한다.
+
+        리비전 행은 불변(트리거가 수정·삭제를 막는다)이라 결과를 기억해도 된다. 그래도 키를 행 내용
+        전체로 잡아, 트리거를 우회한 변조가 생기면 키가 달라져 다시 검증하고 거절한다.
+        """
+        key = tuple(row)
+        with self._decoded_lock:
+            cached = self._decoded.get(key)
+            if cached is not None:
+                self._decoded.move_to_end(key)
+                return cached
+        record = decode_record(row, source_spec_hash=self._source_spec_hash)
+        with self._decoded_lock:
+            self._decoded[key] = record
+            while len(self._decoded) > _DECODED_ROWS_KEPT:
+                self._decoded.popitem(last=False)
+        return record
 
     def _audit_all_revision_chains(self, connection: sqlite3.Connection) -> None:
         rows = connection.execute(

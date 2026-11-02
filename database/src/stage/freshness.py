@@ -37,6 +37,8 @@ from __future__ import annotations
 #                 사이가 최대 137 캘린더일이라 120 이면 2~3월에 오탐한다(리뷰 REC-16) → 150.
 # WISE 10일     : `fetched_date` = 수집일 축, 06:00 원장 체인(월~토 — N-53, 그 전 18:05 저녁 슬롯). 연휴 여유 포함 10.
 # 문서층 4표 10일: available 이 rcept_dt lookup — 공시와 같은 축.
+# 잠정실적 150일: 공시가 실적 시즌(1~2 · 4~5 · 7~8 · 10~11월)에 몰린다 — 재무와 같은 주기 축이라 150.
+#                 월 실적을 내는 회사가 있어 실제 공백은 더 짧다(N-64).
 #
 # 값을 더 죄고 싶으면 거래일 캘린더가 먼저 필요하다. **지금은 느슨한 쪽이 옳다** — C6 가 잡아야
 # 할 실제 사고는 2~5주 정지였고, 상시 오탐은 이 시스템을 여섯 번 멈춰 세운 실패 클래스다.
@@ -71,7 +73,7 @@ ALLOW_DAYS: dict[str, int] = {
     "stg_fin_wise_q": 10,                 # 10-01 T-Q3 — stg_fin_wise 와 같은 WISE 저녁 수집 축
     # 문서층
     "stg_doc_meta": 10, "stg_doc_section": 10, "stg_doc_correction": 10,
-    "stg_doc_parse_log": 10,
+    "stg_doc_parse_log": 10, "stg_doc_prelim": 150,
 }
 
 _KIS_OUT_OF_SCOPE = (

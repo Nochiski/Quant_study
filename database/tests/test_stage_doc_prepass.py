@@ -54,7 +54,7 @@ def test_prepass_writes_jsonl_per_table_and_year_with_summary(tmp_path: Path) ->
     assert s.status == "ok" and s.detail == "ok"
     assert s.n_docs == 2 and s.modes == {"ok": 1, "html": 1}          # 문서 단위(main 멤버 기준)
     assert s.tables == {"stg_doc_meta": 3, "stg_doc_section": 8, "stg_doc_correction": 1,
-                        "stg_doc_parse_log": 3}
+                        "stg_doc_parse_log": 3, "stg_doc_prelim": 0}
     assert len(s.input_hash) == 16
     cache = tmp_path / "cache" / "snap_t"
     meta_2020 = (cache / "stg_doc_meta" / "year=2020_q1.jsonl").read_text().splitlines()
@@ -342,3 +342,36 @@ def test_repair_on_an_incremental_cache_does_not_touch_the_hardlinked_base(
     assert _cache_bytes(root / "snap_base") == before        # base 캐시 불변
     kept = root / "snap_base" / "stg_doc_section" / "year=2020_q1.jsonl"
     assert "새 절" not in kept.read_text(encoding="utf-8")
+
+
+def test_incremental_from_a_base_without_the_prelim_table_gives_every_shard_an_empty_file(
+        tmp_path: Path) -> None:
+    """p1.6 — 기준 캐시가 `stg_doc_prelim` 이 생기기 전 판이면 증분이 그 표의 샤드 파일을 기준 샤드마다 빈 파일로
+    세운다. 안 세우면 그날 새 문서가 0건일 때 표 폴더가 비어 stage `read_json(glob)` 이 '파일 없음'으로 실패한다."""
+    docs, db = _setup(tmp_path)
+    root = tmp_path / "cache"
+    doc_prepass.run(db, docs, root, snapshot_id="snap_base", workers=1)
+    shutil.rmtree(root / "snap_base" / "stg_doc_prelim", ignore_errors=True)   # p1.5 판 기준 캐시
+    before = _cache_bytes(root / "snap_base")
+    inc = doc_prepass.incremental(db, docs, root, "snap_next", "snap_base", workers=1)
+    shards = sorted(f.name for f in (root / "snap_base" / "stg_doc_parse_log").glob("year=*.jsonl"))
+    prelim = root / "snap_next" / "stg_doc_prelim"
+    assert sorted(f.name for f in prelim.glob("year=*.jsonl")) == shards and shards
+    assert all((prelim / n).read_text() == "" for n in shards)
+    assert inc.status == "ok" and inc.tables.get("stg_doc_prelim", 0) == 0
+    assert _cache_bytes(root / "snap_base") == before
+
+
+def test_prepass_writes_a_prelim_row_for_a_preliminary_earnings_disclosure(tmp_path: Path) -> None:
+    from test_stage_doc_prelim import _kumho
+    docs, db = _setup(tmp_path)
+    rno = "20241029800635"
+    (docs / "2024" / f"{rno}.zip").write_bytes(_zip({f"{rno}.xml": _kumho().encode()}))
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO doc_store VALUES (?,10,'s',1,1,'000','2026-11-01T04:00:00')", (rno,))
+    con.commit()
+    con.close()
+    s = doc_prepass.run(db, docs, tmp_path / "cache", snapshot_id="snap_t", workers=1)
+    assert s.status == "ok" and s.modes == {"ok": 1, "html": 2} and s.tables["stg_doc_prelim"] == 1
+    rows = _rows(tmp_path / "cache" / "snap_t", "stg_doc_prelim")
+    assert len(rows) == 1 and json.loads(rows[0])["revenue_krw"] == "1237395000000"

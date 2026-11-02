@@ -725,7 +725,8 @@ WITH tgt AS (
     AND (report_nm LIKE '%주식분할결정%' OR report_nm LIKE '%주식병합결정%'
          OR (report_nm NOT LIKE '%연장신고%' AND
              (report_nm LIKE '%사업보고서%' OR report_nm LIKE '%반기보고서%'
-              OR report_nm LIKE '%분기보고서%'))))
+              OR report_nm LIKE '%분기보고서%')))
+         OR (report_nm LIKE '%영업(잠정)실적(공정공시)%' AND report_nm NOT LIKE '%자회사%'))
 SELECT COUNT(*),
        COALESCE(SUM(CASE WHEN s.zip_ok = 1 THEN 1 ELSE 0 END), 0),
        COALESCE(SUM(CASE WHEN s.rcept_no IS NULL THEN 1 ELSE 0 END), 0),

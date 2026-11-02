@@ -90,5 +90,23 @@ STG_DOC_PARSE_LOG = _table("stg_doc_parse_log", (
     _ms("t_decode_ms"), _ms("t_sanitize_ms"), _ms("t_parse_ms"),
 ), ("rcept_no", "member_name"))
 
+# 잠정실적 공정공시(N-64, p1.6) — 접수 1건 = 행 1개. 값은 파서가 원문 단위(원·천원·백만원·억원)를 원으로 바꿔 싣는다
+# (서식마다 단위가 달라 ColumnRule.unit_scale 로 못 곱한다). status='failed' 면 값 열은 전부 NULL, 사유는 error.
+# 당기 기간이 분기가 아닌 행(월 실적)도 그대로 싣는다 — 고르는 일은 equity 몫이다.
+_KRW = (20, 0)
+
+
+def _krw(name: str) -> ColumnRule:
+    return ColumnRule(name, name, KIND_NUMERIC, *_KRW)
+
+
+STG_DOC_PRELIM = _table("stg_doc_prelim", (
+    _t("rcept_no", key=True, expected_len=14), _t("member_name", key=True), _t("fs_div"),
+    _d("period_from"), _d("period_to"), _d("py_from"), _d("py_to"), _t("unit_raw"),
+    _krw("revenue_krw"), _krw("op_profit_krw"), _krw("pretax_krw"), _krw("net_income_krw"),
+    _krw("ni_owner_krw"), _krw("revenue_py_krw"), _krw("op_profit_py_krw"), _krw("net_income_py_krw"),
+    _n("n_items"), _t("unknown_items"), _t("status"), _t("error"),
+), ("rcept_no", "member_name"))
+
 TABLES: tuple[TableRule, ...] = (STG_DOC_META, STG_DOC_SECTION, STG_DOC_CORRECTION,
-                                 STG_DOC_PARSE_LOG)
+                                 STG_DOC_PARSE_LOG, STG_DOC_PRELIM)

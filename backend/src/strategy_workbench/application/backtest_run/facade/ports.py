@@ -22,6 +22,10 @@ from strategy_workbench.application.backtest_run.ports.outgoing.backtest_executo
     ProgressCallback,
     RunCancelledError,
 )
+from strategy_workbench.application.backtest_run.ports.outgoing.market_index import (
+    MarketIndexCloses,
+    MarketIndexPort,
+)
 from strategy_workbench.application.backtest_run.ports.outgoing.run_execution import (
     RunCancelled,
     RunCommitted,
@@ -52,6 +56,8 @@ __all__ = [
     "BacktestArtifactStorePort",
     "BacktestDataNotReadyError",
     "BacktestDataPort",
+    "MarketIndexCloses",
+    "MarketIndexPort",
     "BacktestDataQuery",
     "BacktestDataset",
     "BacktestDataUnavailableError",

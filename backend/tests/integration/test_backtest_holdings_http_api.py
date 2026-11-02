@@ -82,3 +82,22 @@ def test_holdings_answer_unrecorded_days_and_unknown_runs_with_codes(client: Tes
     missing = client.get("/api/v1/backtests/no-such-run/holdings")
     assert missing.status_code == 404
     assert missing.json()["detail"]["code"] == "backtest.run.not_found"
+
+
+def test_market_reference_reports_why_mock_data_has_no_indices(client: TestClient) -> None:
+    # mock 은 시장 지수를 지어내지 않는다 — 코스피·코스닥 모두 곡선 없이 사유로 답한다.
+    run_id = _completed_run(client)
+    response = client.get(f"/api/v1/backtests/{run_id}/market-reference")
+    assert response.status_code == 200, response.text
+    report = response.json()
+    assert [item["index_id"] for item in report["series"]] == ["kospi", "kosdaq"]
+    for item in report["series"]:
+        assert (item["status"], item["points"], item["drawdown"], item["metrics"]) == (
+            "not_available",
+            [],
+            [],
+            [],
+        )
+        assert "mock" in item["detail"]
+    missing = client.get("/api/v1/backtests/no-such-run/market-reference")
+    assert missing.status_code == 404

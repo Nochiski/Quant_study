@@ -15,7 +15,12 @@ import {
   experimentsQuery,
   TrialProgress,
 } from "../../../entities/experiment";
-import { strategiesQuery } from "../../../entities/strategy";
+import {
+  strategiesQuery,
+  strategyRevisionLabel,
+  useStrategyTitles,
+  type StrategyTitles,
+} from "../../../entities/strategy";
 import { listDrafts } from "../../../features/edit-strategy";
 import { t, tFill } from "../../../shared/config";
 import { browserStorage } from "../../../shared/lib/browser-storage";
@@ -32,14 +37,25 @@ const FAILURES_SHOWN = 2;
 const RESULTS_SHOWN = 5;
 const ACTIVITY_SHOWN = 10;
 
-const sourceLabel = (summary: BacktestRunSummary): string => {
+const sourceLabel = (
+  summary: BacktestRunSummary,
+  titles: StrategyTitles,
+): string => {
   const provenance = summary.strategy_provenance;
-  return provenance.kind === "saved_revision" && provenance.strategy_id
-    ? `${provenance.strategy_id} · v${provenance.revision}`
+  return provenance.kind === "saved_revision" &&
+    provenance.strategy_id &&
+    provenance.revision
+    ? strategyRevisionLabel(titles, provenance.strategy_id, provenance.revision)
     : t("history.backtests.unsaved");
 };
 
-const ActivityText = ({ entry }: { entry: ActivityEntry }) => {
+const ActivityText = ({
+  entry,
+  titles,
+}: {
+  entry: ActivityEntry;
+  titles: StrategyTitles;
+}) => {
   switch (entry.kind) {
     case "revision":
       return (
@@ -60,7 +76,7 @@ const ActivityText = ({ entry }: { entry: ActivityEntry }) => {
             entry.summary.run.status === "failed"
               ? "home.activity.backtestFailed"
               : "home.activity.backtestCompleted",
-            { source: sourceLabel(entry.summary) },
+            { source: sourceLabel(entry.summary, titles) },
           )}
         </Link>
       );
@@ -106,6 +122,9 @@ export const ResearchHomePage = () => {
   const experimentItems = experiments.data?.pages.flatMap((page) => page.items) ?? [];
   const slots = experiments.data?.pages[0]?.slots;
   const runs = backtests.data?.items ?? [];
+  const titles = useStrategyTitles(
+    runs.map((summary) => summary.strategy_provenance.strategy_id),
+  );
 
   if (strategies.isSuccess && strategies.data.total === 0)
     return (
@@ -176,7 +195,7 @@ export const ResearchHomePage = () => {
                   <Badge tone="error">{t("history.strategies.failed")}</Badge>
                   <span className="research-home__failure">
                     {tFill("home.todo.failure", {
-                      source: sourceLabel(summary),
+                      source: sourceLabel(summary, titles),
                       stage: runStageLabel(summary.run.stage),
                     })}
                     <BacktestRunFailure run={summary.run} announce={false} />
@@ -257,7 +276,7 @@ export const ResearchHomePage = () => {
               {runningBacktests.map((summary) => (
                 <li key={summary.run.run_id} className="research-home__progress">
                   <Link to="/research/backtests/$runId" params={{ runId: summary.run.run_id }}>
-                    {sourceLabel(summary)}
+                    {sourceLabel(summary, titles)}
                   </Link>
                   <span>
                     {runStageLabel(summary.run.stage)} · {Math.round(summary.run.progress * 100)}%
@@ -266,7 +285,7 @@ export const ResearchHomePage = () => {
                     className="research-home__bar"
                     value={summary.run.progress}
                     max={1}
-                    aria-label={sourceLabel(summary)}
+                    aria-label={sourceLabel(summary, titles)}
                   />
                 </li>
               ))}
@@ -292,7 +311,7 @@ export const ResearchHomePage = () => {
                 <tbody>
                   {results.map((summary) => (
                     <tr key={summary.run.run_id}>
-                      <td>{sourceLabel(summary)}</td>
+                      <td>{sourceLabel(summary, titles)}</td>
                       <td>{displayTime(summary.run.updated_at)}</td>
                       <td>
                         <RunHeadline headline={summary.headline} />
@@ -323,7 +342,7 @@ export const ResearchHomePage = () => {
               {activity.map((entry, index) => (
                 <li key={`${entry.kind}:${entry.at}:${index}`}>
                   <small className="research-home__muted">{displayTime(entry.at)}</small>
-                  <ActivityText entry={entry} />
+                  <ActivityText entry={entry} titles={titles} />
                 </li>
               ))}
             </ol>

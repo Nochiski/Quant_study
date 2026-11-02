@@ -34,6 +34,7 @@ import {
   getBacktestSummary,
   getBacktestResult,
   getBacktestAccountReport,
+  getBacktestMarketReference,
   getBacktestHoldings,
   getBacktestSecurityTrades,
   getBacktestSessionHoldings,
@@ -42,6 +43,7 @@ import {
   previewCapacitySweep,
   createCapacitySweep,
   getExperimentCapacity,
+  getStrategy,
   getStrategyDraft,
   getStrategyDocument,
   getStrategyDocumentContract,
@@ -121,6 +123,9 @@ import type {
   PageBacktestRunSummary,
   PageRevisionSummary,
   PageStrategySummary,
+  SavedStrategy,
+  MarketReferenceReport,
+  MarketReferenceSeries,
   AddLibraryVersionBody,
   LibraryFactorBody,
   LibraryFactorList,
@@ -714,6 +719,13 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getBacktestAccountReport");
   },
 
+  async backtestMarketReference(runId: string): Promise<MarketReferenceReport> {
+    const response = await getBacktestMarketReference({
+      path: { run_id: runId },
+    });
+    return unwrap(response, "getBacktestMarketReference");
+  },
+
   async getBacktestHoldings(runId: string): Promise<HoldingsOverview> {
     return unwrap(await getBacktestHoldings({ path: { run_id: runId } }), "getBacktestHoldings");
   },
@@ -843,6 +855,18 @@ export const strategyWorkbenchApi = {
   ): Promise<PageStrategySummary> {
     const response = await listStrategies({ query: page });
     return unwrap(response, "listStrategies");
+  },
+
+  /** 전략의 최신 리비전(이름 표시용). 리비전을 고르지 않으면 서버가 최신을 준다. */
+  async getStrategy(
+    strategyId: string,
+    signal?: AbortSignal,
+  ): Promise<SavedStrategy> {
+    const response = await getStrategy({
+      path: { strategy_id: strategyId },
+      signal,
+    });
+    return unwrap(response, "getStrategy");
   },
 
   async getStrategyDraft(draftId: string): Promise<StrategyDraft> {
@@ -1029,6 +1053,8 @@ export type {
   AccountReportStatus,
   AccountReportSummary,
   AccountReportProvenance,
+  MarketReferenceReport,
+  MarketReferenceSeries,
   HoldingChange,
   HoldingsOverview,
   SecurityTradesReport,

@@ -870,7 +870,12 @@ test.describe("professional YAML workflow", () => {
     ).toBeVisible();
     const runRow = workflow.getByRole("row").filter({ hasText: runId });
     await expect(runRow).toContainText("완료");
-    await expect(runRow).toContainText(`${strategyId} · v4`);
+    // 실행은 전략의 지금 이름으로 보이고, 리비전 링크는 전략 id 를 title 로 남긴다.
+    await expect(runRow).toContainText(finalTitle);
+    await expect(runRow.getByRole("link", { name: "v4" })).toHaveAttribute(
+      "title",
+      strategyId,
+    );
 
     await workflow.getByRole("link", { name: "전략 세션" }).click();
     await expect(

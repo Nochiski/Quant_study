@@ -30,7 +30,10 @@ from strategy_workbench.domain.analytics.facade.factor_regression import (
     regress_on_factor_returns,
     unavailable_factor_regression,
 )
-from strategy_workbench.domain.analytics.facade.metrics import MetricScope
+from strategy_workbench.domain.analytics.facade.metrics import (
+    MetricScope,
+    build_default_metric_registry,
+)
 from strategy_workbench.domain.backtest.facade.account_report import (
     AccountReport,
     project_account_report,
@@ -52,6 +55,11 @@ from strategy_workbench.domain.backtest.facade.holdings import (
     project_session_holdings,
     result_security_ids,
     session_security_ids,
+)
+from strategy_workbench.domain.backtest.facade.market_reference import (
+    MARKET_REFERENCE_INDICES,
+    MarketReferenceReport,
+    project_market_reference,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     AdmissionRejectionCode,
@@ -125,6 +133,7 @@ from ._validation_report import RunValidationReport
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
 from .ports.outgoing.backtest_data import BacktestDataPort
 from .ports.outgoing.backtest_executor import BacktestExecutorPort, RunCancelledError
+from .ports.outgoing.market_index import MarketIndexPort
 from .ports.outgoing.run_execution import (
     RunCommitted,
     RunExecutionPort,
@@ -318,6 +327,7 @@ class BacktestRunService:
         factor_registry: FactorRegistry | None = None,
         background: Callable[[Callable[[], None]], None] | None = None,
         security_directory: SecurityDirectoryPort | None = None,
+        market_index: MarketIndexPort | None = None,
     ) -> None:
         """`run_execution` 은 run 계산을 돌릴 전송을 만든다(spec D10).
 
@@ -352,6 +362,7 @@ class BacktestRunService:
         self._factor_registry = factor_registry or build_default_factor_registry()
         # 보유·매매 화면의 종목 이름. 없으면(테스트 조립) 이름 칸이 비고 id 만 보인다.
         self._security_directory = security_directory
+        self._market_index = market_index
         self._records: dict[str, _RunRecord] = {}
         # 끝난 run 은 최근 것만 메모리에 둔다(끝난 순). 상태·요청·결과의 정본은 저장소·산출물이다.
         self._finished: deque[str] = deque()
@@ -690,6 +701,32 @@ class BacktestRunService:
     def account_report(self, run_id: str) -> AccountReport:
         """검증해 읽은 완료 결과를 초기자본 기준 계좌 평가손익으로 투영한다."""
         return project_account_report(self.result(run_id))
+
+    def market_reference(self, run_id: str) -> MarketReferenceReport:
+        """검증해 읽은 완료 결과의 세션마다 같은 기간 코스피·코스닥 참고선과 그 지표.
+
+        지수 원천이 연결되지 않았거나 지수를 주지 않으면 지수마다 사유로 답한다.
+        """
+        result = self.result(run_id)
+        sessions = [item.session for item in result.artifacts.snapshots]
+        if self._market_index is None or not sessions:
+            return project_market_reference(
+                result,
+                {},
+                build_default_metric_registry(),
+                unavailable_reason="이 연결은 시장 지수를 제공하지 않습니다.",
+            )
+        loaded = self._market_index.load_market_index_closes(
+            tuple(index.index_name for index in MARKET_REFERENCE_INDICES),
+            sessions[0],
+            sessions[-1],
+        )
+        return project_market_reference(
+            result,
+            loaded.closes,
+            build_default_metric_registry(),
+            unavailable_reason=loaded.unavailable_reason,
+        )
 
     def holdings_overview(self, run_id: str) -> HoldingsOverview:
         """검증해 읽은 완료 결과의 매매한 세션과 종목별 보유 구간(계좌 보고서와 같은 읽기 경로)."""

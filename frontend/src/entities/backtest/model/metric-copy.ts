@@ -17,6 +17,7 @@ export const RESULT_LAYOUT_METRIC_IDS = [
   "sharpe_standard_error",
   "max_drawdown",
   "max_drawdown_recovery_sessions",
+  "calmar",
   "turnover",
   "average_gross_exposure",
   "win_rate",

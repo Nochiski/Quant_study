@@ -89,6 +89,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     CorporateActionRecord,
     InvalidBarRecord,
     MarketBarRecord,
+    MarketIndexCloses,
     UniverseMembershipRecord,
 )
 from strategy_workbench.application.factor_research.facade.ports import (
@@ -145,6 +146,7 @@ from ._specs import (
     FIELD_NOT_IN_LEDGER,
     FIELD_NOT_PROVIDED,
     FIELD_SPECS,
+    INDEX_TABLE,
     POLICY_TABLE,
     PRICE_TABLE,
     PROFILE_TABLE,
@@ -1413,6 +1415,35 @@ class EquityDuckdbAdapter:
         (T4-01).
         """
         return _raw_panel.load_raw_panel(self, query, checkpoint=checkpoint, progress=progress)
+
+    # ── MarketIndexPort ───────────────────────────────────────────────────────
+
+    def load_market_index_closes(
+        self, index_names: Sequence[str], start: date, end: date
+    ) -> MarketIndexCloses:
+        """원장 `index_daily` 의 지수 종가. 지수는 security 축이 아니라 백테스트 bar 로 내지 않는다
+        (GAP-09) — 결과 옆 참고선 전용이다. 표가 없으면 사유로 답한다."""
+        if INDEX_TABLE not in self._tables:
+            return MarketIndexCloses(
+                unavailable_reason="원장에 시장 지수 표(index_daily)가 없습니다."
+            )
+        names = sorted(set(index_names))
+        if not names:
+            return MarketIndexCloses()
+        con = _open(None)
+        try:
+            rows = con.execute(
+                f"SELECT index_name, date, close_idx FROM {self._source(INDEX_TABLE)} "
+                f"WHERE index_name IN ({', '.join('?' for _ in names)}) "
+                "AND date BETWEEN ? AND ? AND close_idx IS NOT NULL",
+                [*names, start, end],
+            ).fetchall()
+        finally:
+            con.close()
+        closes: dict[str, dict[date, float]] = {}
+        for name, day, close in rows:
+            closes.setdefault(str(name), {})[_as_date(day, "index_daily.date")] = float(close)
+        return MarketIndexCloses(closes)
 
     # ── BacktestDataPort ──────────────────────────────────────────────────────
 

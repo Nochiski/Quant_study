@@ -91,6 +91,10 @@ test(
     ).toBeVisible();
     const table = holdings.getByRole("region", { name: "보유 종목 표" });
     await expect(table.locator("tbody tr")).toHaveCount(latest.holding_count);
+    // 그날 체결 칸은 서버가 계좌 기록에서 낸 당일 총손익과 실현 손익을 함께 보인다.
+    const totals = holdings.getByRole("complementary", { name: "이날 체결" });
+    await expect(totals).toContainText("당일 총손익");
+    await expect(totals).toContainText("실현 손익");
     // 종목은 코드가 아니라 디렉터리 이름으로 보인다.
     const named = overview.securities.find((item) => item.security.name !== null)!;
     await expect(holdings).toContainText(named.security.name!);

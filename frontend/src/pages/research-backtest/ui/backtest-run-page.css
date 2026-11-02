@@ -25,6 +25,12 @@
   overflow-wrap: anywhere;
 }
 
+/* run id 는 재현용 보조 정보라 전략 이름보다 작고 흐리게 둔다. */
+.backtest-run-layout__run-id {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
 .backtest-run-layout__assistant {
   position: sticky;
   top: var(--space-4);

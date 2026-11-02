@@ -10,6 +10,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataset,
     BacktestDataUnavailableError,
     MarketBarRecord,
+    MarketIndexCloses,
     UniverseMembershipRecord,
 )
 from strategy_workbench.application.factor_research.facade.ports import (
@@ -391,6 +392,12 @@ class MockEquityDataAdapter:
         if security_index < 2:
             return True
         return _business_day_index(session) - _business_day_index(session.replace(day=1)) >= 2
+
+    def load_market_index_closes(
+        self, index_names: Collection[str], start: date, end: date
+    ) -> MarketIndexCloses:
+        """mock 은 시장 지수를 지어내지 않는다 — 참고선은 사유로 빈다."""
+        return MarketIndexCloses(unavailable_reason="mock 데이터에는 시장 지수가 없습니다.")
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
         """Generate deterministic OHLCV until the real Equity DB adapter is selected.

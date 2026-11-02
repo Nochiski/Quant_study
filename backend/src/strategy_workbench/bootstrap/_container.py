@@ -283,6 +283,7 @@ def build_container(
         memory_reserve_gb=run_memory_reserve_gb,
         factor_registry=factor_registry,
         security_directory=equity_data,
+        market_index=equity_data,
     )
     experiment_repository = SQLiteExperimentRepository(research_db_path)
     experiments = ExperimentRunService(

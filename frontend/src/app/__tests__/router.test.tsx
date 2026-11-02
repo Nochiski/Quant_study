@@ -401,6 +401,14 @@ const server = setupServer(
   http.get(`${API}/api/v1/strategies/template`, () =>
     HttpResponse.json(spec(0, "새 팩터 전략")),
   ),
+  // template 뒤에 둔다 — 먼저 두면 `:strategyId` 가 `template` 요청을 가로챈다.
+  http.get(`${API}/api/v1/strategies/:strategyId`, () =>
+    HttpResponse.json({
+      spec: spec(2, "Alpha strategy"),
+      spec_hash: "a".repeat(64),
+      requires_upgrade: false,
+    }),
+  ),
   http.get(`${API}/api/v1/assistant/providers`, () =>
     HttpResponse.json({
       kinds: [
@@ -634,7 +642,7 @@ describe("App Shell routes", () => {
         "href",
         "/research/experiments/exp-waiting-1#candidate",
       );
-      expect(await within(todo).findByText(/s1 · v2 백테스트가 .* 단계에서 실패했어요/u)).toBeInTheDocument();
+      expect(await within(todo).findByText(/Alpha strategy · v2 백테스트가 .* 단계에서 실패했어요/u)).toBeInTheDocument();
       expect(within(todo).getByRole("link", { name: "원인 보기" })).toHaveAttribute(
         "href",
         "/research/backtests/run-failed",
@@ -1183,10 +1191,18 @@ describe("App Shell routes", () => {
     expect(savedRow).toHaveTextContent("샤프1.50");
     expect(savedRow).toHaveTextContent("최대 낙폭하락 −8.12%");
     expect(screen.getByText("cccccccccccc")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "s1 · v2" })).toHaveAttribute(
+    // 실행 칸은 run id 대신 전략의 지금 이름을 먼저 보인다. 초안 실행은 이름이 없어 원본 없음 문구다.
+    await waitFor(() => expect(savedRow).toHaveTextContent("Alpha strategy"));
+    expect(screen.getByText("run-inline").closest("td")).toHaveTextContent(
+      "저장되지 않은 실행 원본",
+    );
+    // 이름은 첫 칸이 보이므로 전략 원본 칸은 리비전만 링크로 두고 전략 id 는 title 로 남긴다.
+    const revisionLink = within(savedRow).getByRole("link", { name: "v2" });
+    expect(revisionLink).toHaveAttribute(
       "href",
       "/research/strategies/s1/revisions/2",
     );
+    expect(revisionLink).toHaveAttribute("title", "s1");
     expect(
       within(screen.getByText("run-inline").closest("tr")!).getByRole("link", {
         name: "실행 열기",

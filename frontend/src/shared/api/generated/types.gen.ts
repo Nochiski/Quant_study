@@ -4282,6 +4282,74 @@ export type LibraryVisibilityBody = {
 export type Market = "KRX";
 
 /**
+ * MarketReferencePoint
+ */
+export type MarketReferencePoint = {
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Value
+   */
+  value: number;
+};
+
+/**
+ * MarketReferenceReport
+ */
+export type MarketReferenceReport = {
+  /**
+   * Initial Cash
+   */
+  initial_cash: number;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Series
+   */
+  series: Array<MarketReferenceSeries>;
+};
+
+/**
+ * MarketReferenceSeries
+ */
+export type MarketReferenceSeries = {
+  /**
+   * Detail
+   */
+  detail: string | null;
+  /**
+   * Drawdown
+   */
+  drawdown: Array<DrawdownPoint>;
+  /**
+   * Index Id
+   */
+  index_id: string;
+  /**
+   * Index Name
+   */
+  index_name: string;
+  /**
+   * Metrics
+   */
+  metrics: Array<MetricValue>;
+  /**
+   * Points
+   */
+  points: Array<MarketReferencePoint>;
+  status: MarketReferenceStatus;
+};
+
+/**
+ * MarketReferenceStatus
+ */
+export type MarketReferenceStatus = "available" | "not_available";
+
+/**
  * MetricCategory
  */
 export type MetricCategory =
@@ -6737,6 +6805,14 @@ export type SessionHoldings = {
    */
   closed: Array<ClosedHolding>;
   /**
+   * Day Pnl
+   */
+  day_pnl: number;
+  /**
+   * Day Return
+   */
+  day_return: number | null;
+  /**
    * Equity
    */
   equity: number;
@@ -6792,6 +6868,10 @@ export type SessionTradeTotals = {
    * Fees
    */
   fees: number;
+  /**
+   * Realized Pnl
+   */
+  realized_pnl: number | null;
   /**
    * Sell Count
    */
@@ -10054,6 +10134,50 @@ export type GetBacktestSessionHoldingsResponses = {
 
 export type GetBacktestSessionHoldingsResponse =
   GetBacktestSessionHoldingsResponses[keyof GetBacktestSessionHoldingsResponses];
+
+export type GetBacktestMarketReferenceData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/market-reference";
+};
+
+export type GetBacktestMarketReferenceErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestMarketReferenceError =
+  GetBacktestMarketReferenceErrors[keyof GetBacktestMarketReferenceErrors];
+
+export type GetBacktestMarketReferenceResponses = {
+  /**
+   * Successful Response
+   */
+  200: MarketReferenceReport;
+};
+
+export type GetBacktestMarketReferenceResponse =
+  GetBacktestMarketReferenceResponses[keyof GetBacktestMarketReferenceResponses];
 
 export type GetBacktestRequestData = {
   body?: never;

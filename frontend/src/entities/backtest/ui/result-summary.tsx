@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
 
-import type { AccountReport, MetricDefinition, MetricValue } from "../../../shared/api";
+import type {
+  AccountReport,
+  MarketReferenceSeries,
+  MetricDefinition,
+  MetricValue,
+} from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
 import { SignedValue } from "../../../shared/ui";
 import {
@@ -73,17 +78,33 @@ export const ResultSummary = ({
   id,
   metrics,
   account,
+  references = [],
 }: {
   id: string;
   metrics: ResultMetrics;
   /** 계좌 보고서의 요약. 아직 없거나 계산할 수 없으면 최종 평가액 카드를 두지 않는다. */
   account: AccountReport["summary"] | undefined;
+  /** 같은 기간 시장 지수. 그 지수의 최대 낙폭을 전략 최대 낙폭 옆에 둔다(값은 backend 지표 그대로). */
+  references?: readonly MarketReferenceSeries[];
 }) => {
   const benchmark = metrics.metric("benchmark_return");
   const benchmarkDefinition = metrics.definition("benchmark_return");
   const error = metrics.metric("sharpe_standard_error");
   const errorDefinition = metrics.definition("sharpe_standard_error");
   const recovery = metrics.metric("max_drawdown_recovery_sessions");
+  const drawdownDefinition = metrics.definition("max_drawdown");
+  const indexDrawdowns = references.flatMap((reference) => {
+    const value = reference.metrics.find((item) => item.metric_id === "max_drawdown");
+    return value?.value == null || drawdownDefinition === undefined
+      ? []
+      : [
+          {
+            name: reference.index_name,
+            value: value.value,
+            magnitude: formatMetric({ ...value, value: Math.abs(value.value) }, drawdownDefinition),
+          },
+        ];
+  });
   return (
     <section
       id={id}
@@ -131,17 +152,32 @@ export const ResultSummary = ({
           metrics={metrics}
           signed
           note={
-            recovery === undefined
-              ? null
-              : recovery.value !== null
-                ? tFill("backtest.summary.recovery", {
-                    sessions: recovery.value.toFixed(0),
-                  })
-                : recovery.unavailable_reason
-                  ? metricUnavailableCopy(recovery.unavailable_reason)
-                  : null
+            <>
+              {recovery === undefined
+                ? null
+                : recovery.value !== null
+                  ? tFill("backtest.summary.recovery", {
+                      sessions: recovery.value.toFixed(0),
+                    })
+                  : recovery.unavailable_reason
+                    ? metricUnavailableCopy(recovery.unavailable_reason)
+                    : null}
+              {indexDrawdowns.length > 0 ? (
+                <>
+                  <br />
+                  {t("backtest.summary.indexDrawdowns")}{" "}
+                  {indexDrawdowns.map((item, index) => (
+                    <span key={item.name}>
+                      {index > 0 ? " · " : null}
+                      {item.name} <SignedValue value={item.value} magnitude={item.magnitude} />
+                    </span>
+                  ))}
+                </>
+              ) : null}
+            </>
           }
         />
+        <SummaryCard metricId="calmar" metrics={metrics} signed={false} />
         {account ? (
           <div>
             <span>{t("backtest.summary.finalEquity")}</span>

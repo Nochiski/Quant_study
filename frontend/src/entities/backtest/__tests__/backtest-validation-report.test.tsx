@@ -9,6 +9,7 @@ import type { RunValidationReport } from "../../../shared/api";
 import { useBacktestValidationReport } from "../model/backtest-queries";
 import { BacktestValidationReport } from "../ui/backtest-validation-report";
 import { BacktestMetricTable } from "../ui/backtest-metrics";
+import { displayTime } from "../../../shared/lib/display-time";
 
 const URL = "http://localhost:8000/api/v1/backtests/:runId/validation-report";
 /** 응답에 적힌 알려진 수치를 대조하며 DSR 공식을 테스트 화면에서 복제하지 않는다. */
@@ -73,7 +74,10 @@ describe("실행 검증 카드의 wire 조회와 읽기", () => {
     expect(screen.getByText(/판본이 섞여 있습니다/u)).toBeVisible();
     expect(screen.getByText(/판본을 알 수 없는 대표 자료/u)).toBeVisible();
     expect(document.querySelector("time")).toHaveAttribute("datetime", "2026-10-17T12:34:56Z");
-    expect(document.querySelector("time")).toHaveTextContent("UTC");
+    // 조회 시점은 공용 시각 표기(PC 시간대)로 보인다.
+    expect(document.querySelector("time")).toHaveTextContent(
+      displayTime("2026-10-17T12:34:56Z", { seconds: true }),
+    );
     expect(screen.getByText("0.610123456789")).not.toBeVisible();
     const summary = screen.getByText("계산 근거", { selector: "summary" });
     await userEvent.setup().click(summary);

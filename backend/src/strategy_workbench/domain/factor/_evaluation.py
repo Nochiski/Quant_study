@@ -268,12 +268,9 @@ class _NodeEvaluator:
         self._nodes = {node.node_id: node for node in graph.nodes}
         self._output_node_id = graph.output_node_id
         self._keep_intermediate = keep_intermediate
-        # 중간 노드마다 아직 값을 읽지 않은 소비 간선 수. 0 이 되면 값 목록을 놓는다
-        # (보존 모드는 None)
+        # 중간 노드마다 아직 값을 읽지 않은 소비 간선 수. 0 이 되면 값을 놓는다(보존 모드는 None)
         self._pending_reads = (
-            None
-            if keep_intermediate
-            else _consumer_edges(graph.output_node_id, self._nodes)
+            None if keep_intermediate else _consumer_edges(graph.output_node_id, self._nodes)
         )
         self._parameter_values = {
             parameter.parameter_id: parameter.value for parameter in parameters
@@ -296,6 +293,7 @@ class _NodeEvaluator:
 
     @property
     def computed(self) -> dict[str, list[FactorComputedValue]]:
+        """노드마다 값 목록. 보존 모드가 아니면 출력 노드만 남는다(`_release`)."""
         return self._computed
 
     @property
@@ -491,13 +489,13 @@ class _NodeEvaluator:
         self._progress(self._completed_weight / self._total_weight)
         return values
 
-
     def _release(self, dependencies: tuple[str, ...]) -> None:
         """방금 끝난 노드가 읽은 입력의 남은 소비 간선을 줄이고, 다 읽힌 중간 노드의 값을 놓는다.
 
         같은 입력을 두 번 읽는 노드(`x * x`)는 간선 둘로 센다. 놓은 노드를 다시 부르는 소비자는
-        없다 — 소비 간선은 출력에서 닿는 노드만 셌고 각 노드는 한 번만 계산된다. 구간·가린 칸
-        기록은 작아서 남긴다(횡단면·그룹 노드가 입력의 가린 칸을 읽는다).
+        없다 — 소비 간선은 출력에서 닿는 노드만 셌고 각 노드는 한 번만 계산된다. 입력의 가린 칸은
+        소비 노드가 계산 중에만 읽으므로(횡단면·그룹) 값과 함께 놓는다. 구간 기록은 필드 몇 개라
+        남긴다.
         """
         if self._pending_reads is None:
             return
@@ -505,6 +503,7 @@ class _NodeEvaluator:
             self._pending_reads[dependency] -= 1
             if self._pending_reads[dependency] == 0 and dependency != self._output_node_id:
                 del self._computed[dependency]
+                del self._masked[dependency]
 
 
 class _ObjectNodeCache:
@@ -575,20 +574,13 @@ def _consumer_edges(output_node_id: str, nodes: dict[str, ExpressionNode]) -> di
 
 
 def _reachable_progress_weight(output_node_id: str, nodes: dict[str, ExpressionNode]) -> int:
-    """출력에서 도달 가능한 노드의 진행 가중치 합(진행 분모).
+    """출력에서 도달 가능한 노드(출력 + 소비 간선이 가리키는 아는 노드)의 진행 가중치 합(진행 분모).
 
-    모르는 참조는 평가가 예외로 거부하므로 세지 않는다.
+    도달 가능의 정의는 `_consumer_edges` 하나다. 모르는 참조는 평가가 예외로 거부하므로 세지 않는다.
     """
-
-    seen: set[str] = set()
-    pending = [output_node_id]
-    while pending:
-        node_id = pending.pop()
-        if node_id in seen or node_id not in nodes:
-            continue
-        seen.add(node_id)
-        pending.extend(node_dependencies(nodes[node_id]))
-    return max(sum(_node_progress_weight(nodes[node_id]) for node_id in seen), 1)
+    edges = _consumer_edges(output_node_id, nodes)
+    reachable = {node_id for node_id in (output_node_id, *edges) if node_id in nodes}
+    return max(sum(_node_progress_weight(nodes[node_id]) for node_id in reachable), 1)
 
 
 def _require_finite_values(

@@ -22,7 +22,12 @@ import pytest
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioPipelineResult
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
 from strategy_workbench.domain.factor import _panel_cross_section, _panel_evaluation, _statistics
-from strategy_workbench.domain.factor.facade.evaluation import FactorFieldValue, FactorObservation
+from strategy_workbench.domain.factor._evaluation import _compute_nodes
+from strategy_workbench.domain.factor.facade.evaluation import (
+    FactorFieldValue,
+    FactorObservation,
+    NonFiniteFactorCalculationError,
+)
 from strategy_workbench.domain.factor.facade.expression import (
     ConstantNode,
     CrossSectionalNode,
@@ -144,6 +149,35 @@ def test_l1_evaluator_node_caches_match() -> None:
     _assert_parity(compare("L1", results))
     # 넘침 그래프는 오류도 결과로 대조한다(node_id·as_of·security_id·value).
     assert any(isinstance(expected, Failure) for _, expected, _ in results)
+
+
+def _output_of(case: EvaluatorCase, *, keep_intermediate: bool) -> object:
+    try:
+        evaluator = _compute_nodes(
+            case.graph,
+            observations=case.observations,
+            missing=case.missing,
+            parameters=case.parameters,
+            keep_intermediate=keep_intermediate,
+        )
+    except NonFiniteFactorCalculationError as error:
+        return ("failure", error.node_id, error.as_of, error.security_id, error.value)
+    output = case.graph.output_node_id
+    return (evaluator.computed[output], evaluator.masked[output])
+
+
+def test_l1_released_intermediates_keep_the_output() -> None:
+    """중간 노드 값을 놓는 기본 평가가 모든 노드를 보존한 평가와 출력·가린 칸·실패까지 같다."""
+    cases = evaluator_cases()
+    results = [
+        (
+            case.key,
+            _output_of(case, keep_intermediate=True),
+            _output_of(case, keep_intermediate=False),
+        )
+        for case in cases
+    ]
+    _assert_parity(compare("L1-release", results))
 
 
 def _columnar_ready(case: EvaluatorCase) -> bool:

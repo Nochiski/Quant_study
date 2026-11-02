@@ -255,7 +255,11 @@ test(
       /\/research\/strategies\/[^/]+\/revisions\/1$/u,
     );
 
+    // 실행 화면 머리는 run id 보다 전략 이름·리비전을 먼저 보인다.
+    await expect(page.getByText("US-DM-04 결과 읽기 · v1", { exact: true })).toBeVisible();
     const highlights = result.getByRole("region", { name: "결과 한눈에" });
+    // 최대 낙폭 옆에 칼마 카드가 있다(값이 없으면 사유를 보인다).
+    await expect(highlights.getByText("Calmar ratio", { exact: true })).toBeVisible();
     // 지표마다 이름 바로 뒤에 서버가 계산한 값이 숫자로 붙는다. 수익 방향이 있는 값은 낭독 문구와 부호가
     // 먼저 온다. 값이 없으면 "계산 불가"라 여기서 걸린다.
     for (const label of SUMMARY_LABELS)
@@ -388,6 +392,8 @@ test(
     ).toBeVisible();
     const historyRow = page.getByRole("row").filter({ hasText: runId });
     await expect(historyRow).toContainText("완료");
+    // 이력 줄은 run id 보다 전략의 지금 이름을 먼저 보인다.
+    await expect(historyRow).toContainText("US-DM-04 결과 읽기");
     // 결과 칸은 결과 파일을 열지 않고 서버가 실은 머리 지표를 보인다(RD-06-A).
     for (const label of ["총수익률", "샤프", "최대 낙폭"])
       await expect(historyRow).toContainText(label);

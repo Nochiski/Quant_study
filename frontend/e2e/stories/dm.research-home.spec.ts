@@ -85,7 +85,7 @@ test(
 
     // 방금 끝난 실행이 최근 결과와 작업 기록에 보인다(RD-01-C·D).
     const results = page.getByRole("region", { name: "최근 결과" });
-    const row = results.getByRole("row").filter({ hasText: `${saved.strategy_id} · v1` });
+    const row = results.getByRole("row").filter({ hasText: `${title} · v1` });
     await expect(row).toContainText("총수익률");
     await expect(row.getByRole("link", { name: "결과 열기" })).toHaveAttribute(
       "href",
@@ -93,6 +93,6 @@ test(
     );
     const activity = page.getByRole("region", { name: "작업 기록" });
     await expect(activity).toContainText("주문·체결 운영 로그가 아닙니다");
-    await expect(activity).toContainText(`백테스트 완료 · ${saved.strategy_id} · v1`);
+    await expect(activity).toContainText(`백테스트 완료 · ${title} · v1`);
   },
 );

@@ -8,6 +8,7 @@ import {
   BacktestHoldings,
   BacktestValidationReport,
   useBacktestAccountReport,
+  useBacktestMarketReference,
   useBacktestValidationReport,
   BacktestResultFailure,
   BacktestRunDetail,
@@ -18,6 +19,10 @@ import {
   useBacktestStatus,
   useRunEnvironmentSchema,
 } from "../../../entities/backtest";
+import {
+  strategyRevisionLabel,
+  useStrategyTitles,
+} from "../../../entities/strategy";
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import { CheckCapacity } from "../../../features/check-capacity";
 import { RobustnessCheck } from "../../../features/check-robustness";
@@ -45,10 +50,13 @@ export const BacktestRunPage = () => {
   const status = useBacktestStatus(runId);
   const request = useBacktestRequest(runId);
   const summary = useBacktestSummary(runId);
+  const source = summary.data?.strategy_provenance;
+  const titles = useStrategyTitles([source?.strategy_id]);
   const completed = status.data?.status === "completed";
   const result = useBacktestResult(runId, completed);
   const validationReport = useBacktestValidationReport(runId, completed && result.data !== undefined);
   const accountReport = useBacktestAccountReport(runId, completed);
+  const marketReference = useBacktestMarketReference(runId, completed);
   // run 상세의 실행 설정 칸 이름·단위·값 이름은 실행 설정 스키마에서 읽는다(DEFECT-242-04).
   const runEnvironmentSchema = useRunEnvironmentSchema();
   const environmentFields = runEnvironmentSchema.data === undefined ? null : runEnvironmentSchema.environmentFields;
@@ -105,7 +113,13 @@ export const BacktestRunPage = () => {
       <div className="backtest-run-layout__main">
         <header className="page-header">
           <h1>{t("page.backtest.title")}</h1>
-          <code>{state.run_id}</code>
+          {/* 무엇을 돌린 실행인지 이름으로 먼저 보이고 run id 는 재현용으로 곁에 둔다. */}
+          {source?.strategy_id && source.revision ? (
+            <strong>
+              {strategyRevisionLabel(titles, source.strategy_id, source.revision)}
+            </strong>
+          ) : null}
+          <code className="backtest-run-layout__run-id">{state.run_id}</code>
           <span role="status" aria-label={t("page.backtest.status")}>
             <Badge tone={RUN_STATUS[state.status].tone}>{runStatusLabel(state.status)}</Badge>
           </span>
@@ -199,6 +213,7 @@ export const BacktestRunPage = () => {
               </BacktestValidationReport>
             }
             account={accountReport.data?.summary}
+            marketReference={marketReference.data}
             holdings={<BacktestHoldings runId={runId} enabled={completed} />}
             regression={
               <BacktestFactorRegression runId={runId} fingerprint={result.data.manifest.run_fingerprint} />

@@ -33,6 +33,7 @@ from strategy_workbench.domain.backtest.facade.holdings import (
     SecurityTradesReport,
     SessionHoldingsReport,
 )
+from strategy_workbench.domain.backtest.facade.market_reference import MarketReferenceReport
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestCancelResult,
     BacktestRunResult,
@@ -52,6 +53,7 @@ from strategy_workbench.domain.backtest.facade.trials import TrialLedger, TrialP
 
 __all__ = [
     "AccountReport",
+    "MarketReferenceReport",
     "AccountReportProvenance",
     "AccountReportStatus",
     "AccountReportSummary",

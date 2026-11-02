@@ -58,6 +58,8 @@ const sessionReport = (session: string): SessionHoldingsReport =>
           equity: 1_000_000,
           cash: 200_000,
           cash_weight: 0.2,
+          day_pnl: session === "2024-01-02" ? 0 : -5_000,
+          day_return: session === "2024-01-02" ? 0 : -0.005,
           holdings: [
             {
               security: samsung,
@@ -73,7 +75,15 @@ const sessionReport = (session: string): SessionHoldingsReport =>
             session === "2024-02-01"
               ? [{ security: unknown, change: "sold", previous_quantity: "5", realized_pnl: -1200 }]
               : [],
-          totals: { buy_count: 2, buy_notional: 900_000, sell_count: 0, sell_notional: 0, fees: 135, taxes: 0 },
+          totals: {
+            buy_count: 2,
+            buy_notional: 900_000,
+            sell_count: 0,
+            sell_notional: 0,
+            fees: 135,
+            taxes: 0,
+            realized_pnl: session === "2024-01-02" ? null : -1_200,
+          },
         },
       }
     : {
@@ -140,12 +150,18 @@ describe("BacktestHoldings", () => {
     expect(within(closed).getByText("999999:1")).toBeInTheDocument();
     expect(within(closed).getByText("전량 매도")).toBeInTheDocument();
     expect(requested).toEqual(["session:2024-02-01"]);
+    // 이날 체결 칸은 서버가 낸 당일 손익·실현 손익을 부호와 함께 그대로 보인다.
+    const totals = screen.getByRole("complementary", { name: "이날 체결" });
+    expect(totals).toHaveTextContent("당일 총손익하락 −₩5,000 (하락 −0.5%)");
+    expect(totals).toHaveTextContent("실현 손익하락 −₩1,200");
 
     await user.click(screen.getByRole("button", { name: /2024-01-02/ }));
     const table = await screen.findByRole("region", { name: "보유 종목 표" });
     await waitFor(() => expect(within(table).getByText("신규")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /2024-01-02/ })).toHaveAttribute("aria-pressed", "true");
     expect(requested).toEqual(["session:2024-02-01", "session:2024-01-02"]);
+    // 청산이 없는 날의 실현 손익은 0 이 아니라 "—" 다.
+    expect(screen.getByRole("complementary", { name: "이날 체결" })).toHaveTextContent("실현 손익—");
   });
 
   it("moves between trading days with the arrow keys", async () => {

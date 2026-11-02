@@ -16,6 +16,11 @@ import {
   type BacktestRunSummary,
   type RunKind,
 } from "../../../entities/backtest";
+import {
+  strategyTitle,
+  useStrategyTitles,
+  type StrategyTitles,
+} from "../../../entities/strategy";
 import { displayTime } from "../../../shared/lib/display-time";
 import { t } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
@@ -101,6 +106,21 @@ const KindFilter = ({
   </div>
 );
 
+/** 실행을 알아보는 이름. 저장 전략이면 그 전략의 지금 이름이고, 읽기 전·실패 때는 전략 id 다. */
+const RunTitle = ({
+  summary,
+  titles,
+}: {
+  summary: BacktestRunSummary;
+  titles: StrategyTitles;
+}) => {
+  const strategyId = summary.strategy_provenance.strategy_id;
+  if (strategyId === null || strategyId === undefined) {
+    return <strong>{t("history.backtests.unsaved")}</strong>;
+  }
+  return <strong>{strategyTitle(titles, strategyId)}</strong>;
+};
+
 const StrategySource = ({ summary }: { summary: BacktestRunSummary }) => {
   const provenance = summary.strategy_provenance;
   return (
@@ -122,8 +142,9 @@ const StrategySource = ({ summary }: { summary: BacktestRunSummary }) => {
             revision: String(provenance.revision),
           }}
           search={{}}
+          title={provenance.strategy_id}
         >
-          {provenance.strategy_id} · v{provenance.revision}
+          v{provenance.revision}
         </Link>
       ) : (
         <span>{t("history.backtests.unsaved")}</span>
@@ -166,6 +187,10 @@ export const BacktestsPage = () => {
       strategyId: search.strategy,
       kind: search.kind,
     }),
+  );
+  const titles = useStrategyTitles(
+    history.data?.items.map((item) => item.strategy_provenance.strategy_id) ??
+      [],
   );
   const correctedOffset =
     history.data !== undefined && offset > 0 && offset >= history.data.total
@@ -266,7 +291,11 @@ export const BacktestsPage = () => {
                   {history.data.items.map((item) => (
                     <tr key={item.run.run_id}>
                       <td>
-                        <code>{item.run.run_id}</code>
+                        <RunTitle summary={item} titles={titles} />
+                        <br />
+                        <code className="data-list-page__hash">
+                          {item.run.run_id}
+                        </code>
                         <br />
                         <span className="data-list-page__hash">
                           {runStageLabel(item.run.stage)}

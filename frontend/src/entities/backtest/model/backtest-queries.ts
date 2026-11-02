@@ -188,6 +188,20 @@ export const useBacktestAccountReport = (runId: string | null, enabled: boolean)
   });
 
 /**
+ * 같은 기간 코스피·코스닥 참고선과 그 지표. 완료 결과와 원장 지수가 바뀌지 않으므로 다시 읽지 않는다.
+ * 곡선·지표는 backend 가 결과의 세션 달력과 Metric Registry 로 만든 값을 그대로 쓴다.
+ */
+export const useBacktestMarketReference = (runId: string | null, enabled: boolean) =>
+  useQuery({
+    queryKey: ["backtest", runId, "market-reference"],
+    retry: false,
+    refetchOnReconnect: false,
+    queryFn: () => strategyWorkbenchApi.backtestMarketReference(runId ?? ""),
+    enabled: runId !== null && enabled,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+/**
  * 완료 결과의 보유·매매 투영. 결과 파일은 완료 뒤 바뀌지 않으므로 다시 읽지 않는다. 세션·종목 조회는 화면이
  * 고른 것 하나씩만 읽는다 — 매매한 세션 전부의 보유를 한 번에 받지 않는다.
  */

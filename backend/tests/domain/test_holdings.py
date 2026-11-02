@@ -200,6 +200,18 @@ def test_session_totals_read_fills_and_sell_tax_cost_records() -> None:
     assert (totals.fees, totals.taxes) == (2.0, 0.5)
 
 
+def test_session_pnl_is_equity_change_and_realized_is_closed_trades() -> None:
+    # 당일 손익 = 그 세션 끝 자산 − 직전 세션 끝 자산(첫 세션은 초기 자본). 실현 손익은 그 세션에
+    # 청산된 거래 손익의 합이고, 청산이 없으면 None 이다(0 과 구분).
+    first, third, fourth, ninth = _session(2), _session(3), _session(4), _session(9)
+    assert (first.day_pnl, first.day_return) == (0.0, 0.0)
+    assert (third.day_pnl, third.day_return) == (200.0, 0.1)
+    assert (third.totals.realized_pnl, fourth.totals.realized_pnl) == (30.0, -10.0)
+    assert ninth.totals.realized_pnl is None
+    # 직전 자산이 0 이면 비율을 지어내지 않는다.
+    assert (ninth.day_pnl, ninth.day_return) == (2100.0, None)
+
+
 def test_unrecorded_session_is_reported_not_guessed() -> None:
     report = project_session_holdings(_result(), _day(6), NAMES)
     assert report.status is SessionHoldingsStatus.SESSION_NOT_RECORDED

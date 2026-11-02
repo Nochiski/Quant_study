@@ -23,6 +23,17 @@ export const strategiesQuery = (
     queryFn: () => strategyWorkbenchApi.listStrategies(page),
   });
 
+/**
+ * 전략의 최신 리비전. 이름을 바꾸면 새 리비전이 생기므로 캐시를 고정하지 않고 쓸 때 다시 읽는다 —
+ * 백테스트 이력이 지난 실행에도 지금 이름을 보인다.
+ */
+export const strategyLatestQuery = (strategyId: string) =>
+  queryOptions({
+    queryKey: ["strategy", strategyId, "latest"],
+    queryFn: ({ signal }) =>
+      strategyWorkbenchApi.getStrategy(strategyId, signal),
+  });
+
 /** A saved revision's exact document is immutable, so it never goes stale once loaded. */
 export const strategyDocumentQuery = (strategyId: string, revision: number) =>
   queryOptions({

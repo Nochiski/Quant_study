@@ -6995,6 +6995,117 @@
         "title": "Market",
         "type": "string"
       },
+      "MarketReferencePoint": {
+        "properties": {
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "session",
+          "value"
+        ],
+        "title": "MarketReferencePoint",
+        "type": "object"
+      },
+      "MarketReferenceReport": {
+        "properties": {
+          "initial_cash": {
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/MarketReferenceSeries"
+            },
+            "title": "Series",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "initial_cash",
+          "series"
+        ],
+        "title": "MarketReferenceReport",
+        "type": "object"
+      },
+      "MarketReferenceSeries": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "drawdown": {
+            "items": {
+              "$ref": "#/components/schemas/DrawdownPoint"
+            },
+            "title": "Drawdown",
+            "type": "array"
+          },
+          "index_id": {
+            "title": "Index Id",
+            "type": "string"
+          },
+          "index_name": {
+            "title": "Index Name",
+            "type": "string"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/MarketReferencePoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MarketReferenceStatus"
+          }
+        },
+        "required": [
+          "index_id",
+          "index_name",
+          "status",
+          "points",
+          "drawdown",
+          "metrics",
+          "detail"
+        ],
+        "title": "MarketReferenceSeries",
+        "type": "object"
+      },
+      "MarketReferenceStatus": {
+        "enum": [
+          "available",
+          "not_available"
+        ],
+        "title": "MarketReferenceStatus",
+        "type": "string"
+      },
       "MetricCategory": {
         "enum": [
           "return",
@@ -10843,6 +10954,21 @@
             "title": "Closed",
             "type": "array"
           },
+          "day_pnl": {
+            "title": "Day Pnl",
+            "type": "number"
+          },
+          "day_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Day Return"
+          },
           "equity": {
             "title": "Equity",
             "type": "number"
@@ -10868,6 +10994,8 @@
           "equity",
           "cash",
           "cash_weight",
+          "day_pnl",
+          "day_return",
           "holdings",
           "closed",
           "totals"
@@ -10943,6 +11071,17 @@
             "title": "Fees",
             "type": "number"
           },
+          "realized_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Pnl"
+          },
           "sell_count": {
             "title": "Sell Count",
             "type": "integer"
@@ -10962,7 +11101,8 @@
           "sell_count",
           "sell_notional",
           "fees",
-          "taxes"
+          "taxes",
+          "realized_pnl"
         ],
         "title": "SessionTradeTotals",
         "type": "object"
@@ -16129,6 +16269,76 @@
           }
         },
         "summary": "Get Backtest Session Holdings"
+      }
+    },
+    "/api/v1/backtests/{run_id}/market-reference": {
+      "get": {
+        "description": "같은 기간 코스피·코스닥 참고선과 그 지표(결과를 읽을 때 투영, 저장하지 않는다).",
+        "operationId": "getBacktestMarketReference",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketReferenceReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Market Reference"
       }
     },
     "/api/v1/backtests/{run_id}/request": {

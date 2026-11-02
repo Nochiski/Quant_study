@@ -75,6 +75,8 @@ export {
   type AccountReportStatus,
   type AccountReportSummary,
   type AccountReportProvenance,
+  type MarketReferenceReport,
+  type MarketReferenceSeries,
   type HoldingChange,
   type HoldingsOverview,
   type SecurityTradesReport,

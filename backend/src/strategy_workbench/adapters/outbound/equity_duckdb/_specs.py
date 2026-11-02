@@ -47,6 +47,8 @@ from strategy_workbench.domain.equity.facade.research_data import (
 
 PRICE_TABLE = "price_daily"
 CALENDAR_TABLE = "trading_calendar"
+# 시장 지수 종가. security 축이 아니라 결과 옆 참고선만 읽는다(GAP-09).
+INDEX_TABLE = "index_daily"
 SPAN_TABLE = "security_span"
 UNIVERSE_TABLE = "universe_daily"
 PROFILE_TABLE = "dataset_profile"

@@ -1,6 +1,6 @@
 import { useId } from "react";
 
-import type { BacktestRunResult } from "../../../shared/api";
+import type { BacktestRunResult, MarketReferenceSeries } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
 import "./performance-chart.css";
 
@@ -72,16 +72,20 @@ const GridLines = ({ height }: { height: number }) => (
 
 /**
  * 자산 곡선과 낙폭을 같은 가로축으로 위아래에 붙인다(RD-07-D). 범례와 눈금은 그래프 밖에 두고,
- * 벤치마크는 점선이다. 그래프마다 화면 읽기용 한 문장 요약을 단다.
+ * 벤치마크는 점선이다. 같은 기간 시장 지수(코스피·코스닥)는 backend 가 결과 세션에 맞춰 준 곡선·낙폭을
+ * 그대로 겹친다. 그래프마다 화면 읽기용 한 문장 요약을 단다.
  */
 export const PerformanceChart = ({
   id,
   series,
   benchmarkId,
+  references = [],
 }: {
   id: string;
   series: BacktestRunResult["series"];
   benchmarkId: string | null | undefined;
+  /** 곡선이 있는 시장 참고선만 넘긴다. 세션은 결과 곡선과 같다. */
+  references?: readonly MarketReferenceSeries[];
 }) => {
   const titleId = useId();
   const equity = series.equity;
@@ -102,13 +106,30 @@ export const PerformanceChart = ({
     .map((point) => point.benchmark_equity)
     .filter((value): value is number => value !== null);
   const hasBenchmark = benchmarkValues.length > 0;
+  const indexLines = references.map((reference) => ({
+    reference,
+    values: reference.points
+      .filter((point) => position.has(point.session))
+      .map((point) => [position.get(point.session)!, point.value] as const),
+    drawdown: reference.drawdown
+      .filter((point) => position.has(point.session))
+      .map((point) => [position.get(point.session)!, point.drawdown] as const),
+  }));
   const equityScale = scale(
-    [...equity.map((point) => point.equity), ...benchmarkValues],
+    [
+      ...equity.map((point) => point.equity),
+      ...benchmarkValues,
+      ...indexLines.flatMap((line) => line.values.map(([, value]) => value)),
+    ],
     EQUITY_HEIGHT,
   );
   const drawdown = series.drawdown.filter((point) => position.has(point.session));
   const drawdownScale = scale(
-    [0, ...drawdown.map((point) => point.drawdown)],
+    [
+      0,
+      ...drawdown.map((point) => point.drawdown),
+      ...indexLines.flatMap((line) => line.drawdown.map(([, value]) => value)),
+    ],
     DRAWDOWN_HEIGHT,
   );
   const deepest = drawdown.reduce<(typeof drawdown)[number] | null>(
@@ -133,6 +154,14 @@ export const PerformanceChart = ({
           to: money(benchmarkValues.at(-1)!),
         })
       : null,
+    ...indexLines
+      .filter((line) => line.values.length > 0)
+      .map((line) =>
+        tFill("backtest.chart.indexSummary", {
+          index: line.reference.index_name,
+          to: money(line.values.at(-1)![1]),
+        }),
+      ),
   ]
     .filter(Boolean)
     .join(" ");
@@ -163,6 +192,20 @@ export const PerformanceChart = ({
               {benchmarkLabel}
             </li>
           ) : null}
+          {indexLines.map(({ reference }) => (
+            <li key={reference.index_id}>
+              <svg aria-hidden="true" viewBox="0 0 24 8">
+                <line
+                  className={`performance-chart__index performance-chart__index--${reference.index_id}`}
+                  x1="0"
+                  x2="24"
+                  y1="4"
+                  y2="4"
+                />
+              </svg>
+              {reference.index_name}
+            </li>
+          ))}
         </ul>
       </header>
       <div className="performance-chart__panel">
@@ -191,6 +234,13 @@ export const PerformanceChart = ({
                 )}
               />
             ) : null}
+            {indexLines.map(({ reference, values }) => (
+              <path
+                key={reference.index_id}
+                className={`performance-chart__index performance-chart__index--${reference.index_id}`}
+                d={linePath(values, x, equityScale.y)}
+              />
+            ))}
             <path
               className="performance-chart__strategy"
               d={linePath(
@@ -221,6 +271,13 @@ export const PerformanceChart = ({
             viewBox={`0 0 ${WIDTH} ${DRAWDOWN_HEIGHT}`}
           >
             <GridLines height={DRAWDOWN_HEIGHT} />
+            {indexLines.map(({ reference, drawdown: indexDrawdown }) => (
+              <path
+                key={reference.index_id}
+                className={`performance-chart__index performance-chart__index--${reference.index_id}`}
+                d={linePath(indexDrawdown, x, drawdownScale.y)}
+              />
+            ))}
             <path
               className="performance-chart__loss"
               d={linePath(

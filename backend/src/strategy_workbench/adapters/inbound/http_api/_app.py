@@ -38,6 +38,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunSummary,
     BacktestStartResponse,
     HoldingsOverview,
+    MarketReferenceReport,
     RetiredRunRequestError,
     RunKind,
     SecurityTradesReport,
@@ -668,6 +669,15 @@ def create_app(
                 status_code=status.HTTP_410_GONE,
                 detail={"code": "backtest.result.unreadable", "message": str(error)},
             ) from error
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/market-reference",
+        operation_id="getBacktestMarketReference",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_market_reference(run_id: str) -> MarketReferenceReport:
+        """같은 기간 코스피·코스닥 참고선과 그 지표(결과를 읽을 때 투영, 저장하지 않는다)."""
+        return _completed_result_view(lambda: backtest_runs.market_reference(run_id))
 
     @app.get(
         "/api/v1/backtests/{run_id}/holdings",

@@ -3,6 +3,7 @@ import { BacktestOrderEvents } from "./backtest-order-events";
 import type {
   AccountReport,
   BacktestRunResult,
+  MarketReferenceReport,
   MetricValue,
 } from "../../../shared/api";
 import { t, tFill, tOptional } from "../../../shared/config";
@@ -71,8 +72,11 @@ export const BacktestRunDetail = ({
   capacityCheck,
   regression,
   holdings,
+  marketReference,
 }: {
   result: BacktestRunResult;
+  /** 같은 기간 코스피·코스닥 참고선. 곡선이 있는 지수만 차트와 요약에 쓴다. */
+  marketReference?: MarketReferenceReport;
   /** 계좌 보고서 요약. "결과 한눈에"의 최종 평가액 카드가 읽는다. */
   account?: AccountReport["summary"];
   accountReport?: ReactNode;
@@ -111,6 +115,9 @@ export const BacktestRunDetail = ({
     result.metrics
       .filter((item) => item.scope === "full")
       .map((item) => [item.metric_id, item]),
+  );
+  const references = (marketReference?.series ?? []).filter(
+    (item) => item.status === "available",
   );
   const metrics: ResultMetrics = {
     metric: (metricId) => fullMetrics.get(metricId),
@@ -161,7 +168,12 @@ export const BacktestRunDetail = ({
         </a>
       </nav>
 
-      <ResultSummary id={`${titleId}-summary`} metrics={metrics} account={account} />
+      <ResultSummary
+        id={`${titleId}-summary`}
+        metrics={metrics}
+        account={account}
+        references={references}
+      />
 
       {validationReport ? (
         <section
@@ -182,6 +194,7 @@ export const BacktestRunDetail = ({
         id={`${titleId}-charts`}
         series={result.series}
         benchmarkId={result.manifest.run_spec.benchmark_security_id}
+        references={references}
       />
 
       <section

@@ -268,6 +268,30 @@ const SessionHoldingsView = ({
           <aside className="holdings__totals" aria-label={t("backtest.holdings.totals.title")}>
             <h5>{t("backtest.holdings.totals.title")}</h5>
             <dl>
+              {/* 손익은 backend 보유 투영이 계좌 기록·청산 거래에서 낸 값을 그대로 보인다. */}
+              <div>
+                <dt>{t("backtest.holdings.totals.dayPnl")}</dt>
+                <dd>
+                  <SignedValue value={holdings.day_pnl} magnitude={holdingMoney(Math.abs(holdings.day_pnl))} />
+                  {holdings.day_return === null ? null : (
+                    <>
+                      {" "}
+                      (<SignedValue value={holdings.day_return} magnitude={holdingPercent(holdings.day_return)} />)
+                    </>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("backtest.holdings.totals.realizedPnl")}</dt>
+                <dd>
+                  {holdings.totals.realized_pnl === null ? "—" : (
+                    <SignedValue
+                      value={holdings.totals.realized_pnl}
+                      magnitude={holdingMoney(Math.abs(holdings.totals.realized_pnl))}
+                    />
+                  )}
+                </dd>
+              </div>
               <div>
                 <dt>{t("backtest.holdings.totals.buy")}</dt>
                 <dd>

@@ -79,6 +79,8 @@ class SessionTradeTotals:
     fees: float
     # 그 세션 매도 거래세 비용 기록의 합. 지표 `total_taxes` 와 같은 원천이다.
     taxes: float
+    # 그 세션에 청산된 거래(`trades.closed_on`)의 비용 후 손익 합. 청산이 없으면 None(0 과 구분).
+    realized_pnl: float | None
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,10 @@ class SessionHoldings:
     equity: float
     cash: float
     cash_weight: float | None
+    # 당일 손익 = 그 세션 끝 자산 − 직전 세션 끝 자산(첫 세션은 초기 자본). 평가손익 변동·체결
+    # 비용·배당이 모두 들어간 계좌 변화다. 비율은 직전 자산이 0 이하면 None.
+    day_pnl: float
+    day_return: float | None
     holdings: tuple[HoldingRow, ...]
     closed: tuple[ClosedHolding, ...]
     totals: SessionTradeTotals
@@ -253,6 +259,7 @@ class _Ledger:
                 self.taxes[cost.session] += cost.amount
         self.names = names
         self.fill_count = len(artifacts.fills)
+        self.initial_cash = result.manifest.run_spec.initial_cash
 
     def _add_trade(self, trade: RawTrade) -> None:
         key = (trade.closed_on, trade.security_id)
@@ -284,6 +291,14 @@ class _Ledger:
         return session in self.fills or any(
             self.removed(session, security_id) for security_id in self.previous(session)
         )
+
+    def previous_equity(self, session: date) -> float:
+        index = self.index[session]
+        return self.initial_cash if index == 0 else self.snapshots[self.sessions[index - 1]].equity
+
+    def session_realized_pnl(self, session: date) -> float | None:
+        keys = [key for key in self.closing if key[0] == session]
+        return sum(self.realized[key] for key in keys) if keys else None
 
     def realized_pnl(self, session: date, security_id: str) -> float | None:
         key = (session, security_id)
@@ -387,11 +402,14 @@ def _session_holdings(ledger: _Ledger, session: date) -> SessionHoldings:
     all_fills = [fill for items in fills.values() for fill in items]
     buys = [fill for fill in all_fills if fill.side == "buy"]
     sells = [fill for fill in all_fills if fill.side != "buy"]
+    previous_equity = ledger.previous_equity(session)
     return SessionHoldings(
         session=session,
         equity=snapshot.equity,
         cash=snapshot.cash,
         cash_weight=_ratio(snapshot.cash, snapshot.equity),
+        day_pnl=snapshot.equity - previous_equity,
+        day_return=_ratio(snapshot.equity - previous_equity, previous_equity),
         holdings=tuple(rows),
         closed=closed,
         totals=SessionTradeTotals(
@@ -401,6 +419,7 @@ def _session_holdings(ledger: _Ledger, session: date) -> SessionHoldings:
             sell_notional=sum(float(fill.quantity) * fill.price for fill in sells),
             fees=sum(fill.fee for fill in all_fills),
             taxes=ledger.taxes.get(session, 0.0),
+            realized_pnl=ledger.session_realized_pnl(session),
         ),
     )
 

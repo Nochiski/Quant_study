@@ -78,6 +78,9 @@ import type {
   GetBacktestHoldingsData,
   GetBacktestHoldingsErrors,
   GetBacktestHoldingsResponses,
+  GetBacktestMarketReferenceData,
+  GetBacktestMarketReferenceErrors,
+  GetBacktestMarketReferenceResponses,
   GetBacktestRequestData,
   GetBacktestRequestErrors,
   GetBacktestRequestResponses,
@@ -661,6 +664,22 @@ export const getBacktestSessionHoldings = <
     url: "/api/v1/backtests/{run_id}/holdings/sessions/{session}",
     ...options,
   });
+
+/**
+ * Get Backtest Market Reference
+ *
+ * 같은 기간 코스피·코스닥 참고선과 그 지표(결과를 읽을 때 투영, 저장하지 않는다).
+ */
+export const getBacktestMarketReference = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetBacktestMarketReferenceData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestMarketReferenceResponses,
+    GetBacktestMarketReferenceErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/market-reference", ...options });
 
 /**
  * Get Backtest Request

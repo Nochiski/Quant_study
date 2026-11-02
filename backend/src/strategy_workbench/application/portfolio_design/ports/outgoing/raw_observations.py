@@ -131,7 +131,7 @@ class RawObservationQuery:
             )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RawFieldValue:
     field_id: str
     value: RawFieldValueType
@@ -159,7 +159,7 @@ class RawFieldValue:
             )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RawObservation:
     as_of: date
     security_id: str

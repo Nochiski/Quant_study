@@ -504,6 +504,9 @@ class PortfolioDesignService:
                 )
             )
         evaluation_records = tuple(evaluations)
+        # 팩터 입력은 평가에만 쓴다. 쥐고 있으면 포트폴리오 관측·컴파일 동안 관측 행마다 한 벌이
+        # 더 살아 최대 메모리가 커진다(5년 실데이터 run 메모리 부족).
+        del factor_observations
         checkpoint()
         progress(_PROGRESS_FACTORS_END, "Building portfolio observations")
         observations = _to_portfolio_observations(

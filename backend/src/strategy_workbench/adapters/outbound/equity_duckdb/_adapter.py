@@ -277,7 +277,7 @@ def _noop_progress(fraction: float) -> None:
     """진행 보고를 요구하지 않는 호출자용 콜백 — `load_raw_observations_cancellable` 의 기본값."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Observed:
     """셀 하나 — 값 · 공개일 · 내용일(관측이 가리키는 기간·사건의 날짜) · 셀 종류."""
 
@@ -287,7 +287,7 @@ class _Observed:
     kind: CellKind
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Row:
     """패널 코어 한 행 = universe_daily 격자 (date, ticker) + 구간 + GRID 원천의 셀."""
 
@@ -555,6 +555,11 @@ def _as_date(value: object, label: str) -> date:
     if isinstance(value, date):
         return value
     raise EquityDuckdbSetupError(f"{label} must be a date — got {type(value).__name__}: {value!r}")
+
+
+def _shared(pool: dict[_T, _T], value: _T) -> _T:
+    """같은 값의 객체를 `pool` 에 하나만 두고 그것을 돌려준다(값 비교는 그대로)."""
+    return pool.setdefault(value, value)
 
 
 def _as_float(value: object, label: str) -> float | None:
@@ -1350,6 +1355,8 @@ class EquityDuckdbAdapter:
         )
         rows = tuple(self._rows_in(panel, window.sessions))
         observations: list[RawObservation] = []
+        # `_Row.security_id` 는 부를 때마다 새 문자열이다 — 관측 행마다 사본을 두지 않는다
+        security_ids: dict[tuple[str, int], str] = {}
         for index, row in enumerate(rows):
             if index % _CHECKPOINT_ROWS == 0:
                 checkpoint()
@@ -1372,16 +1379,23 @@ class EquityDuckdbAdapter:
                         kind=found.kind,
                     )
                 )
+            security_key = (row.ticker, row.span_seq)
+            security_id = security_ids.get(security_key)
+            if security_id is None:
+                security_id = security_ids[security_key] = row.security_id
             observations.append(
                 RawObservation(
                     as_of=row.session,
-                    security_id=row.security_id,
+                    security_id=security_id,
                     universe_member=row.member,
                     fields=tuple(fields),
                     sector_id=None,  # classification.sector 는 현재값 라벨이라 미제공(DESIGN §7)
                     previous_weight=0.0,
                 )
             )
+        # 패널·행은 관측을 만드는 데만 쓴다. 정렬·계약 검증 동안 쥐지 않는다
+        warnings = tuple(sorted({*window.warnings, *panel.warnings}))
+        del panel, rows
         observations.sort(key=lambda item: (item.as_of, item.security_id))
         progress(_LOAD_SORTED)
         result = RawObservationSet(
@@ -1391,7 +1405,7 @@ class EquityDuckdbAdapter:
             history_sessions=window.history,
             observations=tuple(observations),
             detail=None if observations else _no_members_detail(query),
-            warnings=tuple(sorted({*window.warnings, *panel.warnings})),
+            warnings=warnings,
             validation_checkpoint=checkpoint,
             validation_progress=lambda fraction: progress(
                 _LOAD_SORTED + (1.0 - _LOAD_SORTED) * fraction
@@ -2087,12 +2101,22 @@ class EquityDuckdbAdapter:
             con.close()
         progress(_GRID_FETCHED)
         rows: dict[tuple[str, date], _Row] = {}
-        for index, raw in enumerate(raw_rows):
+        # 행마다 새로 생기는 날짜·티커 객체를 하나씩만 둔다. 값은 같고 관측 행 수만큼의 사본이
+        # 세션·종목 수만큼으로 준다(5년 실데이터 run 메모리 부족).
+        date_pool: dict[date, date] = {}
+        ticker_pool: dict[str, str] = {}
+        total = len(raw_rows)
+        # 다 읽은 원본 행을 바로 놓는다(뒤에서 꺼내 순서를 지킨다)
+        raw_rows.reverse()
+        index = -1
+        while raw_rows:
+            raw = raw_rows.pop()
+            index += 1
             if index % _CHECKPOINT_ROWS == 0:
                 checkpoint()
-                progress(_GRID_FETCHED + (1.0 - _GRID_FETCHED) * index / len(raw_rows))
-            session = _as_date(raw[0], "universe_daily.date")
-            ticker = str(raw[1])
+                progress(_GRID_FETCHED + (1.0 - _GRID_FETCHED) * index / total)
+            session = _shared(date_pool, _as_date(raw[0], "universe_daily.date"))
+            ticker = _shared(ticker_pool, str(raw[1]))
             cells: dict[str, _Observed] = {}
             offset = 4
             for name, fields in grid.layout:
@@ -2112,8 +2136,14 @@ class EquityDuckdbAdapter:
                         )
                         cells[field_id] = _Observed(
                             value,
-                            _as_date(available, f"{source.relation}.{source.available_expr}"),
-                            _as_date(content, f"{source.relation}.{source.content_expr}"),
+                            _shared(
+                                date_pool,
+                                _as_date(available, f"{source.relation}.{source.available_expr}"),
+                            ),
+                            _shared(
+                                date_pool,
+                                _as_date(content, f"{source.relation}.{source.content_expr}"),
+                            ),
                             kind,
                         )
                 offset += 5 + len(fields)

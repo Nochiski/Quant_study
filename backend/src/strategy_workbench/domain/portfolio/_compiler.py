@@ -243,6 +243,8 @@ def _compile_target_tape(
             raise ValueError(f"duplicate portfolio observation: key={key}")
         seen.add(key)
         by_date.setdefault(observation.as_of, []).append(observation)
+    # 중복 검사용 키 집합은 관측 행 수만큼이라 프레임 조립 동안 쥐지 않는다
+    del seen
 
     compiled: list[TargetFrame] = []
     construction_trace: PortfolioConstructionTrace | None = None

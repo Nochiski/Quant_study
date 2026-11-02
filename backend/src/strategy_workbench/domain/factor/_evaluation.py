@@ -65,7 +65,7 @@ def _checkpointed(items: Iterable[_T], checkpoint: Callable[[], None]) -> Iterat
         yield item
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FactorFieldValue:
     field_id: str
     value: FactorInputValue
@@ -84,7 +84,7 @@ class FactorFieldValue:
             )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FactorObservation:
     """One (as_of, security) row of raw inputs.
 
@@ -102,7 +102,7 @@ class FactorObservation:
     universe_member: bool = True
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FactorValue:
     as_of: date
     security_id: str

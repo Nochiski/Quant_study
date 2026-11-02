@@ -1357,29 +1357,36 @@ class EquityDuckdbAdapter:
         observations: list[RawObservation] = []
         # `_Row.security_id` 는 부를 때마다 새 문자열이다 — 관측 행마다 사본을 두지 않는다
         security_ids: dict[tuple[str, int], str] = {}
+        # (종목, 필드)마다 직전에 만든 셀. 같은 원장 셀 객체(분기 재무처럼 세션마다 같은 관측)면
+        # 그 셀을 다시 쓴다 — 객체 동일성으로만 가르므로 값은 그대로다(5년 run 메모리 부족)
+        previous: dict[tuple[tuple[str, int], str], tuple[_Observed, RawFieldValue]] = {}
         for index, row in enumerate(rows):
             if index % _CHECKPOINT_ROWS == 0:
                 checkpoint()
                 progress(_LOAD_PANEL_END + (_LOAD_ROWS_END - _LOAD_PANEL_END) * index / len(rows))
+            security_key = (row.ticker, row.span_seq)
             fields: list[RawFieldValue] = []
             for field_id in query.field_ids:
                 found = self._cell(panel, row, field_id, lags[field_id])
                 if found is None:
                     continue
-                fields.append(
-                    RawFieldValue(
-                        field_id=field_id,
-                        value=found.value,
-                        available_date=found.available_date,
-                        # load_panel 과 **같은 `_Observed.kind`**(`_cell_kind`)를 쓴다 — 원장 뷰가
-                        # 가린 행이면 MASKED, 값이 있으면 OBSERVED, 없으면 격자 테이블의
-                        # `fill_kind` 가 말하는 종류(없으면 MISSING)다.
-                        # 값 있는 셀을 OBSERVED 밖으로 보내면 포트 계약이 생성 시점에 깨지고,
-                        # 두 포트가 다른 규칙을 쓰면 kind 가 셀 단위로 어긋난다.
-                        kind=found.kind,
-                    )
+                last = previous.get((security_key, field_id))
+                if last is not None and last[0] is found:
+                    fields.append(last[1])
+                    continue
+                cell = RawFieldValue(
+                    field_id=field_id,
+                    value=found.value,
+                    available_date=found.available_date,
+                    # load_panel 과 **같은 `_Observed.kind`**(`_cell_kind`)를 쓴다 — 원장 뷰가
+                    # 가린 행이면 MASKED, 값이 있으면 OBSERVED, 없으면 격자 테이블의
+                    # `fill_kind` 가 말하는 종류(없으면 MISSING)다.
+                    # 값 있는 셀을 OBSERVED 밖으로 보내면 포트 계약이 생성 시점에 깨지고,
+                    # 두 포트가 다른 규칙을 쓰면 kind 가 셀 단위로 어긋난다.
+                    kind=found.kind,
                 )
-            security_key = (row.ticker, row.span_seq)
+                previous[(security_key, field_id)] = (found, cell)
+                fields.append(cell)
             security_id = security_ids.get(security_key)
             if security_id is None:
                 security_id = security_ids[security_key] = row.security_id

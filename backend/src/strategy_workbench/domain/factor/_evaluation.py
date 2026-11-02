@@ -213,12 +213,18 @@ def _compute_nodes(
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     checkpoint: Callable[[], None] = _noop_checkpoint,
     progress: Callable[[float], None] = _noop_progress,
+    keep_intermediate: bool = False,
 ) -> _NodeEvaluator:
     """출력에서 닿는 노드를 한 번씩 평가한 평가기. 그 노드 캐시가 값의 유일한 출처다.
 
     `evaluate_factor_graph` 는 출력 노드만, `_trace` 는 캐시 뷰(`cache`)로 모든 노드의 칸 값과
     원장이 가린 칸 때문에 결측으로 둔 칸을 읽는다. 같은 목록을 읽으므로 추적 값과 평가 값은 만들
     때부터 같다.
+
+    `keep_intermediate` 가 거짓(기본)이면 중간 노드의 값 목록을 마지막 소비 노드가 끝나는 즉시
+    놓는다. 목록 하나가 관측 행 수만큼이라, 노드 492개 그래프를 5년 `krx.common-stock` 에서 모두
+    들고 있으면 60GB 를 넘었다(살아 있는 목록은 그래프 너비만큼으로 준다). trace 만 모든 노드를 읽어
+    참으로 부른다.
 
     진행은 도달 가능한 노드마다 종류별 가중치(`_node_progress_weight`)로 몫을 나눠 노드 완료 때
     올리고, 창 연산이라 가장 오래 걸리는 시계열 노드는 종목 하나를 끝낼 때마다 그 몫 안에서 올린다
@@ -231,6 +237,7 @@ def _compute_nodes(
         parameters=parameters,
         checkpoint=checkpoint,
         progress=progress,
+        keep_intermediate=keep_intermediate,
     )
     evaluator.evaluate(graph.output_node_id)
     return evaluator
@@ -256,9 +263,18 @@ class _NodeEvaluator:
         parameters: tuple[ResolvedFactorParameter, ...],
         checkpoint: Callable[[], None],
         progress: Callable[[float], None],
+        keep_intermediate: bool = False,
     ) -> None:
         self._nodes = {node.node_id: node for node in graph.nodes}
         self._output_node_id = graph.output_node_id
+        self._keep_intermediate = keep_intermediate
+        # 중간 노드마다 아직 값을 읽지 않은 소비 간선 수. 0 이 되면 값 목록을 놓는다
+        # (보존 모드는 None)
+        self._pending_reads = (
+            None
+            if keep_intermediate
+            else _consumer_edges(graph.output_node_id, self._nodes)
+        )
         self._parameter_values = {
             parameter.parameter_id: parameter.value for parameter in parameters
         }
@@ -291,6 +307,11 @@ class _NodeEvaluator:
     @property
     def cache(self) -> _ObjectNodeCache:
         """trace 가 읽는 노드 캐시 뷰. 열 평가기 `FactorNodeCache` 와 같은 읽기를 낸다(T3-06)."""
+        if not self._keep_intermediate:
+            raise ValueError(
+                "node cache view needs every node — "
+                "call _compute_nodes(keep_intermediate=True) for a trace"
+            )
         return _ObjectNodeCache(self._computed, self._masked)
 
     def _securities(self) -> dict[str, list[int]]:
@@ -465,9 +486,25 @@ class _NodeEvaluator:
         self._computed[node_id] = values
         self._spans[node_id] = spans
         self._masked[node_id] = masked
+        self._release(dependencies)
         self._completed_weight += _node_progress_weight(node)
         self._progress(self._completed_weight / self._total_weight)
         return values
+
+
+    def _release(self, dependencies: tuple[str, ...]) -> None:
+        """방금 끝난 노드가 읽은 입력의 남은 소비 간선을 줄이고, 다 읽힌 중간 노드의 값을 놓는다.
+
+        같은 입력을 두 번 읽는 노드(`x * x`)는 간선 둘로 센다. 놓은 노드를 다시 부르는 소비자는
+        없다 — 소비 간선은 출력에서 닿는 노드만 셌고 각 노드는 한 번만 계산된다. 구간·가린 칸
+        기록은 작아서 남긴다(횡단면·그룹 노드가 입력의 가린 칸을 읽는다).
+        """
+        if self._pending_reads is None:
+            return
+        for dependency in dependencies:
+            self._pending_reads[dependency] -= 1
+            if self._pending_reads[dependency] == 0 and dependency != self._output_node_id:
+                del self._computed[dependency]
 
 
 class _ObjectNodeCache:
@@ -516,6 +553,25 @@ def _node_progress_weight(node: ExpressionNode) -> int:
     if isinstance(node, (CrossSectionalNode, GroupNode)):
         return _SECTION_PROGRESS_WEIGHT
     return 1
+
+
+def _consumer_edges(output_node_id: str, nodes: dict[str, ExpressionNode]) -> dict[str, int]:
+    """출력에서 닿는 노드마다 그 노드를 입력으로 읽는 간선 수(같은 입력 두 번은 둘).
+
+    모르는 참조는 평가가 예외로 거부하므로 세지 않는다.
+    """
+    edges: dict[str, int] = {}
+    seen: set[str] = set()
+    pending = [output_node_id]
+    while pending:
+        node_id = pending.pop()
+        if node_id in seen or node_id not in nodes:
+            continue
+        seen.add(node_id)
+        for dependency in node_dependencies(nodes[node_id]):
+            edges[dependency] = edges.get(dependency, 0) + 1
+            pending.append(dependency)
+    return edges
 
 
 def _reachable_progress_weight(output_node_id: str, nodes: dict[str, ExpressionNode]) -> int:

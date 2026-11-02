@@ -138,6 +138,7 @@ def _caches(case: EvaluatorCase) -> tuple[TraceNodeCache, TraceNodeCache] | None
             observations=case.observations,
             missing=case.missing,
             parameters=case.parameters,
+            keep_intermediate=True,
         )
     except NonFiniteFactorCalculationError:
         return None

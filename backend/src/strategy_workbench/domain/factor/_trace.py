@@ -133,6 +133,7 @@ def evaluate_factor_graph_with_trace(
         parameters=parameters,
         checkpoint=checkpoint,
         progress=progress,
+        keep_intermediate=True,
     )
     return (
         _evaluation_from_computed(graph, observations, evaluator.computed, checkpoint=checkpoint),

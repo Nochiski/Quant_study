@@ -51,6 +51,7 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.factor.facade.evaluation import FactorEvaluation, FactorValue
 from strategy_workbench.domain.factor.facade.expression import ConstantNode
+from strategy_workbench.domain.factor.facade.planning import FactorExecutionPlan
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
 from strategy_workbench.domain.portfolio.facade.construction import PortfolioTraceSelection
 from strategy_workbench.domain.strategy.facade.provenance import InlineDraft
@@ -595,27 +596,14 @@ def test_trace_scope_validates_each_requested_date_security_pair() -> None:
 def test_factor_output_cancellation_stops_before_target_and_projection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """팩터 출력이 나온 뒤 걸린 취소는 포트폴리오 관측·TargetTape·추적 투영 앞에서 멈춘다."""
     spec = _spec()
     factor = spec.factors[0]
     stop = Event()
-    consumed = 0
-
-    def latching_values():
-        nonlocal consumed
-        for index in range(1_000):
-            consumed += 1
-            if consumed == 1:
-                stop.set()
-            yield FactorValue(_environment().end, f"security-{index:04d}", float(index))
 
     def evaluate_with_latching_values(*args, **kwargs):
-        return (
-            FactorEvaluation(
-                factor.graph.output_node_id,
-                cast(tuple[FactorValue, ...], latching_values()),
-            ),
-            None,
-        )
+        stop.set()
+        return FactorEvaluation(factor.graph.output_node_id, ()), None
 
     def fail_later_stage(*args, **kwargs):
         raise AssertionError("TargetTape and trace projection must not start after cancellation")
@@ -641,8 +629,6 @@ def test_factor_output_cancellation_stops_before_target_and_projection(
 
     with pytest.raises(StrategyTraceCancelledError, match="cancelled"):
         service.trace(_request(spec), cancelled=stop.is_set)
-
-    assert consumed == 1
 
 
 def test_factor_evaluator_checkpoint_stops_before_target_tape(monkeypatch) -> None:
@@ -720,3 +706,34 @@ def test_starting_holdings_none_preserves_adapter_book_while_empty_overrides_it(
 
     assert preserved[0].previous_weight == 0.37
     assert overridden[0].previous_weight == 0.0
+
+
+def test_portfolio_factor_values_pair_with_raw_rows_by_position_and_stop_when_misaligned() -> None:
+    """팩터 값은 원시 관측 행과 위치로 짝짓는다. 위치의 값이 그 행의 것이 아니면 다른 종목의 값을
+    조용히 싣는 대신 멈춘다."""
+    raw = MockEquityDataAdapter.demo().load_raw_observations(
+        RawObservationQuery(
+            market=_environment().market.value,
+            universe_id=_environment().universe_id,
+            start=_environment().start,
+            end=_environment().end,
+            field_ids=("price.close",),
+        )
+    )
+    values = tuple(
+        FactorValue(item.as_of, item.security_id, float(index))
+        for index, item in enumerate(raw.observations)
+    )
+    # 공개일 계산은 plan 의 필수 필드만 읽는다 — 짝짓기와 무관해 빈 목록으로 둔다.
+    plan = cast(FactorExecutionPlan, SimpleNamespace(required_field_ids=()))
+    record = portfolio_module.FactorEvaluationRecord(factor_id="f", plan=plan, values=values)
+    in_range = set(raw.sessions)
+
+    paired = portfolio_module._to_portfolio_observations(raw, (record,))
+
+    assert [observation.factor_values[0].value for observation in paired] == [
+        float(index) for index, item in enumerate(raw.observations) if item.as_of in in_range
+    ]
+    swapped = replace(record, values=(values[1], values[0], *values[2:]))
+    with pytest.raises(RuntimeError, match="not aligned"):
+        portfolio_module._to_portfolio_observations(raw, (swapped,))

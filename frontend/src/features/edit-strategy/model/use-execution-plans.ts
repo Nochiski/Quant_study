@@ -1,6 +1,6 @@
 import { currentParse } from "./document-state";
 import { metadataCoherence } from "./metadata-coherence";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, type UseQueryResult } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import {
@@ -283,6 +283,19 @@ export const pointerSelectsNode = (
   selectedPointer === nodePointer ||
   selectedPointer?.startsWith(`${nodePointer}/`) === true;
 
+/**
+ * 아래 상태 판정이 읽는 칸만 뽑는다. `combine` 이 없으면 `useQueries` 가 렌더마다 새 배열을 돌려 상태
+ * memo 와 그 하류(실행 요청·미리보기·디버거)가 상태가 그대로인 렌더에서도 다시 돈다. 모듈 함수라 참조가
+ * 고정이고, 결과는 TanStack 이 구조 공유로 바뀐 칸만 새로 만든다.
+ */
+const explanationResults = (results: UseQueryResult<FactorExplanation>[]) =>
+  results.map(({ data, error, isError, isPending }) => ({
+    data,
+    error,
+    isError,
+    isPending,
+  }));
+
 /** Current text only: a stale last-valid spec is never sent to the explain API. */
 export const useExecutionPlans = (
   state: DocumentState,
@@ -309,8 +322,12 @@ export const useExecutionPlans = (
       ] as const,
       queryFn: ({ signal }: { signal: AbortSignal }) =>
         strategyWorkbenchApi.explainFactorGraph(item.request, signal),
-      staleTime: 30_000,
+      // 응답은 키(그래프·파라미터·결측 정책 요청, 레지스트리 판본, 필드 계약 판까지 담은 데이터 판)의
+      // 함수라 시간이 지나도 낡지 않는다. 시간 기준으로 두면 compile 을 기다리는 동안 observer 가
+      // 빠졌다 다시 붙을 때마다 그래프가 그대로인 팩터도 다시 요청한다.
+      staleTime: Number.POSITIVE_INFINITY,
     })),
+    combine: explanationResults,
   });
 
   return useMemo(() => {

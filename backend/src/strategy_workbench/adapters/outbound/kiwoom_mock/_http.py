@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 # 모의 전용 주소. 실전 주소는 이 어댑터에 없고, 주소를 바꾸는 인자도 두지 않는다.
 MOCK_BASE_URL = "https://mockapi.kiwoom.com"
 ACCOUNT_PATH = "/api/dostk/acnt"  # 계좌 TR 경로(ka00001·kt00001·kt00007·kt00018·ka10170)
+STOCK_INFO_PATH = "/api/dostk/stkinfo"  # 종목정보 TR 경로(ka10001·ka10054·ka10100)
 # 같은 모의 호스트의 웹소켓. 실시간 주문체결(`00`) 기록에만 쓴다(S07).
 MOCK_WEBSOCKET_URL = "wss://mockapi.kiwoom.com:10000/api/websocket"
 # 한국은 일광절약시간이 없다. 고정 오프셋으로 Windows의 tzdata 의존을 피한다.

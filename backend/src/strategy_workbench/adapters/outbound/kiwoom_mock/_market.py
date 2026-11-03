@@ -22,6 +22,7 @@ from __future__ import annotations
 from datetime import time
 
 from strategy_workbench.adapters.outbound.kiwoom_mock._broker import KiwoomMockBroker
+from strategy_workbench.adapters.outbound.kiwoom_mock._http import STOCK_INFO_PATH
 from strategy_workbench.adapters.outbound.kiwoom_mock._rows import (
     ContractViolation,
     number,
@@ -83,7 +84,7 @@ class KiwoomMarket:
         return Quote(symbol, _book(body, "sel"), _book(body, "buy"))
 
     def price(self, symbol: str) -> PriceInfo:
-        body = self._call("ka10001", "/api/dostk/stkinfo", symbol)
+        body = self._call("ka10001", STOCK_INFO_PATH, symbol)
         try:
             last = abs(number(body, "cur_prc"))
         except ContractViolation as error:
@@ -93,9 +94,9 @@ class KiwoomMarket:
         return PriceInfo(symbol, text(body, "stk_nm"), last)
 
     def trade_status(self, symbol: str) -> TradeStatus:
-        info = self._call("ka10100", "/api/dostk/stkinfo", symbol)
-        basic = self._call("ka10001", "/api/dostk/stkinfo", symbol)
-        vi = self._call("ka10054", "/api/dostk/stkinfo", symbol, _VI_QUERY)
+        info = self._call("ka10100", STOCK_INFO_PATH, symbol)
+        basic = self._call("ka10001", STOCK_INFO_PATH, symbol)
+        vi = self._call("ka10054", STOCK_INFO_PATH, symbol, _VI_QUERY)
         try:
             upper, lower = abs(number(basic, "upl_pric")), abs(number(basic, "lst_pric"))
             windows = tuple(

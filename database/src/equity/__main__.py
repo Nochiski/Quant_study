@@ -60,6 +60,7 @@ from . import (
     rules_s24,  # noqa: F401  # reason: 등록 부작용 — S24 WISE 커버 이력 coverage_daily
     rules_s25,  # noqa: F401  # reason: 등록 부작용 — S25 WICS 섹터 스냅샷 sector_snapshot
     rules_s26,  # noqa: F401  # reason: 등록 부작용 — S26 WISE 컨센서스·재무비율 3표
+    rules_s27,  # noqa: F401  # reason: 등록 부작용 — S27 잠정실적 판본 fin_prelim
     rules_sample,  # noqa: F401  # reason: T0 샘플 테이블
 )
 from .model import BUILD_BASES, BUILD_BASIS_DEFAULT, RULES, record_basis

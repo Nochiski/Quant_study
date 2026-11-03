@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.34.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.35.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -370,6 +370,9 @@ RULES_VERSION = "e1.34.0"                # BuildRecord.rules_version 에 실린�
 #          보고서가 실려 옴). 서버 e1.33.0 판의 duplicate_vintage 격리는 082660 2025 연간 CFS 1묶음 2행이 전부였고 진짜
 #          2025 행까지 빠져 있었다(10-31) — 산출 +1행 · 격리 −1(2024 꼬리표 행은 그대로 격리). 그림자(10-31 D=10-30):
 #          그 행은 계정 값이 모두 NULL 이라 fi·모델 해시는 그대로였다. 접수가 다른 grain 충돌은 그대로 둘 다 격리.
+# e1.35.0: S27 `fin_prelim` 새 표(N-64 PR ②-1) — 잠정실적 공정공시 판본(stage `stg_doc_prelim` ⋈ `stg_disclosure`).
+#          행을 버리지 않고 `prelim_status` 로 가른다. 메인 엑셀 Earnings 'P' 칸 원천(fi `fi_fin_prelim`), 점수 밖.
+#          다른 표 산출 불변.
 
 # 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a, 규약은 `stage.model.RULES_CHANGED`) — 판본을 올리면 한 줄을 더한다.
 # 그 표를 입력으로 읽는 하류 표는 적지 않는다(읽는 쪽이 `RULES[t].inputs` 를 따라 닫는다). 선언 시작은 e1.31.0 이다 —
@@ -389,6 +392,8 @@ RULES_CHANGED: dict[str, frozenset[str]] = {
     "e1.33.0": frozenset({"dataset_profile"}),
     # 같은 접수가 두 bsns_year 로 온 grain 은 기말일 연도 행을 남긴다(fin_std 산출 +1 · 격리 −1).
     "e1.34.0": frozenset({"fin_std"}),
+    # S27 새 표 — 다른 표는 그대로다
+    "e1.35.0": frozenset({"fin_prelim"}),
 }
 
 

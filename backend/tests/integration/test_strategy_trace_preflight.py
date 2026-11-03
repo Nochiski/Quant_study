@@ -737,3 +737,37 @@ def test_portfolio_factor_values_pair_with_raw_rows_by_position_and_stop_when_mi
     swapped = replace(record, values=(values[1], values[0], *values[2:]))
     with pytest.raises(RuntimeError, match="not aligned"):
         portfolio_module._to_portfolio_observations(raw, (swapped,))
+
+
+def test_portfolio_observation_assembly_stops_within_its_rows_once_cancelled() -> None:
+    """관측 조립 단계 안에서 걸린 취소는 그 단계를 끝까지 돌지 않고 다음 행 묶음에서 멈춘다."""
+    raw = MockEquityDataAdapter.demo().load_raw_observations(
+        RawObservationQuery(
+            market=_environment().market.value,
+            universe_id=_environment().universe_id,
+            start=_environment().start,
+            end=_environment().end,
+            field_ids=("price.close",),
+        )
+    )
+    assert len(raw.observations) > 2 * portfolio_module._CHECKPOINT_BATCH
+    stop = Event()
+    fractions: list[float] = []
+
+    class _Cancelled(Exception):
+        pass
+
+    def checkpoint() -> None:
+        if stop.is_set():
+            raise _Cancelled
+
+    def progress(fraction: float) -> None:
+        fractions.append(fraction)
+        stop.set()  # 조립이 시작되자마자 취소한다
+
+    with pytest.raises(_Cancelled):
+        portfolio_module._to_portfolio_observations(
+            raw, (), checkpoint=checkpoint, progress=progress
+        )
+
+    assert fractions == [0.0]

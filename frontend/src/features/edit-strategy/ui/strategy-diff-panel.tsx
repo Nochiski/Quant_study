@@ -180,10 +180,17 @@ const RevisionComparison = ({
     ...strategyDocumentQuery(strategyId, comparable ? active.target : 1),
     enabled: comparable,
   });
-  const source =
-    baseDocument.data && targetDocument.data
-      ? lineDiff(baseDocument.data.source, targetDocument.data.source)
-      : null;
+  // 줄 단위 LCS 는 두 원문이 바뀔 때만 다시 잰다 — 패널이 열린 동안 편집기 렌더마다 돌면 큰
+  // 문서에서 표(최대 4M 칸)를 매번 새로 만든다.
+  const baseSource = baseDocument.data?.source;
+  const targetSource = targetDocument.data?.source;
+  const source = useMemo(
+    () =>
+      baseSource === undefined || targetSource === undefined
+        ? null
+        : lineDiff(baseSource, targetSource),
+    [baseSource, targetSource],
+  );
 
   if (revisions.isPending) {
     return (
@@ -302,8 +309,12 @@ export const StrategyDiffPanel = ({
   revision,
 }: StrategyDiffPanelProps) => {
   const semantic = useDraftSemanticDiff(state, active);
-  if (!active) return null;
-  const draft = projectDraftDiff(state);
+  const { savedSource, source } = state;
+  const draft = useMemo(
+    () => (active ? projectDraftDiff(savedSource, source) : null),
+    [active, savedSource, source],
+  );
+  if (draft === null) return null;
   return (
     <section className="strategy-diff" aria-label={t("diff.title")}>
       <header>

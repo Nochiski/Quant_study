@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -37,7 +37,9 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestRunRepositoryPort,
+    BacktestRunSummary,
     RunHeadline,
+    RunKind,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestResultNotReadyError,
@@ -320,6 +322,12 @@ class _FrozenAfterAccept(SQLiteBacktestRunRepository):
     def update(self, state: BacktestRunState) -> None:
         return None
 
+    def latest(
+        self, strategy_ids: Collection[str], *, kind: RunKind | None = None
+    ) -> tuple[BacktestRunSummary, ...]:
+        # 인라인 실행이라 전략 id 가 없다 — 덮기만 가르려고 목록의 첫 행을 최근 run 으로 돌려준다.
+        return self.list(PageRequest(limit=1)).items
+
 
 def test_the_list_shows_the_in_process_state_of_a_running_run(
     tmp_path: Path, barriers: list[RawLoadBarrier]
@@ -331,9 +339,11 @@ def test_the_list_shows_the_in_process_state_of_a_running_run(
     assert held.entered.wait(timeout=10)
 
     (item,) = runs.list_runs(PageRequest()).items
+    # 전략별 최근 run 도 같은 메모리 상태로 덮는다(저장소 `latest` 는 목록 첫 행을 돌려준다고 둔다).
+    (latest,) = runs.latest_runs(["s-1"])
 
     assert repository.get("run-1").run.stage == "queued"
-    assert item.run == runs.state("run-1")
+    assert item.run == latest.run == runs.state("run-1")
     assert (item.run.status, item.run.stage) == (RunStatus.RUNNING, "tape")
     assert item.run.progress > 0
 

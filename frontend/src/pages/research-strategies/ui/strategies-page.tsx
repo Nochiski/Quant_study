@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 
 import {
@@ -235,16 +235,17 @@ const StrategyHistory = ({
   );
 };
 
-type LatestRuns = UseQueryResult<BacktestRunSummary[]>;
+/** 한 쪽의 전략 전부를 한 번에 읽은 최근 실행에서 고른 이 전략의 몫. 화면이 행마다 나눠 준다. */
+type LatestRun =
+  | { status: "pending" }
+  | { status: "error" }
+  | { status: "ready"; run: BacktestRunSummary | undefined };
 
-/**
- * 그 전략의 가장 최근 단일 백테스트 한 건. 한 쪽의 전략 전부를 한 번에 읽은 응답에서 고른다. 숫자는 목록
- * 응답의 `headline` 그대로다(결정 1).
- */
-const LatestResult = ({ latest, strategyId }: { latest: LatestRuns; strategyId: string }) => {
-  const run = latest.data?.find((item) => item.strategy_provenance.strategy_id === strategyId);
-  if (latest.isPending) return <span role="status">{t("page.loading")}</span>;
-  if (latest.isError) return <span>{t("history.strategies.resultError")}</span>;
+/** 그 전략의 가장 최근 단일 백테스트 한 건. 숫자는 목록 응답의 `headline` 그대로다(결정 1). */
+const LatestResult = ({ latest }: { latest: LatestRun }) => {
+  if (latest.status === "pending") return <span role="status">{t("page.loading")}</span>;
+  if (latest.status === "error") return <span>{t("history.strategies.resultError")}</span>;
+  const { run } = latest;
   if (run === undefined) return <span>{t("history.strategies.noRun")}</span>;
   if (run.run.status === "failed")
     return (
@@ -295,7 +296,7 @@ const StrategyRow = ({
 }: {
   strategy: StrategySummary;
   experiments: readonly Experiment[];
-  latest: LatestRuns;
+  latest: LatestRun;
 }) => {
   const [expanded, setExpanded] = useState(false);
   const historyId = useId();
@@ -338,7 +339,7 @@ const StrategyRow = ({
           ) : null}
         </td>
         <td>
-          <LatestResult latest={latest} strategyId={strategy.strategy_id} />
+          <LatestResult latest={latest} />
         </td>
         <td>
           <TrialCount strategyId={strategy.strategy_id} />
@@ -417,6 +418,17 @@ export const StrategiesPage = () => {
       "single",
     ),
   );
+  // 읽은 값이 있으면 폴링 중 한 번 실패해도 그 값을 둔다 — 한 응답에 한 쪽 전부가 실리므로 오류를 먼저
+  // 보이면 모든 행이 함께 오류로 바뀐다.
+  const latestRun = (strategyId: string): LatestRun =>
+    latest.data !== undefined
+      ? {
+          status: "ready",
+          run: latest.data.find((item) => item.strategy_provenance.strategy_id === strategyId),
+        }
+      : latest.isError
+        ? { status: "error" }
+        : { status: "pending" };
   const correctedOffset =
     strategies.data !== undefined &&
     offset > 0 &&
@@ -507,7 +519,7 @@ export const StrategiesPage = () => {
                     key={strategy.strategy_id}
                     strategy={strategy}
                     experiments={strategyExperiments(experimentItems, strategy.strategy_id)}
-                    latest={latest}
+                    latest={latestRun(strategy.strategy_id)}
                   />
                 ))}
               </tbody>

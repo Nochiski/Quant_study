@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 
 from strategy_workbench.domain.analytics.facade.metrics import MetricDefinition, MetricValue
 from strategy_workbench.domain.backtest.facade.runs import (
@@ -32,7 +32,8 @@ class BacktestResultArtifacts:
     """`RawArtifactBundle` 에서 `positions` 대신 그 수(`position_count`)를 실은 원장 묶음.
 
     값은 늘 저장 결과에서 채운다. 기본값은 원장 묶음과 같은 칸을 응답 스키마에서도 같은 선택 칸으로
-    두려는 것이다 — 계약 변경을 `positions` → `position_count` 하나로 한정한다.
+    두려는 것이다 — 계약 변경을 `positions` → `position_count` 하나로 한정한다. 원장 묶음의 칸·
+    타입·기본값을 바꾸면 여기도 함께 바꾼다(어긋나면 `test_backtest_result_contract` 가 실패한다).
     """
 
     snapshots: tuple[RawSnapshot, ...]
@@ -57,7 +58,7 @@ class BacktestResult:
 
 
 def backtest_result(result: BacktestRunResult) -> BacktestResult:
-    """저장 결과를 응답 모양으로 옮긴다. 원장 묶음의 칸은 `positions` 를 뺀 전부를 그대로 싣는다."""
+    """저장 결과를 응답 모양으로 옮긴다. `positions` 를 그 수로 바꾸고 나머지 칸은 그대로 싣는다."""
     bundle = result.artifacts
     return BacktestResult(
         manifest=result.manifest,
@@ -65,11 +66,15 @@ def backtest_result(result: BacktestRunResult) -> BacktestResult:
         metrics=result.metrics,
         series=result.series,
         artifacts=BacktestResultArtifacts(
-            **{
-                item.name: getattr(bundle, item.name)
-                for item in fields(bundle)
-                if item.name != "positions"
-            },
+            snapshots=bundle.snapshots,
             position_count=len(bundle.positions),
+            orders=bundle.orders,
+            fills=bundle.fills,
+            costs=bundle.costs,
+            trades=bundle.trades,
+            roundings=bundle.roundings,
+            schema_version=bundle.schema_version,
+            order_updates=bundle.order_updates,
+            corporate_actions=bundle.corporate_actions,
         ),
     )

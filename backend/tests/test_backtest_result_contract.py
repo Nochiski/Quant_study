@@ -4,21 +4,43 @@ from __future__ import annotations
 
 from dataclasses import fields
 
-from strategy_workbench.adapters.inbound.http_api._backtest_result_contract import backtest_result
+from strategy_workbench.adapters.inbound.http_api._backtest_result_contract import (
+    BacktestResult,
+    BacktestResultArtifacts,
+    backtest_result,
+)
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult, RawArtifactBundle
 from tests.test_backtest_artifact_store import _result
 
 
-def test_the_result_response_counts_positions_and_keeps_every_other_field() -> None:
+def _shape(model: type) -> dict[str, tuple[object, object]]:
+    return {item.name: (item.type, item.default) for item in fields(model)}
+
+
+def test_the_result_response_has_every_stored_field_with_positions_counted() -> None:
+    """저장 결과의 칸이 늘거나 타입·선택 여부가 바뀌면 응답 모양도 따라 바꾸게 한다 — 그러지 않으면
+    응답에서 칸이 조용히 빠지거나 생성 SDK 타입이 실제 응답과 어긋난다."""
+    assert _shape(BacktestResult) == {
+        **_shape(BacktestRunResult),
+        "artifacts": _shape(BacktestResult)["artifacts"],
+    }
+    stored = _shape(RawArtifactBundle)
+    response = _shape(BacktestResultArtifacts)
+    assert set(response) == set(stored) - {"positions"} | {"position_count"}
+    assert {name: response[name] for name in stored if name != "positions"} == {
+        name: shape for name, shape in stored.items() if name != "positions"
+    }
+
+
+def test_the_result_response_counts_positions_and_keeps_every_other_value() -> None:
     stored = _result()
 
     response = backtest_result(stored)
 
     assert response.artifacts.position_count == len(stored.artifacts.positions) == 1
-    stored_names = {item.name for item in fields(stored.artifacts)}
-    response_names = {item.name for item in fields(response.artifacts)}
-    assert response_names == stored_names - {"positions"} | {"position_count"}
-    for name in stored_names - {"positions"}:
-        assert getattr(response.artifacts, name) == getattr(stored.artifacts, name), name
+    for item in fields(stored.artifacts):
+        if item.name != "positions":
+            assert getattr(response.artifacts, item.name) == getattr(stored.artifacts, item.name)
     assert (
         response.manifest,
         response.metric_definitions,

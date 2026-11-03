@@ -89,9 +89,10 @@ def test_latest_runs_route_is_not_read_as_a_run_id_and_needs_a_strategy(tmp_path
 
     found = client.get("/api/v1/backtests/latest", params={"strategy_id": ["s-1", "s-2"]})
     missing = client.get("/api/v1/backtests/latest")
+    empty = client.get("/api/v1/backtests/latest", params={"strategy_id": ""})
 
     assert (found.status_code, found.json()) == (200, [])
-    assert missing.status_code == 422
+    assert missing.status_code == empty.status_code == 422
 
 
 def test_v9_file_migrates_and_old_runs_have_no_headline(tmp_path: Path) -> None:

@@ -16,6 +16,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import StringConstraints
 from starlette.concurrency import run_in_threadpool
 
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
@@ -475,7 +476,11 @@ def create_app(
     # `/backtests/{run_id}` 보다 먼저 등록한다 — 늦으면 `latest` 를 run id 로 읽는다.
     @app.get("/api/v1/backtests/latest", operation_id="listLatestBacktests")
     def list_latest_backtests(
-        strategy_id: Annotated[list[str], Query(min_length=1, max_length=PageRequest.MAX_LIMIT)],
+        # 목록 조회(`strategy_id` 하나)와 같이 빈 id 는 받지 않는다.
+        strategy_id: Annotated[
+            list[Annotated[str, StringConstraints(min_length=1)]],
+            Query(min_length=1, max_length=PageRequest.MAX_LIMIT),
+        ],
         kind: RunKind | None = None,
     ) -> tuple[BacktestRunSummary, ...]:
         """전략마다 가장 최근 run 한 행 — 전략 목록 한 쪽이 행마다 목록을 묻지 않게 한다."""

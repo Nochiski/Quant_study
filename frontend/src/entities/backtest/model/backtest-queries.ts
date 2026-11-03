@@ -13,6 +13,7 @@ import {
   ApiRequestError,
   strategyWorkbenchApi,
   type BacktestRunSpec,
+  type BacktestRunSummary,
   type RunKind,
 } from "../../../shared/api";
 
@@ -34,6 +35,11 @@ const retireBacktestHistoryQueries = async (
   queryClient.removeQueries({ queryKey: backtestHistoryKey() });
 };
 
+/** 이력 목록·전략별 최근 실행이 함께 쓰는 폴링 규칙: 도는 run 이 보이는 동안만 1초마다 다시 읽는다. */
+const HISTORY_POLL_MS = 1_000;
+const pollWhileActive = (items: readonly BacktestRunSummary[] | undefined): number | false =>
+  items?.some((item) => RUN_STATUS[item.run.status].active) ? HISTORY_POLL_MS : false;
+
 export const backtestHistoryQuery = (
   page: {
     offset?: number;
@@ -51,10 +57,7 @@ export const backtestHistoryQuery = (
       page.limit ?? 50,
     ],
     queryFn: () => strategyWorkbenchApi.listBacktests(page),
-    refetchInterval: (query) =>
-      query.state.data?.items.some((item) => RUN_STATUS[item.run.status].active)
-        ? 1_000
-        : false,
+    refetchInterval: (query) => pollWhileActive(query.state.data?.items),
   });
 
 /**
@@ -66,8 +69,7 @@ export const latestBacktestsQuery = (strategyIds: readonly string[], kind?: RunK
     queryKey: [...backtestHistoryKey(), "latest", kind ?? null, ...strategyIds],
     queryFn: () => strategyWorkbenchApi.listLatestBacktests(strategyIds, kind),
     enabled: strategyIds.length > 0,
-    refetchInterval: (query) =>
-      query.state.data?.some((item) => RUN_STATUS[item.run.status].active) ? 1_000 : false,
+    refetchInterval: (query) => pollWhileActive(query.state.data),
   });
 
 /**

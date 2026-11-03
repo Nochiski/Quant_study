@@ -702,7 +702,8 @@ export type BacktestResult = {
  * `RawArtifactBundle` 에서 `positions` 대신 그 수(`position_count`)를 실은 원장 묶음.
  *
  * 값은 늘 저장 결과에서 채운다. 기본값은 원장 묶음과 같은 칸을 응답 스키마에서도 같은 선택 칸으로
- * 두려는 것이다 — 계약 변경을 `positions` → `position_count` 하나로 한정한다.
+ * 두려는 것이다 — 계약 변경을 `positions` → `position_count` 하나로 한정한다. 원장 묶음의 칸·
+ * 타입·기본값을 바꾸면 여기도 함께 바꾼다(어긋나면 `test_backtest_result_contract` 가 실패한다).
  */
 export type BacktestResultArtifacts = {
   /**

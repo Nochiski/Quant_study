@@ -329,10 +329,10 @@ FileSource(doc_store 스냅샷 → zip 경로)                     ← BlobSourc
 `table_ord` · `section_code`(없으면 부모 절 첫 자식 코드의 상위 접두로 역산, 예: `D-0-2-0-0`; `section_code_basis`=direct/derived) · `section_kind` · `heading_raw`(직전 번호 매김 문단/제목, §1.14) · `heading_norm` · `header_rows`(JSON, 전개 후 1~3행) · `header_depth` · `n_rows`·`n_cols` · `n_numeric_cells` · `unit_ctx_raw`(직전 1행 표 → 직전 문단 → 헤더 순 첫 매치) · `unit_scale`(사전, NULL) · `signature_hdr`(§1.14 측정과 동일 정의: hash(section_code + 첫 행 셀 정규화) — 정규화 = 공백 제거, `제N기`·날짜·숫자 → `#`, 셀 20자 절단, 최대 8셀) · `signature_ctx`(hash(section_code + heading_norm + header_rows 정규화) — 군집화용) · `elem_start`
 - 용도: §8.3 군집화·골든셋·값 추출의 입력. 셀 값은 싣지 않는다(약 40억 셀).
 
-### 3.8 `stg_doc_prelim` (N-64, 파서 p1.6 · stage 2.11.0) — 잠정실적 공정공시 서식 표
+### 3.8 `stg_doc_prelim` (N-64, 파서 p1.6 · 조원 p1.7 · stage 2.11.0) — 잠정실적 공정공시 서식 표
 원장 = `backfill_docs` P4 가 받은 '영업(잠정)실적(공정공시)' ZIP(연결 · 별도 · 정정 · 첨부추가, 자회사 실적 공시 제외, 2026-07-01 접수부터). 원문은 보고서 XML 이 아니라 xforms HTML 이라 `parse_mode=html` 갈래로 가고(meta · parse_log 1행씩, section · correction 0 · D2 분모 밖), 제목이 '영업(잠정)실적' 인 문서에만 이 표 1행이 더 생긴다.
-`rcept_no` · `member_name` · `fs_div`(CFS = '연결실적내용' / OFS) · `period_from`·`period_to`(실적기간 표 '당기실적', DATE) · `py_from`·`py_to`('전년동기실적') · `unit_raw`(원 · 천원 · 백만원 · 억원) · 당해실적 당기 `revenue_krw` · `op_profit_krw` · `pretax_krw` · `net_income_krw` · `ni_owner_krw`(지배기업 소유주지분 순이익, 별도 서식엔 없음) · 전년동기 `revenue_py_krw` · `op_profit_py_krw` · `net_income_py_krw`(확정 재무와 단위 검산용) · `n_items` · `unknown_items`(모르는 항목 이름 JSON) · `status`(ok/failed) · `error`
-- 값은 파서가 원 단위 정수로 바꿔 싣는다 — 서식마다 단위가 달라(11-01 표본 20건: 억원 3 · 백만원 17) `ColumnRule.unit_scale` 로 못 곱한다. 단위를 못 읽거나 숫자를 하나라도 못 읽으면(△ · 괄호 음수 · 글자) 값 열 전부 NULL + `status=failed`.
+`rcept_no` · `member_name` · `fs_div`(CFS = '연결실적내용' / OFS) · `period_from`·`period_to`(실적기간 표 '당기실적', DATE) · `py_from`·`py_to`('전년동기실적') · `unit_raw`(원 · 천원 · 백만원 · 억원 · 조원) · 당해실적 당기 `revenue_krw` · `op_profit_krw` · `pretax_krw` · `net_income_krw` · `ni_owner_krw`(지배기업 소유주지분 순이익, 별도 서식엔 없음) · 전년동기 `revenue_py_krw` · `op_profit_py_krw` · `net_income_py_krw`(확정 재무와 단위 검산용) · `n_items` · `unknown_items`(모르는 항목 이름 JSON) · `status`(ok/failed) · `error`
+- 값은 파서가 원 단위 정수로 바꿔 싣는다 — 서식마다 단위가 달라(11-01 표본 20건: 억원 3 · 백만원 17 · 11-03 백필 877건: 백만원 752 · 억원 119 · 조원 6 — 시총 최상위 두 종목, 소수 둘째 자리. 조원은 p1.7 부터) `ColumnRule.unit_scale` 로 못 곱한다. 단위를 못 읽거나 숫자를 하나라도 못 읽으면(△ · 괄호 음수 · 글자) 값 열 전부 NULL + `status=failed`.
 - 표는 id(`Table0/1` · `RepeatTable0/1`)가 아니라 내용으로 찾는다: 첫 칸 '실적기간' 인 표 1개 · '항목 | 당해실적' 행이 있는 표 1개. 정정 공시 앞의 정정표(`XFormD8`: 정정 전/후)는 두 꼴 어디에도 맞지 않아 빠지고 뒤에 붙은 바로잡은 전체 서식을 읽는다.
 - 당기 기간이 분기가 아닌 행(백화점 월 실적 — 광주신세계 2026-08-01~08-31)도 그대로 싣는다. 분기 고르기 · 정정 접기(늦은 접수가 이김) · 공개일 자르기는 equity(`fin_prelim`, N-64 PR ②) 몫이다.
 

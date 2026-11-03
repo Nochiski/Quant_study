@@ -417,7 +417,7 @@ def _run_l1(
         print(f"L1 raw status={raw.status.value}", flush=True)
         return 0
     observations = tuple(
-        _with_synthetic_group(_to_factor_observation(item, checkpoint=_noop_checkpoint))
+        _with_synthetic_group(_to_factor_observation(item))
         for item in raw.observations
     )
     del raw

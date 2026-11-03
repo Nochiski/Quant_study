@@ -110,16 +110,16 @@ class _Catalog:
     def __init__(
         self, *fields: FieldMetadata, unavailable: Mapping[str, str] | None = None
     ) -> None:
-        self._fields = fields
-        self._unavailable = unavailable or {}
+        self.fields = fields
+        self.unavailable = unavailable or {}
         self.calls = 0
 
     def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
         self.calls += 1
-        return self._fields
+        return self.fields
 
     def unavailable_factor_fields(self) -> Mapping[str, str]:
-        return self._unavailable
+        return self.unavailable
 
 
 def _service(catalog: FieldCatalogPort | None) -> StrategyAuthoringService:
@@ -245,6 +245,27 @@ def test_the_field_catalog_is_read_per_compile() -> None:
     service.compile(CompileRequest(GOLDEN, SourceFormat.YAML))
 
     assert catalog.calls == 2
+
+
+def test_a_compile_is_reused_only_while_the_field_contract_is_the_same() -> None:
+    """저장·무결성 검사·이력·의미 diff 가 같은 원문을 다시 compile 해도 결과를 다시 쓰지만, 그 사이
+    어댑터 계약(필드 목록·뺀 필드 사유)이 바뀌면 바뀐 계약으로 다시 판정한다."""
+    catalog = _Catalog(_ADJ_CLOSE)
+    service = _service(catalog)
+    request = CompileRequest(GOLDEN, SourceFormat.YAML)
+
+    first = service.compile(request)
+    assert first.ok
+    assert service.compile(request) is first
+
+    catalog.fields = ()
+    missing = service.compile(request)
+    assert _errors(missing) == [("strategy.expression.field_missing", "/factors/0/graph/nodes/0")]
+
+    catalog.unavailable = {"price.adj_close": "카탈로그를 다시 만드세요"}
+    explained = service.compile(request)
+    assert "카탈로그를 다시 만드세요" in explained.diagnostics[0].message
+    assert "카탈로그를 다시 만드세요" not in missing.diagnostics[0].message
 
 
 # -- 그룹 연산 capability ------------------------------------------------------------------------

@@ -142,7 +142,12 @@ from .ports.outgoing.run_execution import (
     RunJob,
     RunOutcome,
 )
-from .ports.outgoing.run_repository import BacktestRunRepositoryPort, BacktestRunSummary, RunKind
+from .ports.outgoing.run_repository import (
+    BacktestRunNotFoundError,
+    BacktestRunRepositoryPort,
+    BacktestRunSummary,
+    RunKind,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -640,12 +645,19 @@ class BacktestRunService:
         return known | stored
 
     def state(self, run_id: str) -> BacktestRunState:
-        """이 프로세스가 도는 run 은 메모리의 진행률까지, 나머지는 저장소의 마지막 상태."""
+        """이 프로세스가 도는 run 은 메모리의 진행률까지, 나머지는 저장소의 마지막 상태.
+
+        저장소는 상태 칸만 읽는 `states` 로 묻는다 — `get` 은 실행 종류를 실험 attempt 전체 집계로
+        구하므로, 결과 조회마다 거치는 이 경로에 쓰지 않는다.
+        """
         with self._lock:
             record = self._records.get(run_id)
             if record is not None:
                 return record.state
-        return self._repository.get(run_id).run
+        stored = self._repository.states((run_id,)).get(run_id)
+        if stored is None:
+            raise BacktestRunNotFoundError(run_id)
+        return stored
 
     def summary(self, run_id: str) -> BacktestRunSummary:
         """이력 한 행(실행 종류·소유 실험·provenance). 이 프로세스가 도는 run 은 메모리 상태로
@@ -688,8 +700,9 @@ class BacktestRunService:
     def result(self, run_id: str) -> BacktestRunResult:
         """완료된 run 의 결과를 산출물 저장소에서 읽는다(V1-04).
 
-        메모리에 결과를 들지 않는다 — 이 프로세스가 끝낸 run 과 재시작 전에 끝난 run 이 같은 길로
-        읽힌다. 산출물은 `COMPLETED` 전이보다 먼저 커밋되므로 완료 상태면 파일이 있다.
+        run 기록에 결과를 들지 않는다 — 이 프로세스가 끝낸 run 과 재시작 전에 끝난 run 이 같은 길로
+        읽힌다(해독 결과를 기억하는 것은 산출물 저장소의 일이다). 산출물은 `COMPLETED` 전이보다
+        먼저 커밋되므로 완료 상태면 파일이 있다.
         """
         state = self.state(run_id)
         if state.status is not RunStatus.COMPLETED or state.artifact_sha256 is None:

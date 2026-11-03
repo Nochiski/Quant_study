@@ -296,6 +296,26 @@ def test_a_missing_altered_or_undecodable_result_file_is_a_coded_error(tmp_path:
     assert str(tmp_path) not in message and "'x'" not in message
 
 
+def test_a_remembered_decode_still_rejects_a_removed_or_altered_file(tmp_path: Path) -> None:
+    """결과 화면의 여러 조회가 같은 파일을 읽으면 해독 결과를 다시 쓰지만, 읽기·해시 대조는 매번이라
+    그 사이 지워지거나 바뀐 파일은 기억과 무관하게 410 이다."""
+    store = LocalArtifactStore(tmp_path)
+    commit = store.commit(_result())
+    result_path = tmp_path / "run-safe-001" / "result.json"
+    payload = result_path.read_bytes()
+
+    first = store.load("run-safe-001", sha256=commit.sha256)
+    assert store.load("run-safe-001", sha256=commit.sha256) is first
+
+    result_path.write_bytes(payload.replace(b'"engine_version":"test"', b'"engine_version":"evil"'))
+    with pytest.raises(BacktestArtifactUnreadableError, match="sha256 — run_id=run-safe-001"):
+        store.load("run-safe-001", sha256=commit.sha256)
+
+    result_path.unlink()
+    with pytest.raises(BacktestArtifactUnreadableError, match="missing — run_id=run-safe-001"):
+        store.load("run-safe-001", sha256=commit.sha256)
+
+
 def test_boot_cleanup_removes_staging_left_by_a_killed_commit(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from functools import cached_property
+from threading import Lock
 from typing import Any
 
 from strategy_workbench.domain.backtest.facade.environment import (
@@ -78,6 +80,15 @@ from .ports.outgoing.document_codec import (
 from .ports.outgoing.field_catalog import FieldCatalogPort
 
 logger = logging.getLogger(__name__)
+
+# compile 결과를 기억하는 최근 입력 수. 한 사용자 동작(저장 → 무결성 검사 → 이력 재조회, 편집 →
+# 의미 diff)이 같은 원문을 몇 번 compile 하는 만큼이면 된다.
+_COMPILED_KEPT = 8
+
+# compile 결과를 정하는 입력 전부: 원문·형식과 그때 읽은 어댑터 필드 계약 두 값.
+_CompileKey = tuple[
+    str, SourceFormat, tuple[FieldMetadata, ...] | None, tuple[tuple[str, str], ...] | None
+]
 
 DRAFT_IDENTITY = StrategyIdentity(strategy_id="draft", revision=0)
 
@@ -246,6 +257,10 @@ class StrategyAuthoringService:
         self._dataset_snapshot_id = dataset_snapshot_id
         # 필드 계약도 어댑터가 소유한다 — 매 호출 읽고 복사해 두지 않는다.
         self._field_catalog = field_catalog
+        # 결과(불변 값)는 그 호출에서 읽은 계약까지 키로 기억한다 — 계약이 바뀌면 키가 달라 다시
+        # compile 한다. 잠금을 쥔 채 계산해 같은 원문의 동시 요청도 한 번만 compile 한다.
+        self._compiled: OrderedDict[_CompileKey, CompiledDocument] = OrderedDict()
+        self._compile_lock = Lock()
 
     @cached_property
     def _schema(self) -> StrategyDocumentSchema:
@@ -346,7 +361,7 @@ class StrategyAuthoringService:
         mismatch = _first_mismatch(expected, reparsed.tree)
         if mismatch is not None:
             raise DocumentUpgradeDriftError(*mismatch)
-        compiled = self._compile_parsed(reparsed)
+        compiled = self._compile_parsed(reparsed, *self._field_contract())
         environment, environment_warnings = _environment_of(outcome.environment)
         return UpgradedDocument(
             format=request.format,
@@ -358,9 +373,38 @@ class StrategyAuthoringService:
         )
 
     def compile(self, request: CompileRequest) -> CompiledDocument:
-        return self._compile_parsed(self._codec.parse(request.source, format=request.format))
+        fields, unavailable = self._field_contract()
+        key: _CompileKey = (request.source, request.format, fields, unavailable)
+        with self._compile_lock:
+            compiled = self._compiled.get(key)
+            if compiled is not None:
+                self._compiled.move_to_end(key)
+                return compiled
+            compiled = self._compile_parsed(
+                self._codec.parse(request.source, format=request.format), fields, unavailable
+            )
+            self._compiled[key] = compiled
+            if len(self._compiled) > _COMPILED_KEPT:
+                self._compiled.popitem(last=False)
+            return compiled
 
-    def _compile_parsed(self, parsed: ParsedDocument) -> CompiledDocument:
+    def _field_contract(
+        self,
+    ) -> tuple[tuple[FieldMetadata, ...] | None, tuple[tuple[str, str], ...] | None]:
+        """이번 compile 이 읽을 어댑터 필드 계약과 뺀 필드 사유(순서 보존)."""
+        if self._field_catalog is None:
+            return None, None
+        return (
+            self._field_catalog.factor_field_catalog(),
+            tuple(self._field_catalog.unavailable_factor_fields().items()),
+        )
+
+    def _compile_parsed(
+        self,
+        parsed: ParsedDocument,
+        fields: tuple[FieldMetadata, ...] | None,
+        unavailable: tuple[tuple[str, str], ...] | None,
+    ) -> CompiledDocument:
         if not parsed.ok or parsed.tree is None:
             return _rejected(parsed, None, parsed.diagnostics)
 
@@ -379,13 +423,9 @@ class StrategyAuthoringService:
         validation = validate_strategy(
             spec,
             written_pointers=parsed.key_ranges.keys(),
-            fields=self._fields_or_none(),
+            fields=fields,
             # 없는 필드가 어댑터가 뺀 필드면 진단이 그 사유(카탈로그 재생성 등)를 싣는다(#316)
-            unavailable_fields=(
-                None
-                if self._field_catalog is None
-                else self._field_catalog.unavailable_factor_fields()
-            ),
+            unavailable_fields=None if unavailable is None else dict(unavailable),
         )
         diagnostics = tuple(
             SourceDiagnostic(

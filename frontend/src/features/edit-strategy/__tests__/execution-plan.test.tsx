@@ -3,7 +3,7 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import type { PropsWithChildren } from "react";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type {
   DatasetFieldProfile,
@@ -464,6 +464,39 @@ describe("execution plan orchestration", () => {
       expect(signals.every((signal) => signal.aborted)).toBe(true),
     );
     expect(result.current).toEqual({ status: "blocked", reason: "stale" });
+  });
+
+  it("does not explain an unchanged graph again after compile pauses the plans", async () => {
+    const initial = currentState();
+    const { result, rerender } = renderHook(
+      ({ state }: { state: DocumentState }) =>
+        useExecutionPlans(state, METADATA),
+      { initialProps: { state: initial }, wrapper: wrapper() },
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(requests).toHaveLength(2);
+
+    // 제목만 고친 편집: compile 을 기다리는 동안 계획이 멈췄다가 같은 그래프로 돌아온다. 그 사이 시간이
+    // 얼마나 흘렀든 응답은 키의 함수라 다시 묻지 않는다.
+    const later = Date.now() + 10 * 60_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(later);
+    try {
+      rerender({ state: { ...initial, sourceVersion: 3, phase: "parsing" } });
+      expect(result.current).toEqual({ status: "blocked", reason: "stale" });
+      rerender({
+        state: {
+          ...initial,
+          sourceVersion: 3,
+          parsedVersion: 3,
+          compiledVersion: 3,
+        },
+      });
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(requests).toHaveLength(2);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("carries the run settings' missing policy so the plan hash matches the run", () => {

@@ -1,8 +1,9 @@
-import { currentParseOutcome } from "./document-state";
 import { useMemo } from "react";
 
 import {
-  currentDiagnostics,
+  currentCompileOutcome,
+  currentParseOutcome,
+  diagnosticsOf,
   isFirstParsePending,
   type DocumentState,
 } from "./document-state";
@@ -28,23 +29,28 @@ export type FormProjectionState = {
 /**
  * Form 패널 입력(WORKFLOW P4-04): 현재 parse가 유효하면 그것으로, 구문 오류면 같은 문서의 마지막 유효
  * parse로 STALE 표시와 함께 그린다. 진단은 현재 compile의 것만 붙인다(stale일 때는 비어 있다).
+ *
+ * 투영은 아래 다섯 입력의 함수라 그것들로만 다시 계산한다 — 문서 상태 전체를 키로 두면 parse 를 기다리는
+ * 타자 중에도(입력이 그대로인데) 키 입력마다 스키마 전체를 다시 훑는다.
  */
 export const useFormProjection = (
   state: DocumentState,
   schema: JsonSchema | null,
-): FormProjectionState =>
-  useMemo(() => {
-    const parsedCurrent = currentParseOutcome(state);
+): FormProjectionState => {
+  const parsedCurrent = currentParseOutcome(state);
+  const compiledCurrent = currentCompileOutcome(state);
+  const lastValidParse = state.lastValidParse?.result ?? null;
+  const firstParsePending = isFirstParsePending(state);
+  return useMemo(() => {
     const current =
       parsedCurrent !== null && parsedCurrent.status === "ok"
         ? parsedCurrent
         : null;
     // "parse 실패"와 "parse 대기"를 구분한다: 대기 중에는 배지·문구 없이 마지막 유효 parse를 그린다.
     const failed = parsedCurrent !== null && current === null;
-    const parse = current ?? state.lastValidParse?.result ?? null;
+    const parse = current ?? lastValidParse;
     const stale = failed && parse !== null;
     const tree = parse !== null ? parse.tree : null;
-    const firstParsePending = isFirstParsePending(state);
     const noValidParse = !firstParsePending && parse === null;
     if (schema === null || parse === null)
       return { projection: null, firstParsePending, noValidParse, stale, tree };
@@ -54,9 +60,10 @@ export const useFormProjection = (
       projection: projectForm(
         schema,
         parse,
-        stale ? [] : currentDiagnostics(state),
+        stale ? [] : diagnosticsOf(parsedCurrent, compiledCurrent),
       ),
       stale,
       tree,
     };
-  }, [schema, state]);
+  }, [schema, parsedCurrent, compiledCurrent, lastValidParse, firstParsePending]);
+};

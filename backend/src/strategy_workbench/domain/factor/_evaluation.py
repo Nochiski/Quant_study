@@ -609,11 +609,15 @@ def _field_values(
     """필드 원값과, 그 가운데 원장이 가린 셀(MASKED)의 관측 index 를 관측을 한 번 훑어 낸다(#298).
 
     잎은 채우지 않는다 — 시계열 창·이항 연산은 모르는 결측을 결측으로 본다(#312, `_filled`).
+    같은 필드의 셀이 여럿이면 마지막 셀이다.
     """
     values: list[FactorComputedValue] = []
     masked: set[int] = set()
     for index, observation in _checkpointed(enumerate(observations), checkpoint):
-        cell = {field.field_id: field for field in observation.fields}.get(field_id)
+        cell = None
+        for field in observation.fields:
+            if field.field_id == field_id:
+                cell = field
         if cell is not None and cell.masked:
             masked.add(index)
         value = None if cell is None else cell.value

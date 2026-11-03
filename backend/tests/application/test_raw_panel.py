@@ -344,7 +344,7 @@ def test_int_value_message_has_the_bool_message_format() -> None:
 def _service_look_ahead(raw: RawObservationSet) -> str | None:
     try:
         for item in raw.observations:
-            portfolio_module._to_factor_observation(item, checkpoint=lambda: None)
+            portfolio_module._to_factor_observation(item)
     except LookAheadViolationError as error:
         return str(error)
     return None

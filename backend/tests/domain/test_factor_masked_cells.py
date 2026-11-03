@@ -329,3 +329,35 @@ def test_a_window_operator_only_looks_inside_its_window() -> None:
     observations = _observations(MASKED=FactorFieldValue(_FIELD, None, masked=True))
 
     assert [p for p in _missing(graph, observations, "MASKED") if p >= 7] == list(range(33, 38))
+
+
+def test_a_field_with_several_cells_reads_the_last_cell_value_and_mask() -> None:
+    """같은 필드의 셀이 한 행에 여럿이면 숫자 잎은 마지막 셀의 값과 가림을 읽는다."""
+    graph = FactorGraph(nodes=(FieldNode("adj", _FIELD, "field"),), output_node_id="adj")
+    observations = (
+        FactorObservation(
+            _DAYS[0],
+            "a",
+            (FactorFieldValue(_FIELD, 1.0), FactorFieldValue(_FIELD, 2.0)),
+            universe_member=True,
+        ),
+        FactorObservation(
+            _DAYS[0],
+            "b",
+            (FactorFieldValue(_FIELD, 3.0), FactorFieldValue(_FIELD, None, masked=True)),
+            universe_member=True,
+        ),
+        FactorObservation(
+            _DAYS[0],
+            "c",
+            (FactorFieldValue(_FIELD, 3.0), FactorFieldValue(_FIELD, None)),
+            universe_member=True,
+        ),
+    )
+
+    # `zero` 는 출력의 빈 칸을 채우되 가린 칸은 채우지 않는다 — 마지막 셀의 가림까지 읽는지 가른다.
+    values = evaluate_factor_graph(
+        graph, observations=observations, missing=MissingPolicy.ZERO
+    ).values
+
+    assert [value.value for value in values] == [2.0, None, 0.0]

@@ -356,8 +356,14 @@ export const currentSpec = (state: DocumentState): StrategySpec | null =>
 /** Diagnostics for the current text: parser syntax markers now, backend markers once compiled. */
 export const currentDiagnostics = (
   state: DocumentState,
+): DocumentDiagnostic[] =>
+  diagnosticsOf(currentParseOutcome(state), currentCompileOutcome(state));
+
+/** `currentDiagnostics` 의 규칙을 이미 고른 현재 parse·compile 결과로 적용한다(memo 입력용). */
+export const diagnosticsOf = (
+  parsed: ParsedSource | null,
+  compiled: CompileOutcome | null,
 ): DocumentDiagnostic[] => {
-  const parsed = currentParseOutcome(state);
   if (parsed === null) return [];
   if (parsed.status === "rejected") {
     return parsed.diagnostics.map((d) => ({
@@ -369,5 +375,5 @@ export const currentDiagnostics = (
       range: d.range,
     }));
   }
-  return currentCompileOutcome(state)?.diagnostics ?? [];
+  return compiled?.diagnostics ?? [];
 };

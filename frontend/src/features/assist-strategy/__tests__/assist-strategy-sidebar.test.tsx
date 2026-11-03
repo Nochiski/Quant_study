@@ -37,6 +37,7 @@ import type {
   StrategyProposalView,
   TurnContextPayload,
 } from "../../../entities/assistant";
+import { AssistSidebarStateProvider } from "../model/use-assist-sidebar";
 import {
   AssistStrategySidebar,
   type AssistProposalAction,
@@ -273,6 +274,16 @@ type MountOptions = {
   onApplyProposalAndBacktest?: (action: AssistProposalAction) => void;
   onClose?: () => void;
   suggestions?: readonly string[];
+  /**
+   * 화면처럼 공급자 하나 아래 사이드바 두 자리와 화면의 나머지(렌더 수를 세는 형제)를 둔다. 주면 형제가 그려질
+   * 때마다 부른다.
+   */
+  shared?: { onSiblingRender: () => void };
+};
+
+const Sibling = ({ onRender }: { onRender: () => void }) => {
+  onRender();
+  return null;
 };
 
 const context = (): TurnContextPayload => ({
@@ -286,7 +297,7 @@ const context = (): TurnContextPayload => ({
   },
 });
 
-const mount = ({ result, ...options }: MountOptions = {}) => {
+const mount = ({ result, shared, ...options }: MountOptions = {}) => {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -298,7 +309,13 @@ const mount = ({ result, ...options }: MountOptions = {}) => {
     getParentRoute: () => rootRoute,
     path: "/",
     component: () =>
-      result === undefined ? (
+      shared !== undefined ? (
+        <AssistSidebarStateProvider documentRef={DOCUMENT} readContext={context}>
+          <AssistStrategySidebar documentRef={DOCUMENT} readContext={context} {...options} />
+          <Sibling onRender={shared.onSiblingRender} />
+          <AssistStrategySidebar documentRef={DOCUMENT} readContext={context} {...options} />
+        </AssistSidebarStateProvider>
+      ) : result === undefined ? (
         <AssistStrategySidebar
           documentRef={DOCUMENT}
           readContext={context}
@@ -858,6 +875,22 @@ describe("AssistStrategySidebar", () => {
     await user.click(within(chips).getByRole("button", { name: "첫 추천" }));
     expect(input).toHaveValue("내가 쓴 질문\n첫 추천");
     expect(startedTurns).toHaveLength(0);
+  });
+
+  it("공급자 아래 두 자리는 입력 초안을 함께 쓰고, 입력이 바뀌어도 화면의 나머지는 다시 그리지 않는다", async () => {
+    const user = userEvent.setup();
+    let siblingRenders = 0;
+    mount({ shared: { onSiblingRender: () => (siblingRenders += 1) } });
+    const [first, second] = await screen.findAllByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    const before = siblingRenders;
+    expect(before).toBeGreaterThan(0);
+
+    await user.type(first, "두 자리에서 이어 쓰는 질문");
+
+    expect(second).toHaveValue("두 자리에서 이어 쓰는 질문");
+    expect(siblingRenders).toBe(before);
   });
 
   it("대화 목록을 읽는 동안에는 보내기와 추천 질문이 꺼져 새 대화를 만들지 않는다(최종 리뷰 3)", async () => {

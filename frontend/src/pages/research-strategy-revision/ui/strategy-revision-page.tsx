@@ -58,8 +58,8 @@ import {
   type StrategyView,
 } from "../../../features/edit-strategy";
 import {
+  AssistSidebarStateProvider,
   AssistStrategySidebar,
-  useAssistSidebarState,
 } from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
@@ -264,12 +264,6 @@ export const StrategyRevisionPage = () => {
     environment: runSettings.environment,
     backtest: { canRun, settling: backtest.settling, run: runBacktest },
   });
-  // AI 대화·입력칸 상태는 새 전략 화면과 같이 화면이 든다. 편집기 AI 열이 접힌 동안(widget 이 넘기는 `open`)
-  // 대화 조회를 멈추되 입력 초안은 남긴다(SoT 3차 경미 1·2, 5차 리뷰 9).
-  const assistantState = useAssistSidebarState({
-    documentRef: strategyAssistant.documentRef,
-    readContext: strategyAssistant.readContext,
-  });
   const selectSymbol = useCallback(
     (pointer: string): void => {
       outline.requestSourceReveal(pointer);
@@ -315,8 +309,13 @@ export const StrategyRevisionPage = () => {
 
   const title = stored.spec.title || t("page.revision.untitled");
 
+  // AI 대화·입력칸 상태는 새 전략 화면과 같이 화면 단위 공급자가 든다(토큰마다 화면을 다시 그리지 않게). 편집기
+  // AI 열이 접힌 동안(widget 이 넘기는 `open`) 대화 조회를 멈추되 입력 초안은 남긴다(SoT 3차 경미 1·2, 5차 리뷰 9).
   return (
-    <>
+    <AssistSidebarStateProvider
+      documentRef={strategyAssistant.documentRef}
+      readContext={strategyAssistant.readContext}
+    >
       <StrategyIde
         title={title}
         versionLabel={`v${stored.revision}`}
@@ -666,7 +665,6 @@ export const StrategyRevisionPage = () => {
             // 창을 접는 손잡이는 창의 최소화 하나다 — 최소화는 턴을 끊지 않는다(진행 중 답변은 끝까지 받는다).
             // 답을 멈추려면 입력칸 옆 "중지"를 쓴다. 사이드바 자신의 닫기(취소 확인)는 두지 않는다.
             visible={open}
-            state={assistantState}
             // 떠 있는 창 안이라 대화가 비어 있어도 입력칸을 창 바닥에 붙인다.
             layout="docked"
           />
@@ -706,6 +704,6 @@ export const StrategyRevisionPage = () => {
       />
       <ProposalApplyDialog apply={proposalApply} />
       <DirtyLeaveGuard dirty={document.dirty} acceptedRunId={backtest.status.kind === "accepted" ? backtest.status.runId : null} />
-    </>
+    </AssistSidebarStateProvider>
   );
 };

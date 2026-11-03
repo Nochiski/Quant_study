@@ -425,7 +425,7 @@ class PortfolioDesignService:
         progress(_PROGRESS_FACTOR_INPUTS, "Preparing factor inputs")
         factor_cells: _SharedCells[FactorFieldValue] = {}
         factor_observations = tuple(
-            _to_factor_observation(item, checkpoint=checkpoint, cells=factor_cells)
+            _to_factor_observation(item, cells=factor_cells)
             for item in _reported(
                 raw.observations,
                 checkpoint,
@@ -1011,14 +1011,15 @@ def _portfolio_cell(field: RawFieldValue) -> PortfolioFieldValue:
 
 
 def _to_factor_observation(
-    item: RawObservation,
-    *,
-    checkpoint: Callable[[], None],
-    cells: _SharedCells[FactorFieldValue] | None = None,
+    item: RawObservation, *, cells: _SharedCells[FactorFieldValue] | None = None
 ) -> FactorObservation:
-    """원시 관측 한 행을 팩터 입력으로. `cells` 를 주면 같은 원시 셀의 변환을 행끼리 나눠 쓴다."""
+    """원시 관측 한 행을 팩터 입력으로. `cells` 를 주면 같은 원시 셀의 변환을 행끼리 나눠 쓴다.
+
+    행 하나의 필드 몇 개는 취소 확인 없이 돈다 — 취소는 행을 도는 쪽이 `_CHECKPOINT_BATCH` 행마다
+    본다.
+    """
     shared: _SharedCells[FactorFieldValue] = {} if cells is None else cells
-    for field in _checkpointed(item.fields, checkpoint):
+    for field in item.fields:
         if field.available_date > item.as_of:
             raise _look_ahead_violation(
                 field_id=field.field_id,
@@ -1030,8 +1031,7 @@ def _to_factor_observation(
         as_of=item.as_of,
         security_id=item.security_id,
         fields=tuple(
-            _shared_cell(shared, item.security_id, field, _factor_cell)
-            for field in _checkpointed(item.fields, checkpoint)
+            _shared_cell(shared, item.security_id, field, _factor_cell) for field in item.fields
         ),
         # Membership travels with the row so cross-sectional operators score members against
         # members only (D-001); dropping non-members here would truncate time-series lookbacks.
@@ -1047,17 +1047,29 @@ def _to_portfolio_observations(
     checkpoint: Callable[[], None] = lambda: None,
     progress: Callable[[float], None] = lambda fraction: None,
 ) -> tuple[PortfolioObservation, ...]:
-    """`progress` 는 팩터 값 색인(0~0.3)과 관측 조립(0.3~1.0) 진행을 받는다."""
+    """`progress` 는 관측 조립 진행(0~1)을 받는다.
+
+    팩터 값은 원시 관측과 위치로 짝짓는다 — 팩터 입력은 원시 관측 행마다 하나이고 평가기는 입력
+    순서대로 값을 낸다(`zip(strict=True)`). (팩터, 날짜, 종목) 색인을 따로 만들면 행 수 × 팩터
+    수만큼 키가 생겨 관측·팩터 값이 모두 살아 있는 이 단계의 최대 메모리가 커진다. 짝이 어긋나면
+    멈춘다.
+
+    취소는 관측 행을 도는 바깥 반복이 `_CHECKPOINT_BATCH` 행마다 본다. 행 안의 팩터·필드 몇 개는
+    확인 없이 돈다.
+    """
     in_range = set(_checkpointed(raw.sessions, checkpoint))
-    values_by_key: dict[tuple[str, date, str], float | None] = {}
-    record_count = max(len(evaluations), 1)
-    for record_index, record in enumerate(_checkpointed(evaluations, checkpoint)):
-
-        def report_record(fraction: float, index: int = record_index) -> None:
-            progress(0.3 * (index + fraction) / record_count)
-
-        for value in _reported(record.values, checkpoint, report_record):
-            values_by_key[(record.factor_id, value.as_of, value.security_id)] = value.value
+    for record in evaluations:
+        if len(record.values) != len(raw.observations):
+            raise RuntimeError(
+                "factor values are not aligned with the raw observations — "
+                f"factor_id={record.factor_id} values={len(record.values)} "
+                f"observations={len(raw.observations)}"
+            )
+    # 팩터 값의 공개일은 plan 이 읽는 필드로 정한다 — 그 집합은 행마다가 아니라 팩터마다 한 번
+    # 만든다.
+    publications = tuple(
+        (record, frozenset(record.plan.required_field_ids)) for record in evaluations
+    )
     portfolio_cells: _SharedCells[PortfolioFieldValue] = {}
     opening_weights = (
         None
@@ -1075,16 +1087,14 @@ def _to_portfolio_observations(
             factor_values=tuple(
                 PortfolioFactorValue(
                     factor_id=record.factor_id,
-                    value=values_by_key.get((record.factor_id, item.as_of, item.security_id)),
-                    available_date=_latest_input_publication(
-                        item, record.plan, checkpoint=checkpoint
-                    ),
+                    value=_aligned_value(record, index, item),
+                    available_date=_latest_input_publication(item, required),
                 )
-                for record in _checkpointed(evaluations, checkpoint)
+                for record, required in publications
             ),
             fields=tuple(
                 _shared_cell(portfolio_cells, item.security_id, field, _portfolio_cell)
-                for field in _checkpointed(item.fields, checkpoint)
+                for field in item.fields
             ),
             sector_id=item.sector_id,
             previous_weight=(
@@ -1093,26 +1103,29 @@ def _to_portfolio_observations(
                 else opening_weights.get(item.security_id, 0.0)
             ),
         )
-        for item in _reported(
-            raw.observations, checkpoint, lambda fraction: progress(0.3 + 0.7 * fraction)
-        )
+        for index, item in enumerate(_reported(raw.observations, checkpoint, progress))
         if item.as_of in in_range
     )
 
 
-def _latest_input_publication(
-    item: RawObservation,
-    plan: FactorExecutionPlan,
-    *,
-    checkpoint: Callable[[], None],
-) -> date:
+def _aligned_value(
+    record: FactorEvaluationRecord, index: int, item: RawObservation
+) -> float | None:
+    """원시 관측 `index` 행의 팩터 값. 위치의 값이 그 행(날짜·종목)의 것이 아니면 멈춘다."""
+    value = record.values[index]
+    if value.as_of != item.as_of or value.security_id != item.security_id:
+        raise RuntimeError(
+            "factor value is not aligned with its raw observation — "
+            f"factor_id={record.factor_id} index={index} "
+            f"value=({value.as_of}, {value.security_id}) "
+            f"observation=({item.as_of}, {item.security_id})"
+        )
+    return value.value
+
+
+def _latest_input_publication(item: RawObservation, required: frozenset[str]) -> date:
     """Publication date of the factor value: the latest among the fields its plan reads."""
-    required = set(plan.required_field_ids)
     return max(
-        (
-            field.available_date
-            for field in _checkpointed(item.fields, checkpoint)
-            if field.field_id in required
-        ),
+        (field.available_date for field in item.fields if field.field_id in required),
         default=item.as_of,
     )

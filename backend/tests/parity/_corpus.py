@@ -517,7 +517,7 @@ def _section_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
 def factor_panel(seed: int) -> tuple[FactorObservation, ...]:
     """L1 입력. S11 의 `x` 몇 칸에 bool·str 을 넣는다(숫자 입력 자리라 평가기가 None 으로 본다)."""
     raw = synthetic_raw_panel(seed, ("x", "y", "sector"), group="sector", extreme="x")
-    rows = [_to_factor_observation(item, checkpoint=lambda: None) for item in raw]
+    rows = [_to_factor_observation(item) for item in raw]
     odd: dict[int, bool | str] = {2: True, 5: False, 9: "A"}
     for position, row in enumerate(rows):
         day = SESSIONS.index(row.as_of)

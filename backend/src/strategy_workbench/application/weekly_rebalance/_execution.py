@@ -322,7 +322,10 @@ class WeeklyExecutionService:
         if send and any(line.outcome == SubmitStatus.SENT.value for line in lines):
             self._await_sells(record.plan_id)
         state = self._gateway.state() if send else state
-        available = state.cash_krw - state.reserved_cash_krw
+        # 목표 금액이 남긴 현금 비율을 실행에서도 지킨다. 남긴 종목이 밴드 안에서 목표를 넘으면
+        # 마지막 매수가 남은 현금을 다 쓴다(2026-11-02 매매 뒤 7,788원).
+        floor = record.plan.cash_floor_krw
+        available = state.cash_krw - state.reserved_cash_krw - floor
         if not send:
             # 미리보기에서는 매도 대금이 아직 들어오지 않았다. 지정가 대금에서 비용 상한을
             # 뺀 값을 더해 본다.
@@ -346,6 +349,7 @@ class WeeklyExecutionService:
                 budget,
                 send,
                 available=available,
+                cash_floor=floor,
             )
             if line.outcome in (SubmitStatus.SENT.value, "preview"):
                 fee = self._policy.fee_budget("buy", line.quantity, line.limit_price_krw)
@@ -367,6 +371,7 @@ class WeeklyExecutionService:
         send: bool,
         *,
         available: int | None = None,
+        cash_floor: int = 0,
     ) -> OrderLine:
         base = f"{record.plan_id}-{symbol}-{side}"
         sent_before = sum(item == base or item.startswith(f"{base}-c") for item in existing)
@@ -417,7 +422,11 @@ class WeeklyExecutionService:
             affordable = affordable_shares(available, limit, self._policy.buy_fee_budget_bp)
             quantity = min(quantity, affordable)
             if quantity <= 0:
-                return skipped("skipped", f"살 현금이 없다 — available={available}", limit)
+                return skipped(
+                    "skipped",
+                    f"살 현금이 없다 — 현금 하한 {cash_floor:,}원을 뺀 available={available}",
+                    limit,
+                )
         request = OrderRequest(
             intent_id,
             symbol,

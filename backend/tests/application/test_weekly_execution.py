@@ -254,11 +254,11 @@ def test_preview_sends_nothing_and_orders_sells_before_buys() -> None:
 
 def test_open_initializes_the_ledger_sells_first_and_buys_with_freed_cash() -> None:
     r = rig()
-    r.gateway.cash = 1_000_000
+    r.gateway.cash = 1_080_000
     result = r.service.execute(PLAN, Phase.OPEN, send=True)
     assert result.status is ExecuteStatus.OK and r.gateway.ready
-    # 매도 999,000원이 들어온 뒤 1,999,000원으로 산다. A 130주(1,302,600 + 비용 상한 5,211원) 뒤
-    # 남은 691,189원 ÷ (10,020 × 1.0035) = 68.7 → B 68주
+    # 매도 999,000원이 들어온 뒤 현금 하한 80,000원을 빼고 1,999,000원으로 산다. A 130주
+    # (1,302,600 + 비용 상한 5,211원) 뒤 남은 691,189원 ÷ (10,020 × 1.0040) = 68.7 → B 68주
     assert _sent(r) == [
         (f"{PLAN}-00000E-sell", "sell", 100, 9_990),
         (f"{PLAN}-00000A-buy", "buy", 130, 10_020),
@@ -455,11 +455,27 @@ def test_keeping_a_name_planned_for_sale_also_drops_the_lowest_new_buy() -> None
 def test_cash_limited_buy_is_sized_with_the_fee_budget_the_ledger_checks() -> None:
     # 리뷰 #603: 수량은 35bp 로 정하고 S05 는 40bp 로 현금을 검사해 주문 전체가 막혔다
     r = rig()
-    r.gateway.cash = 992_811  # 매도 999,000원 · A 130주(1,307,811원) 뒤 B 에 684,000원이 남는다
+    # 매도 999,000원 · 현금 하한 80,000원 · A 130주(1,307,811원) 뒤 B 에 684,000원이 남는다
+    r.gateway.cash = 1_072_811
     result = r.service.execute(PLAN, Phase.OPEN, send=True)
     b = next(line for line in result.lines if line.symbol == "00000B")
     # 684,000 ÷ (10,020 × 1.0040) = 67.99 → 67주. 35bp 로는 68주(684,086원)라 현금을 넘었다
     assert (b.outcome, b.quantity) == ("sent", 67)
+
+
+def test_buys_leave_the_cash_reserve_the_plan_kept_out_of_the_targets() -> None:
+    # 11-02: 목표는 총자산의 2%를 현금으로 남겼는데 마지막 매수가 남은 현금을 다 써 7,788원이 남았다
+    r = rig()
+    r.gateway.cash = 1_000_000
+    preview = r.service.execute(PLAN, Phase.OPEN, send=False)
+    result = r.service.execute(PLAN, Phase.OPEN, send=True)
+    # 총자산 4,000,000원 × 2% = 80,000원은 사지 않는다. 매도 뒤 1,999,000 − 80,000원에서 A 130주
+    # (1,307,811원)를 사고 남은 611,189원 ÷ (10,020 × 1.0040) = 60.8 → B 60주
+    buys = [("00000A", 130), ("00000B", 60)]
+    assert [(line.symbol, line.quantity) for line in result.lines if line.side == "buy"] == buys
+    assert [(line.symbol, line.quantity) for line in preview.lines if line.side == "buy"] == buys
+    state = r.gateway.state()
+    assert state.cash_krw - state.reserved_cash_krw >= 80_000
 
 
 # --- 리스크 가드(②·③) -------------------------------------------------------------------------

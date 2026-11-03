@@ -13,6 +13,7 @@ import { Link } from "../../../shared/lib/router";
 import { Button, EmptyState } from "../../../shared/ui";
 import {
   useAssistSidebarState,
+  useSharedAssistSidebarState,
   type AssistSidebarState,
 } from "../model/use-assist-sidebar";
 import { AssistComposer } from "./assist-composer";
@@ -100,10 +101,6 @@ export type AssistStrategySidebarProps = AssistScreenProps & {
    * 조회한다. 기본은 보임이다.
    */
   visible?: boolean;
-  /**
-   * 위쪽에서 만든 대화·입력칸 상태(`useAssistSidebarState`). 주면 사이드바는 그리기만 한다.
-   */
-  state?: AssistSidebarState;
 };
 
 /**
@@ -111,15 +108,17 @@ export type AssistStrategySidebarProps = AssistScreenProps & {
  *
  * 그래프·YAML 어느 탭에서 보든 같은 세션이며, 문서를 바꾸는 것은 제안 카드의 버튼이 부르는 콜백뿐이다
  * (적용 경로는 spec D7에 따라 바깥이 소유한다). 서버 상태는 전부 query cache가 들고, 대화·입력칸 상태는
- * `useAssistSidebarState`가 든다. `state`를 주지 않으면 사이드바가 스스로 만들고, 주면 그 상태를 그린다 —
- * 같은 문서를 두 자리가 번갈아 보이는 화면이 대화·입력을 잇는 길이다(가이드 재리뷰 4).
+ * `useAssistSidebarState`가 든다. 위쪽에 `AssistSidebarStateProvider` 가 있으면 그 상태를 그리고, 없으면
+ * 스스로 만든다 — 같은 문서를 두 자리가 번갈아 보이는 화면이 대화·입력을 잇는 길이다(가이드 재리뷰 4).
  */
-export const AssistStrategySidebar = (props: AssistStrategySidebarProps) =>
-  props.state === undefined ? (
+export const AssistStrategySidebar = (props: AssistStrategySidebarProps) => {
+  const shared = useSharedAssistSidebarState();
+  return shared === null ? (
     <OwnedSidebar {...props} />
   ) : (
-    <SidebarView {...props} state={props.state} />
+    <SidebarView {...props} state={shared} />
   );
+};
 
 const OwnedSidebar = (props: AssistStrategySidebarProps) => {
   const state = useAssistSidebarState({

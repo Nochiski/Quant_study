@@ -66,8 +66,8 @@ import {
   hasActiveAssistantProvider,
 } from "../../../entities/assistant";
 import {
+  AssistSidebarStateProvider,
   AssistStrategySidebar,
-  useAssistSidebarState,
 } from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
@@ -337,13 +337,13 @@ export const NewStrategyPage = () => {
     });
   }, [navigate, search.assist]);
 
-  // AI 대화·입력칸 상태는 화면이 한 벌 든다. 안내의 AI 탭과 편집기 AI 열이 같은 상태를 그려서, 안내를 닫고
-  // 편집기로 가도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4). 서버 조회는 사이드바가 보이는 동안만 돈다 —
-  // 보임 여부는 사이드바를 품은 자리(안내 탭·편집기 AI 열)가 사이드바에 넘기고, 화면은 사본을 들지 않는다(5차 리뷰 9).
-  const assistantState = useAssistSidebarState({
+  // AI 대화·입력칸 상태는 화면 단위 공급자가 한 벌 든다. 안내와 편집기 두 갈래가 같은 자리(맨 바깥)에 공급자를 두어
+  // 안내를 닫고 편집기로 가도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4). 서버 조회는 사이드바가 보이는
+  // 동안만 돈다 — 보임 여부는 사이드바를 품은 자리(안내 탭·편집기 AI 열)가 사이드바에 넘긴다(5차 리뷰 9).
+  const assistantScope = {
     documentRef: strategyAssistant.documentRef,
     readContext: strategyAssistant.readContext,
-  });
+  };
 
   // 단계별 안내(RD-04-D). 같은 문서·같은 트랜잭션을 쓰고, 편집기는 숨긴 채 살아 있어 되돌리기 이력이 이어진다.
   // 안내를 닫으면 같은 초안을 편집기 그래프 보기로 연다.
@@ -397,7 +397,7 @@ export const NewStrategyPage = () => {
   };
   if (search.guide)
     return (
-      <>
+      <AssistSidebarStateProvider {...assistantScope}>
         <div className="page">
           {autosave.recovery ? (
             <RecoveryBanner recovery={autosave.recovery} />
@@ -426,7 +426,6 @@ export const NewStrategyPage = () => {
                 // 안내가 해석한 지금 단계(모르는 URL 값이면 첫 단계)가 추천 질문의 맥락이다(최종 리뷰 4).
                 suggestionsKey={step.id}
                 visible={guideAssistantOpen === true}
-                state={assistantState}
                 layout="docked"
               />
             )}
@@ -521,11 +520,11 @@ export const NewStrategyPage = () => {
         </div>
         <ProposalApplyDialog apply={proposalApply} />
         <DirtyLeaveGuard dirty={document.dirty && !leaving} acceptedRunId={null} />
-      </>
+      </AssistSidebarStateProvider>
     );
 
   return (
-    <>
+    <AssistSidebarStateProvider {...assistantScope}>
       <StrategyIde
         assistantStartsOpen={assistantHandoff}
         notice={
@@ -820,7 +819,6 @@ export const NewStrategyPage = () => {
             // 편집기로 오면 고치지 않은 안내 추천 질문은 입력칸에서 지워진다.
             suggestionsKey="editor"
             visible={open}
-            state={assistantState}
             // 떠 있는 창 안이라 대화가 비어 있어도 입력칸을 창 바닥에 붙인다.
             layout="docked"
           />
@@ -858,6 +856,6 @@ export const NewStrategyPage = () => {
       />
       <ProposalApplyDialog apply={proposalApply} />
       <DirtyLeaveGuard dirty={document.dirty && !leaving} acceptedRunId={backtest.status.kind === "accepted" ? backtest.status.runId : null} />
-    </>
+    </AssistSidebarStateProvider>
   );
 };

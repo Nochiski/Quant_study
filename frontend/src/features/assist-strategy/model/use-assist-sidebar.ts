@@ -1,4 +1,11 @@
-import { useCallback, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useState,
+  type ReactNode,
+} from "react";
 
 import type { DocumentRefView, TurnContextPayload } from "../../../entities/assistant";
 import { useAssistChat, type AssistChat } from "./use-assist-chat";
@@ -10,8 +17,8 @@ export type UseAssistSidebarStateOptions = {
 
 /**
  * 사이드바 한 벌의 대화·입력칸 상태. 사이드바가 스스로 만들 수도 있고, 같은 문서를 두 자리(새 전략 안내의 AI 탭과
- * 편집기 AI 열)가 번갈아 보이는 화면은 위쪽에서 한 번 만들어 두 사이드바에 넘긴다 — 자리를 옮겨도 치던 문장과
- * 진행 중 답변이 이어진다(가이드 재리뷰 4).
+ * 편집기 AI 열)가 번갈아 보이는 화면은 `AssistSidebarStateProvider` 가 한 번 만들어 그 아래 사이드바들이 함께
+ * 그린다 — 자리를 옮겨도 치던 문장과 진행 중 답변이 이어진다(가이드 재리뷰 4).
  */
 export type AssistSidebarState = {
   chat: AssistChat;
@@ -114,3 +121,22 @@ export const useAssistSidebarState = ({
     setVisible,
   };
 };
+
+const SharedAssistSidebarState = createContext<AssistSidebarState | null>(null);
+
+/**
+ * 화면이 한 벌 드는 대화·입력칸 상태를 품는다. 상태가 바뀌어도(답변 토큰·입력 글자) 다시 그리는 것은 이 공급자와
+ * 상태를 읽는 사이드바뿐이다 — 화면이 상태를 직접 들면 토큰마다 편집 화면 전체(숨은 그래프 탭·디버거 포함)를 다시
+ * 그린다. 화면은 자기 트리를 감싸기만 하고, 공급자를 두 갈래(안내·편집기)의 같은 자리에 두어 상태가 이어지게 한다.
+ */
+export const AssistSidebarStateProvider = ({
+  children,
+  ...options
+}: UseAssistSidebarStateOptions & { children: ReactNode }) => {
+  const state = useAssistSidebarState(options);
+  return createElement(SharedAssistSidebarState.Provider, { value: state }, children);
+};
+
+/** 위쪽 공급자가 든 상태. 공급자 밖이면 null 이고, 그때 사이드바는 스스로 상태를 만든다. */
+export const useSharedAssistSidebarState = (): AssistSidebarState | null =>
+  useContext(SharedAssistSidebarState);

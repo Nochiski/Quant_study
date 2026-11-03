@@ -90,7 +90,7 @@ def roots(tmp_path: Path) -> Roots:
 
 
 def test_build_runs_the_closure_in_order_on_one_dart_snapshot(roots: Roots) -> None:
-    """dart.db 하나만 뜬 스냅숏 한 판으로 문서 캐시(연구 최신 ok 기준) → stage 16표 → equity 6표(연구 baseline) 순서로
+    """dart.db 하나만 뜬 스냅숏 한 판으로 문서 캐시(연구 최신 ok 기준) → stage 17표 → equity 7표(연구 baseline) 순서로
     짓고, 인계는 그날 저녁 판 · health ok · 표마다 지금 판 · 모델 DB 루트다(fi `--dart-builds-from` 이 읽는 모양)."""
     run = FakeRunner(roots)
     r = evening_dart.build(T, roots, run=run, python="py")

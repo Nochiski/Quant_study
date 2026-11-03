@@ -139,7 +139,7 @@ def test_supplement_commits_its_own_board_and_records_wise_asof(supp) -> None:
         "2026-09-29", "2026-09-29", 0, 0)
     assert {g.name: g.status.value for g in s.gates} == {
         "FG0": "pass", "FG1": "pass", "FG2": "pass", "FG3": "pass", "FG4": "skip",
-        "FG-fresh": "pass"}
+        "FG-fresh": "pass", "FG6": "pass"}
 
 
 # ── ① 휴일 WISE 가 들어간다 · 나머지는 D ───────────────────────────────────────

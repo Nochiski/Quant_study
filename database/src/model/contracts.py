@@ -219,6 +219,28 @@ FI_TABLES: dict[str, TableContract] = {t.name: t for t in (
     FI_PRICES, FI_ADJ_PRICES, FI_FLOWS, FI_UNIVERSE, FI_CONSENSUS, FI_CONSENSUS_ANNUAL,
     FI_FIN_SUMMARY, FI_CREDIT)}
 
+# 엑셀 전용 fi 표 — 같은 fi 판에 굽고 FG0·FG1 이 같이 보지만 **엔진 입력이 아니다**(FI_TABLES 밖). 모델 빌드 ·
+# 두 판 대조 · 엔진 계약은 FI_TABLES 만 돈다. 잠정실적은 점수에 넣지 않는다(N-64 Q5) — `fi_fin_summary` 에 넣으면
+# v4 `_opm_ttm` 이 분기 행을 기준 표시 없이 다 읽어 점수가 움직인다.
+FI_FIN_PRELIM = TableContract(
+    "fi_fin_prelim", ("ticker", "period"),
+    (_c("ticker", "VARCHAR"), _c("period", "VARCHAR", note="YYYY/MM — fi_fin_summary 분기 행과 같은 기말일 축"),
+     _c("revenue", "DOUBLE", "억원"), _c("op", "DOUBLE", "억원"), _c("ni", "DOUBLE", "억원"),
+     _c("fs_basis", "VARCHAR", note="PRELIM:CFS | PRELIM:OFS"),
+     _c("rcept_no", "VARCHAR", note="고른 잠정 공시 접수번호(정정이면 정정본)"),
+     _c("is_correction", "BOOLEAN"),
+     _c("unit_check", "VARCHAR",
+        note="ok(전년동기 값이 우리 확정 같은 분기와 맞음) | no_ref(기준 없음 — 직전 확정 분기 대비 범위만 봄) | "
+             "withheld(단위 · 파싱 의심 — 엑셀에 안 냄, FG6 warn)"),
+     _c("available_date", "DATE", note="잠정 공시 공개일(≤ dart_asof)")),
+    window="종목의 확정 분기(fi_fin_summary 분기 행 중 값이 있는 것) 중 최신보다 뒤 기말만, 최대 5기",
+    source="equity fin_prelim(S27 — stage stg_doc_prelim · stg_disclosure) + 이 판의 fi_fin_summary(확정 분기 · 검산 기준)",
+    readers=())
+
+FI_DELIVER_TABLES: dict[str, TableContract] = {FI_FIN_PRELIM.name: FI_FIN_PRELIM}
+# fi 판이 굽는 표 전부 — 빌드 · FG0 · FG1 · 투영은 이것을 돈다
+FI_BUILD_TABLES: dict[str, TableContract] = {**FI_TABLES, **FI_DELIVER_TABLES}
+
 
 # ── ② 모델 설정 ───────────────────────────────────────────────────────────────
 ROLES = ("score", "display")
@@ -477,7 +499,7 @@ def score_columns(spec: ModelSpec) -> tuple[str, ...]:
 __all__ = [
     "ALL_ENGINES", "DTYPES", "ELIGIBILITY_FLAGS", "FI_ADJ_PRICES",
     "FI_CONSENSUS", "FI_CONSENSUS_ANNUAL", "FI_COVERAGE_GRACE_MAX",
-    "FI_CREDIT", "FI_FIN_SUMMARY",
+    "FI_BUILD_TABLES", "FI_CREDIT", "FI_DELIVER_TABLES", "FI_FIN_PRELIM", "FI_FIN_SUMMARY",
     "FI_FLOWS", "FI_PRICES", "FI_TABLES", "FI_UNIVERSE", "FLOW_SUBJECTS", "GATE_RULES",
     "INDICATOR_COLUMNS", "PRIMARY_PREDECESSOR", "ROLES", "SCORE_BASE_COLUMNS", "SECTOR_LEVELS",
     "UNITS",

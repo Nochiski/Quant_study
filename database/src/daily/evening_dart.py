@@ -7,17 +7,18 @@
 판을 읽는다. 연구 루트에는 쓰지 않는다 — 연구 인계 이력(stage_builds)에 저녁 판이 섞이면 안 된다(T-29 와 같은 이유).
 
 폐포: 표 목록은 이 모듈 한 곳이다(fi 가 인계를 검사할 때도 여기서 읽는다).
-  · stage 16표는 모두 원장 dart.db 하나만 읽는다. `stg_rcept_dt_map` 이 먼저다(공개일 조회표). 문서 표
-    (`stg_doc_meta`·`stg_doc_correction`)는 같은 스냅숏의 문서 캐시가 있어야 지어진다.
-  · equity 6표는 이 stage 표와 서로만 입력으로 쓴다(corp → disclosure_version → fin_std … 순서).
+  · stage 17표는 모두 원장 dart.db 하나만 읽는다. `stg_rcept_dt_map` 이 먼저다(공개일 조회표). 문서 표
+    (`stg_doc_meta`·`stg_doc_correction`·`stg_doc_prelim`)는 같은 스냅숏의 문서 캐시가 있어야 지어진다.
+  · equity 7표는 이 stage 표와 서로만 입력으로 쓴다(corp → disclosure_version → fin_std … 순서). `fin_prelim`(잠정실적,
+    N-64)은 그날 저녁 잠정 공시를 메인 엑셀 Earnings 'P' 칸에 싣는다.
   · 수정주가 사슬(기업행위 → 계수 → 유니버스)은 넣지 않는다 — fi 의 T-6 당일 기업행위 보류가 맡는다.
 
 순서(앞 단계가 실패하면 멈추고, 인계는 health fail 로 쓴다 — fi 가 그 인계를 거절해 체인이 전 거래일 공시 판으로 간다):
   ① 스냅숏 — dart.db 하나만 `<model_db>/snapshots` 에 VACUUM INTO(원장 락 없이 — 아침 빌드와 같은 방식, 원장 무변경)
   ② 문서 캐시 — 연구 루트의 최신 ok 캐시를 기준으로 증분(`stage.doc_prepass --base-stage-root`, 손대지 않은 샤드는 하드링크)
-  ③ stage 16표 — 표마다 따로 프로세스(`python -m stage`, ① 의 스냅숏 id 를 모두 쓴다 · 게이트 임계는 연구 stage
+  ③ stage 17표 — 표마다 따로 프로세스(`python -m stage`, ① 의 스냅숏 id 를 모두 쓴다 · 게이트 임계는 연구 stage
      baseline 을 `--baseline` 으로 — 모델 DB stage 루트엔 그 파일이 없어 한도 0 으로 걸린다, 10-29 미리 돌리기)
-  ④ equity 6표 — `python -m equity --baseline <연구 baseline>`(사본을 두면 S1 처럼 상수가 늘 때 갈린다)
+  ④ equity 7표 — `python -m equity --baseline <연구 baseline>`(사본을 두면 S1 처럼 상수가 늘 때 갈린다)
   ⑤ 인계 기록(원자 교체) → 스냅숏 GC(keep = KEEP_DEFAULT, 현재 판 보호) · 지난 문서 캐시 정리(현재 판이 선 것만 남김)
      · equity `_pinned` 정리(`equity.inputs.gc_pinned` — 현재 판이 가리키는 판 + 표별 최신 keep, 연구 체인과 같은 함수)
 표마다 따로 프로세스인 이유: stg_fin 은 6GB 메모리 한도로 돈다 — 한 프로세스에 쌓지 않는다(연구 체인 run_stage_all 과 같다).
@@ -50,11 +51,11 @@ STAGE_TABLES: tuple[str, ...] = (
     "stg_fin", "stg_dividend", "stg_audit", "stg_holder_elestock", "stg_holder_majorstock",
     "stg_disclosure", "stg_company", "stg_corp_map", "stg_doc_index",
     "stg_event_tsstk_aq", "stg_event_piic", "stg_event_cvbd_is", "stg_event_tsstk_dp",
-    "stg_doc_meta", "stg_doc_correction",
+    "stg_doc_meta", "stg_doc_correction", "stg_doc_prelim",
 )
 # stage → equity 순서(입력 의존 순 — corp·disclosure_version 이 fin_std·audit_opinion·holder_daily 앞)
 EQUITY_TABLES: tuple[str, ...] = ("corp", "disclosure_version", "fin_std", "dividend_event",
-                                  "audit_opinion", "holder_daily")
+                                  "audit_opinion", "holder_daily", "fin_prelim")
 BASIS = "evening"
 LEDGER = "dart"
 DOC_WORKERS = 3

@@ -1,11 +1,12 @@
-"""factor_inputs 판 게이트 FG0~FG4 · FG-fresh · FG5 (플랜 `2026-09-24-v3-merge.md` M2 W1-b · T2.11 ·
+"""factor_inputs 판 게이트 FG0~FG4 · FG-fresh · FG6 · FG5 (플랜 `2026-09-24-v3-merge.md` M2 W1-b · T2.11 ·
 컷오버 PR-5).
 
 `build.py` 가 판을 임시 경로에 parquet 으로 쓴 뒤, 그 파일 위 뷰(`g_<표>`)로 여기 게이트를 돈다.
 **FAIL 이 하나라도 있으면 판을 올리지 않는다**(MANIFEST 포인터를 바꾸지 않는다 — equity 규약).
 결과 타입은 stage/equity 와 같은 `stage.gates.GateResult` 다.
 
-  FG0 스키마   — 8표의 열 이름·순서·타입이 계약(`model.contracts.FI_TABLES`)과 같다. FAIL 이면
+  FG0 스키마   — 판이 굽는 표 전부(엔진 입력 8표 + 엑셀 전용 `FI_DELIVER_TABLES`, `model.contracts.FI_BUILD_TABLES`)의
+                 열 이름·순서·타입이 계약과 같다. FAIL 이면
                  뒤 게이트는 `skip(upstream_failed)`.
   FG1 행수     — 유니버스 × 창: 모든 표의 종목 ⊆ fi_universe · eligible 은 D 가격·cur 컨센서스가
                  있다 · eligible 수 ≥ 하한 · 날짜가 창 안 · 연간 ≤ 2기 · 분기 ≤ 5기 ·
@@ -26,6 +27,10 @@
                  T: 그날 06:00 수집, N-53)보다 COLLECTION_LAG_MAX 거래일 넘게 뒤처지지 않는다(수집 중단
                  허용치는 유예 G 와 따로 둔다). grace 종목이 `GRACE_WARN_MAX` 를 넘으면 metrics `warn`
                  (판정은 그대로 — WISE 부분 수집 실패 의심, N-47).
+  FG6 잠정 격리 — 잠정실적(N-64, 엑셀 전용 `fi_fin_prelim`)이 점수 표에 새지 않고 확정과 겹치지 않는다(PG-5 · 6 · 7):
+                 `fi_fin_summary` 에 PRELIM 행 0 · 두 재무 표에 D 의 달보다 뒤 기말 0 · 같은 (종목, 기말)에 값 있는
+                 확정 분기 행과 낼 잠정 행이 함께 0 · 잠정 공개일 ≤ dart_asof · 어휘. 단위 의심(`unit_check='withheld'`,
+                 PG-8)은 metrics `warn`(판정은 그대로 — 엑셀이 그 행을 내지 않는다). 거른 꼴 집계(PG-10)는 기록만.
   FG5 후보 커버리지 — 장 마감 판만(컷오버 PR-5 · N-42 Q4 '당일 행 없는 종목이 상한 넘으면 판 실패').
                  직전 판 모델 후보 중 T 가격이 없는 종목 비율 ≤ `T_CANDIDATE_MISSING_MAX`. 후보를 못
                  읽으면 FAIL. 아침판 판 기록에는 이 게이트가 없다(`GATE_ORDER` 그대로).
@@ -46,7 +51,7 @@ from pathlib import Path
 
 import duckdb
 from daily.kw_daily import COMMIT_MIN_RATIO
-from model.contracts import FI_TABLES, UniverseRule
+from model.contracts import FI_BUILD_TABLES, UniverseRule
 from stage import skip_allow
 from stage.gates import GateResult, GateStatus
 from stage.model import BASIS_SUPPLEMENT
@@ -59,7 +64,7 @@ from .queries import (
     T_PRICE_SOURCE,
 )
 
-GATE_ORDER = ("FG0", "FG1", "FG2", "FG3", "FG4", "FG-fresh")
+GATE_ORDER = ("FG0", "FG1", "FG2", "FG3", "FG4", "FG-fresh", "FG6")
 # 장 마감 판만 도는 게이트(컷오버 PR-5) — GATE_ORDER 뒤에 붙는다
 EVENING_GATE_ORDER = (*GATE_ORDER, "FG5")
 MKTCAP_REL_TOL = 1e-6
@@ -149,7 +154,7 @@ def _result(name: str, violations: dict[str, int], metrics: dict[str, object],
 # ── FG0 ──────────────────────────────────────────────────────────────────────
 def fg0_schema(ctx: GateContext) -> GateResult:
     mism: list[str] = []
-    for name, t in FI_TABLES.items():
+    for name, t in FI_BUILD_TABLES.items():
         got = [(str(r[0]), str(r[1])) for r in
                ctx.con.execute(f"DESCRIBE SELECT * FROM {ctx.view(name)}").fetchall()]
         want = [(c.name, c.dtype) for c in t.columns]
@@ -158,7 +163,7 @@ def fg0_schema(ctx: GateContext) -> GateResult:
     if mism:
         return GateResult("FG0", GateStatus.FAIL, " | ".join(mism)[:2000],
                           {"n_tables_mismatch": len(mism)})
-    return GateResult("FG0", GateStatus.PASS, "8표 열·타입이 계약과 같다",
+    return GateResult("FG0", GateStatus.PASS, f"{len(FI_BUILD_TABLES)}표 열·타입이 계약과 같다",
                       {"n_tables_mismatch": 0})
 
 
@@ -167,9 +172,9 @@ def fg1_rows(ctx: GateContext) -> GateResult:
     v = ctx.view
     con = ctx.con
     uni = v("fi_universe")
-    n_rows = {t: _count(con, f"SELECT count(*) FROM {v(t)}") for t in FI_TABLES}
+    n_rows = {t: _count(con, f"SELECT count(*) FROM {v(t)}") for t in FI_BUILD_TABLES}
     viol: dict[str, int] = {}
-    for t in FI_TABLES:
+    for t in FI_BUILD_TABLES:
         if t == "fi_universe":
             continue
         viol[f"{t}.ticker_outside_universe"] = _count(
@@ -448,6 +453,64 @@ def fg_fresh(ctx: GateContext) -> GateResult:
     return res
 
 
+# ── FG6 ──────────────────────────────────────────────────────────────────────
+PRELIM_BASES = ("PRELIM:CFS", "PRELIM:OFS")
+UNIT_CHECKS = ("ok", "no_ref", "withheld")
+# 단위 의심 행을 detail 에 몇 개까지 적나(나머지는 metrics 개수로만)
+PRELIM_WITHHELD_LIST_MAX = 20
+
+
+def fg6_prelim(ctx: GateContext) -> GateResult:
+    """잠정 격리(PG-5 · 6 · 7) — 폐기형. 단위 의심(PG-8)은 warn, 거른 꼴(PG-10)은 기록."""
+    con = ctx.con
+    fin, pre = ctx.view("fi_fin_summary"), ctx.view("fi_fin_prelim")
+    d_month = ctx.date[:4] + "/" + ctx.date[5:7]
+    shown = f"{pre} WHERE unit_check <> 'withheld'"
+    viol = {
+        "fi_fin_summary.prelim_rows": _count(
+            con, f"SELECT count(*) FROM {fin} WHERE fs_basis LIKE 'PRELIM%'"),
+        "fi_fin_summary.quarter_after_d": _count(
+            con, f"SELECT count(*) FROM {fin} WHERE period_type = 'quarter' AND period > '{d_month}'"),
+        "fi_fin_prelim.period_after_d": _count(
+            con, f"SELECT count(*) FROM {pre} WHERE period > '{d_month}'"),
+        "fi_fin_prelim.overlaps_confirmed": _count(
+            con, f"SELECT count(*) FROM (SELECT ticker, period FROM {shown}) p JOIN {fin} f "
+                 "ON f.ticker = p.ticker AND f.period = p.period AND f.period_type = 'quarter' "
+                 "AND (f.revenue IS NOT NULL OR f.op IS NOT NULL OR f.ni IS NOT NULL)"),
+        "fi_fin_prelim.available_after_asof": _count(
+            con, f"SELECT count(*) FROM {pre} WHERE available_date > DATE '{ctx.dart_asof}'"),
+        "fi_fin_prelim.outside_vocab": _count(
+            con, f"SELECT count(*) FROM {pre} WHERE fs_basis NOT IN "
+                 f"({', '.join(repr(b) for b in PRELIM_BASES)}) OR fs_basis IS NULL OR unit_check NOT IN "
+                 f"({', '.join(repr(u) for u in UNIT_CHECKS)}) OR unit_check IS NULL"),
+    }
+    withheld = [f"{t}:{r}" for t, r in con.execute(
+        f"SELECT ticker, rcept_no FROM {pre} WHERE unit_check = 'withheld' ORDER BY ticker, period").fetchall()]
+    by_check = {str(k): int(n) for k, n in con.execute(
+        f"SELECT unit_check, count(*) FROM {pre} GROUP BY 1 ORDER BY 1").fetchall()}
+    # 거른 꼴(PG-10) — equity 판의 상태별 접수 수(그날까지 공개된 것)와 새 분기 열
+    by_status = {str(k): int(n) for k, n in con.execute(
+        f"SELECT prelim_status, count(*) FROM fin_prelim WHERE available_date <= DATE '{ctx.dart_asof}' "
+        "GROUP BY 1 ORDER BY 1").fetchall()}
+    conf_max = _scalar(con, f"SELECT max(period) FROM {fin} WHERE period_type = 'quarter' "
+                            "AND (revenue IS NOT NULL OR op IS NOT NULL OR ni IS NOT NULL)")
+    pre_max = _scalar(con, f"SELECT max(period) FROM {shown}")
+    new_q = pre_max if pre_max is not None and (conf_max is None or str(pre_max) > str(conf_max)) else None
+    n_new_q = 0 if new_q is None else _count(con, f"SELECT count(*) FROM {shown} AND period = '{new_q}'")
+    warn = bool(withheld)
+    metrics: dict[str, object] = {
+        "n_rows_by_unit_check": by_check, "fin_prelim_by_status": by_status,
+        "confirmed_quarter_max": conf_max, "prelim_quarter_max": pre_max,
+        "new_quarter": new_q, "n_tickers_new_quarter": n_new_q,
+        "n_withheld": len(withheld), "withheld": withheld[:PRELIM_WITHHELD_LIST_MAX], "warn": warn}
+    warn_note = (f" · warn: 단위 의심 잠정 {len(withheld)}행 엑셀에 안 냄 "
+                 f"({', '.join(withheld[:PRELIM_WITHHELD_LIST_MAX])})" if warn else "")
+    res = _result("FG6", viol, metrics, f"잠정 격리 성립 · 새 분기 열 {new_q or '없음'}{warn_note}")
+    if warn and res.status is GateStatus.FAIL:
+        res = GateResult(res.name, res.status, res.detail + warn_note, res.metrics)
+    return res
+
+
 # ── FG5 ──────────────────────────────────────────────────────────────────────
 def fg5_t_coverage(ctx: GateContext) -> GateResult:
     """장 마감 판 후보 커버리지(N-42 Q4 · 컷오버 PR-5).
@@ -520,7 +583,7 @@ def fg5_t_coverage(ctx: GateContext) -> GateResult:
 
 
 GATES: tuple[Callable[[GateContext], GateResult], ...] = (
-    fg0_schema, fg1_rows, fg2_overlay, fg3_mktcap, fg4_golden, fg_fresh)
+    fg0_schema, fg1_rows, fg2_overlay, fg3_mktcap, fg4_golden, fg_fresh, fg6_prelim)
 EVENING_GATES: tuple[Callable[[GateContext], GateResult], ...] = (*GATES, fg5_t_coverage)
 
 

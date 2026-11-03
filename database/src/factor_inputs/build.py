@@ -25,8 +25,8 @@
 판으로 대신하지 않는다(P1):
   이력이 없다 · health 가 stage=ok·equity=ok 가 아니다 · 이력 basis 가 morning 이 아니다 ·
   이력 date 가 없거나 --date 보다 뒤다 · 표가 이력에 없다 · 그 판이 MANIFEST 에서 사라졌다.
-  예외: 선택 원천(`OPTIONAL_STAGE_SOURCES`, WISE 분기)은 이력에 키가 없으면 그날도 판이 없던 것이라
-  current 모드와 같이 빈 표(`absent`)로 대신한다(이력에 키가 있는데 판이 없으면 rc 2).
+  예외: 선택 원천(`OPTIONAL_STAGE_SOURCES` WISE 분기 · `OPTIONAL_EQUITY_SOURCES` 잠정실적)은 이력에 키가 없으면
+  그날도 판이 없던 것이라 current 모드와 같이 빈 표(`absent`)로 대신한다(이력에 키가 있는데 판이 없으면 rc 2).
 이력이 D' = 직전 거래일인지는 여기서 보지 않는다(장 마감 체인 PR-8 이 경로를 고를 때 맞춘다).
 이력 경로·날짜는 판 manifest `builds_from`·`builds_from_date` 에 남는다.
 
@@ -89,8 +89,9 @@ import duckdb
 from daily import calendar as daily_calendar
 from daily import evening_dart
 from equity import handoff, inputs
+from equity.rules_s27 import FIN_PRELIM
 from equity.rules_s10 import FIELDS as CREDIT_FIELDS
-from model.contracts import FI_COVERAGE_GRACE_MAX, FI_TABLES, UniverseRule
+from model.contracts import FI_BUILD_TABLES, FI_COVERAGE_GRACE_MAX, UniverseRule
 from stage import manifest, skip_allow
 from stage.gates import GateResult, GateStatus
 from stage.model import BASIS_SUPPLEMENT, basis_of_build_id, build_id_time, make_build_id
@@ -135,7 +136,10 @@ from . import gates, queries
 # 1.11.0(2026-10-29, D13 · N-62): 장 마감 판 DART 정보 시점 `dart_asof` — 저녁 DART 인계(`--dart-builds-from`)를 읽으면
 # DART 재무·배당·감사·공시·4Q 파생 공개일이 T 까지, 나머지는 asof(D') 그대로 · FG1 DART 행 상한 = dart_asof. 인계 없는
 # 판(아침·보강·인계 없는 장 마감)은 SQL·게이트 판정이 글자 그대로다
-RULES_VERSION = "fi1.11.0"
+# 1.12.0(2026-11-03, N-64 PR ②-1): 엑셀 전용 표 `fi_fin_prelim`(잠정실적 — 확정보다 뒤 분기만, 단위 검산 PG-8)과
+# 게이트 FG6(점수 표에 잠정 0 · 미래 분기 · 확정/잠정 겹침 · 단위 의심 warn). 원천 equity `fin_prelim` 은 선택 원천이다
+# (판이 없는 날 · 옛 이력은 빈 표). 엔진 입력 8표(FI_TABLES)의 SQL·판정은 글자 그대로다
+RULES_VERSION = "fi1.12.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning", BASIS_SUPPLEMENT)
 # fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)
@@ -154,7 +158,7 @@ DUCKDB_MEMORY_LIMIT = "8GB"
 EQUITY_SOURCES = ("trading_calendar", "universe_daily", "security", "price_daily",
                   "price_adj_daily", "adj_factor", "flow_daily", "credit_daily",
                   "sector_snapshot", "coverage_daily", "fin_std", "dividend_event",
-                  "audit_opinion", "disclosure_version", "corp")
+                  "audit_opinion", "disclosure_version", "corp", "fin_prelim")
 STAGE_SOURCES = ("stg_consensus_annual", "stg_consensus_matrix", "stg_fin_wise", "stg_fin_wise_q")
 # 저녁 DART 인계(`--dart-builds-from`, D13 · N-62)에서 읽는 표 — fi equity 원천 중 저녁 DART 판 폐포에 든 것
 DART_EQUITY_SOURCES = tuple(t for t in EQUITY_SOURCES if t in evening_dart.EQUITY_TABLES)
@@ -168,6 +172,11 @@ _EMPTY_FIN_WISE_Q = (
                 for i in range(1, 7))
     + " WHERE false)")
 OPTIONAL_STAGE_SOURCES: dict[str, str] = {"stg_fin_wise_q": _EMPTY_FIN_WISE_Q}
+# 있으면 쓰는 equity 원천 — 같은 규칙. `fin_prelim`(S27, e1.35.0)은 배포 첫날 아침 판 · 그 전 날짜 재생 · 옛 인계
+# 이력에 판이 없다. 없으면 엑셀 전용 `fi_fin_prelim` 이 비고(잠정 칸 없음) 엔진 입력 8표는 그대로다
+OPTIONAL_EQUITY_SOURCES: dict[str, str] = {
+    FIN_PRELIM.name: "(SELECT " + ", ".join(f"CAST(NULL AS {t}) AS {c}" for c, t in FIN_PRELIM.columns.items())
+                     + " WHERE false)"}
 _CHAIN_TABLES = ("price_daily", "price_adj_daily", "adj_factor")
 # 재생(`--replay`)이 뷰를 asof 에서 자르는 equity 세션 축 표 — 세션 날짜 열 `date` 가 있는 원천.
 # 정보 표(공개일 축)는 SQL 이 asof 로 자르고, 마스터(security·corp)는 날짜 축이 없다
@@ -248,12 +257,13 @@ def _resolve(root: Path, tables: tuple[str, ...], stage: bool,
     그 판을 읽는다."""
     ids: dict[str, str] = {}
     exprs: dict[str, str] = {}
+    optional = OPTIONAL_STAGE_SOURCES if stage else OPTIONAL_EQUITY_SOURCES
     for t in tables:
         want = None if pinned is None else pinned.get(t)
         if pinned is not None and want is None:
             # 그날도 판이 없던 선택 원천 — current 모드와 같이 빈 표로 대신한다
-            if stage and t in OPTIONAL_STAGE_SOURCES:
-                ids[t], exprs[t] = "absent", OPTIONAL_STAGE_SOURCES[t]
+            if t in optional:
+                ids[t], exprs[t] = "absent", optional[t]
                 continue
             raise FactorInputsError(f"인계 이력에 이 표의 판이 없다: 이력={origin} table={t} "
                                     "— 최신 판으로 대신하지 않는다")
@@ -264,8 +274,8 @@ def _resolve(root: Path, tables: tuple[str, ...], stage: bool,
                 raise FactorInputsError(
                     f"인계 이력이 가리킨 판이 MANIFEST 에 없다(GC 로 지워짐?): 이력={origin} "
                     f"table={t} build_id={want} — 최신 판으로 대신하지 않는다 ({e})") from e
-            if stage and t in OPTIONAL_STAGE_SOURCES:
-                ids[t], exprs[t] = "absent", OPTIONAL_STAGE_SOURCES[t]
+            if t in optional:
+                ids[t], exprs[t] = "absent", optional[t]
                 continue
             raise FactorInputsError(f"원천 판이 없다: {root}/{t} ({e})") from e
         if stage:
@@ -362,7 +372,9 @@ def _t_candidates(fi_root: Path, dprime: date) -> tuple[tuple[str, ...] | None, 
 def _load_dart_handoff(path: Path, t: date, research_equity_root: Path) -> evening_dart.DartPin:
     """저녁 DART 인계(D13 · N-62) — 검사는 `daily.evening_dart.load_handoff` 한 곳(compat 과 같다). 거절이면 rc 2."""
     try:
-        return evening_dart.load_handoff(path, t.strftime("%Y%m%d"), research_equity_root, DART_EQUITY_SOURCES)
+        # 선택 원천(fin_prelim)은 배포 전 날짜의 인계에 없다 — 요구하지 않고 `_resolve` 가 빈 표로 대신한다
+        need = tuple(x for x in DART_EQUITY_SOURCES if x not in OPTIONAL_EQUITY_SOURCES)
+        return evening_dart.load_handoff(path, t.strftime("%Y%m%d"), research_equity_root, need)
     except evening_dart.HandoffRejected as e:
         raise FactorInputsError(str(e)) from e
 
@@ -372,6 +384,8 @@ def _check_basis(equity_builds: dict[str, str], basis: str) -> None:
     판도 직전 거래일 확정판을 `--builds-from` 으로 고정해 읽으므로(T-2 — 고정 없음은 `build` 가
     먼저 거절한다) 같은 규칙이다. 저녁 잠정판(`e_`)은 basis 와 상관없이 섞지 않는다."""
     for table, bid in sorted(equity_builds.items()):
+        if bid == "absent" and table in OPTIONAL_EQUITY_SOURCES:
+            continue
         got = basis_of_build_id(bid)
         if got not in EQUITY_BASES_READ:
             raise FactorInputsError(f"equity 판 접두어가 허용 밖이다(아침 확정 m_·수동 b_ 만): "
@@ -592,7 +606,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         table_inputs: dict[str, dict[str, str]] = {}
         sources = queries.table_sources(basis)
         read_builds = {**stage_builds, **post_builds, **equity_builds, **dart_builds}
-        for name in FI_TABLES:
+        for name in FI_BUILD_TABLES:
             out = tmp_root / name / "part0.parquet"
             out.parent.mkdir(parents=True)
             con.execute(f"COPY _{name} TO '{out}' (FORMAT PARQUET)")
@@ -601,7 +615,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             n = int(str(_one(con, f'SELECT count(*) FROM "g_{name}"')))
             table_inputs[name] = {s: read_builds[s] for s in sources[name]}
             tables[name] = {"n_rows": n, "content_hash": _content_hash(con, out),
-                            "inputs": table_inputs[name], "window": FI_TABLES[name].window}
+                            "inputs": table_inputs[name], "window": FI_BUILD_TABLES[name].window}
 
         ctx = gates.GateContext(
             con=con, date=d_iso, basis=basis, price_from=p.price_from, flow_from=p.flow_from,

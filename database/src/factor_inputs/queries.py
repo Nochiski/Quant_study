@@ -48,7 +48,7 @@ from daily.kw_daily import (
     ka10060_postclose_price_usable_sql,
 )
 from equity.rules_s06 import PRICE_UNRESOLVED
-from model.contracts import FI_TABLES, TableContract, UniverseRule
+from model.contracts import FI_BUILD_TABLES, TableContract, UniverseRule
 from stage.model import BASIS_SUPPLEMENT
 
 # ── 창·상수 ──────────────────────────────────────────────────────────────────
@@ -56,6 +56,12 @@ PRICE_WINDOW_DAYS = 550          # fi_prices·fi_adj_prices — D 까지 550 달
 FLOW_SESSIONS = 60               # fi_flows·fi_credit — D 까지 60 세션
 FIN_ANNUAL_PERIODS = 2           # fi_fin_summary 연간 — v3 LIMIT 2
 FIN_QUARTERS = 5                 # fi_fin_summary 분기 — v4 TTM 용
+# 잠정실적 단위 검산(PG-8, 계획 9-3) — 잠정 공시의 전년동기 값 ÷ 우리 확정 같은 분기. 처음 값이다(11-03 백필 877건으로
+# 보정 — 배포 전 BOARD). 기준 분기 값이 작으면(억원 반올림이 비율을 흔든다) 그 갈래를 건너뛴다. 기준이 없으면
+# 당기 ÷ 직전 확정 분기를 1/PRELIM_PREV_RATIO_MAX ~ PRELIM_PREV_RATIO_MAX 로만 본다(단위 오류는 100배 이상 틀린다)
+PRELIM_PY_RATIO = (0.5, 2.0)
+PRELIM_PREV_RATIO_MAX = 50.0
+PRELIM_REF_MIN_EOK = 10
 KRW_PER_MN = 1_000_000           # 원 → 백만원 (compat units.KRW_PER_MN 과 같다 — 테스트가 대조)
 KRW_PER_EOK = 100_000_000        # 원 → 억원   (compat units.KRW_PER_EOK)
 MARKETS_IN_LAYER = ("KOSPI", "KOSDAQ")    # fi_universe.market 어휘(계약 주석)
@@ -158,7 +164,7 @@ def project(contract: TableContract, inner: str) -> str:
 
 def create(table: str, inner: str) -> str:
     """`_<표>` 임시 표 생성문(예: fi_universe → `_fi_universe`)."""
-    return f"CREATE OR REPLACE TEMP TABLE _{table} AS\n" + project(FI_TABLES[table], inner)
+    return f"CREATE OR REPLACE TEMP TABLE _{table} AS\n" + project(FI_BUILD_TABLES[table], inner)
 
 
 # ── 달력 · 신선도(T2.11) ──────────────────────────────────────────────────────
@@ -1009,6 +1015,89 @@ WHERE w.k <= {FIN_QUARTERS}"""
     return create("fi_fin_summary", inner)
 
 
+def fin_prelim_sql(p: Params) -> str:
+    """엑셀 전용 잠정 분기 행(N-64 PR ②-1, 계획 9-3) — `fi_fin_summary` 다음에 굽는다(그 확정 분기를 읽는다).
+
+    고르기(기준일 D):
+      · equity `fin_prelim` 의 `prelim_status='ok'` · 공개일 ≤ dart_asof · 기말이 분기 말 달(3·6·9·12)이고 ≤ D.
+      · (종목, 기말, 연결/별도)마다 접수가 가장 늦은 판(정정이 이긴다, Q4).
+      · 확정 > 잠정: 종목의 확정 분기(`fi_fin_summary` 분기 행 중 매출 · 영업이익 · 순이익 하나라도 있는 행) 중
+        최신보다 **뒤** 기말만. 확정이 없는 종목은 잠정 전부(최대 FIN_QUARTERS 기).
+      · 연결/별도(Q2): 같은 기말에 연결 잠정이 있으면 연결. 별도 잠정은 연결이 없고 종목의 최신 확정 분기 기준이
+        연결이 아닐 때만 쓴다(기준이 섞이지 않게).
+    단위 검산(PG-8) `unit_check`:
+      · 잠정의 전년동기 기간이 당기 − 1년이고 우리 확정 같은 분기(기말 − 1년)의 매출이 PRELIM_REF_MIN_EOK 억원
+        이상이면 매출 비, 매출을 못 쓰면 같은 부호의 영업이익 비가 PRELIM_PY_RATIO 안 → ok, 밖 → withheld.
+      · 그 밖(기준 없음 — 동아에스티 꼴처럼 전년동기 기간을 잘못 적은 서식 포함)은 당기 매출 ÷ 직전 확정 분기
+        매출이 1/PRELIM_PREV_RATIO_MAX ~ PRELIM_PREV_RATIO_MAX 안 → no_ref, 밖 → withheld. 비교할 것이 없으면 no_ref.
+      · withheld 행도 표에 남긴다(값 · 접수번호를 사람이 본다) — 엑셀이 내지 않고 FG6 이 warn 으로 알린다.
+    """
+    eok = f"{KRW_PER_EOK}.0"
+    lo, hi = PRELIM_PY_RATIO
+    inner = f"""WITH dsec AS (
+    SELECT ticker, corp_code FROM security
+    WHERE corp_code IS NOT NULL AND {_IN_UNIVERSE}
+),
+cand AS (
+    SELECT s.ticker, strftime(f.period_to, '%Y/%m') AS period, f.period_to, f.py_to, f.fs_div,
+           f.rcept_no, f.is_correction, f.revenue_krw, f.op_profit_krw, f.net_income_krw,
+           f.revenue_py_krw, f.op_profit_py_krw, f.available_date
+    FROM fin_prelim f JOIN dsec s ON s.corp_code = f.corp_code
+    WHERE f.prelim_status = 'ok' AND f.available_date <= DATE '{p.dart_asof}'
+      AND month(f.period_to) IN (3, 6, 9, 12) AND f.period_to <= DATE '{p.d}'
+    QUALIFY row_number() OVER (PARTITION BY s.ticker, f.period_to, f.fs_div
+                               ORDER BY f.rcept_no DESC) = 1
+),
+conf AS (
+    SELECT ticker, period, revenue, op, fs_basis FROM _fi_fin_summary
+    WHERE period_type = 'quarter' AND (revenue IS NOT NULL OR op IS NOT NULL OR ni IS NOT NULL)
+),
+last_conf AS (
+    SELECT ticker, max(period) AS period, arg_max(revenue, period) AS revenue,
+           arg_max(fs_basis, period) AS fs_basis
+    FROM conf GROUP BY ticker
+),
+pick AS (
+    SELECT c.*, l.revenue AS last_revenue
+    FROM cand c LEFT JOIN last_conf l ON l.ticker = c.ticker
+    WHERE (l.period IS NULL OR c.period > l.period)
+      AND (c.fs_div = 'CFS'
+           OR (NOT EXISTS (SELECT 1 FROM cand x WHERE x.ticker = c.ticker AND x.period_to = c.period_to
+                                                  AND x.fs_div = 'CFS')
+               AND coalesce(l.fs_basis, '') NOT LIKE '%CFS%' AND coalesce(l.fs_basis, '') NOT LIKE '%연결%'))
+),
+judged AS (
+    SELECT k.*,
+           CASE
+             WHEN k.py_to = CAST(k.period_to - INTERVAL 1 YEAR AS DATE) AND k.revenue_py_krw IS NOT NULL
+                  AND abs(r.revenue) >= {PRELIM_REF_MIN_EOK}
+               THEN CASE WHEN k.revenue_py_krw / {eok} / r.revenue BETWEEN {lo} AND {hi}
+                         THEN 'ok' ELSE 'withheld' END
+             WHEN k.py_to = CAST(k.period_to - INTERVAL 1 YEAR AS DATE) AND k.op_profit_py_krw IS NOT NULL
+                  AND abs(r.op) >= {PRELIM_REF_MIN_EOK} AND sign(k.op_profit_py_krw) = sign(r.op)
+               THEN CASE WHEN k.op_profit_py_krw / {eok} / r.op BETWEEN {lo} AND {hi}
+                         THEN 'ok' ELSE 'withheld' END
+             WHEN k.revenue_krw IS NOT NULL AND abs(k.last_revenue) >= {PRELIM_REF_MIN_EOK}
+               THEN CASE WHEN abs(k.revenue_krw / {eok} / k.last_revenue)
+                              BETWEEN {1 / PRELIM_PREV_RATIO_MAX} AND {PRELIM_PREV_RATIO_MAX}
+                         THEN 'no_ref' ELSE 'withheld' END
+             ELSE 'no_ref'
+           END AS unit_check
+    FROM pick k
+    LEFT JOIN conf r ON r.ticker = k.ticker
+                    AND r.period = strftime(CAST(k.period_to - INTERVAL 1 YEAR AS DATE), '%Y/%m')
+)
+SELECT ticker, period,
+       CAST(round(revenue_krw / {eok}) AS BIGINT)    AS revenue,
+       CAST(round(op_profit_krw / {eok}) AS BIGINT)  AS op,
+       CAST(round(net_income_krw / {eok}) AS BIGINT) AS ni,
+       'PRELIM:' || fs_div                           AS fs_basis,
+       rcept_no, is_correction, unit_check, available_date
+FROM judged
+QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY period DESC) <= {FIN_QUARTERS}"""
+    return create("fi_fin_prelim", inner)
+
+
 # ── 판 순서 ──────────────────────────────────────────────────────────────────
 # 표 → 그 표를 굽는 SQL 이 **직접** 읽는 원천(판 기록용). `_fi_universe` 제한은 fi_universe 의
 # 원천으로 따로 남으므로 여기에 되풀이하지 않는다.
@@ -1025,6 +1114,8 @@ TABLE_SOURCES: Mapping[str, tuple[str, ...]] = {
     "fi_consensus_annual": ("stg_consensus_annual",),
     "fi_fin_summary": ("stg_fin_wise", "stg_fin_wise_q", "fin_std", "dividend_event", "security",
                        "corp", "stg_consensus_annual", "trading_calendar"),
+    # 엑셀 전용(FI_DELIVER_TABLES) — 확정 분기 · 검산 기준은 이 판의 `_fi_fin_summary` 를 읽는다(원천 판은 위 줄)
+    "fi_fin_prelim": ("fin_prelim", "security"),
 }
 
 
@@ -1066,7 +1157,7 @@ def t_prices_sql(p: Params) -> str:
        volume_shr AS volume, NULL AS amount, '{T_PRICE_SOURCE}' AS price_source
 FROM _t_src
 WHERE {ka10060_postclose_price_usable_sql("price_valid", "close_krw", "volume_shr")}"""
-    return "CREATE OR REPLACE TEMP TABLE _t_prices AS\n" + project(FI_TABLES["fi_prices"], inner)
+    return "CREATE OR REPLACE TEMP TABLE _t_prices AS\n" + project(FI_BUILD_TABLES["fi_prices"], inner)
 
 
 def t_adj_source_sql(p: Params) -> str:
@@ -1133,7 +1224,8 @@ def table_sqls(p: Params, rule: UniverseRule) -> list[tuple[str, str]]:
             ("fi_credit", credit_sql(p)),
             ("fi_consensus", consensus_sql(p)),
             ("fi_consensus_annual", consensus_annual_sql(p)),
-            ("fi_fin_summary", fin_summary_sql(p))]
+            ("fi_fin_summary", fin_summary_sql(p)),
+            ("fi_fin_prelim", fin_prelim_sql(p))]
 
 
 # 판 manifest `gaps` — 원천이 없거나 의도적으로 비운 열(조용한 결측 금지 · V2-7).

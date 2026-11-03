@@ -665,7 +665,7 @@ def test_schema_equals_contract_and_gates_pass(built) -> None:
         assert got == [(c.name, c.dtype) for c in t.columns], name
     status = {g.name: g.status.value for g in res.gates}
     assert status == {"FG0": "pass", "FG1": "pass", "FG2": "pass", "FG3": "pass",
-                      "FG4": "skip", "FG-fresh": "pass"}
+                      "FG4": "skip", "FG-fresh": "pass", "FG6": "pass"}
 
 
 def test_default_keep_keeps_the_first_of_four_same_day_builds(roots, tmp_path: Path) -> None:
@@ -1704,7 +1704,8 @@ def test_pinned_build_hashes_equal_the_current_build_on_the_same_builds(roots,
     assert _hashes(pin_run) == _hashes(cur.run_manifest)
     run = json.loads(pin_run.read_text(encoding="utf-8"))
     assert run["builds_from"] == str(hist.resolve()) and run["builds_from_date"] == D_S
-    assert run["equity_builds"] == {t: EQ_BUILD for t in EQ_TABLES}
+    # 선택 equity 원천(잠정실적 fin_prelim, e1.35.0)도 이력에 없으면 'absent'
+    assert run["equity_builds"] == {**{t: EQ_BUILD for t in EQ_TABLES}, "fin_prelim": "absent"}
     # 이력에 없는 선택 원천(WISE 분기)은 그날도 판이 없던 것 — current 와 같이 'absent'
     assert run["stage_builds"] == {**{t: ST_BUILD for t in ST_TABLES}, "stg_fin_wise_q": "absent"}
     cur_run = json.loads(cur.run_manifest.read_text(encoding="utf-8"))

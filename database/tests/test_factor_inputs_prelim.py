@@ -113,6 +113,18 @@ def test_기준일을_바꿔도_미래_정보가_안_보인다(d: str, expect: t
     assert all(str(r["available_date"]) <= d for r in got.values())
 
 
+@pytest.mark.parametrize(("d", "q4_value", "shown"), [
+    ("2027-02-10", None, True),     # 사업보고서 전 — 4Q 확정 행이 없다(또는 파생값 전이라 값이 빈 행) → P
+    ("2027-03-15", 40.0, False),    # 사업보고서 공개일 — fin_std 4Q 파생값(사업보고서 − 9개월 누계)이 확정으로 이긴다
+])
+def test_4q_잠정은_사업보고서_파생값으로_바뀐다(d: str, q4_value: float | None, shown: bool) -> None:
+    """PG-2 — 4Q 잠정(10~12월 3개월, 11-03 표본 14/14)은 사업보고서가 나오기 전까지 P, 나온 날부터 파생 확정값."""
+    conf = [_q("2026/09")] + ([_q("2026/12", rev=q4_value, op=q4_value)] if d >= "2027-03-15" else
+                             [_q("2026/12", rev=None, op=None)])
+    got = _run(d, [_p("20270205800001", "2026-12-31")], conf)
+    assert ((T1, "2026/12") in got) is shown
+
+
 def test_연결이_있으면_연결_확정이_연결이면_별도_잠정은_버린다() -> None:
     """Q2 — 같은 기말 연결 · 별도 둘이면 연결. 별도만 있고 최신 확정 기준이 연결이면 버린다(기준을 섞지 않는다)."""
     both = _run("2026-11-03", [_p("20261025800001", "2026-09-30"),

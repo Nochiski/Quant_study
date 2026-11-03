@@ -27,7 +27,9 @@ from .doc_vocab import DocVocab
 #   정정사항 표의 항목별 열이 됐다 — 세 원문 필드가 2025년 96.6% · 2026년 99.1% NULL 이었다.
 # p1.6(2026-11-01): 잠정실적 공정공시(xforms HTML) 서식 표 → stg_doc_prelim(N-64). html 갈래의 meta ·
 #   parse_log 행은 그대로이고, 제목이 '영업(잠정)실적' 인 문서에만 잠정 행 1개가 더 생긴다.
-PARSER_VERSION = "p1.6"
+# p1.7(2026-11-03): 잠정 서식 단위 '조원'(시총 최상위 종목 서식, 소수 둘째 자리). p1.6 은 unit:조원 실패 —
+#   11-03 백필 877건 중 6건. 다른 표 · 다른 문서 산출 불변(바뀌는 문서는 `--scan '단위\s*:\s*조원'` 로 찾는다).
+PARSER_VERSION = "p1.7"
 STD_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
 
 
@@ -553,7 +555,7 @@ _PRELIM_TITLE_RE = re.compile(r"<title>[^<]*영업\(잠정\)실적", re.I)
 _PRELIM_ITEMS = {"매출액": "revenue", "영업이익": "op_profit", "법인세비용차감전계속사업이익": "pretax",
                  "당기순이익": "net_income", "지배기업소유주지분순이익": "ni_owner"}
 _PRELIM_PY = ("revenue", "op_profit", "net_income")       # 전년동기 당해값 — 확정 재무와 단위 검산용
-_PRELIM_UNIT = {"원": 1, "천원": 10**3, "백만원": 10**6, "억원": 10**8}
+_PRELIM_UNIT = {"원": 1, "천원": 10**3, "백만원": 10**6, "억원": 10**8, "조원": 10**12}
 _PRELIM_UNIT_RE = re.compile(r"단위\s*:\s*([^,)\s]+)")
 _PRELIM_NUM_RE = re.compile(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
 _PRELIM_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")

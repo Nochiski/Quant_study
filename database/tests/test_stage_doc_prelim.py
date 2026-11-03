@@ -128,6 +128,16 @@ def test_월_실적은_기간을_그대로_남기고_빈칸은_NULL() -> None:
     assert (r["revenue_krw"], r["op_profit_krw"], r["net_income_krw"]) == ("13403000000", None, None)
 
 
+def test_대형주_서식은_조원_소수_둘째_자리이고_1조를_곱한다() -> None:
+    # 11-03 백필 877건 실측: 시총 최상위 두 종목의 잠정 서식이 '단위 : 조원, %' — p1.6 은 unit:조원 실패였다
+    items = {"매출액": ("95.25", "91.50", "86.06"), "영업이익": ("10.44", "9.49", "-0.17")}
+    r = _parse(_doc(_period_table(("2026-07-01", "2026-09-30"), ("2025-07-01", "2025-09-30")),
+                    _result_table(items, unit="조원")))
+    assert r is not None and r["status"] == "ok" and r["unit_raw"] == "조원"
+    assert (r["revenue_krw"], r["op_profit_krw"]) == ("95250000000000", "10440000000000")
+    assert (r["revenue_py_krw"], r["op_profit_py_krw"]) == ("86060000000000", "-170000000000")
+
+
 def test_음수는_부호를_살린다() -> None:
     items = {"매출액": ("8,000", "7,000", "6,000"), "당기순이익": ("-3,286", "-9,440", "906")}
     r = _parse(_doc(_period_table(("2026-07-01", "2026-09-30"), ("2025-07-01", "2025-09-30")), _result_table(items)))

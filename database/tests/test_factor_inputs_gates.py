@@ -13,7 +13,7 @@ from dataclasses import replace
 import duckdb
 import pytest
 from factor_inputs import gates
-from model.contracts import FI_TABLES, UniverseRule
+from model.contracts import FI_BUILD_TABLES, UniverseRule
 from stage.gates import GateResult, GateStatus
 
 D = "2026-09-28"
@@ -21,7 +21,7 @@ PRICE_FROM, FLOW_FROM = "2025-03-27", "2026-06-30"
 
 
 def _insert(con: duckdb.DuckDBPyConnection, table: str, **values: object) -> None:
-    cols = FI_TABLES[table].column_names
+    cols = FI_BUILD_TABLES[table].column_names
     extra = set(values) - set(cols)
     assert not extra, extra
     row = [values.get(c) for c in cols]
@@ -31,9 +31,11 @@ def _insert(con: duckdb.DuckDBPyConnection, table: str, **values: object) -> Non
 @pytest.fixture
 def con() -> Iterator[duckdb.DuckDBPyConnection]:
     c = duckdb.connect()
-    for name, t in FI_TABLES.items():
+    for name, t in FI_BUILD_TABLES.items():
         cols = ", ".join(f'"{col.name}" {col.dtype}' for col in t.columns)
         c.execute(f"CREATE TABLE g_{name} ({cols})")
+    # FG6 가 거른 꼴(PG-10)을 세는 equity 원천 뷰 — 빌드에서는 원천 판(없으면 빈 표)이 이 이름으로 선다
+    c.execute("CREATE TABLE fin_prelim (prelim_status VARCHAR, available_date DATE)")
     c.execute("CREATE TABLE price_daily (ticker VARCHAR, date DATE, basis VARCHAR, "
               "mktcap_krw DECIMAL(18, 0))")
     d = dt.date.fromisoformat(D)
@@ -63,7 +65,8 @@ def _by_name(results: list[GateResult]) -> dict[str, GateResult]:
 def test_baseline_passes_every_gate(con) -> None:
     got = {g.name: g.status for g in gates.run_all(_ctx(con, golden=[_fx()]))}
     assert got == {"FG0": GateStatus.PASS, "FG1": GateStatus.PASS, "FG2": GateStatus.PASS,
-                   "FG3": GateStatus.PASS, "FG4": GateStatus.PASS, "FG-fresh": GateStatus.PASS}
+                   "FG3": GateStatus.PASS, "FG4": GateStatus.PASS, "FG-fresh": GateStatus.PASS,
+                   "FG6": GateStatus.PASS}
 
 
 def test_fg4_skip_is_outside_the_skip_table_so_the_board_fails(con) -> None:
@@ -280,7 +283,7 @@ def test_evening_baseline_passes_every_gate(con_evening) -> None:
     assert {n: g.status for n, g in res.items()} == {
         "FG0": GateStatus.PASS, "FG1": GateStatus.PASS, "FG2": GateStatus.PASS,
         "FG3": GateStatus.PASS, "FG4": GateStatus.PASS, "FG-fresh": GateStatus.PASS,
-        "FG5": GateStatus.PASS}
+        "FG6": GateStatus.PASS, "FG5": GateStatus.PASS}
     assert res["FG2"].metrics["n_t_price_rows"] == 1
     assert (res["FG5"].metrics["n_candidates"], res["FG5"].metrics["n_missing"]) == (1, 0)
     # KRX 시총 대조는 장 마감 판에 대상이 없다(KRX 의 T 시총은 아직 없다) — 0 이 아니라 NULL
@@ -464,3 +467,58 @@ def test_fg5_records_pred_pre_missing_and_the_source_build(con_evening) -> None:
     assert r.metrics["n_pred_pre_missing"] == 1
     assert (r.metrics["t_source_build"], r.metrics["t_source_max_date"]) == (
         "e_20260929T064500Z", "2026-09-28")
+
+
+# ── FG6 잠정 격리(N-64 PR ②-1 · PG-5 · 6 · 7 · 8 · 10) ───────────────────────────────
+def _prelim(con: duckdb.DuckDBPyConnection, **over: object) -> None:
+    row: dict[str, object] = {"ticker": "000001", "period": "2026/06", "revenue": 120.0, "op": 10.0,
+                              "fs_basis": "PRELIM:CFS", "rcept_no": "20260725800001", "is_correction": False,
+                              "unit_check": "ok", "available_date": dt.date(2026, 7, 25)}
+    _insert(con, "fi_fin_prelim", **{**row, **over})
+
+
+@pytest.mark.parametrize(("sql", "violation"), [
+    # PG-5 점수 표에 잠정이 새면(엑셀 전용 표 밖으로) — v4 TTM 이 읽는다
+    ("INSERT INTO g_fi_fin_summary (ticker, period, period_type, fs_basis) "
+     "VALUES ('000001', '2026/06', 'quarter', 'PRELIM:CFS')", "fi_fin_summary.prelim_rows"),
+    # PG-6 판 날짜(09-28)의 달보다 뒤 기말 — 기간을 잘못 읽은 행 하나가 엑셀 열을 민다
+    ("INSERT INTO g_fi_fin_summary (ticker, period, period_type, op) "
+     "VALUES ('000001', '2026/12', 'quarter', 1.0)", "fi_fin_summary.quarter_after_d"),
+    ("UPDATE g_fi_fin_prelim SET period = '2026/12'", "fi_fin_prelim.period_after_d"),
+    # PG-7 같은 (종목, 기말)에 값 있는 확정 분기와 낼 잠정이 함께
+    ("INSERT INTO g_fi_fin_summary (ticker, period, period_type, op) "
+     "VALUES ('000001', '2026/06', 'quarter', 9.0)", "fi_fin_prelim.overlaps_confirmed"),
+    ("UPDATE g_fi_fin_prelim SET available_date = DATE '2026-09-29'", "fi_fin_prelim.available_after_asof"),
+    ("UPDATE g_fi_fin_prelim SET fs_basis = 'DART:CFS'", "fi_fin_prelim.outside_vocab"),
+    ("UPDATE g_fi_fin_prelim SET unit_check = 'maybe'", "fi_fin_prelim.outside_vocab"),
+])
+def test_fg6_fails_on_each_breach(con, sql: str, violation: str) -> None:
+    _prelim(con)
+    assert gates.fg6_prelim(_ctx(con)).status is GateStatus.PASS
+    con.execute(sql)
+    r = gates.fg6_prelim(_ctx(con))
+    assert r.status is GateStatus.FAIL and r.metrics[violation] >= 1, r.detail
+
+
+def test_fg6_withheld_is_a_warn_and_does_not_count_as_overlap(con) -> None:
+    """PG-8 단위 의심 행은 판을 막지 않고 warn — 엑셀이 내지 않으므로 같은 기말의 확정 행과 겹쳐도 겹침이 아니다."""
+    _prelim(con, unit_check="withheld")
+    con.execute("INSERT INTO g_fi_fin_summary (ticker, period, period_type, op) "
+                "VALUES ('000001', '2026/06', 'quarter', 9.0)")
+    r = gates.fg6_prelim(_ctx(con))
+    assert r.status is GateStatus.PASS, r.detail
+    assert (r.metrics["warn"], r.metrics["n_withheld"], r.metrics["withheld"]) == (True, 1, ["000001:20260725800001"])
+    assert "단위 의심" in r.detail
+
+
+def test_fg6_records_the_new_quarter_column_and_filtered_kinds(con) -> None:
+    """PG-10 — 확정 최신(2026/03)보다 뒤 잠정(2026/06)이 들면 새 분기 열이 열린 날로 기록한다."""
+    con.execute("INSERT INTO g_fi_fin_summary (ticker, period, period_type, op) "
+                "VALUES ('000001', '2026/03', 'quarter', 9.0)")
+    _prelim(con)
+    con.execute("INSERT INTO fin_prelim VALUES ('ok', DATE '2026-07-25'), ('not_quarter', DATE '2026-08-10'), "
+                "('ok', DATE '2026-09-29')")      # 마지막 행은 dart_asof(D) 뒤 — 세지 않는다
+    r = gates.fg6_prelim(_ctx(con))
+    assert r.status is GateStatus.PASS and r.metrics["warn"] is False
+    assert (r.metrics["new_quarter"], r.metrics["n_tickers_new_quarter"]) == ("2026/06", 1)
+    assert r.metrics["fin_prelim_by_status"] == {"not_quarter": 1, "ok": 1}

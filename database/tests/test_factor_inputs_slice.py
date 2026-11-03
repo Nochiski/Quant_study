@@ -133,7 +133,7 @@ def test_slice_build_passes_all_gates_with_golden(built) -> None:
     status = {g.name: g.status.value for g in res.gates}
     assert res.ok, [(g.name, g.status.value, g.detail) for g in res.gates]
     assert status == {"FG0": "pass", "FG1": "pass", "FG2": "pass", "FG3": "pass",
-                      "FG4": "pass", "FG-fresh": "skip"}
+                      "FG4": "pass", "FG-fresh": "skip", "FG6": "pass"}
     fg4 = next(g for g in res.gates if g.name == "FG4")
     n_golden = len(json.loads(GOLDEN_PATH.read_text(encoding="utf-8")))
     assert fg4.metrics["n_checked"] == n_golden and fg4.metrics["n_mismatch"] == 0

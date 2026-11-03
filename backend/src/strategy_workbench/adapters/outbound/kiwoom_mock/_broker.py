@@ -24,6 +24,7 @@ from strategy_workbench.adapters.outbound.kiwoom_mock._http import (
     ACCOUNT_PATH,
     KST,
     MOCK_MIN_INTERVAL_SECONDS,
+    STOCK_INFO_PATH,
     KiwoomAnsweredError,
     KiwoomBlock,
     KiwoomBlockedError,
@@ -47,6 +48,8 @@ from strategy_workbench.adapters.outbound.kiwoom_mock._rows import (
     Observation,
     OrderRow,
     Participant,
+    SellDetail,
+    SellFill,
     cash_of,
     day_trades,
     holdings_of,
@@ -54,9 +57,11 @@ from strategy_workbench.adapters.outbound.kiwoom_mock._rows import (
     observe,
     order_number,
     same_order,
+    sell_fills,
     split_day_amounts,
     text,
     untracked_fact,
+    with_tax_rounding,
 )
 from strategy_workbench.application.offline_execution.facade.execution import BrokerError
 from strategy_workbench.domain.order_execution.facade.orders import (
@@ -85,6 +90,7 @@ DEFAULT_REMATCH_MARGIN = timedelta(seconds=60)
 class _Reads:
     orders: list[OrderRow]
     day_trades: dict[str, DayTrade]
+    sales: dict[str, SellDetail]  # 오늘 매도가 있는 종목만
     holdings: tuple[tuple[str, int], ...]
     cash_krw: int
 
@@ -120,6 +126,10 @@ class KiwoomMockBroker:
         self._transmit = transmit
         self._rematch_margin = rematch_margin
         self._max_snapshot_reads = max_snapshot_reads
+        # 종목의 시장 구분은 실행 안에서 바뀌지 않는다. 매도 체결은 (날짜, 종목, 일지 매도
+        # 수량·금액)이 같으면 같다. 장중 대사마다 다시 읽지 않으려고 둔다(같은 TR 은 초당 1회다).
+        self._market_codes: dict[str, str] = {}
+        self._sell_fills: dict[tuple[str, str, int, int], tuple[SellFill, ...]] = {}
 
     def close(self) -> None:
         self._reference.close()
@@ -169,7 +179,7 @@ class KiwoomMockBroker:
     def snapshot(self) -> Snapshot:
         self._ready()
         today = self._kst().strftime("%Y%m%d")
-        reads = self._stable_reads()
+        reads = self._stable_reads(today)
         try:
             facts = self._facts(today, reads)
             tracked = [f for f in facts if not f.intent.intent_id.startswith(UNTRACKED_PREFIX)]
@@ -393,8 +403,9 @@ class KiwoomMockBroker:
             "acnt_ord_cntr_prps_dtl",
         )
 
-    def _stable_reads(self) -> _Reads:
-        """주문 → 당일매매일지 → 보유 → 현금 → 주문. 두 번 읽은 주문이 같을 때만 쓴다."""
+    def _stable_reads(self, today: str) -> _Reads:
+        """주문 → 당일매매일지 → 매도 종목의 시장 구분·매도 체결 → 보유 → 현금 → 주문. 두 번 읽은
+        주문이 같을 때만 쓴다."""
         for _ in range(self._max_snapshot_reads):
             first = self._order_rows("")
             journal = self._client.rows(
@@ -403,6 +414,15 @@ class KiwoomMockBroker:
                 _DAY_JOURNAL_QUERY,
                 "tdy_trde_diary",
             )
+            try:
+                trades = day_trades([DayTrade.parse(row) for row in journal])
+                sales = {
+                    code: self._sell_detail(today, trade)
+                    for code, trade in trades.items()
+                    if trade.sell_quantity
+                }
+            except ContractViolation as error:
+                self._violation(f"unreadable kiwoom rows — {error}")
             holdings = self._client.rows(
                 "kt00018",
                 ACCOUNT_PATH,
@@ -415,7 +435,8 @@ class KiwoomMockBroker:
                 try:
                     return _Reads(
                         [OrderRow.parse(row) for row in second],
-                        day_trades([DayTrade.parse(row) for row in journal]),
+                        trades,
+                        sales,
                         holdings_of(holdings),
                         cash_of(cash),
                     )
@@ -424,6 +445,24 @@ class KiwoomMockBroker:
         raise BrokerError(
             f"kiwoom orders kept changing during snapshot — reads={self._max_snapshot_reads}"
         )
+
+    def _sell_detail(self, today: str, trade: DayTrade) -> SellDetail:
+        """매도 종목의 시장 구분(`ka10100`)과 그날 매도 체결(`ka10077`)."""
+        code = trade.symbol
+        market = self._market_codes.get(code)
+        if market is None:
+            body = self._client.call("ka10100", STOCK_INFO_PATH, {"stk_cd": code}).body
+            market = self._market_codes[code] = text(body, "marketCode")
+        key = (today, code, trade.sell_quantity, trade.sell_value_krw)
+        fills = self._sell_fills.get(key)
+        if fills is None:
+            # `ka10077` 당일실현손익상세: 종목 하나의 그날 매도 체결
+            rows = self._client.rows("ka10077", ACCOUNT_PATH, {"stk_cd": code}, "tdy_rlzt_pl_dtl")
+            fills = sell_fills(code, rows)
+            # 일지를 아직 따라오지 않은 체결은 남기지 않는다. 다음 조회에서 다시 읽는다.
+            if sum(fill.quantity for fill in fills) == trade.sell_quantity:
+                self._sell_fills[key] = fills
+        return SellDetail(market, fills)
 
     def _facts(self, today: str, reads: _Reads) -> list[OrderFact]:
         records = self._reference.orders()
@@ -451,7 +490,11 @@ class KiwoomMockBroker:
             for row in reads.orders
             if row.original == NO_ORIGINAL and (today, row.ord_no) not in bound
         ]
-        amounts = self._day_amounts(today, resolved, seen, untracked, reads.day_trades)
+        journal = {
+            code: with_tax_rounding(trade, reads.sales.get(code))
+            for code, trade in reads.day_trades.items()
+        }
+        amounts = self._day_amounts(today, resolved, seen, untracked, journal)
         facts: list[OrderFact] = []
         for record in resolved:
             fact = self._fact(record, today, seen[record.intent.intent_id], amounts)

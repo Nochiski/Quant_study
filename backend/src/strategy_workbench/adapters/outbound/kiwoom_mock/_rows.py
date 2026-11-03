@@ -3,14 +3,18 @@
 주문의 상태와 체결수량은 `kt00007`, 체결금액과 비용은 `ka10170` 당일매매일지의 종목별 하루 합계에서
 읽는다. 2026-10-21 모의 실측에서 여러 번 나눠 체결된 주문의 `kt00007` 체결단가는 평균을 원 단위로
 반올림한 값이었고, `ka10076` 수수료는 체결 건마다 10원 미만을 버린 합이라 현금 차감과 달랐다.
+매도 세금은 당일매매일지도 체결마다 끝전을 버린 합이라, 종목·하루 매도 금액에 한 번 매기는 현금
+차감과 다르다(2026-11-02 모의 실측). 그 차이는 `ka10077` 체결 행으로 다시 계산해 비용에 더한다.
 해석과 맞지 않는 응답은 추정하지 않고 `ContractViolation`으로 멈춘다.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from types import MappingProxyType
+from typing import Final
 
 from strategy_workbench.domain.order_execution.facade.orders import Intent, OrderFact, OrderState
 
@@ -22,6 +26,11 @@ _LIMIT_TYPES = frozenset({"지정가", "보통", "보통가"})
 # "모의투자"로 남는지는 미확인이라, 같은 내용의 HTS 주문이 있으면 후보 2건으로 정지한다.
 _ORDER_CHANNELS = frozenset({"REST API", "모의투자"})
 UNTRACKED_PREFIX = "kiwoom-untracked-"
+# 시장 구분(`ka10100` marketCode) → 매도 세금 성분(bp). 성분마다 끝전을 버린다. 2026 세율은
+# 거래소 "0"이 증권거래세 0.05% + 농어촌특별세 0.15%, 코스닥 "10"이 증권거래세 0.20%다.
+# 2026-11-02 모의 실측(매도 체결 27건의 세금, `kt00008` 종목별 거래세·농특세)과 원 단위로 맞았다.
+# 없는 시장(ETF 등)과 세율이 바뀐 경우는 체결 검증에서 멈춘다(`tax_rounding_krw`).
+SELL_TAX_BP: Final = MappingProxyType({"0": (5, 15), "10": (20,)})
 
 
 class ContractViolation(Exception):
@@ -121,8 +130,10 @@ class OrderRow:
 class DayTrade:
     """`ka10170` 당일매매일지의 한 종목. 하루 합계가 원 단위로 정확하다.
 
-    2026-10-21 모의 실측에서 매수금액과 수수료가 현금(`d2_entra`) 차감과 일치했다. 수수료와
-    세금(`cmsn_alm_tax`)은 매수·매도를 합친 값이다.
+    2026-10-21 모의 실측에서 매수금액과 수수료가 현금(`d2_entra`) 차감과 일치했다(매수만 본 근거다).
+    수수료와 세금(`cmsn_alm_tax`)은 매수·매도를 합친 값이다. 수수료는 종목·하루 합계 금액에 매기지만
+    매도 세금은 체결마다 끝전을 버린 합이라 현금 차감보다 적을 수 있다 — `with_tax_rounding`이
+    그 차이를 더한다(2026-11-02 실측).
     """
 
     symbol: str
@@ -162,6 +173,85 @@ def day_trades(rows: list[DayTrade]) -> dict[str, DayTrade]:
             )
         )
     return totals
+
+
+@dataclass(frozen=True)
+class SellFill:
+    """`ka10077` 당일실현손익상세의 매도 체결 한 건. 세금은 이 체결에서 끝전을 버린 값이다."""
+
+    quantity: int
+    price_krw: int
+    tax_krw: int
+
+
+def sell_fills(code: str, rows: list[dict[str, object]]) -> tuple[SellFill, ...]:
+    """한 종목의 `ka10077` 행. 매도 체결이 없으면 칸이 모두 빈 행 하나가 온다(2026-11-02 실측)."""
+    fills: list[SellFill] = []
+    for row in rows:
+        if not text(row, "cntr_qty"):
+            continue
+        if symbol(text(row, "stk_cd")) != code:
+            raise ContractViolation(
+                f"kiwoom sell fill of another symbol — symbol={code} row={text(row, 'stk_cd')!r}"
+            )
+        fills.append(
+            SellFill(number(row, "cntr_qty"), number(row, "cntr_pric"), number(row, "tdy_trde_tax"))
+        )
+    return tuple(fills)
+
+
+@dataclass(frozen=True)
+class SellDetail:
+    """매도가 있는 종목의 시장 구분(`ka10100` marketCode)과 그날 매도 체결."""
+
+    market_code: str
+    fills: tuple[SellFill, ...]
+
+
+def _sell_tax(value_krw: int, rates_bp: Sequence[int]) -> int:
+    return sum(value_krw * rate // 10_000 for rate in rates_bp)
+
+
+def tax_rounding_krw(day: DayTrade, detail: SellDetail) -> int:
+    """종목·하루 매도 금액에 한 번 매긴 세금 − 체결마다 끝전을 버린 세금의 합(0 이상).
+
+    체결 세금이 시장의 세금 모형과 하나라도 다르면 추정하지 않고 멈춘다. 체결 행이 일지 수량에
+    못 미치면 아직 따라오지 않은 것으로 본다.
+    """
+    identity = f"symbol={day.symbol} market_code={detail.market_code!r}"
+    rates = SELL_TAX_BP.get(detail.market_code)
+    if rates is None:
+        raise ContractViolation(f"no sell tax model for the market — {identity}")
+    quantity = sum(fill.quantity for fill in detail.fills)
+    if quantity != day.sell_quantity:
+        raise JournalNotReady(
+            f"kiwoom sell fills and day journal disagree — {identity} "
+            f"fill_quantity={quantity} journal_quantity={day.sell_quantity}"
+        )
+    value = sum(fill.quantity * fill.price_krw for fill in detail.fills)
+    if value != day.sell_value_krw:
+        raise ContractViolation(
+            f"kiwoom sell fills differ from the day journal value — {identity} "
+            f"fill_value={value} journal_value={day.sell_value_krw}"
+        )
+    for index, fill in enumerate(detail.fills):
+        expected = _sell_tax(fill.quantity * fill.price_krw, rates)
+        if fill.tax_krw != expected:
+            raise ContractViolation(
+                f"kiwoom fill tax differs from the market's tax model — {identity} "
+                f"fill={index} quantity={fill.quantity} price={fill.price_krw} "
+                f"expected={expected} actual={fill.tax_krw} rates_bp={list(rates)}"
+            )
+    return _sell_tax(value, rates) - sum(fill.tax_krw for fill in detail.fills)
+
+
+def with_tax_rounding(day: DayTrade, detail: SellDetail | None) -> DayTrade:
+    """매도가 있는 종목의 비용을 현금 차감과 같은 세금으로 고친다. 매수만 있으면 그대로다."""
+    if not day.sell_quantity:
+        return day
+    if detail is None:
+        raise ContractViolation(f"sell fills were not read — symbol={day.symbol}")
+    return replace(day, costs_krw=day.costs_krw + tax_rounding_krw(day, detail))
 
 
 def same_order(row: OrderRow, intent: Intent) -> bool:

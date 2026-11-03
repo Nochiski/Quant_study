@@ -83,6 +83,10 @@ class FakeKiwoom:
     접수구분은 "주문완료", 원주문의 정정취소는 "일반", 취소 행은 같은 주문구분에 "취소"다.
     `kt00007` 체결단가는 평균을 원 단위로 반올림한 값이고, `ka10170` 당일매매일지는 종목별
     금액·비용을 원 단위로 정확히 준다.
+
+    매도 세금은 2026-11-02 모의 실측대로 둔다. 당일매매일지 비용과 `ka10077` 체결 행의 세금은
+    체결마다 성분별로 끝전을 버린 값이고, 예수금(`d2_entra`)은 종목·하루 매도 금액 합계에 한 번
+    매긴 세금을 뺀다. 세율은 시장 구분(`ka10100` marketCode)마다 `tax_rates_bp`다.
     """
 
     def __init__(self, clock: Clock, *, account: str = ACCOUNT) -> None:
@@ -106,6 +110,11 @@ class FakeKiwoom:
         self.state: dict[str, str] = {}  # 종목 → 종목상태(파이프로 이은 토큰)
         self.price_limits: dict[str, tuple[int, int]] = {}  # 종목 → (상한가, 하한가)
         self.vi: dict[str, list[dict[str, str]]] = {}  # 종목 → 그날 VI 발동 행
+        self.markets: dict[str, str] = {}  # 종목 → 시장 구분(ka10100 marketCode, 기본 "0" 거래소)
+        # 시장 구분 → 매도 세금 성분(bp). 2026 세율은 거래소가 거래세 0.05% + 농특세 0.15%,
+        # 코스닥이 0.20%다
+        self.tax_rates_bp: dict[str, tuple[int, ...]] = {"0": (5, 15), "10": (20,)}
+        self.sell_fills: dict[str, list[dict[str, str]]] = {}  # 종목 → 그날 ka10077 매도 체결 행
         self.calls: list[Call] = []
         self.after: dict[str, list[Callable[[], None]]] = {}  # 한 번만 돈다
         self.every: dict[str, list[Callable[[], None]]] = {}  # 호출마다 돈다
@@ -177,6 +186,14 @@ class FakeKiwoom:
         ]
         return self._page(rows, "tdy_trde_diary", headers)
 
+    def _ka10077(self, body: dict[str, object], headers: dict[str, str]) -> KiwoomHttpResponse:
+        # 실측: 매도 체결이 없는 종목도 칸이 모두 빈 행 하나로 답한다
+        blank: dict[str, str] = dict.fromkeys(
+            ("stk_nm", "cntr_qty", "cntr_pric", "tdy_trde_cmsn", "tdy_trde_tax", "stk_cd"), ""
+        )
+        rows = self.sell_fills.get(str(body["stk_cd"])) or [blank]
+        return self._page(rows, "tdy_rlzt_pl_dtl", headers)
+
     def _ka10004(self, body: dict[str, object], _: dict[str, str]) -> KiwoomHttpResponse:
         asks, bids = self.quotes.get(str(body["stk_cd"]), ((), ()))
         levels = ["fpr", *(f"{index}th_pre" for index in range(2, 11))]
@@ -213,6 +230,7 @@ class FakeKiwoom:
                 "auditInfo": audit,
                 "orderWarning": warning,
                 "state": state,
+                "marketCode": self.markets.get(code, "0"),
             }
         )
 
@@ -340,7 +358,6 @@ class FakeKiwoom:
         price: int,
         *,
         commission: int = 0,
-        tax: int = 0,
         journal: bool = True,
     ) -> None:
         row = self.row(ord_no)
@@ -353,12 +370,35 @@ class FakeKiwoom:
         buy = "매수" in row["io_tp_nm"]
         code = row["stk_cd"][1:]
         self.holdings[code] = self.holdings.get(code, 0) + (quantity if buy else -quantity)
-        self.cash += (-quantity * price if buy else quantity * price) - commission - tax
+        tax = 0 if buy else self._sell_tax(code, quantity, price)
+        self.cash += (-quantity * price if buy else quantity * price) - commission
         entry = (code, "buy" if buy else "sell", quantity, quantity * price, commission + tax)
         if journal:
             self._journal(*entry)
         else:
             self.journal_lag.append(entry)
+
+    def _sell_tax(self, code: str, quantity: int, price: int) -> int:
+        """체결 한 건의 세금(성분마다 끝전을 버린다). 예수금은 하루 합계 기준으로 다시 맞춘다."""
+        rates = self.tax_rates_bp[self.markets.get(code, "0")]
+        before = sum(
+            int(r["cntr_qty"]) * int(r["cntr_pric"]) for r in self.sell_fills.get(code, [])
+        )
+        value = quantity * price
+        tax = sum(value * rate // 10_000 for rate in rates)
+        self.sell_fills.setdefault(code, []).append(
+            {
+                "stk_nm": "삼성전자",
+                "cntr_qty": str(quantity),
+                "cntr_pric": str(price),
+                "tdy_trde_cmsn": "0",
+                "tdy_trde_tax": str(tax),
+                "stk_cd": code,
+            }
+        )
+        after = before + value
+        self.cash -= sum(after * rate // 10_000 - before * rate // 10_000 for rate in rates)
+        return tax
 
     def catch_up_journal(self) -> None:
         for entry in self.journal_lag:
@@ -379,6 +419,7 @@ class FakeKiwoom:
         self.past[date] = self.rows
         self.rows = []
         self.journal = {}
+        self.sell_fills = {}
         self.clock.now_value = (self.clock.now_value + timedelta(days=1)).replace(hour=8, minute=0)
 
 
@@ -600,13 +641,169 @@ def test_order_lifecycle_partial_fill_then_cancel(tmp_path: Path) -> None:
 
 
 def test_sell_fill_with_tax_reconciles(tmp_path: Path) -> None:
+    # 체결 한 건이면 체결별 세금과 하루 합계 세금이 같다(끝전 차이 0)
     r = started(tmp_path)
-    sell = Intent("sell-1", SYMBOL, "sell", 3, 71_000, 1_000)
+    sell = Intent("sell-1", SYMBOL, "sell", 3, 71_000, 2_000)
     assert r.service.submit(sell).status == ExecutionStatus.OK
-    r.fake.fill("0000001", 3, 71_000, commission=32, tax=383)
+    r.fake.fill("0000001", 3, 71_000, commission=740)
     assert r.service.recover().status == ExecutionStatus.OK
     filled = fact_of(r.ledger, "sell-1")
-    assert (filled.state, filled.fees_krw) == (OrderState.FILLED, 415)
+    # 213,000원 × 0.05% = 106 · × 0.15% = 319
+    assert (filled.state, filled.fees_krw) == (OrderState.FILLED, 740 + 106 + 319)
+
+
+# 2026-11-02 첫 완전 자동 매도의 실제 체결(ka10077 수량·가격)과 kt00008 결제 예정 비용.
+# 종목: (시장 구분, 그날 수수료, 체결, 결제 예정 수수료 + 세금)
+NOV2_SELLS: dict[str, tuple[str, int, tuple[tuple[int, int], ...], int]] = {
+    "003350": (
+        "0",
+        26_920,
+        (
+            (20, 11_990),
+            (22, 11_990),
+            (2, 11_980),
+            (8, 11_980),
+            (115, 11_970),
+            (2, 11_990),
+            (5, 11_980),
+            (131, 11_970),
+            (19, 11_960),
+            (83, 11_960),
+            (3, 11_960),
+            (16, 11_960),
+            (217, 11_950),
+        ),
+        26_920 + 3_846 + 11_538,
+    ),
+    "048910": (
+        "10",
+        28_720,
+        (
+            (47, 7_590),
+            (59, 7_600),
+            (200, 7_530),
+            (7, 7_560),
+            (523, 7_570),
+            (165, 7_570),
+            (42, 7_570),
+            (42, 7_570),
+        ),
+        28_720 + 16_416,
+    ),
+    "354320": (
+        "10",
+        24_850,
+        ((23, 42_650), (13, 42_800), (69, 42_800), (2, 42_800), (12, 42_800), (47, 42_800)),
+        24_850 + 14_202,
+    ),
+}
+
+
+def nov2_rig(tmp_path: Path) -> Rig:
+    r = rig(tmp_path)
+    r.fake.holdings = {
+        code: sum(q for q, _ in fills) for code, (_, _, fills, _) in NOV2_SELLS.items()
+    }
+    r.fake.markets = {code: market for code, (market, _, _, _) in NOV2_SELLS.items()}
+    assert r.service.initialize().status == ExecutionStatus.OK
+    return r
+
+
+def nov2_sell(r: Rig, code: str) -> None:
+    """한 종목을 판다. 체결마다 대사한다(장중 다음 주문 직전 대사와 같다)."""
+    _, commission, fills, _ = NOV2_SELLS[code]
+    quantity = sum(q for q, _ in fills)
+    intent = Intent(f"sell-{code}", code, "sell", quantity, min(p for _, p in fills), 60_000)
+    assert r.service.submit(intent).status == ExecutionStatus.OK
+    ord_no = r.fake.rows[-1]["ord_no"]
+    for index, (fill_quantity, price) in enumerate(fills):
+        r.fake.fill(ord_no, fill_quantity, price, commission=commission if index == 0 else 0)
+        report = r.service.recover()
+        assert report.status == ExecutionStatus.OK, report
+
+
+def test_split_sell_fills_reconcile_with_the_day_total_tax(tmp_path: Path) -> None:
+    # 11-02: 일지 비용은 체결마다 끝전을 버린 세금이라 예수금보다 17·4·2원 적어 대사가 멈췄다
+    r = nov2_rig(tmp_path)
+    for code in NOV2_SELLS:
+        nov2_sell(r, code)
+    for code, (_, _, _, settled_costs) in NOV2_SELLS.items():
+        fact = fact_of(r.ledger, f"sell-{code}")
+        assert (fact.state, fact.fees_krw) == (OrderState.FILLED, settled_costs)
+    assert not r.ledger.halted()
+
+
+def test_sell_fills_are_read_again_only_when_the_day_total_changes(tmp_path: Path) -> None:
+    r = nov2_rig(tmp_path)
+    nov2_sell(r, "354320")
+    fills, markets = r.fake.api_ids().count("ka10077"), r.fake.api_ids().count("ka10100")
+    assert (fills, markets) == (len(NOV2_SELLS["354320"][2]), 1)
+    assert r.service.recover().status == ExecutionStatus.OK
+    assert (r.fake.api_ids().count("ka10077"), r.fake.api_ids().count("ka10100")) == (
+        fills,
+        markets,
+    )
+
+
+def test_sell_fills_that_lag_the_day_journal_are_read_again(tmp_path: Path) -> None:
+    # 늦은 체결 행을 남겨 두면 일지 합계가 같은 동안 다시 읽지 않아 그날 내내 대사가 막힌다
+    r = started(tmp_path)
+    assert r.service.submit(Intent("sell-1", SYMBOL, "sell", 5, 70_000, 5_000)).status == (
+        ExecutionStatus.OK
+    )
+    r.fake.fill("0000001", 2, 70_010, commission=490)
+    r.fake.fill("0000001", 3, 70_220, commission=740)
+    late = r.fake.sell_fills[SYMBOL].pop()
+    assert r.service.recover().status == ExecutionStatus.ERROR
+    assert r.broker.latch() is None
+    r.fake.sell_fills[SYMBOL].append(late)
+    assert r.service.recover().status == ExecutionStatus.OK
+    assert fact_of(r.ledger, "sell-1").fees_krw == 490 + 740 + 175 + 526
+
+
+def test_a_requote_sell_takes_the_rest_of_the_day_total_tax(tmp_path: Path) -> None:
+    # 추적이 남은 매도를 취소하고 다시 내면(-c1) 끝전 차이도 종목·하루 합계로 바뀐다
+    r = started(tmp_path)
+    assert r.service.submit(Intent("sell-a", SYMBOL, "sell", 8, 70_000, 5_000)).status == (
+        ExecutionStatus.OK
+    )
+    r.fake.fill("0000001", 2, 70_010, commission=1_220)
+    r.fake.fill("0000001", 3, 70_220)
+    assert r.service.cancel("sell-a").status == ExecutionStatus.OK
+    assert r.service.submit(Intent("sell-b", SYMBOL, "sell", 3, 70_100, 5_000)).status == (
+        ExecutionStatus.OK
+    )
+    second = next(row["ord_no"] for row in r.fake.rows if row["ord_uv"] == pad(70_100))
+    r.fake.fill(second, 3, 70_220, commission=740)
+    assert r.service.recover().status == ExecutionStatus.OK
+    first, later = fact_of(r.ledger, "sell-a"), fact_of(r.ledger, "sell-b")
+    # 350,680원의 세금은 175 + 526 = 701(체결별 합 700)이고,
+    # 하루 561,340원의 세금은 280 + 842 = 1,122(체결별 합 1,120)다
+    assert (first.state, first.fees_krw) == (OrderState.CANCELLED, 1_220 + 701)
+    assert (later.state, later.fees_krw) == (OrderState.FILLED, 740 + 1_122 - 701)
+
+
+@pytest.mark.parametrize(
+    ("market", "rates", "detail"),
+    [
+        ("0", (10, 15), "tax model"),  # 세율이 바뀌었다(체결 세금이 모형과 다르다)
+        ("8", (), "no sell tax model"),  # ETF 처럼 모형이 없는 시장
+    ],
+)
+def test_sell_tax_that_the_model_cannot_explain_latches(
+    tmp_path: Path, market: str, rates: tuple[int, ...], detail: str
+) -> None:
+    r = started(tmp_path)
+    r.fake.markets[SYMBOL] = market
+    r.fake.tax_rates_bp[market] = rates
+    assert r.service.submit(Intent("sell-1", SYMBOL, "sell", 5, 70_000, 5_000)).status == (
+        ExecutionStatus.OK
+    )
+    r.fake.fill("0000001", 2, 70_010, commission=490)
+    r.fake.fill("0000001", 3, 70_220, commission=740)
+    assert r.service.recover().status == ExecutionStatus.ERROR
+    latched = r.broker.latch()
+    assert latched is not None and detail in latched
 
 
 def test_revisions_survive_restart(tmp_path: Path) -> None:
@@ -839,6 +1036,7 @@ def test_multi_price_fills_take_exact_amounts_from_the_day_journal(tmp_path: Pat
     r.fake.fill("0000001", 2, 70_000, commission=490)
     assert r.fake.row("0000001")["cntr_uv"] == pad(69_967)  # 209,900 / 3 = 69,966.7
     assert r.service.recover().status == ExecutionStatus.OK
+    assert "ka10077" not in r.fake.api_ids()  # 매수만 있으면 매도 체결·시장 구분을 읽지 않는다
     filled = fact_of(r.ledger)
     assert (filled.state, filled.filled_value_krw, filled.fees_krw) == (
         OrderState.FILLED,

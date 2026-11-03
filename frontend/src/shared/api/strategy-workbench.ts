@@ -686,8 +686,11 @@ export const strategyWorkbenchApi = {
   },
 
   /** 실행 전 미리 계산 — 같은 요청이 결과를 내면 계열 시도 수가 어떻게 되는가(검증 랩 spec D2). */
-  async previewBacktestTrial(spec: BacktestRunSpec): Promise<TrialPreview> {
-    const response = await previewBacktestTrial({ body: spec });
+  async previewBacktestTrial(
+    spec: BacktestRunSpec,
+    signal?: AbortSignal,
+  ): Promise<TrialPreview> {
+    const response = await previewBacktestTrial({ body: spec, signal });
     return unwrap(response, "previewBacktestTrial");
   },
 
@@ -731,16 +734,27 @@ export const strategyWorkbenchApi = {
   },
 
   /** `session` 은 `YYYY-MM-DD`. 계좌 기록이 없는 날은 200 의 `session_not_recorded` 로 답한다. */
-  async getBacktestSessionHoldings(runId: string, session: string): Promise<SessionHoldingsReport> {
+  async getBacktestSessionHoldings(
+    runId: string,
+    session: string,
+    signal?: AbortSignal,
+  ): Promise<SessionHoldingsReport> {
     return unwrap(
-      await getBacktestSessionHoldings({ path: { run_id: runId, session } }),
+      await getBacktestSessionHoldings({ path: { run_id: runId, session }, signal }),
       "getBacktestSessionHoldings",
     );
   },
 
-  async getBacktestSecurityTrades(runId: string, securityId: string): Promise<SecurityTradesReport> {
+  async getBacktestSecurityTrades(
+    runId: string,
+    securityId: string,
+    signal?: AbortSignal,
+  ): Promise<SecurityTradesReport> {
     return unwrap(
-      await getBacktestSecurityTrades({ path: { run_id: runId, security_id: securityId } }),
+      await getBacktestSecurityTrades({
+        path: { run_id: runId, security_id: securityId },
+        signal,
+      }),
       "getBacktestSecurityTrades",
     );
   },

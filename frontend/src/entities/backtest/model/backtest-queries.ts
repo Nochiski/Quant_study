@@ -125,7 +125,7 @@ export const useStartBacktest = () => {
  * 실행 전 미리 계산(검증 랩 spec D2). 새 시도인지·시도 수가 얼마가 되는지는 backend 가 판정하고 화면은 응답을
  * 보이기만 한다. 거절(봉인 겹침 등)은 같은 요청이면 늘 같으므로 자동 재시도는 하지 않는다.
  * 실행 설정을 한 글자 고칠 때마다 요청이 바뀌므로, 새 답이 오기 전까지 직전 답을 보여 패널 높이가
- * 출렁이지 않게 한다(`isPlaceholderData` 로 옛 답임을 표시한다).
+ * 출렁이지 않게 한다(`isPlaceholderData` 로 옛 답임을 표시한다). 요청이 바뀌면 밀려난 요청은 끊는다.
  */
 export const useBacktestTrialPreview = (spec: BacktestRunSpec | null) =>
   useQuery({
@@ -133,7 +133,7 @@ export const useBacktestTrialPreview = (spec: BacktestRunSpec | null) =>
     queryFn:
       spec === null
         ? skipToken
-        : () => strategyWorkbenchApi.previewBacktestTrial(spec),
+        : ({ signal }) => strategyWorkbenchApi.previewBacktestTrial(spec, signal),
     retry: false,
     placeholderData: keepPreviousData,
   });
@@ -221,8 +221,10 @@ export const useBacktestSessionHoldings = (runId: string, session: string | null
     queryFn:
       session === null
         ? skipToken
-        : () => strategyWorkbenchApi.getBacktestSessionHoldings(runId, session),
-    // 다른 날을 고르는 동안 직전 날의 표를 두어 표 높이가 출렁이지 않게 한다.
+        : ({ signal }) =>
+            strategyWorkbenchApi.getBacktestSessionHoldings(runId, session, signal),
+    // 다른 날을 고르는 동안 직전 날의 표를 두어 표 높이가 출렁이지 않게 한다. 날짜를 빠르게 넘기면
+    // 밀려난 날의 요청은 끊는다.
     placeholderData: keepPreviousData,
     ...holdingsQueryOptions,
   });
@@ -233,7 +235,8 @@ export const useBacktestSecurityTrades = (runId: string, securityId: string | nu
     queryFn:
       securityId === null
         ? skipToken
-        : () => strategyWorkbenchApi.getBacktestSecurityTrades(runId, securityId),
+        : ({ signal }) =>
+            strategyWorkbenchApi.getBacktestSecurityTrades(runId, securityId, signal),
     placeholderData: keepPreviousData,
     ...holdingsQueryOptions,
   });

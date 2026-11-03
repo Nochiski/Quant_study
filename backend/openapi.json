@@ -15788,6 +15788,71 @@
         "summary": "Start Backtest"
       }
     },
+    "/api/v1/backtests/latest": {
+      "get": {
+        "description": "전략마다 가장 최근 run 한 행 — 전략 목록 한 쪽이 행마다 목록을 묻지 않게 한다.",
+        "operationId": "listLatestBacktests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 500,
+              "minItems": 1,
+              "title": "Strategy Id",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BacktestRunSummary"
+                  },
+                  "title": "Response Listlatestbacktests",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Latest Backtests"
+      }
+    },
     "/api/v1/backtests/trial-preview": {
       "post": {
         "description": "실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2).",

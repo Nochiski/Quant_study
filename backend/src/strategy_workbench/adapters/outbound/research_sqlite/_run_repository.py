@@ -182,6 +182,29 @@ class SQLiteBacktestRunRepository:
             limit=page.limit,
         )
 
+    def latest(
+        self, strategy_ids: Collection[str], *, kind: RunKind | None = None
+    ) -> tuple[BacktestRunSummary, ...]:
+        ids = list(dict.fromkeys(strategy_ids))
+        if not ids:
+            return ()
+        with self._database.transaction(write=False) as connection:
+            rows = connection.execute(
+                f"""
+                SELECT {_READ_COLUMNS} FROM (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY strategy_id ORDER BY accepted_order DESC
+                    ) AS recency
+                    FROM {_RUNS}
+                    WHERE strategy_id IN ({", ".join("?" * len(ids))}) AND (? IS NULL OR kind = ?)
+                )
+                WHERE recency = 1
+                ORDER BY accepted_order DESC
+                """,
+                (*ids, kind, kind),
+            ).fetchall()
+        return tuple(_summary(row) for row in rows)
+
     def record_trial_result(
         self,
         completed: BacktestRunState,

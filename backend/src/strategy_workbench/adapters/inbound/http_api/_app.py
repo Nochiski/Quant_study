@@ -472,6 +472,15 @@ def create_app(
             kind=kind,
         )
 
+    # `/backtests/{run_id}` 보다 먼저 등록한다 — 늦으면 `latest` 를 run id 로 읽는다.
+    @app.get("/api/v1/backtests/latest", operation_id="listLatestBacktests")
+    def list_latest_backtests(
+        strategy_id: Annotated[list[str], Query(min_length=1, max_length=PageRequest.MAX_LIMIT)],
+        kind: RunKind | None = None,
+    ) -> tuple[BacktestRunSummary, ...]:
+        """전략마다 가장 최근 run 한 행 — 전략 목록 한 쪽이 행마다 목록을 묻지 않게 한다."""
+        return backtest_runs.latest_runs(strategy_id, kind=kind)
+
     def admitted(call: Callable[[], _T]) -> _T:
         """시작·미리 계산·실험 기반 검사의 거절을 실행 요청 거절 코드로 낸다.
 

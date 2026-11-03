@@ -1,12 +1,13 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 
 import {
-  backtestHistoryQuery,
+  latestBacktestsQuery,
   RUN_STATUS,
   RunHeadline,
   runStageLabel,
   trialLedgerQuery,
+  type BacktestRunSummary,
 } from "../../../entities/backtest";
 import { experimentsQuery, type Experiment } from "../../../entities/experiment";
 import {
@@ -234,10 +235,14 @@ const StrategyHistory = ({
   );
 };
 
-/** 그 전략의 가장 최근 단일 백테스트 한 건. 숫자는 목록 응답의 `headline` 그대로다(결정 1). */
-const LatestResult = ({ strategyId }: { strategyId: string }) => {
-  const latest = useQuery(backtestHistoryQuery({ strategyId, kind: "single", limit: 1 }));
-  const run = latest.data?.items[0];
+type LatestRuns = UseQueryResult<BacktestRunSummary[]>;
+
+/**
+ * 그 전략의 가장 최근 단일 백테스트 한 건. 한 쪽의 전략 전부를 한 번에 읽은 응답에서 고른다. 숫자는 목록
+ * 응답의 `headline` 그대로다(결정 1).
+ */
+const LatestResult = ({ latest, strategyId }: { latest: LatestRuns; strategyId: string }) => {
+  const run = latest.data?.find((item) => item.strategy_provenance.strategy_id === strategyId);
   if (latest.isPending) return <span role="status">{t("page.loading")}</span>;
   if (latest.isError) return <span>{t("history.strategies.resultError")}</span>;
   if (run === undefined) return <span>{t("history.strategies.noRun")}</span>;
@@ -286,9 +291,11 @@ const ActiveWork = ({ experiments }: { experiments: readonly Experiment[] }) => 
 const StrategyRow = ({
   strategy,
   experiments,
+  latest,
 }: {
   strategy: StrategySummary;
   experiments: readonly Experiment[];
+  latest: LatestRuns;
 }) => {
   const [expanded, setExpanded] = useState(false);
   const historyId = useId();
@@ -331,7 +338,7 @@ const StrategyRow = ({
           ) : null}
         </td>
         <td>
-          <LatestResult strategyId={strategy.strategy_id} />
+          <LatestResult latest={latest} strategyId={strategy.strategy_id} />
         </td>
         <td>
           <TrialCount strategyId={strategy.strategy_id} />
@@ -403,6 +410,13 @@ export const StrategiesPage = () => {
   // 실험 목록은 한 번만 읽어 전략마다 나눈다. 첫 쪽(최근 실험)만 본다.
   const experiments = useInfiniteQuery(experimentsQuery());
   const experimentItems = experiments.data?.pages.flatMap((page) => page.items) ?? [];
+  // 최근 실행도 한 쪽의 전략 전부를 한 번에 읽어 행마다 나눈다.
+  const latest = useQuery(
+    latestBacktestsQuery(
+      strategies.data?.items.map((strategy) => strategy.strategy_id) ?? [],
+      "single",
+    ),
+  );
   const correctedOffset =
     strategies.data !== undefined &&
     offset > 0 &&
@@ -493,6 +507,7 @@ export const StrategiesPage = () => {
                     key={strategy.strategy_id}
                     strategy={strategy}
                     experiments={strategyExperiments(experimentItems, strategy.strategy_id)}
+                    latest={latest}
                   />
                 ))}
               </tbody>

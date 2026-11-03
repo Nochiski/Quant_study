@@ -58,6 +58,19 @@ export const backtestHistoryQuery = (
   });
 
 /**
+ * 전략마다 가장 최근 run 한 행(전략 목록 한 쪽). 이력 목록과 같은 키 아래라 실행을 시작하면 함께 새로
+ * 읽고, 도는 run 이 있으면 이력 목록처럼 1초마다 다시 읽는다.
+ */
+export const latestBacktestsQuery = (strategyIds: readonly string[], kind?: RunKind) =>
+  queryOptions({
+    queryKey: [...backtestHistoryKey(), "latest", kind ?? null, ...strategyIds],
+    queryFn: () => strategyWorkbenchApi.listLatestBacktests(strategyIds, kind),
+    enabled: strategyIds.length > 0,
+    refetchInterval: (query) =>
+      query.state.data?.some((item) => RUN_STATUS[item.run.status].active) ? 1_000 : false,
+  });
+
+/**
  * 실행 설정 스키마(P2-01, spec D6). 배포로만 바뀌고 서버가 `schema_hash` 를 ETag 로 답하므로 전략 문서
  * 스키마와 같은 staleTime 을 쓴다. 실행 설정 패널이 필드·기본값·범위를 읽는 유일한 출처다.
  */

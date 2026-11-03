@@ -170,6 +170,18 @@ const openTrialLedger = async (user: ReturnType<typeof userEvent.setup>) => {
   return screen.getByRole("tabpanel");
 };
 
+/** 기본 이력: 최근 접수 순. 목록과 전략별 최근 조회가 같은 행을 읽는다. */
+const storedBacktests = () => [
+  backtestSummary({ runId: "run-inline" }),
+  backtestSummary({
+    runId: "run-saved",
+    saved: true,
+    kind: "experiment_trial",
+    experimentId: "exp-7",
+    paused: true,
+  }),
+];
+
 const server = setupServer(
   // 실행 설정 유니버스 칸·요약 띠가 읽는 연결된 시장 데이터의 유니버스 목록.
   http.get(`${API}/api/v1/equity/universes`, () =>
@@ -265,22 +277,27 @@ const server = setupServer(
       limit: 20,
     }),
   ),
+  http.get(`${API}/api/v1/backtests/latest`, ({ request }) => {
+    const url = new URL(request.url);
+    const strategyIds = url.searchParams.getAll("strategy_id");
+    const kind = url.searchParams.get("kind");
+    // 목록과 같은 최근 순에서 전략마다 첫 행.
+    const latest = new Map<string, ReturnType<typeof backtestSummary>>();
+    for (const item of storedBacktests()) {
+      const strategyId = item.strategy_provenance.strategy_id;
+      if (strategyId == null || !strategyIds.includes(strategyId)) continue;
+      if (kind !== null && item.kind !== kind) continue;
+      if (!latest.has(strategyId)) latest.set(strategyId, item);
+    }
+    return HttpResponse.json([...latest.values()]);
+  }),
   http.get(`${API}/api/v1/backtests`, ({ request }) => {
     const url = new URL(request.url);
     const offset = Number(url.searchParams.get("offset") ?? 0);
     const limit = Number(url.searchParams.get("limit") ?? 25);
     const strategyId = url.searchParams.get("strategy_id");
     const kind = url.searchParams.get("kind");
-    const all = [
-      backtestSummary({ runId: "run-inline" }),
-      backtestSummary({
-        runId: "run-saved",
-        saved: true,
-        kind: "experiment_trial",
-        experimentId: "exp-7",
-        paused: true,
-      }),
-    ];
+    const all = storedBacktests();
     const filtered = all.filter(
       (item) =>
         (strategyId === null ||
@@ -771,6 +788,7 @@ describe("App Shell routes", () => {
         strategy_provenance: { ...summary.strategy_provenance, strategy_id: strategyId },
       };
     };
+    const latestRequests: string[][] = [];
     server.use(
       http.get(`${API}/api/v1/strategies`, () =>
         HttpResponse.json({
@@ -787,14 +805,10 @@ describe("App Shell routes", () => {
           limit: 20,
         }),
       ),
-      http.get(`${API}/api/v1/backtests`, ({ request }) => {
-        const strategyId = new URL(request.url).searchParams.get("strategy_id") ?? "good";
-        return HttpResponse.json({
-          items: [saved(strategyId, strategyId === "bad" ? "failed" : "completed")],
-          total: 1,
-          offset: 0,
-          limit: 1,
-        });
+      // 한 쪽의 전략 전부를 한 번에 묻는다 — 행마다 목록을 묻지 않는다.
+      http.get(`${API}/api/v1/backtests/latest`, ({ request }) => {
+        latestRequests.push(new URL(request.url).searchParams.getAll("strategy_id"));
+        return HttpResponse.json([saved("good", "completed"), saved("bad", "failed")]);
       }),
       http.get(`${API}/api/v1/strategies/:strategyId/trials`, ({ params }) =>
         HttpResponse.json({
@@ -829,6 +843,7 @@ describe("App Shell routes", () => {
     );
     mount("/research/strategies");
     const good = (await screen.findByRole("link", { name: "good strategy" })).closest("tr")!;
+    await waitFor(() => expect(latestRequests).toEqual([["good", "bad"]]));
     expect(screen.getByRole("link", { name: "good strategy" })).toHaveAttribute(
       "href",
       "/research/strategies/good",

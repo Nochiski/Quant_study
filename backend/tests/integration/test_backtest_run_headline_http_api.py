@@ -79,6 +79,21 @@ def test_completed_runs_carry_headline_metrics_in_list_and_summary(tmp_path: Pat
     assert restarted.get("/api/v1/backtests").json()["items"][0]["headline"] == expected
 
 
+def test_latest_runs_route_is_not_read_as_a_run_id_and_needs_a_strategy(tmp_path: Path) -> None:
+    """`/backtests/latest` 는 `/backtests/{run_id}` 와 겹친다 — 먼저 등록돼야 run 404 가 아니다."""
+    client = TestClient(
+        build_http_app(
+            research_db_path=tmp_path / "research.sqlite3", artifact_root=tmp_path / "runs"
+        )
+    )
+
+    found = client.get("/api/v1/backtests/latest", params={"strategy_id": ["s-1", "s-2"]})
+    missing = client.get("/api/v1/backtests/latest")
+
+    assert (found.status_code, found.json()) == (200, [])
+    assert missing.status_code == 422
+
+
 def test_v9_file_migrates_and_old_runs_have_no_headline(tmp_path: Path) -> None:
     path = tmp_path / "old-research.sqlite3"
     with sqlite3.connect(path) as connection:

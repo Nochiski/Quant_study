@@ -54,6 +54,7 @@ import {
   getTrialLedger,
   listBacktests,
   listEquityUniverses,
+  listLatestBacktests,
   listExperimentTrials,
   listExperiments,
   listStrategies,
@@ -489,6 +490,17 @@ export const strategyWorkbenchApi = {
       },
     });
     return unwrap(response, "listBacktests");
+  },
+
+  /** 전략마다 가장 최근 run 한 행(run 이 없는 전략은 빠진다) — 전략 목록 한 쪽을 한 번에 읽는다. */
+  async listLatestBacktests(
+    strategyIds: readonly string[],
+    kind?: RunKind,
+  ): Promise<BacktestRunSummary[]> {
+    const response = await listLatestBacktests({
+      query: { strategy_id: [...strategyIds], kind },
+    });
+    return unwrap(response, "listLatestBacktests");
   },
 
   /** 계열 시도 원장 — 시도 묶음·실행 역할·N(검증 랩 spec D2). 합쳐진 계열이면 남은 계열의 원장이다. */

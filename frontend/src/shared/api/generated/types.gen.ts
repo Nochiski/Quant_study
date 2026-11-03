@@ -9813,6 +9813,44 @@ export type StartBacktestResponses = {
 export type StartBacktestResponse =
   StartBacktestResponses[keyof StartBacktestResponses];
 
+export type ListLatestBacktestsData = {
+  body?: never;
+  path?: never;
+  query: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: Array<string>;
+    /**
+     * Kind
+     */
+    kind?: RunKind | null;
+  };
+  url: "/api/v1/backtests/latest";
+};
+
+export type ListLatestBacktestsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListLatestBacktestsError =
+  ListLatestBacktestsErrors[keyof ListLatestBacktestsErrors];
+
+export type ListLatestBacktestsResponses = {
+  /**
+   * Response Listlatestbacktests
+   *
+   * Successful Response
+   */
+  200: Array<BacktestRunSummary>;
+};
+
+export type ListLatestBacktestsResponse =
+  ListLatestBacktestsResponses[keyof ListLatestBacktestsResponses];
+
 export type PreviewBacktestTrialData = {
   body: BacktestRunSpec;
   path?: never;

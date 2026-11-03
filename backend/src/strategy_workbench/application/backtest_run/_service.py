@@ -686,15 +686,24 @@ class BacktestRunService:
         """최근 접수 순. 목록은 저장소가 정하고, 이 프로세스가 도는 run 은 메모리 상태로 덮는다."""
 
         stored = self._repository.list(page, strategy_id=strategy_id, kind=kind)
+        return replace(stored, items=self._with_live_states(stored.items))
+
+    def latest_runs(
+        self, strategy_ids: Collection[str], *, kind: RunKind | None = None
+    ) -> tuple[BacktestRunSummary, ...]:
+        """전략마다 가장 최근 접수한 run 한 행(run 이 없는 전략은 빠진다). 목록과 같은 저장소 순서에
+        이 프로세스가 도는 run 의 메모리 상태를 덮는다."""
+        return self._with_live_states(self._repository.latest(strategy_ids, kind=kind))
+
+    def _with_live_states(
+        self, items: tuple[BacktestRunSummary, ...]
+    ) -> tuple[BacktestRunSummary, ...]:
         with self._lock:
-            return replace(
-                stored,
-                items=tuple(
-                    replace(item, run=self._records[item.run.run_id].state)
-                    if item.run.run_id in self._records
-                    else item
-                    for item in stored.items
-                ),
+            return tuple(
+                replace(item, run=self._records[item.run.run_id].state)
+                if item.run.run_id in self._records
+                else item
+                for item in items
             )
 
     def result(self, run_id: str) -> BacktestRunResult:

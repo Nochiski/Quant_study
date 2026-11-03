@@ -15,6 +15,8 @@ import {
   type DocumentState,
 } from "./document-state";
 
+// 타자를 모아 보내는 지연. 편집하지 않은 문서(막 연 리비전·새 문서 템플릿)는 모을 타자가 없어 곧바로 보낸다 —
+// 서버 compile 은 끊어도 서버에서 끝까지 돌므로, 타자 중에는 지연을 지켜 요청이 줄줄이 쌓이지 않게 한다.
 const COMPILE_DELAY_MS = 300;
 
 /** Exact frontend range for the pointer, else the backend's range, else the nearest ancestor. */
@@ -150,7 +152,7 @@ export const useCompileDocument = (
             },
           });
         });
-    }, COMPILE_DELAY_MS);
+    }, state.dirty ? COMPILE_DELAY_MS : 0);
     return () => {
       clearTimeout(timer);
       controller.abort();

@@ -700,8 +700,9 @@ class BacktestRunService:
     def result(self, run_id: str) -> BacktestRunResult:
         """완료된 run 의 결과를 산출물 저장소에서 읽는다(V1-04).
 
-        메모리에 결과를 들지 않는다 — 이 프로세스가 끝낸 run 과 재시작 전에 끝난 run 이 같은 길로
-        읽힌다. 산출물은 `COMPLETED` 전이보다 먼저 커밋되므로 완료 상태면 파일이 있다.
+        run 기록에 결과를 들지 않는다 — 이 프로세스가 끝낸 run 과 재시작 전에 끝난 run 이 같은 길로
+        읽힌다(해독 결과를 기억하는 것은 산출물 저장소의 일이다). 산출물은 `COMPLETED` 전이보다
+        먼저 커밋되므로 완료 상태면 파일이 있다.
         """
         state = self.state(run_id)
         if state.status is not RunStatus.COMPLETED or state.artifact_sha256 is None:

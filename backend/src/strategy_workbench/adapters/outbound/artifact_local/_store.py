@@ -9,6 +9,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
+from threading import Lock
 from typing import Annotated, Any
 from uuid import uuid4
 
@@ -61,6 +62,12 @@ class LocalArtifactStore:
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
         self._root.mkdir(parents=True, exist_ok=True)
+        # 마지막으로 해독한 결과(sha256, 값). 결과 화면 한 번이 같은 파일을 결과·계좌 보고서·보유 등
+        # 여러 조회로 거의 동시에 읽고, 해독(pydantic 검증)이 파일 읽기·해시보다 열 배쯤 무겁다.
+        # 읽기와 해시 대조는 매번 하므로 지워지거나 바뀐 파일은 여전히 거절된다. 잠금 안에서 해독해
+        # 동시에 온 조회도 한 번만 해독한다. 공유하는 결과는 읽기 전용이다.
+        self._decoded: tuple[str, BacktestRunResult] | None = None
+        self._decode_lock = Lock()
 
     def remove_orphan_staging(self) -> None:
         """커밋 도중 프로세스가 죽어 남은 staging(`.*.tmp`)을 모두 지운다.
@@ -110,16 +117,21 @@ class LocalArtifactStore:
             raise BacktestArtifactUnreadableError(
                 f"run result file does not match its recorded sha256 — run_id={run_id}"
             )
-        try:
-            return _RESULT.validate_json(payload)
-        except ValidationError as error:
-            # 해시가 맞는데 못 읽으면 결과 모델이 파일을 쓴 뒤 바뀐 것이다. 서버 경로·파일 원문은
-            # 싣지 않는다.
-            first = error.errors()[0]
-            raise BacktestArtifactUnreadableError(
-                f"run result file does not decode — run_id={run_id} "
-                f"errors={error.error_count()} first={first['loc']}: {first['msg']}"
-            ) from error
+        with self._decode_lock:
+            if self._decoded is not None and self._decoded[0] == sha256:
+                return self._decoded[1]
+            try:
+                result = _RESULT.validate_json(payload)
+            except ValidationError as error:
+                # 해시가 맞는데 못 읽으면 결과 모델이 파일을 쓴 뒤 바뀐 것이다. 서버 경로·파일
+                # 원문은 싣지 않는다.
+                first = error.errors()[0]
+                raise BacktestArtifactUnreadableError(
+                    f"run result file does not decode — run_id={run_id} "
+                    f"errors={error.error_count()} first={first['loc']}: {first['msg']}"
+                ) from error
+            self._decoded = (sha256, result)
+            return result
 
     def discard(self, run_id: str) -> None:
         """Delete one exact committed run after application-level cancellation wins."""

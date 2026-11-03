@@ -31,7 +31,6 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestParameterValueError,
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
-    BacktestRunResult,
     BacktestRunService,
     BacktestRunSpec,
     BacktestRunState,
@@ -170,6 +169,7 @@ from ._backtest_contract import (
     TrialLineageAlreadyMergedResponse,
     TrialLineageMergeRequest,
 )
+from ._backtest_result_contract import BacktestResult, backtest_result
 from ._broker_routes import register_broker_connection_routes
 from ._continuous_account_routes import register_continuous_account_routes
 from ._execution_error_contract import (
@@ -591,9 +591,9 @@ def create_app(
         operation_id="getBacktestResult",
         responses=_backtest_result_responses(),
     )
-    def get_backtest_result(run_id: str) -> BacktestRunResult:
+    def get_backtest_result(run_id: str) -> BacktestResult:
         try:
-            return backtest_runs.result(run_id)
+            return backtest_result(backtest_runs.result(run_id))
         except BacktestRunNotFoundError as error:
             raise _backtest_not_found(error) from error
         except BacktestResultNotReadyError as error:

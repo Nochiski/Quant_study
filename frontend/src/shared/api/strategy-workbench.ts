@@ -85,7 +85,7 @@ import type {
   SessionHoldingsReport,
   RunValidationReport,
   ApplicableWhen,
-  BacktestRunResult,
+  BacktestResult,
   BacktestRunSpec,
   BacktestCancelResult,
   BacktestRunState,
@@ -710,7 +710,7 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getBacktestRequest");
   },
 
-  async getBacktestResult(runId: string): Promise<BacktestRunResult> {
+  async getBacktestResult(runId: string): Promise<BacktestResult> {
     const response = await getBacktestResult({ path: { run_id: runId } });
     return unwrap(response, "getBacktestResult");
   },
@@ -1074,7 +1074,7 @@ export type {
   SecurityTradesReport,
   SessionHoldingsReport,
   ApplicableWhen,
-  BacktestRunResult,
+  BacktestResult,
   BacktestRunSpec,
   BacktestCancelResult,
   BacktestRunState,

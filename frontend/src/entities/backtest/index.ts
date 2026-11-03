@@ -12,7 +12,7 @@ export {
   BacktestResultFailure,
   BacktestRunFailure,
 } from "./ui/backtest-run-failure";
-export type { BacktestRunResult, BacktestRunSpec, BacktestRunState, BacktestRunSummary, RunKind, TrialLedger } from "../../shared/api";
+export type { BacktestResult, BacktestRunSpec, BacktestRunState, BacktestRunSummary, RunKind, TrialLedger } from "../../shared/api";
 
 export { RUN_STATUS, runStatusLabel, runStageLabel } from "./model/run-status";
 

@@ -21,7 +21,7 @@ import {
 } from "vitest";
 
 import { App } from "../app";
-import type { BacktestRunResult } from "../../entities/backtest";
+import type { BacktestResult } from "../../entities/backtest";
 
 /**
  * 결과 화면의 AI 패널(결과 설명 spec R1·R4). 진입점은 완료된 결과에만 있고, 대화는 실행에 붙으며
@@ -61,7 +61,7 @@ const METRICS = [
   metric("trade_count", "Closed trades", "count", 4),
 ];
 
-const resultFixture = (): BacktestRunResult => ({
+const resultFixture = (): BacktestResult => ({
   manifest: {
     run_id: RUN_ID,
     created_at: "2026-09-27T00:00:00Z",
@@ -97,7 +97,7 @@ const resultFixture = (): BacktestRunResult => ({
   },
   artifacts: {
     snapshots: [],
-    positions: [],
+    position_count: 0,
     orders: [],
     fills: [],
     costs: [],

@@ -6,7 +6,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { BacktestRunResult, MetricDefinition } from "../../../shared/api";
+import type { BacktestResult, MetricDefinition } from "../../../shared/api";
 import { BacktestRunDetail } from "../ui/backtest-run-detail";
 
 afterEach(cleanup);
@@ -42,7 +42,7 @@ const MONTHLY = [2020, 2021, 2022, 2023, 2024, 2025].flatMap((year) => [
   { year, month: 2, value: -0.013 },
 ]);
 
-const result = (): BacktestRunResult => ({
+const result = (): BacktestResult => ({
   manifest: {
     run_id: "run-1",
     created_at: "2026-09-27T00:00:00Z",
@@ -116,7 +116,7 @@ const result = (): BacktestRunResult => ({
   },
   artifacts: {
     snapshots: [],
-    positions: [],
+    position_count: 0,
     orders: [],
     fills: [],
     costs: [],

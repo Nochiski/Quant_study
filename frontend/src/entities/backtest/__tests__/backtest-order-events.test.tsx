@@ -1,14 +1,14 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
-import type { BacktestRunResult } from "../../../shared/api";
+import type { BacktestResult } from "../../../shared/api";
 import { BacktestOrderEvents } from "../ui/backtest-order-events";
 
-type Artifacts = BacktestRunResult["artifacts"];
+type Artifacts = BacktestResult["artifacts"];
 const artifacts = (updates?: Artifacts["order_updates"]): Artifacts => ({
   orders: [{ order_id: "order-1", security_id: "KRX:005930", decision_id: "d1", session: "2026-10-12", side: "buy", quantity: "5", order_type: "market", time_in_force: "gtc" }],
   order_updates: updates,
-  fills: [], trades: [], positions: [], costs: [], snapshots: [],
+  fills: [], trades: [], position_count: 0, costs: [], snapshots: [],
 });
 afterEach(cleanup);
 

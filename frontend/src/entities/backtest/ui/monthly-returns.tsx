@@ -1,8 +1,8 @@
-import type { BacktestRunResult } from "../../../shared/api";
+import type { BacktestResult } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
 import { SignedValue } from "../../../shared/ui";
 
-type MonthlyPoint = BacktestRunResult["series"]["monthly_returns"][number];
+type MonthlyPoint = BacktestResult["series"]["monthly_returns"][number];
 
 /** 펼쳐 둘 최근 연도 수. 이전 연도는 접어 둔다(RD-07-D). */
 const RECENT_YEARS = 3;

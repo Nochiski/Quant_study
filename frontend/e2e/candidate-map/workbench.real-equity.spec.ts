@@ -10,7 +10,7 @@ import {
   getExperiment,
   getExperimentParameterMap,
   listExperimentTrials,
-  type BacktestRunResult,
+  type BacktestResult,
   type ExperimentSelection,
   type RunValidationReport,
 } from "../../src/shared/api/generated";
@@ -257,7 +257,7 @@ test.describe("후보 지도 실자료 기술 QA", () => {
     const validationHttp = await validationResponse;
     expect(resultHttp.ok()).toBe(true);
     expect(validationHttp.ok()).toBe(true);
-    const result = (await resultHttp.json()) as BacktestRunResult;
+    const result = (await resultHttp.json()) as BacktestResult;
     const validationReport = (await validationHttp.json()) as RunValidationReport;
     const manifest = result.manifest;
     expect(manifest.run_id).toBe(runId);

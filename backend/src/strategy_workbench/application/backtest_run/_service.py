@@ -142,7 +142,12 @@ from .ports.outgoing.run_execution import (
     RunJob,
     RunOutcome,
 )
-from .ports.outgoing.run_repository import BacktestRunRepositoryPort, BacktestRunSummary, RunKind
+from .ports.outgoing.run_repository import (
+    BacktestRunNotFoundError,
+    BacktestRunRepositoryPort,
+    BacktestRunSummary,
+    RunKind,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -640,12 +645,19 @@ class BacktestRunService:
         return known | stored
 
     def state(self, run_id: str) -> BacktestRunState:
-        """이 프로세스가 도는 run 은 메모리의 진행률까지, 나머지는 저장소의 마지막 상태."""
+        """이 프로세스가 도는 run 은 메모리의 진행률까지, 나머지는 저장소의 마지막 상태.
+
+        저장소는 상태 칸만 읽는 `states` 로 묻는다 — `get` 은 실행 종류를 실험 attempt 전체 집계로
+        구하므로, 결과 조회마다 거치는 이 경로에 쓰지 않는다.
+        """
         with self._lock:
             record = self._records.get(run_id)
             if record is not None:
                 return record.state
-        return self._repository.get(run_id).run
+        stored = self._repository.states((run_id,)).get(run_id)
+        if stored is None:
+            raise BacktestRunNotFoundError(run_id)
+        return stored
 
     def summary(self, run_id: str) -> BacktestRunSummary:
         """이력 한 행(실행 종류·소유 실험·provenance). 이 프로세스가 도는 run 은 메모리 상태로

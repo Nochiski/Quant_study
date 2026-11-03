@@ -287,6 +287,33 @@ def test_only_recent_finished_runs_keep_an_in_memory_copy(
     assert runs.result("old").manifest.run_id == "old"
 
 
+def test_a_stored_run_state_is_read_without_the_run_kind_aggregate(
+    tmp_path: Path, barriers: list[RawLoadBarrier], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """메모리 사본이 없는 끝난 run 의 상태는 상태 칸만 읽는다 — 결과 조회마다 거치는 경로라
+    실험 attempt 전체를 집계하는 `get` 을 타면 조회 하나가 실험 수만큼 느려진다."""
+    monkeypatch.setattr(
+        "strategy_workbench.application.backtest_run._service._FINISHED_RECORDS_KEPT", 0
+    )
+    free = _open_barrier(barriers)
+    free.release.set()
+    repository = SQLiteBacktestRunRepository()
+    runs = _service(tmp_path, repository, free, "done")
+    runs.start(_request())
+    wait_for_terminal_run(runs, "done")
+    stored = repository.get("done").run
+
+    def _aggregate(run_id: str) -> object:
+        raise AssertionError(f"state() read the run-kind aggregate: run_id={run_id}")
+
+    # mock: 상태 읽기가 어느 질의를 타는지는 결과로 보이지 않아 집계 경로만 막는다
+    monkeypatch.setattr(repository, "get", _aggregate)
+
+    assert runs.state("done") == stored
+    with pytest.raises(BacktestRunNotFoundError):
+        runs.state("unknown")
+
+
 class _FrozenAfterAccept(SQLiteBacktestRunRepository):
     """접수 뒤 전이를 적지 않는 저장소. 목록이 저장소 행이 아니라 메모리 상태를 보이는지 가른다."""
 

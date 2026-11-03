@@ -32,7 +32,7 @@ from deliver.reader import DeliverError, find_run
 from deliver.stats import quantile
 from deliver.view import load_day
 from model import registry
-from model.contracts import FI_TABLES, score_columns
+from model.contracts import FI_BUILD_TABLES, FI_TABLES, score_columns
 from openpyxl import load_workbook
 from openpyxl.formatting.rule import ColorScale
 from stage import manifest
@@ -100,7 +100,7 @@ def _d(v: object) -> object:
 
 
 def write_fi(root: Path, table: str, bid: str, rows: list[dict[str, object]]) -> None:
-    c = FI_TABLES[table]
+    c = FI_BUILD_TABLES[table]
     schema = pa.schema([(col.name, PA[col.dtype]) for col in c.columns])
     fixed = [{k: (_d(v) if dict(zip(c.column_names, (x.dtype for x in c.columns),
                                     strict=True)).get(k) == "DATE" else v)
@@ -564,6 +564,42 @@ def _roll_to_2027(table: str, rows: list[dict[str, object]]) -> None:
                    if not (r["ticker"] == tick(11) and r["target_period"] == "2026/12")]
         rows += [{**r, "target_period": "2028/12", "revenue": float(r["revenue"]) + 200}
                  for r in rows if r["target_period"] == "2027/12"]
+
+
+def test_daily_earnings_prelim_opens_the_quarter_column_in_grey_p(tmp_path: Path) -> None:
+    """N-64 PG-1 — 확정 분기가 2026/06 까지인 판에 첫 3Q 잠정이 들면 분기 창이 26.3Q 로 한 칸 밀리고(가장 오래된
+    25.2Q 가 빠진다) 그 칸은 회색 'P'. 아직 발표하지 않은 종목은 빈칸, 단위 의심(withheld) 행은 내지 않는다.
+    '최근 분기 YoY' 의 당기가 잠정이면 그 칸도 회색. 머리 메모는 'P = 잠정실적'."""
+    day = "2026-10-28"
+    model_root, fi_root = tmp_path / "model", tmp_path / "fi"
+    bid = write_fi_day(fi_root, day)
+    pre = {"period": "2026/09", "revenue": 260.0, "ni": 9.0, "fs_basis": "PRELIM:CFS",
+           "is_correction": False, "available_date": "2026-10-27"}
+    write_fi(fi_root, "fi_fin_prelim", bid, [
+        {**pre, "ticker": tick(0), "op": 30.0, "rcept_no": "20261027800001", "unit_check": "ok"},
+        {**pre, "ticker": tick(1), "op": 999.0, "rcept_no": "20261027800002", "unit_check": "withheld"},
+        {**pre, "ticker": tick(2), "op": -4.0, "rcept_no": "20261027800003", "unit_check": "no_ref"}])
+    write_model_day(model_root, day, bid)
+    res = build_daily(day, "morning", model_root=model_root, fi_root=fi_root, out_root=tmp_path)
+    ws = load_workbook(res.path)["Earnings"]
+    labels = [str(c.value).replace("\n", " ") for c in ws[7] if c.value is not None]
+    assert labels[-6:] == ["25.3Q", "25.4Q", "26.1Q", "26.2Q", "26.3Q", "YoY (최근 분기)"]
+    rows, h = rows_by_code(ws), header(ws)
+    p0 = ws.cell(rows[tick(0)], h["26.3Q"])
+    assert p0.value == 30 and p0.number_format == '#,##0"P"' and p0.font.color.rgb.endswith("7F7F7F")
+    assert ws.cell(rows[tick(2)], h["26.3Q"]).value == -4                # 기준 없음(no_ref)도 낸다
+    assert ws.cell(rows[tick(1)], h["26.3Q"]).value is None              # 단위 의심 — 내지 않는다
+    assert ws.cell(rows[tick(10)], h["26.3Q"]).value is None             # 아직 발표 전
+    conf = ws.cell(rows[tick(0)], h["26.2Q"])                            # 확정 칸은 그대로
+    assert conf.value == 14 and conf.number_format == "#,##0"
+    q_y = h["YoY (최근 분기)"]
+    assert ws.cell(rows[tick(0)], q_y).value == pytest.approx((30 / 11 - 1) * 100)   # 잠정 2026/09 vs 2025/09
+    assert ws.cell(rows[tick(0)], q_y).font.color.rgb.endswith("7F7F7F")
+    assert ws.cell(rows[tick(10)], q_y).value == pytest.approx((14 / 10 - 1) * 100)   # 확정 그대로
+    q_y10 = ws.cell(rows[tick(10)], q_y)
+    assert q_y10.font.color is None or not q_y10.font.color.rgb.endswith("7F7F7F")
+    a5 = " ".join(str(ws.cell(5, c).value) for c in range(1, ws.max_column + 1) if ws.cell(5, c).value)
+    assert "P = 잠정실적" in a5 and "원천 없음" not in a5
 
 
 def test_daily_earnings_headers_roll_over_with_the_board_year(tmp_path: Path) -> None:

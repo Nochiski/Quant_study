@@ -192,6 +192,9 @@ class FiData:
     op_actual: dict[str, dict[str, float | None]] = field(default_factory=dict)
     # 연결/별도 범위 — 종목 → ('YYYY/MM', 'A'|'E') → '연결'|'별도'(같은 표 · 같은 수집의 라벨)
     scope: dict[str, dict[tuple[str, str], str]] = field(default_factory=dict)
+    # 잠정 분기(N-64, 엑셀 전용 fi_fin_prelim) — 종목 → 'YYYY/MM' → 행. fi 가 확정 분기보다 뒤 기말만 내고,
+    # 단위 의심(unit_check='withheld') 행은 읽을 때 뺀다. 옛 fi 판(표 없음)이면 비어 있다
+    prelim: dict[str, dict[str, Row]] = field(default_factory=dict)
 
     def scope_at(self, t: str, period: str, kind: str) -> str | None:
         return self.scope.get(t, {}).get((period, kind))
@@ -209,6 +212,13 @@ class FiData:
     def quarters(self, t: str) -> dict[str, Row]:
         return {str(r["period"]): r for r in self.fins.get(t, ())
                 if r.get("period_type") == "quarter"}
+
+    def quarters_shown(self, t: str) -> tuple[dict[str, Row], frozenset[str]]:
+        """Earnings 분기 칸 — 확정 분기에 잠정 분기를 더한 것과 잠정 기말 집합. 같은 기말에 영업이익이 있는
+        확정 행이 있으면 확정이 이긴다(fi 가 이미 보장하지만 엑셀도 확정을 먼저 쓴다)."""
+        qs = self.quarters(t)
+        pre = {p: r for p, r in self.prelim.get(t, {}).items() if (qs.get(p) or {}).get("op") is None}
+        return {**qs, **pre}, frozenset(pre)
 
     def revenue_net(self, t: str, period: str) -> bool:
         """그 결산기 확정 매출이 순액(순영업이익 — 은행·증권·카드, fi1.2.0 연간 행 `revenue_basis`
@@ -275,9 +285,20 @@ def load_fi(fi_root: Path, view: DayView) -> FiData:
             ni_actual.setdefault(t, {})[str(r["period"])] = v
         if r["data_type"] == "A":
             op_actual.setdefault(t, {})[str(r["period"])] = _num(r["op"])
+    try:
+        pre_rows = read_fi(fi_root, "fi_fin_prelim", bid,
+                           columns=("ticker", "period", "revenue", "op", "ni", "fs_basis", "unit_check"))
+    except (DeliverError, duckdb.Error) as e:
+        # 표가 없는 옛 fi 판(fi1.12.0 전) · 깨진 파일 — 엑셀은 그대로, 분기 칸에 잠정 'P' 만 없다
+        log.warning("Earnings 분기 — fi_fin_prelim 을 읽지 못해 잠정실적 칸이 없다(데이터 %s): %s", bid, e)
+        pre_rows = []
+    prelim: dict[str, dict[str, Row]] = {}
+    for r in pre_rows:
+        if r["unit_check"] != "withheld":
+            prelim.setdefault(str(r["ticker"]), {})[str(r["period"])] = r
     return FiData(close=close, fins=_group(read_fi(fi_root, "fi_fin_summary", bid)),
                   cons=_group(read_fi(fi_root, "fi_consensus", bid)), flow_last=flow_last,
-                  ni_actual=ni_actual, ni_fetched=ni_fetched, op_actual=op_actual)
+                  ni_actual=ni_actual, ni_fetched=ni_fetched, op_actual=op_actual, prelim=prelim)
 
 
 # Y−2 확정 지배 순이익을 읽은 종목이 모집단의 이 몫보다 적으면 경고(10-14 실측 869종목 중 864 ≈ 99%)
@@ -1238,25 +1259,29 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
         groups.append(Group(f"{label}(억원 · YoY %)", tuple(cols)))
     # 분기 창 = 판 전 종목 중 영업이익이 있는 가장 최근 달력 분기를 끝으로 5칸(오래된 → 최근).
     # 머리글 'YY.nQ' — 'YYYY/MM' 의 03→1Q · 06→2Q · 09→3Q · 12→4Q. 기말이 분기말이 아닌 결산월
-    # (예 11월 결산의 2026/08)은 창 끝을 정하지 않고 칸에도 들어가지 않는다(최근 분기 y-y 는 그대로)
-    q_last = max((p for row in view.rows for p, q in fi.quarters(ticker_of(row)).items()
+    # (예 11월 결산의 2026/08)은 창 끝을 정하지 않고 칸에도 들어가지 않는다(최근 분기 y-y 는 그대로).
+    # 잠정 분기(N-64)도 창 끝을 정한다 — 첫 잠정이 들어오는 날 새 분기 열이 열린다(PG-1)
+    shown = {ticker_of(row): fi.quarters_shown(ticker_of(row)) for row in view.rows}
+    q_last = max((p for qs, _ in shown.values() for p, q in qs.items()
                   if q.get("op") is not None and p[5:7] in ("03", "06", "09", "12")),
                  default=None)
     q_periods = ([] if q_last is None
                  else [period_add(q_last, -3 * k) for k in range(N_QUARTERS - 1, -1, -1)])
     qcols = [Col(f"q:{p}", f"{p[2:4]}.{int(p[5:7]) // 3}Q", "num", "#,##0",
-                 definition=f"{p} 분기 영업이익(3개월 값), 억원 — 그 분기 행이 없으면 빈칸")
+                 definition=(f"{p} 분기 영업이익(3개월 값), 억원 — 확정치가 없고 잠정실적(공정공시)이 나왔으면 "
+                             "그 값을 회색 'P' 서식으로(확정되면 바뀜), 둘 다 없으면 빈칸"))
              for p in q_periods]
     qcols.append(Col("q_y", "YoY\n(최근 분기)", "chg", "#,##0.0",
                      color=False, fit_lines=True, definition=(
                          "종목마다 영업이익이 있는 최근 분기의 전년 동기 대비(%). 부호가 바뀌면 "
-                         "숫자 대신 흑자전환·적자전환·적자지속")))
+                         "숫자 대신 흑자전환·적자전환·적자지속. 최근 분기가 잠정(P)이면 회색")))
     sides["q_y"] = SIDE_PAIR
     groups.append(Group("분기 영업이익(억원 · YoY %)", tuple(qcols)))
 
     rows: list[Row] = []
     est: list[tuple[int, str]] = []         # Y−1 칸에 추정치를 넣은 (행 순번, 지표)
     mixed_cells: list[tuple[int, str]] = []  # 연결/별도가 다른 두 값을 견준 (행 순번, YoY 열 key)
+    prelim_cells: list[tuple[int, str]] = []  # 잠정(P)을 넣은 (행 순번, 열 key) — 분기 칸 · 그 YoY
     for i, row in enumerate(view.rows):
         t = ticker_of(row)
         out: Row = id_values(view, t)
@@ -1273,16 +1298,20 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
                 if key == "revenue" and slot in mixed:
                     y, f = None, None
                 out[f"{key}_{slot}"], out[f"{key}_{slot}_y"] = v, f or y   # 부호 전환이면 글자
-        qs = fi.quarters(t)
+        qs, pre = shown[t]
         for p in q_periods:
             q = qs.get(p)
             out[f"q:{p}"] = None if q is None else _num(q.get("op"))
+            if p in pre and out[f"q:{p}"] is not None:
+                prelim_cells.append((i, f"q:{p}"))
         with_op = [p for p, q in qs.items() if q.get("op") is not None]
         if with_op:
             q0 = max(with_op)
             prev = qs.get(period_add(q0, -12))
             y, f = yoy(_num(qs[q0].get("op")), None if prev is None else _num(prev.get("op")))
             out["q_y"] = f or y
+            if q0 in pre:
+                prelim_cells.append((i, "q_y"))
         rows.append(out)
     starts = [g.cols[0].key for g in groups[1:]]
     notes_5 = [(None, "YoY 글자: 흑자 파랑 · 적자 빨강"),
@@ -1291,7 +1320,7 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
                    f"연도: 결산기가 끝나는 해(9월 결산 {year}E = {year}/09)",
                    "매출 순액 회사: 매출 YoY 비움 · 회색 YoY: 연결/별도 다름",
                    (f"분기: 최근 {N_QUARTERS}분기(분기말이 다른 결산월은 칸이 비고 YoY 만) · "
-                    "어닝시즌: 원천 없음")),
+                    "P = 잠정실적(공정공시) — 확정되면 바뀜")),
                    strict=True)]
     sh = write_confirmed(wb, "Earnings",
                          band(view, "Earnings: 연간·분기 실적과 YoY", "정렬: Score 순위 순",
@@ -1317,6 +1346,15 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
     # '흑자전환' 자체가 범위 차이일 수 있다, 동국씨엠 연결 −388 → 별도 390E)
     for i, key in mixed_cells:
         ws.cell(r0 + i, sh.cols[key]).font = font(color=C_HDR)
+    # 잠정 분기 칸은 'P' 서식 · 회색 글자(연간 'E' 와 같은 문법, N-64 Q3). 그 분기를 당기로 잰 YoY 도 회색 —
+    # 흑자 · 적자 글자는 그 색 그대로
+    for i, key in prelim_cells:
+        cell = ws.cell(r0 + i, sh.cols[key])
+        if key == "q_y":
+            if cell.value not in SIGN_COLORS:
+                cell.font = font(color=C_HDR)
+        else:
+            cell.number_format, cell.font = '#,##0"P"', font(color=C_HDR)
     return sh.dictionary
 
 

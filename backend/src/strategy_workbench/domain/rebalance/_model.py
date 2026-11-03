@@ -112,6 +112,11 @@ class RebalancePlan:
     target_value_krw: int
     lines: tuple[RebalanceLine, ...]
 
+    @property
+    def cash_floor_krw(self) -> int:
+        """실행이 매수에 쓰지 않고 남길 현금. 목표 금액에서 뺀 현금 비율 몫과 같다(내림)."""
+        return self.equity_krw * self.policy.cash_reserve_bp // BP
+
     def target_shares(self) -> dict[str, int]:
         """주문할 목표 주식 수. 건너뛴 종목은 넣지 않고, 파는 종목은 0이다."""
         return {

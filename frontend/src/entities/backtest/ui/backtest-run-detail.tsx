@@ -2,7 +2,7 @@ import { BacktestMetricTable, type MetricExplanation } from "./backtest-metrics"
 import { BacktestOrderEvents } from "./backtest-order-events";
 import type {
   AccountReport,
-  BacktestRunResult,
+  BacktestResult,
   MarketReferenceReport,
   MetricValue,
 } from "../../../shared/api";
@@ -28,7 +28,7 @@ import { ResultSummary, type ResultMetrics } from "./result-summary";
  * 바꿨다)는 그 뒤에 키와 값을 그대로 붙인다 — run 기록은 실행 설정의 유일한 사본이다(#251).
  */
 const environmentRows = (
-  environment: BacktestRunResult["manifest"]["environment"],
+  environment: BacktestResult["manifest"]["environment"],
   fields: readonly RunEnvironmentField[] | null,
 ): { key: string; label: string; value: string }[] => {
   const record = environment as unknown as Record<string, unknown>;
@@ -74,7 +74,7 @@ export const BacktestRunDetail = ({
   holdings,
   marketReference,
 }: {
-  result: BacktestRunResult;
+  result: BacktestResult;
   /** 같은 기간 코스피·코스닥 참고선. 곡선이 있는 지수만 차트와 요약에 쓴다. */
   marketReference?: MarketReferenceReport;
   /** 계좌 보고서 요약. "결과 한눈에"의 최종 평가액 카드가 읽는다. */
@@ -281,7 +281,7 @@ export const BacktestRunDetail = ({
           <span>
             {t("backtest.result.orders")} {result.artifacts.orders.length} ·{" "}
             {t("backtest.result.fills")} {result.artifacts.fills.length} ·{" "}
-            {t("backtest.result.positions")} {result.artifacts.positions.length}
+            {t("backtest.result.positions")} {result.artifacts.position_count}
           </span>
         </header>
         {result.artifacts.trades.length === 0 ? (

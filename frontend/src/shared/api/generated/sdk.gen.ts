@@ -183,6 +183,9 @@ import type {
   ListExperimentTrialsData,
   ListExperimentTrialsErrors,
   ListExperimentTrialsResponses,
+  ListLatestBacktestsData,
+  ListLatestBacktestsErrors,
+  ListLatestBacktestsResponses,
   ListLibraryFactorsData,
   ListLibraryFactorsErrors,
   ListLibraryFactorsResponses,
@@ -535,6 +538,20 @@ export const startBacktest = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+/**
+ * List Latest Backtests
+ *
+ * 전략마다 가장 최근 run 한 행 — 전략 목록 한 쪽이 행마다 목록을 묻지 않게 한다.
+ */
+export const listLatestBacktests = <ThrowOnError extends boolean = false>(
+  options: Options<ListLatestBacktestsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    ListLatestBacktestsResponses,
+    ListLatestBacktestsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/latest", ...options });
 
 /**
  * Preview Backtest Trial

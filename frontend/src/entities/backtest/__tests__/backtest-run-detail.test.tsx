@@ -7,7 +7,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { BacktestRunResult } from "../../../shared/api";
+import type { BacktestResult } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import { runEnvironmentFields, runEnvironmentLabel } from "../model/run-environment-fields";
 import { BacktestRunDetail } from "../ui/backtest-run-detail";
@@ -21,7 +21,7 @@ const FIELDS = runEnvironmentFields(
 
 afterEach(cleanup);
 
-const result = (): BacktestRunResult => ({
+const result = (): BacktestResult => ({
   manifest: {
     run_id: "run-1",
     created_at: "2026-09-27T00:00:00Z",
@@ -69,7 +69,7 @@ const result = (): BacktestRunResult => ({
   },
   artifacts: {
     snapshots: [],
-    positions: [],
+    position_count: 0,
     orders: [],
     fills: [],
     costs: [],
@@ -313,8 +313,8 @@ describe("사용 불가 지표의 이유", () => {
   // 있으면 칸에서 바로 그 경고로 간다. 전에는 "benchmark not available" 원문만 보였고 이유는 접힌
   // manifest 안에만 있었다.
   const unavailableBenchmark = (
-    warnings: BacktestRunResult["manifest"]["warnings"],
-  ): BacktestRunResult => {
+    warnings: BacktestResult["manifest"]["warnings"],
+  ): BacktestResult => {
     const base = result();
     return {
       ...base,

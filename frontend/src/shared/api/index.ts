@@ -87,7 +87,7 @@ export {
   type CellVerdict,
   type SearchAxis,
   type ApplicableWhen,
-  type BacktestRunResult,
+  type BacktestResult,
   type BacktestRunSpec,
   type BacktestCancelResult,
   type BacktestRunState,

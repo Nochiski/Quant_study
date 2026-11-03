@@ -1,8 +1,8 @@
 import { useId } from "react";
-import type { BacktestRunResult } from "../../../shared/api";
+import type { BacktestResult } from "../../../shared/api";
 import { t, tOptional } from "../../../shared/config";
 
-type Artifacts = BacktestRunResult["artifacts"];
+type Artifacts = BacktestResult["artifacts"];
 
 /** 엔진 기록을 순서대로 표시한다. 체결 가능 여부나 원문 메시지의 의미를 다시 판정하지 않는다. */
 export const BacktestOrderEvents = ({ artifacts }: { artifacts: Artifacts }) => {

@@ -54,6 +54,7 @@ import {
   getTrialLedger,
   listBacktests,
   listEquityUniverses,
+  listLatestBacktests,
   listExperimentTrials,
   listExperiments,
   listStrategies,
@@ -85,7 +86,7 @@ import type {
   SessionHoldingsReport,
   RunValidationReport,
   ApplicableWhen,
-  BacktestRunResult,
+  BacktestResult,
   BacktestRunSpec,
   BacktestCancelResult,
   BacktestRunState,
@@ -491,6 +492,17 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "listBacktests");
   },
 
+  /** 전략마다 가장 최근 run 한 행(run 이 없는 전략은 빠진다) — 전략 목록 한 쪽을 한 번에 읽는다. */
+  async listLatestBacktests(
+    strategyIds: readonly string[],
+    kind?: RunKind,
+  ): Promise<BacktestRunSummary[]> {
+    const response = await listLatestBacktests({
+      query: { strategy_id: [...strategyIds], kind },
+    });
+    return unwrap(response, "listLatestBacktests");
+  },
+
   /** 계열 시도 원장 — 시도 묶음·실행 역할·N(검증 랩 spec D2). 합쳐진 계열이면 남은 계열의 원장이다. */
   async getTrialLedger(strategyId: string): Promise<TrialLedger> {
     const response = await getTrialLedger({
@@ -710,7 +722,7 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getBacktestRequest");
   },
 
-  async getBacktestResult(runId: string): Promise<BacktestRunResult> {
+  async getBacktestResult(runId: string): Promise<BacktestResult> {
     const response = await getBacktestResult({ path: { run_id: runId } });
     return unwrap(response, "getBacktestResult");
   },
@@ -1074,7 +1086,7 @@ export type {
   SecurityTradesReport,
   SessionHoldingsReport,
   ApplicableWhen,
-  BacktestRunResult,
+  BacktestResult,
   BacktestRunSpec,
   BacktestCancelResult,
   BacktestRunState,

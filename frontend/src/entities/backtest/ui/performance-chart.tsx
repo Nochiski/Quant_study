@@ -1,6 +1,6 @@
 import { useId } from "react";
 
-import type { BacktestRunResult, MarketReferenceSeries } from "../../../shared/api";
+import type { BacktestResult, MarketReferenceSeries } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
 import "./performance-chart.css";
 
@@ -82,7 +82,7 @@ export const PerformanceChart = ({
   references = [],
 }: {
   id: string;
-  series: BacktestRunResult["series"];
+  series: BacktestResult["series"];
   benchmarkId: string | null | undefined;
   /** 곡선이 있는 시장 참고선만 넘긴다. 세션은 결과 곡선과 같다. */
   references?: readonly MarketReferenceSeries[];

@@ -82,6 +82,10 @@ _RUNS = f"""(
     LEFT JOIN experiment_controls
         ON experiment_controls.experiment_order = experiments.experiment_order
 )"""
+# 목록(`list`)과 전략별 최근 행(`latest`)이 같은 거르기·순서를 쓴다 — 한쪽만 바뀌면 전략 목록의 최근
+# 실행이 전략 이력의 첫 행과 갈린다.
+_KIND_FILTER = "(? IS NULL OR kind = ?)"
+_NEWEST_FIRST = "accepted_order DESC"
 _READ_COLUMNS = (
     f"{_STATE_COLUMNS}, kind, experiment_id, experiment_paused, has_headline, "
     "headline_total_return, headline_sharpe, headline_max_drawdown"
@@ -163,7 +167,7 @@ class SQLiteBacktestRunRepository:
     def list(
         self, page: PageRequest, *, strategy_id: str | None = None, kind: RunKind | None = None
     ) -> Page[BacktestRunSummary]:
-        where = "WHERE (? IS NULL OR strategy_id = ?) AND (? IS NULL OR kind = ?)"
+        where = f"WHERE (? IS NULL OR strategy_id = ?) AND {_KIND_FILTER}"
         filters = (strategy_id, strategy_id, kind, kind)
         with self._database.transaction(write=False) as connection:
             count = connection.execute(f"SELECT COUNT(*) FROM {_RUNS} {where}", filters)
@@ -171,7 +175,7 @@ class SQLiteBacktestRunRepository:
             rows = connection.execute(
                 f"""
                 SELECT {_READ_COLUMNS} FROM {_RUNS} {where}
-                ORDER BY accepted_order DESC LIMIT ? OFFSET ?
+                ORDER BY {_NEWEST_FIRST} LIMIT ? OFFSET ?
                 """,
                 (*filters, page.limit, page.offset),
             ).fetchall()
@@ -181,6 +185,29 @@ class SQLiteBacktestRunRepository:
             offset=page.offset,
             limit=page.limit,
         )
+
+    def latest(
+        self, strategy_ids: Collection[str], *, kind: RunKind | None = None
+    ) -> tuple[BacktestRunSummary, ...]:
+        ids = list(dict.fromkeys(strategy_ids))
+        if not ids:
+            return ()
+        with self._database.transaction(write=False) as connection:
+            rows = connection.execute(
+                f"""
+                SELECT {_READ_COLUMNS} FROM (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY strategy_id ORDER BY {_NEWEST_FIRST}
+                    ) AS recency
+                    FROM {_RUNS}
+                    WHERE strategy_id IN ({", ".join("?" * len(ids))}) AND {_KIND_FILTER}
+                )
+                WHERE recency = 1
+                ORDER BY {_NEWEST_FIRST}
+                """,
+                (*ids, kind, kind),
+            ).fetchall()
+        return tuple(_summary(row) for row in rows)
 
     def record_trial_result(
         self,

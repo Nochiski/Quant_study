@@ -180,6 +180,48 @@ def test_states_list_newest_first_filter_by_strategy_and_report_unfinished(
     assert reopened.states([]) == {}
 
 
+def test_latest_reads_each_strategy_s_newest_run_once_with_the_kind_filter(
+    tmp_path: Path,
+) -> None:
+    """전략별 최근 run 한 행을 목록과 같은 순서·거르기로 한 번에 읽는다(전략 목록 한 쪽용)."""
+    path = tmp_path / "research.sqlite3"
+    repository = SQLiteBacktestRunRepository(path)
+    for run_id, strategy_id in (
+        ("run-1", "s-1"),
+        ("run-2", "s-2"),
+        ("run-3", "s-1"),
+        ("run-4", None),
+        ("run-5", "s-1"),
+    ):
+        _add(
+            repository,
+            _summary(run_id, strategy_id=strategy_id),
+            _REQUESTS["saved_revision"],
+            **_NO_LINEAGE,
+        )
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO experiments (experiment_id, created_at, design_json) VALUES (?, ?, ?)",
+            ("e-1", _AT.isoformat(), "{}"),
+        )
+        connection.execute(
+            "INSERT INTO experiment_attempts "
+            "(experiment_order, trial_index, attempt, created_at, run_id) VALUES (1, 0, 1, ?, ?)",
+            (_AT.isoformat(), "run-5"),
+        )
+
+    latest = repository.latest(["s-2", "s-1", "missing"])
+    single = repository.latest(["s-2", "s-1"], kind=RunKind.SINGLE)
+
+    assert [item.run.run_id for item in latest] == ["run-5", "run-2"]
+    assert [item.run.run_id for item in single] == ["run-3", "run-2"]
+    for item in single:
+        strategy_id = item.strategy_provenance.strategy_id
+        listed = repository.list(PageRequest(limit=1), strategy_id=strategy_id, kind=RunKind.SINGLE)
+        assert listed.items == (item,)
+    assert repository.latest([]) == ()
+
+
 def test_the_kind_and_owning_experiment_come_from_the_experiment_rows(tmp_path: Path) -> None:
     # 실행 종류·쓰는 실험(검증 랩 V5-03, #382)은 같은 파일의 실험 attempt·워크포워드 창 선택이
     # run 을 가리키는지로 정한다. 일시정지는 그 실험의 조작 행에서 읽는다.

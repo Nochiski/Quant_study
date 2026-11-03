@@ -105,6 +105,16 @@ class BacktestRunRepositoryPort(TrialLedgerPort, Protocol):
         """최근 접수 순. `strategy_id`(저장 리비전 provenance)와 `kind`(실행 종류)로 거른다."""
         ...
 
+    def latest(
+        self, strategy_ids: Collection[str], *, kind: RunKind | None = None
+    ) -> tuple[BacktestRunSummary, ...]:
+        """전략마다 가장 최근 접수한 run 한 행(`list` 와 같은 순서·거르기의 첫 행).
+
+        최근 접수 순이고, run 이 없는 전략은 빠진다. 목록 화면이 전략마다 따로 묻지 않게 한 번에
+        읽는다.
+        """
+        ...
+
     def unfinished(self) -> tuple[BacktestRunState, ...]:
         """종결(`completed`·`failed`·`cancelled`)되지 않은 run 의 상태."""
         ...

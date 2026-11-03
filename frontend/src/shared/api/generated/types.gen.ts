@@ -680,6 +680,75 @@ export type BacktestResearchWindowViolationDetail = {
 };
 
 /**
+ * BacktestResult
+ */
+export type BacktestResult = {
+  artifacts: BacktestResultArtifacts;
+  manifest: RunManifest;
+  /**
+   * Metric Definitions
+   */
+  metric_definitions: Array<MetricDefinition>;
+  /**
+   * Metrics
+   */
+  metrics: Array<MetricValue>;
+  series: BacktestSeries;
+};
+
+/**
+ * BacktestResultArtifacts
+ *
+ * `RawArtifactBundle` 에서 `positions` 대신 그 수(`position_count`)를 실은 원장 묶음.
+ *
+ * 값은 늘 저장 결과에서 채운다. 기본값은 원장 묶음과 같은 칸을 응답 스키마에서도 같은 선택 칸으로
+ * 두려는 것이다 — 계약 변경을 `positions` → `position_count` 하나로 한정한다. 원장 묶음의 칸·
+ * 타입·기본값을 바꾸면 여기도 함께 바꾼다(어긋나면 `test_backtest_result_contract` 가 실패한다).
+ */
+export type BacktestResultArtifacts = {
+  /**
+   * Corporate Actions
+   */
+  corporate_actions?: Array<RawCorporateAction> | null;
+  /**
+   * Costs
+   */
+  costs: Array<RawCost>;
+  /**
+   * Fills
+   */
+  fills: Array<RawFill>;
+  /**
+   * Order Updates
+   */
+  order_updates?: Array<RawOrderUpdate> | null;
+  /**
+   * Orders
+   */
+  orders: Array<RawOrder>;
+  /**
+   * Position Count
+   */
+  position_count: number;
+  /**
+   * Roundings
+   */
+  roundings?: Array<RawRounding>;
+  /**
+   * Schema Version
+   */
+  schema_version?: string;
+  /**
+   * Snapshots
+   */
+  snapshots: Array<RawSnapshot>;
+  /**
+   * Trades
+   */
+  trades: Array<RawTrade>;
+};
+
+/**
  * BacktestResultNotReadyDetail
  */
 export type BacktestResultNotReadyDetail = {
@@ -778,23 +847,6 @@ export type BacktestRunNotFoundDetail = {
  */
 export type BacktestRunNotFoundResponse = {
   detail: BacktestRunNotFoundDetail;
-};
-
-/**
- * BacktestRunResult
- */
-export type BacktestRunResult = {
-  artifacts: RawArtifactBundle;
-  manifest: RunManifest;
-  /**
-   * Metric Definitions
-   */
-  metric_definitions: Array<MetricDefinition>;
-  /**
-   * Metrics
-   */
-  metrics: Array<MetricValue>;
-  series: BacktestSeries;
 };
 
 /**
@@ -9762,6 +9814,44 @@ export type StartBacktestResponses = {
 export type StartBacktestResponse =
   StartBacktestResponses[keyof StartBacktestResponses];
 
+export type ListLatestBacktestsData = {
+  body?: never;
+  path?: never;
+  query: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: Array<string>;
+    /**
+     * Kind
+     */
+    kind?: RunKind | null;
+  };
+  url: "/api/v1/backtests/latest";
+};
+
+export type ListLatestBacktestsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListLatestBacktestsError =
+  ListLatestBacktestsErrors[keyof ListLatestBacktestsErrors];
+
+export type ListLatestBacktestsResponses = {
+  /**
+   * Response Listlatestbacktests
+   *
+   * Successful Response
+   */
+  200: Array<BacktestRunSummary>;
+};
+
+export type ListLatestBacktestsResponse =
+  ListLatestBacktestsResponses[keyof ListLatestBacktestsResponses];
+
 export type PreviewBacktestTrialData = {
   body: BacktestRunSpec;
   path?: never;
@@ -10257,7 +10347,7 @@ export type GetBacktestResultResponses = {
   /**
    * Successful Response
    */
-  200: BacktestRunResult;
+  200: BacktestResult;
 };
 
 export type GetBacktestResultResponse =

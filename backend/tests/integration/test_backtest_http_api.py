@@ -252,6 +252,9 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
     assert result["artifacts"]["snapshots"]
     assert result["artifacts"]["orders"]
     assert result["artifacts"]["fills"]
+    # 세션별 보유는 `holdings/sessions/{session}` 이 답한다 — 결과 응답은 수만 싣는다.
+    assert "positions" not in result["artifacts"]
+    assert result["artifacts"]["position_count"] > 0
 
     events = client.get(f"/api/v1/backtests/{run_id}/events")
     assert events.status_code == 200

@@ -16,6 +16,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import StringConstraints
 from starlette.concurrency import run_in_threadpool
 
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
@@ -31,7 +32,6 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestParameterValueError,
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
-    BacktestRunResult,
     BacktestRunService,
     BacktestRunSpec,
     BacktestRunState,
@@ -170,6 +170,7 @@ from ._backtest_contract import (
     TrialLineageAlreadyMergedResponse,
     TrialLineageMergeRequest,
 )
+from ._backtest_result_contract import BacktestResult, backtest_result
 from ._broker_routes import register_broker_connection_routes
 from ._continuous_account_routes import register_continuous_account_routes
 from ._execution_error_contract import (
@@ -472,6 +473,19 @@ def create_app(
             kind=kind,
         )
 
+    # `/backtests/{run_id}` 보다 먼저 등록한다 — 늦으면 `latest` 를 run id 로 읽는다.
+    @app.get("/api/v1/backtests/latest", operation_id="listLatestBacktests")
+    def list_latest_backtests(
+        # 목록 조회(`strategy_id` 하나)와 같이 빈 id 는 받지 않는다.
+        strategy_id: Annotated[
+            list[Annotated[str, StringConstraints(min_length=1)]],
+            Query(min_length=1, max_length=PageRequest.MAX_LIMIT),
+        ],
+        kind: RunKind | None = None,
+    ) -> tuple[BacktestRunSummary, ...]:
+        """전략마다 가장 최근 run 한 행 — 전략 목록 한 쪽이 행마다 목록을 묻지 않게 한다."""
+        return backtest_runs.latest_runs(strategy_id, kind=kind)
+
     def admitted(call: Callable[[], _T]) -> _T:
         """시작·미리 계산·실험 기반 검사의 거절을 실행 요청 거절 코드로 낸다.
 
@@ -591,9 +605,9 @@ def create_app(
         operation_id="getBacktestResult",
         responses=_backtest_result_responses(),
     )
-    def get_backtest_result(run_id: str) -> BacktestRunResult:
+    def get_backtest_result(run_id: str) -> BacktestResult:
         try:
-            return backtest_runs.result(run_id)
+            return backtest_result(backtest_runs.result(run_id))
         except BacktestRunNotFoundError as error:
             raise _backtest_not_found(error) from error
         except BacktestResultNotReadyError as error:

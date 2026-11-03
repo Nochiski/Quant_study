@@ -936,6 +936,137 @@
         "title": "BacktestResearchWindowViolationDetail",
         "type": "object"
       },
+      "BacktestResult": {
+        "properties": {
+          "artifacts": {
+            "$ref": "#/components/schemas/BacktestResultArtifacts"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/RunManifest"
+          },
+          "metric_definitions": {
+            "items": {
+              "$ref": "#/components/schemas/MetricDefinition"
+            },
+            "title": "Metric Definitions",
+            "type": "array"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "series": {
+            "$ref": "#/components/schemas/BacktestSeries"
+          }
+        },
+        "required": [
+          "manifest",
+          "metric_definitions",
+          "metrics",
+          "series",
+          "artifacts"
+        ],
+        "title": "BacktestResult",
+        "type": "object"
+      },
+      "BacktestResultArtifacts": {
+        "description": "`RawArtifactBundle` 에서 `positions` 대신 그 수(`position_count`)를 실은 원장 묶음.\n\n값은 늘 저장 결과에서 채운다. 기본값은 원장 묶음과 같은 칸을 응답 스키마에서도 같은 선택 칸으로\n두려는 것이다 — 계약 변경을 `positions` → `position_count` 하나로 한정한다. 원장 묶음의 칸·\n타입·기본값을 바꾸면 여기도 함께 바꾼다(어긋나면 `test_backtest_result_contract` 가 실패한다).",
+        "properties": {
+          "corporate_actions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RawCorporateAction"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corporate Actions"
+          },
+          "costs": {
+            "items": {
+              "$ref": "#/components/schemas/RawCost"
+            },
+            "title": "Costs",
+            "type": "array"
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/RawFill"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "order_updates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RawOrderUpdate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Updates"
+          },
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/RawOrder"
+            },
+            "title": "Orders",
+            "type": "array"
+          },
+          "position_count": {
+            "title": "Position Count",
+            "type": "integer"
+          },
+          "roundings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RawRounding"
+            },
+            "title": "Roundings",
+            "type": "array"
+          },
+          "schema_version": {
+            "default": "backtest-artifacts-v2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/RawSnapshot"
+            },
+            "title": "Snapshots",
+            "type": "array"
+          },
+          "trades": {
+            "items": {
+              "$ref": "#/components/schemas/RawTrade"
+            },
+            "title": "Trades",
+            "type": "array"
+          }
+        },
+        "required": [
+          "snapshots",
+          "position_count",
+          "orders",
+          "fills",
+          "costs",
+          "trades"
+        ],
+        "title": "BacktestResultArtifacts",
+        "type": "object"
+      },
       "BacktestResultNotReadyDetail": {
         "properties": {
           "code": {
@@ -1078,42 +1209,6 @@
           "detail"
         ],
         "title": "BacktestRunNotFoundResponse",
-        "type": "object"
-      },
-      "BacktestRunResult": {
-        "properties": {
-          "artifacts": {
-            "$ref": "#/components/schemas/RawArtifactBundle"
-          },
-          "manifest": {
-            "$ref": "#/components/schemas/RunManifest"
-          },
-          "metric_definitions": {
-            "items": {
-              "$ref": "#/components/schemas/MetricDefinition"
-            },
-            "title": "Metric Definitions",
-            "type": "array"
-          },
-          "metrics": {
-            "items": {
-              "$ref": "#/components/schemas/MetricValue"
-            },
-            "title": "Metrics",
-            "type": "array"
-          },
-          "series": {
-            "$ref": "#/components/schemas/BacktestSeries"
-          }
-        },
-        "required": [
-          "manifest",
-          "metric_definitions",
-          "metrics",
-          "series",
-          "artifacts"
-        ],
-        "title": "BacktestRunResult",
         "type": "object"
       },
       "BacktestRunSpec": {
@@ -15693,6 +15788,72 @@
         "summary": "Start Backtest"
       }
     },
+    "/api/v1/backtests/latest": {
+      "get": {
+        "description": "전략마다 가장 최근 run 한 행 — 전략 목록 한 쪽이 행마다 목록을 묻지 않게 한다.",
+        "operationId": "listLatestBacktests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 500,
+              "minItems": 1,
+              "title": "Strategy Id",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BacktestRunSummary"
+                  },
+                  "title": "Response Listlatestbacktests",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Latest Backtests"
+      }
+    },
     "/api/v1/backtests/trial-preview": {
       "post": {
         "description": "실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2).",
@@ -16420,7 +16581,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BacktestRunResult"
+                  "$ref": "#/components/schemas/BacktestResult"
                 }
               }
             },

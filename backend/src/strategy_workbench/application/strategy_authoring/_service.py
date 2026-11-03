@@ -258,7 +258,8 @@ class StrategyAuthoringService:
         # 필드 계약도 어댑터가 소유한다 — 매 호출 읽고 복사해 두지 않는다.
         self._field_catalog = field_catalog
         # 결과(불변 값)는 그 호출에서 읽은 계약까지 키로 기억한다 — 계약이 바뀌면 키가 달라 다시
-        # compile 한다. 잠금을 쥔 채 계산해 같은 원문의 동시 요청도 한 번만 compile 한다.
+        # compile 한다. 잠금을 쥔 채 계산해 같은 원문의 동시 요청도 한 번만 compile 한다. 다른
+        # 원문도 이 인스턴스에서는 차례로 돈다(GIL 아래 순수 CPU 작업이라 처리량은 같다).
         self._compiled: OrderedDict[_CompileKey, CompiledDocument] = OrderedDict()
         self._compile_lock = Lock()
 

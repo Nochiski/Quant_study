@@ -21,10 +21,12 @@ from strategy_workbench.domain.factor.facade.operators import (
     required_field_value_type,
 )
 from strategy_workbench.domain.factor.facade.validation import (
+    UNKNOWN_UNIT,
     FactorGraphValidation,
     FactorValidationSeverity,
     missing_field_message,
     node_dependencies,
+    unit_dimensions,
     validate_factor_graph,
 )
 
@@ -529,10 +531,6 @@ def _unadjusted_price_issues(
     return issues
 
 
-# 필드 계약 없이 추론한 필드 노드의 단위(`domain/factor` `_infer_contract`). 판정할 수 없는 값이다.
-_UNKNOWN_UNIT = "unknown"
-
-
 def _unit_mismatch_issue(
     spec: StrategySpec, output_units: dict[str, str]
 ) -> ValidationIssue | None:
@@ -540,16 +538,21 @@ def _unit_mismatch_issue(
 
     `none` 은 원시 점수의 가중 합이라 큰 단위 팩터가 합성 점수를 지배한다. 1.1 에서 올라온 문서가
     예전 결과를 그대로 내는 모드라 막지 않고 알린다. 합성에 들어가는 팩터(`composite_factors`)만
-    비교하고, 단위를 모르는 팩터(필드 계약 없음)는 판정에서 뺀다.
+    비교하고, 단위를 모르는 팩터(필드 계약 없음)는 판정에서 뺀다. 단위가 같은지는 약분한 차원으로
+    본다(`unit_dimensions`, #668 IT-01) — `(KRW/KRW)` 와 무차원 `1` 은 같은 단위다.
     """
     if spec.signal.normalization is not SignalNormalization.NONE:
         return None
-    units = {
-        factor.factor_id: output_units[factor.factor_id]
+    dimensions = {
+        factor.factor_id: unit_dimensions(output_units.get(factor.factor_id, UNKNOWN_UNIT))
         for factor in composite_factors(spec)
-        if output_units.get(factor.factor_id, _UNKNOWN_UNIT) != _UNKNOWN_UNIT
     }
-    if len(set(units.values())) <= 1:
+    units = {
+        factor_id: output_units[factor_id]
+        for factor_id, dimension in dimensions.items()
+        if dimension is not None
+    }
+    if len({dimension for dimension in dimensions.values() if dimension is not None}) <= 1:
         return None
     return semantic_issue(
         "strategy.signal.unit_mismatch",

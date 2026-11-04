@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 
 from ._history import node_read_window
 from ._nodes import (
@@ -33,6 +34,91 @@ _DIMENSIONLESS_SECTIONS = frozenset({CrossSectionalOperator.RANK, CrossSectional
 # 출력이 무차원인 그룹 연산(BACKLOG-015). 그룹 안 순위는 횡단면 순위와 같은 백분위 공식
 # (`cross_sectional_rank`)이다. `neutralize` 는 그룹 평균을 빼므로 입력 단위를 그대로 둔다.
 _DIMENSIONLESS_GROUP_OPERATIONS = frozenset({GroupOperator.RANK})
+
+UNKNOWN_UNIT = "unknown"
+DIMENSIONLESS_UNIT = "1"
+
+
+@lru_cache(maxsize=4096)
+def unit_dimensions(unit: str) -> tuple[tuple[str, int], ...] | None:
+    """단위 표기를 약분한 차원(기본 단위별 지수, 이름순)으로 바꾼다. `unknown` 이 섞이면 None.
+
+    단위 표기는 곱·나눗셈 노드가 `(a*b)`·`(a/b)` 로 이어 붙인 문자열이고 약분하지 않는다 — 실행
+    계획의 `output_unit` 과 `plan_hash`(연속 계좌 후보 신원)가 이 문자열을 싣기 때문에 표기는 그대로
+    두고, 단위가 같은지 판정할 때만 이 차원을 쓴다(#668 IT-01). 그래서 `(KRW/KRW)` 와 `1`,
+    `(1*1)` 과 `1`, `((KRW*shares)/shares)` 와 `KRW` 가 같은 단위다. 괄호 없는 `a/b*c` 는 왼쪽부터
+    읽는다. 이름이 비거나 괄호가 맞지 않는 표기는 그 문자열 전체(앞뒤 공백 제외)를 기본 단위 하나로
+    본다. 원천 필드 단위에는 `()*/` 가 없다(어댑터 계약 테스트가 지킨다).
+
+    이름이 붙은 무차원 단위(`ratio`·`배`)는 `1` 과 다른 단위로 본다 — 별칭 표가 필요하면 이 함수
+    한 곳에 둔다. `pct`·`%`·`bp` 는 배율이 있어 `1` 과 다르다.
+
+    반복문으로 읽어 깊은 그래프의 긴 표기에서도 재귀 한도에 걸리지 않고, 같은 표기는 캐시한다.
+    """
+    exponents = _parsed_unit(unit)
+    if exponents is None:
+        exponents = {unit.strip(): 1}
+    if UNKNOWN_UNIT in exponents:
+        return None
+    exponents.pop(DIMENSIONLESS_UNIT, None)
+    return tuple(sorted((name, power) for name, power in exponents.items() if power))
+
+
+def same_unit(left: str, right: str) -> bool:
+    """두 단위가 약분하면 같은가. 한쪽이라도 `unknown` 이 섞이면 판정하지 않고 같다고 본다."""
+    left_dimensions, right_dimensions = unit_dimensions(left), unit_dimensions(right)
+    if left_dimensions is None or right_dimensions is None:
+        return True
+    return left_dimensions == right_dimensions
+
+
+def _parsed_unit(unit: str) -> dict[str, int] | None:
+    """`항 (('*' | '/') 항)*`, 항 = 이름 | `(` 곱 `)` 을 읽어 지수를 더한다. 문법이 틀리면 None.
+
+    괄호마다 그 묶음의 부호를 스택에 쌓는다 — 묶음 안 첫 항은 묶음 부호 그대로, `/` 뒤 항은 반대다.
+    """
+    exponents: dict[str, int] = {}
+    group_signs = [1]
+    next_sign = 1
+    expect_term = True
+    for token in _unit_tokens(unit):
+        if expect_term:
+            if token == "(":
+                group_signs.append(group_signs[-1] * next_sign)
+                next_sign = 1
+            elif token in _UNIT_SYMBOLS:
+                return None
+            else:
+                exponents[token] = exponents.get(token, 0) + group_signs[-1] * next_sign
+                expect_term = False
+        elif token in "*/":
+            next_sign = 1 if token == "*" else -1
+            expect_term = True
+        elif token == ")" and len(group_signs) > 1:
+            group_signs.pop()
+        else:
+            return None
+    return exponents if not expect_term and len(group_signs) == 1 else None
+
+
+_UNIT_SYMBOLS = frozenset("()*/")
+
+
+def _unit_tokens(unit: str) -> list[str]:
+    tokens: list[str] = []
+    name: list[str] = []
+    for character in unit:
+        if character in _UNIT_SYMBOLS:
+            if "".join(name).strip():
+                tokens.append("".join(name).strip())
+            name = []
+            tokens.append(character)
+        else:
+            name.append(character)
+    if "".join(name).strip():
+        tokens.append("".join(name).strip())
+    return tokens
+
 
 # 정수 파라미터의 하한은 노드 dataclass 옆에 한 번만 선언한다(`_nodes.minimum`). runtime schema가
 # 같은 값을 JSON Schema `minimum`으로 발행하므로 화면이 만든 기본값과 검증기가
@@ -450,10 +536,10 @@ def _infer_contract(
     if isinstance(node, FieldNode):
         metadata = fields.get(node.field_id)
         value_type = metadata.value_type if metadata else NodeValueType.NUMERIC_SERIES
-        unit = metadata.unit if metadata else "unknown"
+        unit = metadata.unit if metadata else UNKNOWN_UNIT
         history = 1
     elif isinstance(node, (ConstantNode, ParameterNode)):
-        value_type, unit, history = NodeValueType.SCALAR, "1", 0
+        value_type, unit, history = NodeValueType.SCALAR, DIMENSIONLESS_UNIT, 0
     elif isinstance(node, BinaryNode):
         left, right = dependencies
         for side, operand in (("left", left), ("right", right)):
@@ -478,7 +564,7 @@ def _infer_contract(
         history = max(left.minimum_history_sessions, right.minimum_history_sessions)
         if node.operator in (BinaryOperator.ADD, BinaryOperator.SUBTRACT):
             unit = left.unit
-            if left.unit != "unknown" and right.unit != "unknown" and left.unit != right.unit:
+            if not same_unit(left.unit, right.unit):
                 issues.append(
                     _issue(
                         "factor.graph.unit_mismatch",
@@ -520,7 +606,12 @@ def _infer_contract(
                     f"조건 노드는 boolean이어야 합니다: actual={predicate.value_type.value}",
                 )
             )
-        if true_value.value_type is not false_value.value_type:
+        numeric = {NodeValueType.NUMERIC_SERIES, NodeValueType.SCALAR}
+        # 상수 가지와 숫자 시계열 가지는 섞을 수 있다 — 두 평가기 모두 상수를 행마다 값으로
+        # 펼친다(`조건 ? 1 : 비율` 같은 상한 자르기, #668 IT-01). 참거짓과 숫자는 열 하나에 담을 수
+        # 없어 막는다.
+        mixed_numeric = {true_value.value_type, false_value.value_type} <= numeric
+        if true_value.value_type is not false_value.value_type and not mixed_numeric:
             issues.append(
                 _issue(
                     "factor.graph.branch_type",
@@ -530,11 +621,7 @@ def _infer_contract(
                     f"true={true_value.value_type.value} false={false_value.value_type.value}",
                 )
             )
-        if (
-            true_value.unit != "unknown"
-            and false_value.unit != "unknown"
-            and true_value.unit != false_value.unit
-        ):
+        if not same_unit(true_value.unit, false_value.unit):
             issues.append(
                 _issue(
                     "factor.graph.branch_unit",
@@ -545,14 +632,10 @@ def _infer_contract(
                 )
             )
         value_type = true_value.value_type
-        if (
-            value_type is NodeValueType.SCALAR
-            and false_value.value_type is NodeValueType.SCALAR
-            and predicate.value_type is NodeValueType.BOOLEAN_SERIES
-        ):
+        if mixed_numeric and predicate.value_type is NodeValueType.BOOLEAN_SERIES:
             # 가지가 상수여도 조건이 종목·날짜마다 갈리므로 값은 시계열이다(P2-07). boolean
             # 출력 승격(`domain/strategy/_promotion.py`)이 이 규칙으로 `조건 ? 1 : 0` 을 숫자
-            # 점수로 만든다.
+            # 점수로 만든다. 한 가지만 상수여도 같다.
             value_type = NodeValueType.NUMERIC_SERIES
         unit = true_value.unit
         history = max(item.minimum_history_sessions for item in dependencies)
@@ -580,10 +663,10 @@ def _infer_contract(
         if isinstance(node, CrossSectionalNode) and node.operator in _DIMENSIONLESS_SECTIONS:
             # 순위·z-score 는 입력 단위를 지운다(BACKLOG-003). 카탈로그 `UnitRule.DIMENSIONLESS`
             # 와 같은 규칙이며 `test_factor_operators.py` 가 둘을 대조한다.
-            unit = "1"
+            unit = DIMENSIONLESS_UNIT
         if isinstance(node, GroupNode) and node.operator in _DIMENSIONLESS_GROUP_OPERATIONS:
             # 카탈로그 `UnitRule.DIMENSIONLESS` 와 같은 규칙이다(`test_factor_operators.py` 대조).
-            unit = "1"
+            unit = DIMENSIONLESS_UNIT
         if isinstance(node, GroupNode):
             group_metadata = fields.get(node.group_field_id)
             if (fields or require_field_metadata) and group_metadata is None:

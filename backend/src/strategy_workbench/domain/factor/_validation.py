@@ -34,6 +34,82 @@ _DIMENSIONLESS_SECTIONS = frozenset({CrossSectionalOperator.RANK, CrossSectional
 # (`cross_sectional_rank`)이다. `neutralize` 는 그룹 평균을 빼므로 입력 단위를 그대로 둔다.
 _DIMENSIONLESS_GROUP_OPERATIONS = frozenset({GroupOperator.RANK})
 
+UNKNOWN_UNIT = "unknown"
+_DIMENSIONLESS_UNIT = "1"
+
+
+def unit_dimensions(unit: str) -> tuple[tuple[str, int], ...] | None:
+    """단위 표기를 약분한 차원(기본 단위별 지수, 이름순)으로 바꾼다. `unknown` 이 섞이면 None.
+
+    단위 표기는 곱·나눗셈 노드가 `(a*b)`·`(a/b)` 로 이어 붙인 문자열이고 약분하지 않는다 — 실행
+    계획의 `output_unit` 과 `plan_hash`(연속 계좌 후보 신원)가 이 문자열을 싣기 때문에 표기는 그대로
+    두고, 단위가 같은지 판정할 때만 이 차원을 쓴다(#668 IT-01). 그래서 `(KRW/KRW)` 와 `1`,
+    `(1*1)` 과 `1`, `((KRW*shares)/shares)` 와 `KRW` 가 같은 단위다. 괄호 없는 `a/b*c` 는 왼쪽부터
+    읽는다. 이름이 비거나 괄호가 맞지 않는 표기는 그 문자열 전체를 기본 단위 하나로 본다.
+    """
+    tokens = _unit_tokens(unit)
+    exponents: dict[str, int] = {}
+    position, ok = _parse_unit_product(tokens, 0, 1, exponents)
+    if not ok or position != len(tokens):
+        exponents = {unit: 1}
+    if UNKNOWN_UNIT in exponents:
+        return None
+    exponents.pop(_DIMENSIONLESS_UNIT, None)
+    return tuple(sorted((name, power) for name, power in exponents.items() if power))
+
+
+def same_unit(left: str, right: str) -> bool:
+    """두 단위가 약분하면 같은가. 한쪽이라도 `unknown` 이 섞이면 판정하지 않고 같다고 본다."""
+    left_dimensions, right_dimensions = unit_dimensions(left), unit_dimensions(right)
+    if left_dimensions is None or right_dimensions is None:
+        return True
+    return left_dimensions == right_dimensions
+
+
+def _unit_tokens(unit: str) -> list[str]:
+    tokens: list[str] = []
+    name = ""
+    for character in unit:
+        if character in "()*/":
+            if name.strip():
+                tokens.append(name.strip())
+            name = ""
+            tokens.append(character)
+        else:
+            name += character
+    if name.strip():
+        tokens.append(name.strip())
+    return tokens
+
+
+def _parse_unit_product(
+    tokens: list[str], position: int, sign: int, exponents: dict[str, int]
+) -> tuple[int, bool]:
+    """`항 (('*' | '/') 항)*` 을 읽어 지수를 더한다. 반환은 (다음 위치, 문법이 맞았는가)."""
+    position, ok = _parse_unit_term(tokens, position, sign, exponents)
+    while ok and position < len(tokens) and tokens[position] in "*/":
+        factor = sign if tokens[position] == "*" else -sign
+        position, ok = _parse_unit_term(tokens, position + 1, factor, exponents)
+    return position, ok
+
+
+def _parse_unit_term(
+    tokens: list[str], position: int, sign: int, exponents: dict[str, int]
+) -> tuple[int, bool]:
+    if position >= len(tokens):
+        return position, False
+    token = tokens[position]
+    if token == "(":
+        position, ok = _parse_unit_product(tokens, position + 1, sign, exponents)
+        if not ok or position >= len(tokens) or tokens[position] != ")":
+            return position, False
+        return position + 1, True
+    if token in ")*/":
+        return position, False
+    exponents[token] = exponents.get(token, 0) + sign
+    return position + 1, True
+
+
 # 정수 파라미터의 하한은 노드 dataclass 옆에 한 번만 선언한다(`_nodes.minimum`). runtime schema가
 # 같은 값을 JSON Schema `minimum`으로 발행하므로 화면이 만든 기본값과 검증기가
 # 어긋나지 않는다(P1-04).
@@ -450,7 +526,7 @@ def _infer_contract(
     if isinstance(node, FieldNode):
         metadata = fields.get(node.field_id)
         value_type = metadata.value_type if metadata else NodeValueType.NUMERIC_SERIES
-        unit = metadata.unit if metadata else "unknown"
+        unit = metadata.unit if metadata else UNKNOWN_UNIT
         history = 1
     elif isinstance(node, (ConstantNode, ParameterNode)):
         value_type, unit, history = NodeValueType.SCALAR, "1", 0
@@ -478,7 +554,7 @@ def _infer_contract(
         history = max(left.minimum_history_sessions, right.minimum_history_sessions)
         if node.operator in (BinaryOperator.ADD, BinaryOperator.SUBTRACT):
             unit = left.unit
-            if left.unit != "unknown" and right.unit != "unknown" and left.unit != right.unit:
+            if not same_unit(left.unit, right.unit):
                 issues.append(
                     _issue(
                         "factor.graph.unit_mismatch",
@@ -520,7 +596,12 @@ def _infer_contract(
                     f"조건 노드는 boolean이어야 합니다: actual={predicate.value_type.value}",
                 )
             )
-        if true_value.value_type is not false_value.value_type:
+        numeric = {NodeValueType.NUMERIC_SERIES, NodeValueType.SCALAR}
+        # 상수 가지와 숫자 시계열 가지는 섞을 수 있다 — 두 평가기 모두 상수를 행마다 값으로
+        # 펼친다(`조건 ? 1 : 비율` 같은 상한 자르기, #668 IT-01). 참거짓과 숫자는 열 하나에 담을 수
+        # 없어 막는다.
+        mixed_numeric = {true_value.value_type, false_value.value_type} <= numeric
+        if true_value.value_type is not false_value.value_type and not mixed_numeric:
             issues.append(
                 _issue(
                     "factor.graph.branch_type",
@@ -530,11 +611,7 @@ def _infer_contract(
                     f"true={true_value.value_type.value} false={false_value.value_type.value}",
                 )
             )
-        if (
-            true_value.unit != "unknown"
-            and false_value.unit != "unknown"
-            and true_value.unit != false_value.unit
-        ):
+        if not same_unit(true_value.unit, false_value.unit):
             issues.append(
                 _issue(
                     "factor.graph.branch_unit",
@@ -545,14 +622,10 @@ def _infer_contract(
                 )
             )
         value_type = true_value.value_type
-        if (
-            value_type is NodeValueType.SCALAR
-            and false_value.value_type is NodeValueType.SCALAR
-            and predicate.value_type is NodeValueType.BOOLEAN_SERIES
-        ):
+        if mixed_numeric and predicate.value_type is NodeValueType.BOOLEAN_SERIES:
             # 가지가 상수여도 조건이 종목·날짜마다 갈리므로 값은 시계열이다(P2-07). boolean
             # 출력 승격(`domain/strategy/_promotion.py`)이 이 규칙으로 `조건 ? 1 : 0` 을 숫자
-            # 점수로 만든다.
+            # 점수로 만든다. 한 가지만 상수여도 같다.
             value_type = NodeValueType.NUMERIC_SERIES
         unit = true_value.unit
         history = max(item.minimum_history_sessions for item in dependencies)

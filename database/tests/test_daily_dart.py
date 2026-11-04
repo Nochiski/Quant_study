@@ -488,6 +488,21 @@ def test_docs_gate_counts_todays_preliminary_earnings_but_not_subsidiary_ones(tm
     con.close()
 
 
+def test_docs_gate_counts_preliminary_earnings_of_that_day_and_listed_only(tmp_path) -> None:
+    """잠정실적 조건도 그날 · 상장사 조건 안에 든다. 11-03 운영 — 괄호가 하나 밀려 잠정 조건이 날짜 조건 밖으로
+    나가, 지난 잠정 공시 3.4만 건(원문 안 받은 분)을 대상으로 세어 documents 게이트가 실패했다."""
+    rows = [("20260908000001", D, C1, "005930", "연결재무제표기준영업(잠정)실적(공정공시)"),
+            ("20260801000002", "20260801", C2, "000660", "연결재무제표기준영업(잠정)실적(공정공시)"),
+            ("20260908000003", D, C3, "", "영업(잠정)실적(공정공시)")]
+    home = _make_home(tmp_path, rows=rows)
+    con = _con(home)
+    _doc_ok(con, "20260908000001")
+    con.commit()
+    g = _gates(con, dd.plan(con, D))["documents"]
+    assert g.ok and g.metrics["n_target"] == 1
+    con.close()
+
+
 def test_periodic_gate_rejects_ok_logged_before_first_seen(tmp_path) -> None:
     """어제 ok 였던 유닛이 오늘 공시를 반영하지 않은 채 통과하면 안 된다(DEFECT-B01 의 우려).
 

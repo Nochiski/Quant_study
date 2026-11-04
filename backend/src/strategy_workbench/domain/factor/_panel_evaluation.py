@@ -468,8 +468,7 @@ class _PanelEvaluator:
         *,
         rows: int,
     ) -> tuple[NDArray[np.float64] | NDArray[np.bool_], NDArray[np.bool_]]:
-        # 가지의 값 타입이 칸마다 섞이면 열 하나에 담을 수 없다. 검증기가 참거짓·숫자를 맞춘다
-        # (상수와 숫자 시계열은 섞일 수 있다 — 상수는 행마다 펼친 float 열이다)
+        # 가지의 값 타입이 칸마다 섞이면 열 하나에 담을 수 없다. 검증기가 두 가지 타입을 맞춘다
         if true.boolean != false.boolean:
             raise UnsupportedPanelEvaluationError(
                 "conditional branches must share one value type — "

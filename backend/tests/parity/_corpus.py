@@ -364,15 +364,6 @@ def _elementwise_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
             ConditionalNode("out", "p", "t", "f", "conditional"),
         ),
         (x, y, ConditionalNode("out", "y", "x", "y", "conditional")),
-        # 상수 가지가 참 쪽인 상한 자르기 `ratio > 1 ? 1 : ratio`(#668 IT-01, 섞인 가지 허용)
-        (
-            x,
-            y,
-            ratio,
-            ConstantNode("one", 1.0, "constant"),
-            compare("over", FactorComparisonOperator.GREATER_THAN, "ratio", "one"),
-            ConditionalNode("out", "over", "one", "ratio", "conditional"),
-        ),
         (x, y, negate, binary("out", BinaryOperator.DIVIDE, "neg", "y")),
         (x, y, negate, binary("out", BinaryOperator.DIVIDE, "y", "neg")),
         (x, y, ratio, square, binary("out", BinaryOperator.ADD, "ratio", "square")),

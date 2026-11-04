@@ -139,7 +139,9 @@ from . import gates, queries
 # 1.12.0(2026-11-03, N-64 PR ②-1): 엑셀 전용 표 `fi_fin_prelim`(잠정실적 — 확정보다 뒤 분기만, 단위 검산 PG-8)과
 # 게이트 FG6(점수 표에 잠정 0 · 미래 분기 · 확정/잠정 겹침 · 단위 의심 warn). 원천 equity `fin_prelim` 은 선택 원천이다
 # (판이 없는 날 · 옛 이력은 빈 표). 엔진 입력 8표(FI_TABLES)의 SQL·판정은 글자 그대로다
-RULES_VERSION = "fi1.12.0"
+# 1.12.1(2026-11-04, PG-8 보정 — 사용자 승인 11-03): 단위 검산은 매출 비 · 영업이익 비 중 하나라도 문턱 안이면 ok
+# (금융사 잠정 '매출액' = 영업수익 정의 차이로 매출 비만 밖이던 12행). `fi_fin_prelim.unit_check` 만 바뀐다
+RULES_VERSION = "fi1.12.1"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning", BASIS_SUPPLEMENT)
 # fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)

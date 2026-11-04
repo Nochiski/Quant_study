@@ -56,8 +56,9 @@ PRICE_WINDOW_DAYS = 550          # fi_prices·fi_adj_prices — D 까지 550 달
 FLOW_SESSIONS = 60               # fi_flows·fi_credit — D 까지 60 세션
 FIN_ANNUAL_PERIODS = 2           # fi_fin_summary 연간 — v3 LIMIT 2
 FIN_QUARTERS = 5                 # fi_fin_summary 분기 — v4 TTM 용
-# 잠정실적 단위 검산(PG-8, 계획 9-3) — 잠정 공시의 전년동기 값 ÷ 우리 확정 같은 분기. 처음 값이다(11-03 백필 877건으로
-# 보정 — 배포 전 BOARD). 기준 분기 값이 작으면(억원 반올림이 비율을 흔든다) 그 갈래를 건너뛴다. 기준이 없으면
+# 잠정실적 단위 검산(PG-8, 계획 9-3) — 잠정 공시의 전년동기 값 ÷ 우리 확정 같은 분기(매출 · 영업이익 중 하나라도 안이면
+# 통과). 11-03 그림자 보정: 매출 비 중앙 1.000 · 5~95% 0.78~1.05, 단위 오류(100배 이상) 0건 — 문턱 그대로. 기준 분기
+# 값이 작으면(억원 반올림이 비율을 흔든다) 그 갈래를 건너뛴다. 기준이 없으면
 # 당기 ÷ 직전 확정 분기를 1/PRELIM_PREV_RATIO_MAX ~ PRELIM_PREV_RATIO_MAX 로만 본다(단위 오류는 100배 이상 틀린다)
 PRELIM_PY_RATIO = (0.5, 2.0)
 PRELIM_PREV_RATIO_MAX = 50.0
@@ -1026,8 +1027,10 @@ def fin_prelim_sql(p: Params) -> str:
       · 연결/별도(Q2): 같은 기말에 연결 잠정이 있으면 연결. 별도 잠정은 연결이 없고 종목의 최신 확정 분기 기준이
         연결이 아닐 때만 쓴다(기준이 섞이지 않게).
     단위 검산(PG-8) `unit_check`:
-      · 잠정의 전년동기 기간이 당기 − 1년이고 우리 확정 같은 분기(기말 − 1년)의 매출이 PRELIM_REF_MIN_EOK 억원
-        이상이면 매출 비, 매출을 못 쓰면 같은 부호의 영업이익 비가 PRELIM_PY_RATIO 안 → ok, 밖 → withheld.
+      · 잠정의 전년동기 기간이 당기 − 1년이면 우리 확정 같은 분기(기말 − 1년)와 매출 비(확정 매출 PRELIM_REF_MIN_EOK
+        억원 이상) · 영업이익 비(같은 부호 · PRELIM_REF_MIN_EOK 억원 이상)를 잰다. 잰 비 중 하나라도 PRELIM_PY_RATIO
+        안 → ok, 둘 다 밖 → withheld. 단위 오류는 서식 전체가 같은 배수로 틀어져 두 비가 함께 밖이다 — 금융사처럼
+        잠정 '매출액'(영업수익)이 우리 매출과 정의가 다른 종목은 매출 비만 밖이다(11-03 그림자 12행, 사용자 승인 11-03).
       · 그 밖(기준 없음 — 동아에스티 꼴처럼 전년동기 기간을 잘못 적은 서식 포함)은 당기 매출 ÷ 직전 확정 분기
         매출이 1/PRELIM_PREV_RATIO_MAX ~ PRELIM_PREV_RATIO_MAX 안 → no_ref, 밖 → withheld. 비교할 것이 없으면 no_ref.
       · withheld 행도 표에 남긴다(값 · 접수번호를 사람이 본다) — 엑셀이 내지 않고 FG6 이 warn 으로 알린다.
@@ -1066,26 +1069,30 @@ pick AS (
                                                   AND x.fs_div = 'CFS')
                AND coalesce(l.fs_basis, '') NOT LIKE '%CFS%' AND coalesce(l.fs_basis, '') NOT LIKE '%연결%'))
 ),
-judged AS (
+ref AS (
     SELECT k.*,
+           CASE WHEN k.py_to = CAST(k.period_to - INTERVAL 1 YEAR AS DATE) AND abs(r.revenue) >= {PRELIM_REF_MIN_EOK}
+                THEN k.revenue_py_krw / {eok} / r.revenue END AS rev_py_ratio,
+           CASE WHEN k.py_to = CAST(k.period_to - INTERVAL 1 YEAR AS DATE) AND abs(r.op) >= {PRELIM_REF_MIN_EOK}
+                     AND sign(k.op_profit_py_krw) = sign(r.op)
+                THEN k.op_profit_py_krw / {eok} / r.op END AS op_py_ratio
+    FROM pick k
+    LEFT JOIN conf r ON r.ticker = k.ticker
+                    AND r.period = strftime(CAST(k.period_to - INTERVAL 1 YEAR AS DATE), '%Y/%m')
+),
+judged AS (
+    SELECT * EXCLUDE (rev_py_ratio, op_py_ratio),
            CASE
-             WHEN k.py_to = CAST(k.period_to - INTERVAL 1 YEAR AS DATE) AND k.revenue_py_krw IS NOT NULL
-                  AND abs(r.revenue) >= {PRELIM_REF_MIN_EOK}
-               THEN CASE WHEN k.revenue_py_krw / {eok} / r.revenue BETWEEN {lo} AND {hi}
+             WHEN rev_py_ratio IS NOT NULL OR op_py_ratio IS NOT NULL
+               THEN CASE WHEN rev_py_ratio BETWEEN {lo} AND {hi} OR op_py_ratio BETWEEN {lo} AND {hi}
                          THEN 'ok' ELSE 'withheld' END
-             WHEN k.py_to = CAST(k.period_to - INTERVAL 1 YEAR AS DATE) AND k.op_profit_py_krw IS NOT NULL
-                  AND abs(r.op) >= {PRELIM_REF_MIN_EOK} AND sign(k.op_profit_py_krw) = sign(r.op)
-               THEN CASE WHEN k.op_profit_py_krw / {eok} / r.op BETWEEN {lo} AND {hi}
-                         THEN 'ok' ELSE 'withheld' END
-             WHEN k.revenue_krw IS NOT NULL AND abs(k.last_revenue) >= {PRELIM_REF_MIN_EOK}
-               THEN CASE WHEN abs(k.revenue_krw / {eok} / k.last_revenue)
+             WHEN revenue_krw IS NOT NULL AND abs(last_revenue) >= {PRELIM_REF_MIN_EOK}
+               THEN CASE WHEN abs(revenue_krw / {eok} / last_revenue)
                               BETWEEN {1 / PRELIM_PREV_RATIO_MAX} AND {PRELIM_PREV_RATIO_MAX}
                          THEN 'no_ref' ELSE 'withheld' END
              ELSE 'no_ref'
            END AS unit_check
-    FROM pick k
-    LEFT JOIN conf r ON r.ticker = k.ticker
-                    AND r.period = strftime(CAST(k.period_to - INTERVAL 1 YEAR AS DATE), '%Y/%m')
+    FROM ref
 )
 SELECT ticker, period,
        CAST(round(revenue_krw / {eok}) AS BIGINT)    AS revenue,

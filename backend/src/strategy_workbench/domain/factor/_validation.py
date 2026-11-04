@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 
 from ._history import node_read_window
 from ._nodes import (
@@ -35,9 +36,10 @@ _DIMENSIONLESS_SECTIONS = frozenset({CrossSectionalOperator.RANK, CrossSectional
 _DIMENSIONLESS_GROUP_OPERATIONS = frozenset({GroupOperator.RANK})
 
 UNKNOWN_UNIT = "unknown"
-_DIMENSIONLESS_UNIT = "1"
+DIMENSIONLESS_UNIT = "1"
 
 
+@lru_cache(maxsize=4096)
 def unit_dimensions(unit: str) -> tuple[tuple[str, int], ...] | None:
     """단위 표기를 약분한 차원(기본 단위별 지수, 이름순)으로 바꾼다. `unknown` 이 섞이면 None.
 
@@ -45,16 +47,20 @@ def unit_dimensions(unit: str) -> tuple[tuple[str, int], ...] | None:
     계획의 `output_unit` 과 `plan_hash`(연속 계좌 후보 신원)가 이 문자열을 싣기 때문에 표기는 그대로
     두고, 단위가 같은지 판정할 때만 이 차원을 쓴다(#668 IT-01). 그래서 `(KRW/KRW)` 와 `1`,
     `(1*1)` 과 `1`, `((KRW*shares)/shares)` 와 `KRW` 가 같은 단위다. 괄호 없는 `a/b*c` 는 왼쪽부터
-    읽는다. 이름이 비거나 괄호가 맞지 않는 표기는 그 문자열 전체를 기본 단위 하나로 본다.
+    읽는다. 이름이 비거나 괄호가 맞지 않는 표기는 그 문자열 전체(앞뒤 공백 제외)를 기본 단위 하나로
+    본다. 원천 필드 단위에는 `()*/` 가 없다(어댑터 계약 테스트가 지킨다).
+
+    이름이 붙은 무차원 단위(`ratio`·`배`)는 `1` 과 다른 단위로 본다 — 별칭 표가 필요하면 이 함수
+    한 곳에 둔다. `pct`·`%`·`bp` 는 배율이 있어 `1` 과 다르다.
+
+    반복문으로 읽어 깊은 그래프의 긴 표기에서도 재귀 한도에 걸리지 않고, 같은 표기는 캐시한다.
     """
-    tokens = _unit_tokens(unit)
-    exponents: dict[str, int] = {}
-    position, ok = _parse_unit_product(tokens, 0, 1, exponents)
-    if not ok or position != len(tokens):
-        exponents = {unit: 1}
+    exponents = _parsed_unit(unit)
+    if exponents is None:
+        exponents = {unit.strip(): 1}
     if UNKNOWN_UNIT in exponents:
         return None
-    exponents.pop(_DIMENSIONLESS_UNIT, None)
+    exponents.pop(DIMENSIONLESS_UNIT, None)
     return tuple(sorted((name, power) for name, power in exponents.items() if power))
 
 
@@ -66,48 +72,52 @@ def same_unit(left: str, right: str) -> bool:
     return left_dimensions == right_dimensions
 
 
+def _parsed_unit(unit: str) -> dict[str, int] | None:
+    """`항 (('*' | '/') 항)*`, 항 = 이름 | `(` 곱 `)` 을 읽어 지수를 더한다. 문법이 틀리면 None.
+
+    괄호마다 그 묶음의 부호를 스택에 쌓는다 — 묶음 안 첫 항은 묶음 부호 그대로, `/` 뒤 항은 반대다.
+    """
+    exponents: dict[str, int] = {}
+    group_signs = [1]
+    next_sign = 1
+    expect_term = True
+    for token in _unit_tokens(unit):
+        if expect_term:
+            if token == "(":
+                group_signs.append(group_signs[-1] * next_sign)
+                next_sign = 1
+            elif token in _UNIT_SYMBOLS:
+                return None
+            else:
+                exponents[token] = exponents.get(token, 0) + group_signs[-1] * next_sign
+                expect_term = False
+        elif token in "*/":
+            next_sign = 1 if token == "*" else -1
+            expect_term = True
+        elif token == ")" and len(group_signs) > 1:
+            group_signs.pop()
+        else:
+            return None
+    return exponents if not expect_term and len(group_signs) == 1 else None
+
+
+_UNIT_SYMBOLS = frozenset("()*/")
+
+
 def _unit_tokens(unit: str) -> list[str]:
     tokens: list[str] = []
-    name = ""
+    name: list[str] = []
     for character in unit:
-        if character in "()*/":
-            if name.strip():
-                tokens.append(name.strip())
-            name = ""
+        if character in _UNIT_SYMBOLS:
+            if "".join(name).strip():
+                tokens.append("".join(name).strip())
+            name = []
             tokens.append(character)
         else:
-            name += character
-    if name.strip():
-        tokens.append(name.strip())
+            name.append(character)
+    if "".join(name).strip():
+        tokens.append("".join(name).strip())
     return tokens
-
-
-def _parse_unit_product(
-    tokens: list[str], position: int, sign: int, exponents: dict[str, int]
-) -> tuple[int, bool]:
-    """`항 (('*' | '/') 항)*` 을 읽어 지수를 더한다. 반환은 (다음 위치, 문법이 맞았는가)."""
-    position, ok = _parse_unit_term(tokens, position, sign, exponents)
-    while ok and position < len(tokens) and tokens[position] in "*/":
-        factor = sign if tokens[position] == "*" else -sign
-        position, ok = _parse_unit_term(tokens, position + 1, factor, exponents)
-    return position, ok
-
-
-def _parse_unit_term(
-    tokens: list[str], position: int, sign: int, exponents: dict[str, int]
-) -> tuple[int, bool]:
-    if position >= len(tokens):
-        return position, False
-    token = tokens[position]
-    if token == "(":
-        position, ok = _parse_unit_product(tokens, position + 1, sign, exponents)
-        if not ok or position >= len(tokens) or tokens[position] != ")":
-            return position, False
-        return position + 1, True
-    if token in ")*/":
-        return position, False
-    exponents[token] = exponents.get(token, 0) + sign
-    return position + 1, True
 
 
 # 정수 파라미터의 하한은 노드 dataclass 옆에 한 번만 선언한다(`_nodes.minimum`). runtime schema가
@@ -529,7 +539,7 @@ def _infer_contract(
         unit = metadata.unit if metadata else UNKNOWN_UNIT
         history = 1
     elif isinstance(node, (ConstantNode, ParameterNode)):
-        value_type, unit, history = NodeValueType.SCALAR, "1", 0
+        value_type, unit, history = NodeValueType.SCALAR, DIMENSIONLESS_UNIT, 0
     elif isinstance(node, BinaryNode):
         left, right = dependencies
         for side, operand in (("left", left), ("right", right)):
@@ -653,10 +663,10 @@ def _infer_contract(
         if isinstance(node, CrossSectionalNode) and node.operator in _DIMENSIONLESS_SECTIONS:
             # 순위·z-score 는 입력 단위를 지운다(BACKLOG-003). 카탈로그 `UnitRule.DIMENSIONLESS`
             # 와 같은 규칙이며 `test_factor_operators.py` 가 둘을 대조한다.
-            unit = "1"
+            unit = DIMENSIONLESS_UNIT
         if isinstance(node, GroupNode) and node.operator in _DIMENSIONLESS_GROUP_OPERATIONS:
             # 카탈로그 `UnitRule.DIMENSIONLESS` 와 같은 규칙이다(`test_factor_operators.py` 대조).
-            unit = "1"
+            unit = DIMENSIONLESS_UNIT
         if isinstance(node, GroupNode):
             group_metadata = fields.get(node.group_field_id)
             if (fields or require_field_metadata) and group_metadata is None:

@@ -543,12 +543,16 @@ def _unit_mismatch_issue(
     """
     if spec.signal.normalization is not SignalNormalization.NONE:
         return None
-    units = {
-        factor.factor_id: output_units[factor.factor_id]
+    dimensions = {
+        factor.factor_id: unit_dimensions(output_units.get(factor.factor_id, UNKNOWN_UNIT))
         for factor in composite_factors(spec)
-        if unit_dimensions(output_units.get(factor.factor_id, UNKNOWN_UNIT)) is not None
     }
-    if len({unit_dimensions(unit) for unit in units.values()}) <= 1:
+    units = {
+        factor_id: output_units[factor_id]
+        for factor_id, dimension in dimensions.items()
+        if dimension is not None
+    }
+    if len({dimension for dimension in dimensions.values() if dimension is not None}) <= 1:
         return None
     return semantic_issue(
         "strategy.signal.unit_mismatch",

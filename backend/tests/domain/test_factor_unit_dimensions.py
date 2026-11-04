@@ -20,6 +20,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     FactorGraph,
     FieldMetadata,
     FieldNode,
+    MissingPolicy,
     NodeValueType,
     UnaryNode,
     UnaryOperator,
@@ -143,12 +144,53 @@ def test_branch_units_compare_by_dimensions() -> None:
     validation = validate_factor_graph(graph, fields=(_PRICE,))
 
     assert validation.valid, [issue.message for issue in validation.issues]
+    contracts = {contract.node_id: contract for contract in validation.node_contracts}
+    assert contracts["capped"].value_type is NodeValueType.NUMERIC_SERIES
+
+
+def test_constant_on_the_false_branch_is_numeric_series() -> None:
+    """상수 가지가 거짓 쪽이어도 같다 — `ratio > 1 ? ratio : 1`."""
+    graph = FactorGraph(
+        nodes=(
+            *_return_minus_one().nodes[:3],
+            ConstantNode(node_id="one", value=1.0, kind="constant"),
+            ComparisonNode(
+                node_id="above",
+                operator=FactorComparisonOperator.GREATER_THAN,
+                left_node_id="ratio",
+                right_node_id="one",
+                kind="comparison",
+            ),
+            ConditionalNode(
+                node_id="floored",
+                predicate_node_id="above",
+                true_node_id="ratio",
+                false_node_id="one",
+                kind="conditional",
+            ),
+        ),
+        output_node_id="floored",
+    )
+
+    validation = validate_factor_graph(graph, fields=(_PRICE,))
+
+    assert validation.valid, [issue.message for issue in validation.issues]
+    contracts = {contract.node_id: contract for contract in validation.node_contracts}
+    assert contracts["floored"].value_type is NodeValueType.NUMERIC_SERIES
+
+
+def test_deep_ratio_chain_does_not_hit_the_recursion_limit() -> None:
+    """곱·나눗셈이 길게 이어진 표기(괄호 천여 겹)도 반복문으로 읽는다(재귀는 약 500겹에서 죽음)."""
+    depth = 1500
+    unit = "KRW"
+    for _ in range(depth):
+        unit = f"({unit}/KRW)"
+    assert unit_dimensions(unit) == (("KRW", 1 - depth),)
+    assert not same_unit(f"({unit}*KRW)", unit)
 
 
 def test_plan_keeps_the_unit_notation() -> None:
     """표기는 그대로다 — 실행 계획의 `output_unit` 이 바뀌면 `plan_hash`(후보 신원)가 바뀐다."""
-    from strategy_workbench.domain.factor.facade.expression import MissingPolicy
-
     plan = compile_factor_plan(
         _return_minus_one(), registry_version="test", missing=MissingPolicy.DROP, fields=(_PRICE,)
     )

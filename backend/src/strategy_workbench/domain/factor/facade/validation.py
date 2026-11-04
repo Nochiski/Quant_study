@@ -1,4 +1,5 @@
 from strategy_workbench.domain.factor._validation import (
+    DIMENSIONLESS_UNIT,
     FACTOR_GRAPH_CODES,
     UNKNOWN_UNIT,
     UNSELECTED_FIELD_MESSAGE,
@@ -16,6 +17,7 @@ from strategy_workbench.domain.factor._validation import (
 )
 
 __all__ = [
+    "DIMENSIONLESS_UNIT",
     "FACTOR_GRAPH_CODES",
     "FactorGraphValidation",
     "FactorValidationIssue",

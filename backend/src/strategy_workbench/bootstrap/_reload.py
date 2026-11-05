@@ -55,6 +55,7 @@ class ReloadableApp:
         self._built: Built | None = None
         self._stack: AsyncExitStack | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._closed = False
 
     def load(self, build: Callable[[], Built]) -> ReloadableApp:
         self._build = build
@@ -92,8 +93,10 @@ class ReloadableApp:
         self._stack = stack
         await send({"type": "lifespan.startup.complete"})
         await receive()  # lifespan.shutdown
+        self._closed = True
         try:
-            await stack.aclose()
+            # 반영으로 바꿔 끼웠으면 첫 앱의 스택은 이미 닫혔다 — 지금 앱의 스택을 닫는다.
+            await self._stack.aclose()
         except Exception as error:
             logger.exception("app shutdown failed")
             await send({"type": "lifespan.shutdown.failed", "message": repr(error)})
@@ -117,6 +120,9 @@ class ReloadableApp:
     async def _swap(self, built: Built) -> None:
         stack = AsyncExitStack()
         await stack.enter_async_context(built[0].router.lifespan_context(built[0]))
+        if self._closed:  # 세우는 동안 서버가 끝나기 시작했다 — 새 앱을 바로 닫는다
+            await stack.aclose()
+            raise RuntimeError("server is shutting down — the reloaded app was closed")
         old = self._stack
         self._built, self._stack = built, stack
         logger.info("app reloaded with new ledger data")

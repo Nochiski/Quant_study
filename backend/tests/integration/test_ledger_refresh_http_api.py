@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
+from typing import Any
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from strategy_workbench.application.ledger_refresh.facade.refresh import (
@@ -115,3 +119,26 @@ def test_a_refresh_blocks_new_runs_then_swaps_in_a_new_container() -> None:
         assert holder.container is not first
         # 새 앱이 요청을 받는다 — 막힘도 풀렸다
         assert client.post("/api/v1/backtests", json={}).status_code != 409
+
+
+def test_shutting_down_after_a_reload_closes_the_app_in_use() -> None:
+    events: list[str] = []
+
+    # reason: 컨테이너 자리는 이 테스트가 읽지 않는다
+    def build() -> tuple[FastAPI, Any]:
+        number = sum(event.startswith("open") for event in events) + 1
+
+        @asynccontextmanager
+        async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+            events.append(f"open{number}")
+            yield
+            events.append(f"close{number}")
+
+        return FastAPI(lifespan=lifespan), None
+
+    holder = ReloadableApp().load(build)
+    with TestClient(holder):
+        holder.apply()
+        assert events == ["open1", "open2", "close1"]
+    # 서버가 끝나면 바꿔 끼운 앱(run worker 정리 등)을 닫는다
+    assert events == ["open1", "open2", "close1", "close2"]

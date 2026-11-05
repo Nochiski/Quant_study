@@ -187,6 +187,29 @@
         "title": "AccountReportSummary",
         "type": "object"
       },
+      "ActiveWorkBody": {
+        "properties": {
+          "backtests": {
+            "title": "Backtests",
+            "type": "integer"
+          },
+          "evaluations": {
+            "title": "Evaluations",
+            "type": "integer"
+          },
+          "experiments": {
+            "title": "Experiments",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "backtests",
+          "experiments",
+          "evaluations"
+        ],
+        "title": "ActiveWorkBody",
+        "type": "object"
+      },
       "AddLibraryVersionBody": {
         "properties": {
           "expected_latest": {
@@ -2088,6 +2111,32 @@
         ],
         "title": "CapacitySweepRequest",
         "type": "object"
+      },
+      "CardIssueBody": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/CardIssueCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "CardIssueBody",
+        "type": "object"
+      },
+      "CardIssueCode": {
+        "enum": [
+          "table_missing",
+          "no_rows",
+          "coverage_low"
+        ],
+        "title": "CardIssueCode",
+        "type": "string"
       },
       "CellKind": {
         "description": "A numeric zero and unavailable data must never collapse into one value.",
@@ -6281,6 +6330,170 @@
         "title": "FloatParameter",
         "type": "object"
       },
+      "FlowCardBody": {
+        "properties": {
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlowCoverageBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/FlowDayBody"
+            },
+            "title": "Days",
+            "type": "array"
+          },
+          "issue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardIssueBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "market": {
+            "$ref": "#/components/schemas/FlowMarket"
+          },
+          "totals": {
+            "items": {
+              "$ref": "#/components/schemas/FlowTotalBody"
+            },
+            "title": "Totals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "market",
+          "coverage",
+          "totals",
+          "days",
+          "issue"
+        ],
+        "title": "FlowCardBody",
+        "type": "object"
+      },
+      "FlowCoverageBody": {
+        "properties": {
+          "grid_securities": {
+            "description": "합산 대상 종목 수(ETF·우선주 제외).",
+            "title": "Grid Securities",
+            "type": "integer"
+          },
+          "measured_securities": {
+            "description": "그중 값이 있는 종목 수.",
+            "title": "Measured Securities",
+            "type": "integer"
+          },
+          "mktcap_share": {
+            "description": "측정 종목의 시가총액 비중(0~1).",
+            "title": "Mktcap Share",
+            "type": "number"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "grid_securities",
+          "measured_securities",
+          "mktcap_share"
+        ],
+        "title": "FlowCoverageBody",
+        "type": "object"
+      },
+      "FlowDayBody": {
+        "properties": {
+          "amounts": {
+            "items": {
+              "$ref": "#/components/schemas/InvestorAmountBody"
+            },
+            "title": "Amounts",
+            "type": "array"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "amounts"
+        ],
+        "title": "FlowDayBody",
+        "type": "object"
+      },
+      "FlowMarket": {
+        "enum": [
+          "KOSPI",
+          "KOSDAQ"
+        ],
+        "title": "FlowMarket",
+        "type": "string"
+      },
+      "FlowPeriod": {
+        "enum": [
+          "day",
+          "five_sessions",
+          "twenty_sessions"
+        ],
+        "title": "FlowPeriod",
+        "type": "string"
+      },
+      "FlowTotalBody": {
+        "properties": {
+          "amounts": {
+            "items": {
+              "$ref": "#/components/schemas/InvestorAmountBody"
+            },
+            "title": "Amounts",
+            "type": "array"
+          },
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "period": {
+            "$ref": "#/components/schemas/FlowPeriod"
+          },
+          "sessions": {
+            "title": "Sessions",
+            "type": "integer"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          },
+          "summary": {
+            "description": "누가 더 사고 팔았는지 한 문장(backend 가 완성).",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period",
+          "start",
+          "end",
+          "sessions",
+          "amounts",
+          "summary"
+        ],
+        "title": "FlowTotalBody",
+        "type": "object"
+      },
       "FrozenWindowChoice": {
         "properties": {
           "data_snapshot_id": {
@@ -6595,6 +6808,140 @@
         "title": "ImpactModel",
         "type": "string"
       },
+      "IndexCardBody": {
+        "properties": {
+          "index_id": {
+            "title": "Index Id",
+            "type": "string"
+          },
+          "index_name": {
+            "title": "Index Name",
+            "type": "string"
+          },
+          "issue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardIssueBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IndexSummaryBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "index_id",
+          "index_name",
+          "summary",
+          "issue"
+        ],
+        "title": "IndexCardBody",
+        "type": "object"
+      },
+      "IndexPointBody": {
+        "properties": {
+          "close": {
+            "title": "Close",
+            "type": "number"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "close"
+        ],
+        "title": "IndexPointBody",
+        "type": "object"
+      },
+      "IndexSummaryBody": {
+        "properties": {
+          "change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change"
+          },
+          "change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Pct"
+          },
+          "close": {
+            "title": "Close",
+            "type": "number"
+          },
+          "high_close": {
+            "description": "선(history) 안의 종가 최고. 당일 고가가 아니다.",
+            "title": "High Close",
+            "type": "number"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/IndexPointBody"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "low_close": {
+            "description": "선(history) 안의 종가 최저. 당일 저가가 아니다.",
+            "title": "Low Close",
+            "type": "number"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "value_krw": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Krw"
+          }
+        },
+        "required": [
+          "session",
+          "close",
+          "change",
+          "change_pct",
+          "value_krw",
+          "high_close",
+          "low_close",
+          "history"
+        ],
+        "title": "IndexSummaryBody",
+        "type": "object"
+      },
       "InlineDraft": {
         "description": "Use an unsaved typed spec while recording its authoring-source hash when known.\n\nAn inline draft can be researched or backtested, but it is never a deployment source.\n`source_hash` is client-asserted provenance: the server cannot verify it without the text.",
         "properties": {
@@ -6664,6 +7011,43 @@
         "title": "IntegerParameter",
         "type": "object"
       },
+      "Investor": {
+        "enum": [
+          "individual",
+          "foreign",
+          "institution",
+          "other_corporation",
+          "resident_foreign",
+          "financial_investment",
+          "pension",
+          "investment_trust",
+          "private_equity",
+          "insurance",
+          "bank",
+          "other_financial",
+          "government"
+        ],
+        "title": "Investor",
+        "type": "string"
+      },
+      "InvestorAmountBody": {
+        "properties": {
+          "amount_krw": {
+            "description": "순매수(산 금액 − 판 금액), 원. 반올림하지 않은 합.",
+            "title": "Amount Krw",
+            "type": "integer"
+          },
+          "investor": {
+            "$ref": "#/components/schemas/Investor"
+          }
+        },
+        "required": [
+          "investor",
+          "amount_krw"
+        ],
+        "title": "InvestorAmountBody",
+        "type": "object"
+      },
       "KiwoomMockConnectionBody": {
         "properties": {
           "account_tail": {
@@ -6722,6 +7106,143 @@
           "account_tail"
         ],
         "title": "KiwoomMockConnectionCheckBody",
+        "type": "object"
+      },
+      "LedgerRefreshBody": {
+        "properties": {
+          "active_work": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActiveWorkBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "can_start": {
+            "title": "Can Start",
+            "type": "boolean"
+          },
+          "code": {
+            "$ref": "#/components/schemas/RefreshCode"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RefreshFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "message": {
+            "description": "지금 상태를 말하는 한 문장(backend 가 완성).",
+            "title": "Message",
+            "type": "string"
+          },
+          "needs_check": {
+            "description": "서버 판 확인이 오래돼 다시 확인할 때다.",
+            "title": "Needs Check",
+            "type": "boolean"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SyncProgressBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnavailableReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "remote": {
+            "$ref": "#/components/schemas/RemoteCheckBody"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "can_start",
+          "reason",
+          "failure",
+          "needs_check",
+          "remote",
+          "progress",
+          "active_work",
+          "started_at",
+          "finished_at"
+        ],
+        "title": "LedgerRefreshBody",
+        "type": "object"
+      },
+      "LedgerRefreshErrorDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "ledger_refresh.rejected",
+              "data.refreshing"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "LedgerRefreshErrorDetail",
+        "type": "object"
+      },
+      "LedgerRefreshErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/LedgerRefreshErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "LedgerRefreshErrorResponse",
         "type": "object"
       },
       "LibraryDiagnosticBody": {
@@ -7090,6 +7611,102 @@
         "title": "Market",
         "type": "string"
       },
+      "MarketErrorDetail": {
+        "properties": {
+          "code": {
+            "const": "market.sector.not_found",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "MarketErrorDetail",
+        "type": "object"
+      },
+      "MarketErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/MarketErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "MarketErrorResponse",
+        "type": "object"
+      },
+      "MarketOverviewBody": {
+        "properties": {
+          "flows": {
+            "items": {
+              "$ref": "#/components/schemas/FlowCardBody"
+            },
+            "title": "Flows",
+            "type": "array"
+          },
+          "indices": {
+            "items": {
+              "$ref": "#/components/schemas/IndexCardBody"
+            },
+            "title": "Indices",
+            "type": "array"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "sectors": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorCardBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "session": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "카드 날짜 중 가장 이른 장.",
+            "title": "Session"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OverviewStatus"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "session",
+          "indices",
+          "flows",
+          "sectors"
+        ],
+        "title": "MarketOverviewBody",
+        "type": "object"
+      },
       "MarketReferencePoint": {
         "properties": {
           "session": {
@@ -7200,6 +7817,86 @@
         ],
         "title": "MarketReferenceStatus",
         "type": "string"
+      },
+      "MarketSectorBody": {
+        "properties": {
+          "group": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorGroupBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorGroupBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "securities": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityMoveBody"
+            },
+            "title": "Securities",
+            "type": "array"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session"
+          },
+          "snapshot_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Date"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OverviewStatus"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "parent",
+          "group",
+          "session",
+          "snapshot_date",
+          "securities"
+        ],
+        "title": "MarketSectorBody",
+        "type": "object"
       },
       "MetricCategory": {
         "enum": [
@@ -7577,6 +8274,14 @@
           "boolean_series"
         ],
         "title": "OutputTypeRule",
+        "type": "string"
+      },
+      "OverviewStatus": {
+        "enum": [
+          "available",
+          "practice_data"
+        ],
+        "title": "OverviewStatus",
         "type": "string"
       },
       "Page_BacktestRunSummary_": {
@@ -9194,6 +9899,89 @@
         "title": "RebalanceFrequency",
         "type": "string"
       },
+      "RefreshCode": {
+        "enum": [
+          "unavailable",
+          "locked",
+          "busy_work",
+          "idle",
+          "running",
+          "applying",
+          "succeeded",
+          "failed",
+          "partial"
+        ],
+        "title": "RefreshCode",
+        "type": "string"
+      },
+      "RefreshFailure": {
+        "description": "`failed`(아무것도 반영하지 않음)·`partial`(일부만 바뀜)의 갈래.",
+        "enum": [
+          "connect",
+          "transfer",
+          "disk",
+          "locked",
+          "unexpected",
+          "mismatch",
+          "unverified",
+          "apply",
+          "tables_failed",
+          "catalog"
+        ],
+        "title": "RefreshFailure",
+        "type": "string"
+      },
+      "RemoteCheckBody": {
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "download_bytes": {
+            "title": "Download Bytes",
+            "type": "integer"
+          },
+          "in_build_window": {
+            "description": "서버가 지금 데이터를 만드는 시간인가.",
+            "title": "In Build Window",
+            "type": "boolean"
+          },
+          "new_tables": {
+            "description": "서버에 새 판본이 있는 데이터 수.",
+            "title": "New Tables",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RemoteState"
+          }
+        },
+        "required": [
+          "state",
+          "new_tables",
+          "download_bytes",
+          "in_build_window",
+          "checked_at"
+        ],
+        "title": "RemoteCheckBody",
+        "type": "object"
+      },
+      "RemoteState": {
+        "enum": [
+          "behind",
+          "up_to_date",
+          "unknown"
+        ],
+        "title": "RemoteState",
+        "type": "string"
+      },
       "RequestValidationIssue": {
         "properties": {
           "loc": {
@@ -10656,6 +11444,149 @@
         "title": "SearchSpec",
         "type": "object"
       },
+      "SectorCardBody": {
+        "properties": {
+          "issue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardIssueBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sector_map": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorMapBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "sector_map",
+          "issue"
+        ],
+        "title": "SectorCardBody",
+        "type": "object"
+      },
+      "SectorGroupBody": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "return_weight_krw": {
+            "description": "등락 계산에 든(거래 있는) 종목의 같은 가중 합.",
+            "title": "Return Weight Krw",
+            "type": "number"
+          },
+          "securities": {
+            "title": "Securities",
+            "type": "integer"
+          },
+          "size_weight_krw": {
+            "description": "유동주식수 × 전날 종가의 합. 칸 크기와 등락 가중이 같은 값이다.",
+            "title": "Size Weight Krw",
+            "type": "number"
+          },
+          "untraded": {
+            "description": "그날 거래가 없어 등락에서 뺀 종목 수.",
+            "title": "Untraded",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "size_weight_krw",
+          "return_weight_krw",
+          "return_pct",
+          "securities",
+          "untraded"
+        ],
+        "title": "SectorGroupBody",
+        "type": "object"
+      },
+      "SectorMapBody": {
+        "properties": {
+          "parents": {
+            "items": {
+              "$ref": "#/components/schemas/SectorParentBody"
+            },
+            "title": "Parents",
+            "type": "array"
+          },
+          "securities": {
+            "title": "Securities",
+            "type": "integer"
+          },
+          "session": {
+            "description": "등락을 잰 장.",
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "snapshot_date": {
+            "description": "업종 분류·유동주식수 스냅샷 날짜(주 1회).",
+            "format": "date",
+            "title": "Snapshot Date",
+            "type": "string"
+          },
+          "untraded": {
+            "title": "Untraded",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "snapshot_date",
+          "session",
+          "securities",
+          "untraded",
+          "parents"
+        ],
+        "title": "SectorMapBody",
+        "type": "object"
+      },
+      "SectorParentBody": {
+        "properties": {
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/SectorGroupBody"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "group": {
+            "$ref": "#/components/schemas/SectorGroupBody"
+          }
+        },
+        "required": [
+          "group",
+          "children"
+        ],
+        "title": "SectorParentBody",
+        "type": "object"
+      },
       "SecurityFillRow": {
         "properties": {
           "fee": {
@@ -10741,6 +11672,41 @@
           "name"
         ],
         "title": "SecurityLabel",
+        "type": "object"
+      },
+      "SecurityMoveBody": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "size_weight_krw": {
+            "title": "Size Weight Krw",
+            "type": "number"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "name",
+          "size_weight_krw",
+          "return_pct"
+        ],
+        "title": "SecurityMoveBody",
         "type": "object"
       },
       "SecurityRef": {
@@ -12968,6 +13934,76 @@
         "title": "StrategyValidation",
         "type": "object"
       },
+      "SyncProgressBody": {
+        "properties": {
+          "bytes_done": {
+            "title": "Bytes Done",
+            "type": "integer"
+          },
+          "bytes_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes Total"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/SyncStage"
+          },
+          "stage_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Started At"
+          },
+          "tables_done": {
+            "title": "Tables Done",
+            "type": "integer"
+          },
+          "tables_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "받을 데이터 수. 받기 단계만 안다.",
+            "title": "Tables Total"
+          }
+        },
+        "required": [
+          "stage",
+          "stage_started_at",
+          "tables_total",
+          "tables_done",
+          "bytes_total",
+          "bytes_done"
+        ],
+        "title": "SyncProgressBody",
+        "type": "object"
+      },
+      "SyncStage": {
+        "enum": [
+          "download",
+          "catalog",
+          "verify",
+          "done"
+        ],
+        "title": "SyncStage",
+        "type": "string"
+      },
       "SynthesizedNode": {
         "description": "문서에 줄이 없는, compile 이 붙인 노드 표식(P3-01, Phase 2 감사 #13).\n\n화면은 이 표식으로 붙인 노드를 가른다. 승격 노드 이름 규칙(`PROMOTION_NODE_PREFIX`)을 화면이\n복제하지 않게 하는 wire 계약이다. `origin` 은 붙인 단계이고 지금은 boolean 출력 승격뿐이다.",
         "properties": {
@@ -14163,6 +15199,16 @@
           "lag"
         ],
         "title": "UnaryOperator",
+        "type": "string"
+      },
+      "UnavailableReason": {
+        "enum": [
+          "practice_data",
+          "not_configured",
+          "root_mismatch",
+          "sync_tool_missing"
+        ],
+        "title": "UnavailableReason",
         "type": "string"
       },
       "UnitRule": {
@@ -19131,6 +20177,136 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/v1/ledger-refresh": {
+      "get": {
+        "operationId": "getLedgerRefresh",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerRefreshBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Status"
+      },
+      "post": {
+        "operationId": "startLedgerRefresh",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerRefreshBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerRefreshErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Start"
+      }
+    },
+    "/api/v1/ledger-refresh/check": {
+      "post": {
+        "description": "서버 판을 다시 확인한다(원격 MANIFEST 만 읽는다). 받는 중이면 지금 상태만 돌려준다.",
+        "operationId": "checkLedgerRefresh",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerRefreshBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check"
+      }
+    },
+    "/api/v1/market/overview": {
+      "get": {
+        "operationId": "getMarketOverview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketOverviewBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Overview"
+      }
+    },
+    "/api/v1/market/sectors/{wics_l2_cd}": {
+      "get": {
+        "operationId": "getMarketSector",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "wics_l2_cd",
+            "required": true,
+            "schema": {
+              "title": "Wics L2 Cd",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketSectorBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sector"
       }
     },
     "/api/v1/portfolio/preview": {

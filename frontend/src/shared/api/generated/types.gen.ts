@@ -121,6 +121,24 @@ export type AccountReportSummary = {
 };
 
 /**
+ * ActiveWorkBody
+ */
+export type ActiveWorkBody = {
+  /**
+   * Backtests
+   */
+  backtests: number;
+  /**
+   * Evaluations
+   */
+  evaluations: number;
+  /**
+   * Experiments
+   */
+  experiments: number;
+};
+
+/**
  * AddLibraryVersionBody
  */
 export type AddLibraryVersionBody = {
@@ -1330,6 +1348,22 @@ export type CapacitySweepRequest = {
   initial_cash: Array<number>;
   run: BacktestRunSpec;
 };
+
+/**
+ * CardIssueBody
+ */
+export type CardIssueBody = {
+  code: CardIssueCode;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * CardIssueCode
+ */
+export type CardIssueCode = "table_missing" | "no_rows" | "coverage_low";
 
 /**
  * CellKind
@@ -3843,6 +3877,104 @@ export type FloatParameter = {
 };
 
 /**
+ * FlowCardBody
+ */
+export type FlowCardBody = {
+  coverage: FlowCoverageBody | null;
+  /**
+   * Days
+   */
+  days: Array<FlowDayBody>;
+  issue: CardIssueBody | null;
+  market: FlowMarket;
+  /**
+   * Totals
+   */
+  totals: Array<FlowTotalBody>;
+};
+
+/**
+ * FlowCoverageBody
+ */
+export type FlowCoverageBody = {
+  /**
+   * Grid Securities
+   *
+   * 합산 대상 종목 수(ETF·우선주 제외).
+   */
+  grid_securities: number;
+  /**
+   * Measured Securities
+   *
+   * 그중 값이 있는 종목 수.
+   */
+  measured_securities: number;
+  /**
+   * Mktcap Share
+   *
+   * 측정 종목의 시가총액 비중(0~1).
+   */
+  mktcap_share: number;
+  /**
+   * Session
+   */
+  session: string;
+};
+
+/**
+ * FlowDayBody
+ */
+export type FlowDayBody = {
+  /**
+   * Amounts
+   */
+  amounts: Array<InvestorAmountBody>;
+  /**
+   * Session
+   */
+  session: string;
+};
+
+/**
+ * FlowMarket
+ */
+export type FlowMarket = "KOSPI" | "KOSDAQ";
+
+/**
+ * FlowPeriod
+ */
+export type FlowPeriod = "day" | "five_sessions" | "twenty_sessions";
+
+/**
+ * FlowTotalBody
+ */
+export type FlowTotalBody = {
+  /**
+   * Amounts
+   */
+  amounts: Array<InvestorAmountBody>;
+  /**
+   * End
+   */
+  end: string;
+  period: FlowPeriod;
+  /**
+   * Sessions
+   */
+  sessions: number;
+  /**
+   * Start
+   */
+  start: string;
+  /**
+   * Summary
+   *
+   * 누가 더 사고 팔았는지 한 문장(backend 가 완성).
+   */
+  summary: string;
+};
+
+/**
  * FrozenWindowChoice
  */
 export type FrozenWindowChoice = {
@@ -4017,6 +4149,78 @@ export type HoldingsOverview = {
 export type ImpactModel = "fixed_bps" | "sqrt";
 
 /**
+ * IndexCardBody
+ */
+export type IndexCardBody = {
+  /**
+   * Index Id
+   */
+  index_id: string;
+  /**
+   * Index Name
+   */
+  index_name: string;
+  issue: CardIssueBody | null;
+  summary: IndexSummaryBody | null;
+};
+
+/**
+ * IndexPointBody
+ */
+export type IndexPointBody = {
+  /**
+   * Close
+   */
+  close: number;
+  /**
+   * Session
+   */
+  session: string;
+};
+
+/**
+ * IndexSummaryBody
+ */
+export type IndexSummaryBody = {
+  /**
+   * Change
+   */
+  change: number | null;
+  /**
+   * Change Pct
+   */
+  change_pct: number | null;
+  /**
+   * Close
+   */
+  close: number;
+  /**
+   * High Close
+   *
+   * 선(history) 안의 종가 최고. 당일 고가가 아니다.
+   */
+  high_close: number;
+  /**
+   * History
+   */
+  history: Array<IndexPointBody>;
+  /**
+   * Low Close
+   *
+   * 선(history) 안의 종가 최저. 당일 저가가 아니다.
+   */
+  low_close: number;
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Value Krw
+   */
+  value_krw: number | null;
+};
+
+/**
  * InlineDraft
  *
  * Use an unsaved typed spec while recording its authoring-source hash when known.
@@ -4067,6 +4271,37 @@ export type IntegerParameter = {
 };
 
 /**
+ * Investor
+ */
+export type Investor =
+  | "individual"
+  | "foreign"
+  | "institution"
+  | "other_corporation"
+  | "resident_foreign"
+  | "financial_investment"
+  | "pension"
+  | "investment_trust"
+  | "private_equity"
+  | "insurance"
+  | "bank"
+  | "other_financial"
+  | "government";
+
+/**
+ * InvestorAmountBody
+ */
+export type InvestorAmountBody = {
+  /**
+   * Amount Krw
+   *
+   * 순매수(산 금액 − 판 금액), 원. 반올림하지 않은 합.
+   */
+  amount_krw: number;
+  investor: Investor;
+};
+
+/**
  * KiwoomMockConnectionBody
  */
 export type KiwoomMockConnectionBody = {
@@ -4099,6 +4334,63 @@ export type KiwoomMockConnectionCheckBody = {
    */
   message: string;
   outcome: ConnectionOutcome;
+};
+
+/**
+ * LedgerRefreshBody
+ */
+export type LedgerRefreshBody = {
+  active_work: ActiveWorkBody | null;
+  /**
+   * Can Start
+   */
+  can_start: boolean;
+  code: RefreshCode;
+  failure: RefreshFailure | null;
+  /**
+   * Finished At
+   */
+  finished_at: string | null;
+  /**
+   * Message
+   *
+   * 지금 상태를 말하는 한 문장(backend 가 완성).
+   */
+  message: string;
+  /**
+   * Needs Check
+   *
+   * 서버 판 확인이 오래돼 다시 확인할 때다.
+   */
+  needs_check: boolean;
+  progress: SyncProgressBody | null;
+  reason: UnavailableReason | null;
+  remote: RemoteCheckBody;
+  /**
+   * Started At
+   */
+  started_at: string | null;
+};
+
+/**
+ * LedgerRefreshErrorDetail
+ */
+export type LedgerRefreshErrorDetail = {
+  /**
+   * Code
+   */
+  code: "ledger_refresh.rejected" | "data.refreshing";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * LedgerRefreshErrorResponse
+ */
+export type LedgerRefreshErrorResponse = {
+  detail: LedgerRefreshErrorDetail;
 };
 
 /**
@@ -4334,6 +4626,53 @@ export type LibraryVisibilityBody = {
 export type Market = "KRX";
 
 /**
+ * MarketErrorDetail
+ */
+export type MarketErrorDetail = {
+  /**
+   * Code
+   */
+  code: "market.sector.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * MarketErrorResponse
+ */
+export type MarketErrorResponse = {
+  detail: MarketErrorDetail;
+};
+
+/**
+ * MarketOverviewBody
+ */
+export type MarketOverviewBody = {
+  /**
+   * Flows
+   */
+  flows: Array<FlowCardBody>;
+  /**
+   * Indices
+   */
+  indices: Array<IndexCardBody>;
+  /**
+   * Message
+   */
+  message: string | null;
+  sectors: SectorCardBody | null;
+  /**
+   * Session
+   *
+   * 카드 날짜 중 가장 이른 장.
+   */
+  session: string | null;
+  status: OverviewStatus;
+};
+
+/**
  * MarketReferencePoint
  */
 export type MarketReferencePoint = {
@@ -4400,6 +4739,31 @@ export type MarketReferenceSeries = {
  * MarketReferenceStatus
  */
 export type MarketReferenceStatus = "available" | "not_available";
+
+/**
+ * MarketSectorBody
+ */
+export type MarketSectorBody = {
+  group: SectorGroupBody | null;
+  /**
+   * Message
+   */
+  message: string | null;
+  parent: SectorGroupBody | null;
+  /**
+   * Securities
+   */
+  securities: Array<SecurityMoveBody>;
+  /**
+   * Session
+   */
+  session: string | null;
+  /**
+   * Snapshot Date
+   */
+  snapshot_date: string | null;
+  status: OverviewStatus;
+};
 
 /**
  * MetricCategory
@@ -4652,6 +5016,11 @@ export type OutputTypeRule =
   | "numeric_series"
   | "numeric_if_any_series"
   | "boolean_series";
+
+/**
+ * OverviewStatus
+ */
+export type OverviewStatus = "available" | "practice_data";
 
 /**
  * Page
@@ -5673,6 +6042,69 @@ export type RebalanceFrequency =
   "every_n_sessions" | "weekly" | "monthly" | "quarterly";
 
 /**
+ * RefreshCode
+ */
+export type RefreshCode =
+  | "unavailable"
+  | "locked"
+  | "busy_work"
+  | "idle"
+  | "running"
+  | "applying"
+  | "succeeded"
+  | "failed"
+  | "partial";
+
+/**
+ * RefreshFailure
+ *
+ * `failed`(아무것도 반영하지 않음)·`partial`(일부만 바뀜)의 갈래.
+ */
+export type RefreshFailure =
+  | "connect"
+  | "transfer"
+  | "disk"
+  | "locked"
+  | "unexpected"
+  | "mismatch"
+  | "unverified"
+  | "apply"
+  | "tables_failed"
+  | "catalog";
+
+/**
+ * RemoteCheckBody
+ */
+export type RemoteCheckBody = {
+  /**
+   * Checked At
+   */
+  checked_at: string | null;
+  /**
+   * Download Bytes
+   */
+  download_bytes: number;
+  /**
+   * In Build Window
+   *
+   * 서버가 지금 데이터를 만드는 시간인가.
+   */
+  in_build_window: boolean;
+  /**
+   * New Tables
+   *
+   * 서버에 새 판본이 있는 데이터 수.
+   */
+  new_tables: number;
+  state: RemoteState;
+};
+
+/**
+ * RemoteState
+ */
+export type RemoteState = "behind" | "up_to_date" | "unknown";
+
+/**
  * RequestValidationIssue
  */
 export type RequestValidationIssue = {
@@ -6624,6 +7056,95 @@ export type SearchSpec = {
 };
 
 /**
+ * SectorCardBody
+ */
+export type SectorCardBody = {
+  issue: CardIssueBody | null;
+  sector_map: SectorMapBody | null;
+};
+
+/**
+ * SectorGroupBody
+ */
+export type SectorGroupBody = {
+  /**
+   * Code
+   */
+  code: string;
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Return Pct
+   */
+  return_pct: number | null;
+  /**
+   * Return Weight Krw
+   *
+   * 등락 계산에 든(거래 있는) 종목의 같은 가중 합.
+   */
+  return_weight_krw: number;
+  /**
+   * Securities
+   */
+  securities: number;
+  /**
+   * Size Weight Krw
+   *
+   * 유동주식수 × 전날 종가의 합. 칸 크기와 등락 가중이 같은 값이다.
+   */
+  size_weight_krw: number;
+  /**
+   * Untraded
+   *
+   * 그날 거래가 없어 등락에서 뺀 종목 수.
+   */
+  untraded: number;
+};
+
+/**
+ * SectorMapBody
+ */
+export type SectorMapBody = {
+  /**
+   * Parents
+   */
+  parents: Array<SectorParentBody>;
+  /**
+   * Securities
+   */
+  securities: number;
+  /**
+   * Session
+   *
+   * 등락을 잰 장.
+   */
+  session: string;
+  /**
+   * Snapshot Date
+   *
+   * 업종 분류·유동주식수 스냅샷 날짜(주 1회).
+   */
+  snapshot_date: string;
+  /**
+   * Untraded
+   */
+  untraded: number;
+};
+
+/**
+ * SectorParentBody
+ */
+export type SectorParentBody = {
+  /**
+   * Children
+   */
+  children: Array<SectorGroupBody>;
+  group: SectorGroupBody;
+};
+
+/**
  * SecurityFillRow
  */
 export type SecurityFillRow = {
@@ -6673,6 +7194,28 @@ export type SecurityLabel = {
    * Ticker
    */
   ticker: string | null;
+};
+
+/**
+ * SecurityMoveBody
+ */
+export type SecurityMoveBody = {
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Return Pct
+   */
+  return_pct: number | null;
+  /**
+   * Size Weight Krw
+   */
+  size_weight_krw: number;
+  /**
+   * Ticker
+   */
+  ticker: string;
 };
 
 /**
@@ -8012,6 +8555,40 @@ export type StrategyValidation = {
 };
 
 /**
+ * SyncProgressBody
+ */
+export type SyncProgressBody = {
+  /**
+   * Bytes Done
+   */
+  bytes_done: number;
+  /**
+   * Bytes Total
+   */
+  bytes_total: number | null;
+  stage: SyncStage;
+  /**
+   * Stage Started At
+   */
+  stage_started_at: string | null;
+  /**
+   * Tables Done
+   */
+  tables_done: number;
+  /**
+   * Tables Total
+   *
+   * 받을 데이터 수. 받기 단계만 안다.
+   */
+  tables_total: number | null;
+};
+
+/**
+ * SyncStage
+ */
+export type SyncStage = "download" | "catalog" | "verify" | "done";
+
+/**
  * SynthesizedNode
  *
  * 문서에 줄이 없는, compile 이 붙인 노드 표식(P3-01, Phase 2 감사 #13).
@@ -8816,6 +9393,12 @@ export type UnaryNode = {
  * UnaryOperator
  */
 export type UnaryOperator = "negate" | "lag";
+
+/**
+ * UnavailableReason
+ */
+export type UnavailableReason =
+  "practice_data" | "not_configured" | "root_mismatch" | "sync_tool_missing";
 
 /**
  * UnitRule
@@ -11933,6 +12516,120 @@ export type GetHealthResponses = {
 };
 
 export type GetHealthResponse = GetHealthResponses[keyof GetHealthResponses];
+
+export type GetLedgerRefreshData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/ledger-refresh";
+};
+
+export type GetLedgerRefreshResponses = {
+  /**
+   * Successful Response
+   */
+  200: LedgerRefreshBody;
+};
+
+export type GetLedgerRefreshResponse =
+  GetLedgerRefreshResponses[keyof GetLedgerRefreshResponses];
+
+export type StartLedgerRefreshData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/ledger-refresh";
+};
+
+export type StartLedgerRefreshErrors = {
+  /**
+   * Conflict
+   */
+  409: LedgerRefreshErrorResponse;
+};
+
+export type StartLedgerRefreshError =
+  StartLedgerRefreshErrors[keyof StartLedgerRefreshErrors];
+
+export type StartLedgerRefreshResponses = {
+  /**
+   * Successful Response
+   */
+  202: LedgerRefreshBody;
+};
+
+export type StartLedgerRefreshResponse =
+  StartLedgerRefreshResponses[keyof StartLedgerRefreshResponses];
+
+export type CheckLedgerRefreshData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/ledger-refresh/check";
+};
+
+export type CheckLedgerRefreshResponses = {
+  /**
+   * Successful Response
+   */
+  200: LedgerRefreshBody;
+};
+
+export type CheckLedgerRefreshResponse =
+  CheckLedgerRefreshResponses[keyof CheckLedgerRefreshResponses];
+
+export type GetMarketOverviewData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/market/overview";
+};
+
+export type GetMarketOverviewResponses = {
+  /**
+   * Successful Response
+   */
+  200: MarketOverviewBody;
+};
+
+export type GetMarketOverviewResponse =
+  GetMarketOverviewResponses[keyof GetMarketOverviewResponses];
+
+export type GetMarketSectorData = {
+  body?: never;
+  path: {
+    /**
+     * Wics L2 Cd
+     */
+    wics_l2_cd: string;
+  };
+  query?: never;
+  url: "/api/v1/market/sectors/{wics_l2_cd}";
+};
+
+export type GetMarketSectorErrors = {
+  /**
+   * Not Found
+   */
+  404: MarketErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetMarketSectorError =
+  GetMarketSectorErrors[keyof GetMarketSectorErrors];
+
+export type GetMarketSectorResponses = {
+  /**
+   * Successful Response
+   */
+  200: MarketSectorBody;
+};
+
+export type GetMarketSectorResponse =
+  GetMarketSectorResponses[keyof GetMarketSectorResponses];
 
 export type PreviewPortfolioData = {
   body: PortfolioPreviewRequest;

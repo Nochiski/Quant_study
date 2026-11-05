@@ -286,8 +286,8 @@
 - 비고(제품 결정 2026-10-19): 전략은 라이브러리를 참조하지 않고 **복사**한다 — 전략 언어·`spec_hash`·시도 키가
   라이브러리를 모르고 `saved_factor` 노드는 되살리지 않는다. 저장 위치는 전략 저장소 파일(`strategy_sqlite` 판본
   3)이고 Factor Registry와 섞지 않는다. 버전 신원은 compile이 정규화한 그래프와 그 그래프가 읽는 파라미터 정의의
-  해시이며, 어느 버전과 같은지는 backend `POST /api/v1/factor-library/matches`가 판정한다(SoT 대장 "사용자 팩터
-  라이브러리" 행). 저장·새 버전·판정 분기는 backend `tests/integration/test_factor_library_http_api.py`와 frontend
+  해시이며, 어느 버전과 같은지는 backend `POST /api/v1/factor-library/matches`가 판정한다(신원은
+  `domain/factor_library/_models.py`의 `version_identity`, 판정은 `match_factor`). 저장·새 버전·판정 분기는 backend `tests/integration/test_factor_library_http_api.py`와 frontend
   `document-routes.test.tsx`도 확인한다.
 
 ### US-CS-09 워크포워드 실험으로 표본 밖 성과를 본다

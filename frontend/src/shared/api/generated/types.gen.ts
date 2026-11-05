@@ -4381,6 +4381,12 @@ export type LedgerRefreshBody = {
    * 서버 판 확인이 오래돼 다시 확인할 때다.
    */
   needs_check: boolean;
+  /**
+   * Outcome Message
+   *
+   * 그 결과의 문장(한글). 지금 상태 문장 message 와 다를 수 있다.
+   */
+  outcome_message: string | null;
   progress: SyncProgressBody | null;
   reason: UnavailableReason | null;
   /**

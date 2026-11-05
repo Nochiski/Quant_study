@@ -7186,6 +7186,18 @@
             "title": "Needs Check",
             "type": "boolean"
           },
+          "outcome_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "그 결과의 문장(한글). 지금 상태 문장 message 와 다를 수 있다.",
+            "title": "Outcome Message"
+          },
           "progress": {
             "anyOf": [
               {
@@ -7233,6 +7245,7 @@
           "can_start",
           "refreshing",
           "last_outcome",
+          "outcome_message",
           "reason",
           "failure",
           "needs_check",

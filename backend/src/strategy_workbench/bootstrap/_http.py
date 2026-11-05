@@ -250,14 +250,11 @@ def build_http_app(
     )
     if ledger_refresh is None:
         ledger_refresh = LedgerRefreshService(
-            None,
+            UnavailableReason.PRACTICE_DATA
+            if equity_adapter != "duckdb"
+            else UnavailableReason.NOT_CONFIGURED,
             ContainerActiveWork(lambda: container),
             _NotReloadable(),
-            unavailable=(
-                UnavailableReason.PRACTICE_DATA
-                if equity_adapter != "duckdb"
-                else UnavailableReason.NOT_CONFIGURED
-            ),
         )
     app = create_app(
         strategy_design=container.strategy_design,
@@ -294,13 +291,12 @@ def build_runtime_http_app() -> ReloadableApp:
     """
     adapter, root = runtime_equity_selection()
     holder = ReloadableApp()
-    if adapter != "duckdb" or root is None:
-        sync, unavailable = None, UnavailableReason.PRACTICE_DATA
-    else:
-        found = discover_ledger_sync(root, _secrets.repository_root())
-        sync, unavailable = (None, found) if isinstance(found, UnavailableReason) else (found, None)
     refresh = LedgerRefreshService(
-        sync, ContainerActiveWork(lambda: holder.container), holder, unavailable=unavailable
+        UnavailableReason.PRACTICE_DATA
+        if adapter != "duckdb" or root is None
+        else discover_ledger_sync(root, _secrets.repository_root()),
+        ContainerActiveWork(lambda: holder.container),
+        holder,
     )
     build = partial(
         build_http_app,
@@ -319,4 +315,4 @@ def build_runtime_http_app() -> ReloadableApp:
         allowed_origins=runtime_allowed_origins(),
         ledger_refresh=refresh,
     )
-    return holder.load(build)
+    return holder.load(build, on_shutdown=refresh.stop)

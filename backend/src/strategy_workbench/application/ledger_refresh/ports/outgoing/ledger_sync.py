@@ -23,7 +23,17 @@ __all__ = [
     "SyncPlan",
     "SyncProgress",
     "SyncStage",
+    "UnavailableReason",
 ]
+
+
+class UnavailableReason(StrEnum):
+    """앱에서 받을 수 없는 이유. 동기화 도구를 찾는 쪽(어댑터·조립)이 만든다."""
+
+    PRACTICE_DATA = "practice_data"
+    NOT_CONFIGURED = "not_configured"
+    ROOT_MISMATCH = "root_mismatch"
+    SYNC_TOOL_MISSING = "sync_tool_missing"
 
 
 class SyncStage(StrEnum):

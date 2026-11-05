@@ -35,6 +35,7 @@ from strategy_workbench.application.ledger_refresh.ports.outgoing.ledger_sync im
     SyncJob,
     SyncOutcome,
     SyncProgress,
+    UnavailableReason,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,11 +57,12 @@ class RefreshCode(StrEnum):
     PARTIAL = "partial"
 
 
-class UnavailableReason(StrEnum):
-    PRACTICE_DATA = "practice_data"
-    NOT_CONFIGURED = "not_configured"
-    ROOT_MISMATCH = "root_mismatch"
-    SYNC_TOOL_MISSING = "sync_tool_missing"
+class RefreshOutcome(StrEnum):
+    """끝난 받기의 결과. 지금 상태(`code`)가 바뀌어도(계산 시작·잠금) 그대로 남는다."""
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    PARTIAL = "partial"
 
 
 class RemoteState(StrEnum):
@@ -119,7 +121,8 @@ FAILURE_MESSAGES: dict[RefreshFailure, str] = {
     ),
     RefreshFailure.MISMATCH: (
         "받은 파일이 서버와 달라 앱에 반영하지 않았어요. 다시 받아 주세요. 다시 받기 전까지 "
-        "재무·수정주가처럼 정리된 데이터를 읽는 계산은 멈춰요."
+        "재무·수정주가처럼 정리된 데이터를 읽는 계산은 멈춰요. 다시 받아도 그대로면 사용 설명서 "
+        "'데이터 받기'의 확인 절차를 따라 주세요."
     ),
     RefreshFailure.UNVERIFIED: (
         "받기는 끝났지만 확인하기를 마치지 못해 앱에 반영하지 않았어요. 다시 받아 주세요. "
@@ -173,6 +176,8 @@ class RefreshStatus:
     can_start: bool
     # 받거나 반영하는 중인가 — 이 동안 계산 시작은 409 `data.refreshing` 으로 돌아간다.
     refreshing: bool
+    # 마지막으로 끝난 받기의 결과(`finished_at` 과 짝). 받는 중이거나 아직 받은 적이 없으면 None.
+    last_outcome: RefreshOutcome | None
     reason: UnavailableReason | None
     failure: RefreshFailure | None
     remote: RemoteCheck
@@ -226,6 +231,7 @@ def classify(outcome: SyncOutcome) -> RefreshFailure | None:
 @dataclass
 class _State:
     code: RefreshCode = RefreshCode.IDLE
+    outcome: RefreshOutcome | None = None
     failure: RefreshFailure | None = None
     drifted: bool = False
     progress: SyncProgress | None = None
@@ -243,29 +249,25 @@ class LedgerRefreshService:
 
     def __init__(
         self,
-        sync: LedgerSyncPort | None,
+        sync: LedgerSyncPort | UnavailableReason,
         active_work: ActiveWorkPort,
         apply: ApplyDataPort,
         *,
-        unavailable: UnavailableReason | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         background: Callable[[Callable[[], None]], None] = _start_daemon,
     ) -> None:
-        if (sync is None) == (unavailable is None):
-            raise ValueError(
-                "ledger refresh needs exactly one of a sync port or an unavailable reason — "
-                f"sync={'set' if sync else 'none'} unavailable={unavailable}"
-            )
-        self._sync = sync
+        """`sync` 는 동기화 도구, 또는 앱에서 받을 수 없는 이유다."""
+        self._sync = None if isinstance(sync, UnavailableReason) else sync
+        self._unavailable = sync if isinstance(sync, UnavailableReason) else None
         self._active_work = active_work
         self._apply = apply
-        self._unavailable = unavailable
         self._now = now
         self._background = background
         self._lock = threading.Lock()
         self._state = _State()
         self._admitting = 0  # 처리 중인 계산 시작 요청 수
         self._job: SyncJob | None = None
+        self._stopping = False  # 서버가 끝난다 — 띄운 도구는 바로 끊는다
 
     # ── 조회 ──────────────────────────────────────────────────────────────────
 
@@ -273,11 +275,6 @@ class LedgerRefreshService:
         with self._lock:
             state = replace(self._state)
         return self._status(state)
-
-    def blocks_new_work(self) -> bool:
-        """받거나 반영하는 동안에는 새 계산을 시작하지 않는다(교체할 때 옛 앱이 쥔 계산이 없게)."""
-        with self._lock:
-            return self._state.code in _BUSY
 
     @contextmanager
     def admit_work(self) -> Iterator[None]:
@@ -300,7 +297,9 @@ class LedgerRefreshService:
 
     def check(self) -> RefreshStatus:
         """서버 판을 다시 확인한다. 받는 중이면 확인하지 않고 지금 상태를 돌려준다."""
-        if self._sync is None or self.blocks_new_work():
+        with self._lock:
+            busy = self._state.code in _BUSY
+        if self._sync is None or busy:
             return self.status()
         plan = self._sync.plan()
         if plan.failure is not None:
@@ -325,6 +324,7 @@ class LedgerRefreshService:
                 self._state = replace(
                     previous,
                     code=RefreshCode.RUNNING,
+                    outcome=None,
                     failure=None,
                     drifted=False,
                     progress=None,
@@ -339,21 +339,29 @@ class LedgerRefreshService:
                 )
             raise RefreshRejectedError(rejected)
         # RUNNING 앞에 접수를 끝낸 계산을 센다. 이제 새 계산은 `admit_work` 에서 막힌다.
-        if self._active_work.active().any:
-            with self._lock:
-                self._state = previous
-            raise RefreshRejectedError(self.status())
+        # 세기나 스레드 띄우기가 실패해도 RUNNING 에 갇히지 않게 되돌린다.
         try:
-            self._background(self._run)
+            busy = self._active_work.active().any
+            if not busy:
+                self._background(self._run)
         except BaseException:
             with self._lock:
                 self._state = previous
             raise
+        if busy:
+            with self._lock:
+                self._state = previous
+            raise RefreshRejectedError(self.status())
         return self.status()
 
     def stop(self) -> None:
-        """서버가 끝난다 — 받는 중이면 동기화 도구를 끊는다(앱을 끄면 받기도 멈춘다)."""
+        """서버가 끝난다 — 받는 중이면 동기화 도구를 끊는다(앱을 끄면 받기도 멈춘다).
+
+        앱 프로세스 하나에 한 번, 앱의 수명 주인(`ReloadableApp`)이 부른다. 도구를 띄우는 중이면
+        띄운 직후 끊는다.
+        """
         with self._lock:
+            self._stopping = True
             job = self._job
         if job is not None:
             job.cancel()
@@ -385,6 +393,7 @@ class LedgerRefreshService:
         now = self._now()
         with self._lock:
             self._state.code = RefreshCode.SUCCEEDED
+            self._state.outcome = RefreshOutcome.SUCCEEDED
             self._state.finished_at = now
             # 받는 동안 서버 판이 바뀌었으면 받을 것이 남았다 — 다음 조회가 다시 확인한다.
             self._state.remote = (
@@ -397,6 +406,9 @@ class LedgerRefreshService:
         job = sync.start()
         with self._lock:
             self._job = job
+            stopping = self._stopping
+        if stopping:
+            job.cancel()
         try:
             while True:
                 outcome = job.wait(_POLL_S)
@@ -413,8 +425,10 @@ class LedgerRefreshService:
     def _finish(self, failure: RefreshFailure) -> None:
         logger.warning("ledger refresh ended without applying — failure=%s", failure.value)
         now = self._now()
+        partial = failure in _PARTIAL
         with self._lock:
-            self._state.code = RefreshCode.PARTIAL if failure in _PARTIAL else RefreshCode.FAILED
+            self._state.code = RefreshCode.PARTIAL if partial else RefreshCode.FAILED
+            self._state.outcome = RefreshOutcome.PARTIAL if partial else RefreshOutcome.FAILED
             self._state.failure = failure
             self._state.finished_at = now
 
@@ -429,6 +443,7 @@ class LedgerRefreshService:
             message="",
             can_start=False,
             refreshing=state.code in _BUSY,
+            last_outcome=state.outcome,
             reason=self._unavailable,
             failure=state.failure,
             remote=state.remote,
@@ -446,13 +461,11 @@ class LedgerRefreshService:
         if state.code is RefreshCode.APPLYING:
             return replace(base, message=APPLYING_MESSAGE)
         lock = self._sync.lock()
-        if lock is not None:
-            message = FAILURE_MESSAGES[RefreshFailure.LOCKED]
-            if lock.stale:
-                message += (
-                    " 그 작업이 3시간 넘게 끝나지 않아 멈춘 것 같아요(사용 설명서 '데이터 받기')."
-                )
-            return replace(base, code=RefreshCode.LOCKED, message=message)
+        # 낡은(멈춘 실행이 남긴) 잠금은 도구가 받기를 시작할 때 스스로 치운다 — 막지 않는다.
+        if lock is not None and not lock.stale:
+            return replace(
+                base, code=RefreshCode.LOCKED, message=FAILURE_MESSAGES[RefreshFailure.LOCKED]
+            )
         work = self._active_work.active()
         settled = replace(base, active_work=work, needs_check=stale)
         if work.any:
@@ -480,7 +493,7 @@ def _busy_message(work: ActiveWork) -> str:
         if count
     ]
     # 대기·일시정지한 실험도 끝나지 않은 실험이다 — 그냥 두면 계속 막힌다.
-    paused = " 일시정지한 실험도 끝내거나 취소해야 해요." if work.experiments else ""
+    paused = " 일시정지한 실험이 있으면 그것도 끝내거나 취소해야 해요." if work.experiments else ""
     return (
         f"진행 중인 {'·'.join(parts)}이 끝나야 받을 수 있어요. 받으면 앱을 새 데이터로 다시 "
         f"세워야 해서요.{paused}"

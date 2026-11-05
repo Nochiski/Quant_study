@@ -134,15 +134,26 @@ def outcome_from_last_run(payload: Mapping[str, object] | None, return_code: int
     if failure is None and exit_code not in (EXIT_OK, EXIT_ERROR, EXIT_DRIFTED, EXIT_MISMATCH):
         failure = SyncFailureKind.UNEXPECTED
     catalog_rc = _int(payload.get("catalog_rc"))
-    verify = payload.get("verify")
+    verify = payload.get("verify") if isinstance(payload.get("verify"), dict) else {}
+    findings = verify.get("findings") if isinstance(verify, dict) else None
+    ahead = verify.get("remote_ahead") if isinstance(verify, dict) else None
+    ahead_tables = {str(table) for table in ahead} if isinstance(ahead, list) else set()
+    found_tables = (
+        {str(row.get("table")) for row in findings if isinstance(row, dict)}
+        if isinstance(findings, list)
+        else set()
+    )
+    # 확인하기의 차이가 모두 서버가 앞선 표(받는 도중·정리하기 동안 새 판을 올림)라면 로컬 판은
+    # 맞다 — 받는 도중 판이 바뀐 것(drifted)과 같다.
+    only_ahead = bool(ahead_tables) and found_tables <= ahead_tables
+    differs = exit_code == EXIT_MISMATCH or verify.get("ok") is False
     return SyncOutcome(
         failure=failure,
         tables_failed=sum(row.get("outcome") in ("failed", "error") for row in rows),
         catalog_rebuilt=catalog_rc == EXIT_OK,
         catalog_failed=catalog_rc not in (None, EXIT_OK),
-        verify_mismatch=exit_code == EXIT_MISMATCH
-        or (isinstance(verify, dict) and verify.get("ok") is False),
-        drifted=isinstance(pull, dict) and bool(pull.get("drifted")),
+        verify_mismatch=differs and not only_ahead,
+        drifted=(isinstance(pull, dict) and bool(pull.get("drifted"))) or bool(ahead_tables),
     )
 
 
@@ -234,7 +245,8 @@ class _ProcessJob:
             return
         _kill_tree(self._process)
         lock = self._sync_dir / LOCK_NAME
-        if self._ours(_read_json(lock)):
+        # 진행 파일은 도구가 잠금을 잡은 뒤에 쓴다 — 없으면 그 잠금은 늦게 시작한 남의 것일 수 있다.
+        if self._progress_path.exists() and self._ours(_read_json(lock)):
             try:
                 lock.unlink(missing_ok=True)
             except OSError:

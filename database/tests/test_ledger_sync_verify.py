@@ -119,6 +119,8 @@ def test_manifest_level_sees_remote_advance_and_stale_catalog(synced) -> None:
     details = {f.table: f.detail for f in report.findings}
     assert "current_build differs" in details["security"]
     assert "catalog snapshot_id" in details["_catalog_meta"]
+    # 서버가 앞선 표만 따로 센다 — 카탈로그 차이는 로컬의 일이다
+    assert report.remote_ahead == {"security"}
     fresh = snapshot_id({t: ts.build_id for t, ts in state.tables.items()})
     (root / "_catalog_meta.json").write_text(json.dumps({"snapshot_id": fresh}), encoding="utf-8")
     report = VerifyReport()

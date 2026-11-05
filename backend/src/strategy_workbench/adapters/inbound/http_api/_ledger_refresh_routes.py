@@ -8,8 +8,7 @@
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal
@@ -22,6 +21,7 @@ from strategy_workbench.application.ledger_refresh.facade.refresh import (
     LedgerRefreshService,
     RefreshCode,
     RefreshFailure,
+    RefreshOutcome,
     RefreshRejectedError,
     RefreshStatus,
     RemoteState,
@@ -33,7 +33,8 @@ LEDGER_REFRESH_PATH = "/api/v1/ledger-refresh"
 
 
 def _admit_work(request: Request) -> Iterator[None]:
-    """계산을 시작하는 요청을 처리하는 동안 자리를 쥔다. 본문을 읽기 전에 판정한다.
+    """계산을 시작하는 요청을 처리하는 동안 자리를 쥔다. 본문을 검증하기 전에 판정한다(깨진 JSON
+    은 받는 중에도 422 다).
 
     미리보기·추적·조회에는 달지 않는다 — 부팅 때 고정한 판본만 읽는다.
     """
@@ -88,6 +89,12 @@ class LedgerRefreshBody:
     refreshing: Annotated[
         bool, Field(description="받거나 반영하는 중인가. 이 동안 계산 시작은 409 data.refreshing.")
     ]
+    last_outcome: Annotated[
+        RefreshOutcome | None,
+        Field(
+            description="마지막으로 끝난 받기의 결과(finished_at 과 짝). 지금 code 와 다를 수 있다."
+        ),
+    ]
     reason: UnavailableReason | None
     failure: RefreshFailure | None
     needs_check: Annotated[bool, Field(description="서버 판 확인이 오래돼 다시 확인할 때다.")]
@@ -116,6 +123,7 @@ def _body(status: RefreshStatus) -> LedgerRefreshBody:
         message=status.message,
         can_start=status.can_start,
         refreshing=status.refreshing,
+        last_outcome=status.last_outcome,
         reason=status.reason,
         failure=status.failure,
         needs_check=status.needs_check,
@@ -144,11 +152,7 @@ def _body(status: RefreshStatus) -> LedgerRefreshBody:
     )
 
 
-def register_ledger_refresh_routes(
-    app: FastAPI, service: LedgerRefreshService
-) -> Callable[[], Awaitable[None]]:
-    """라우트를 달고 서버 종료 때 부를 정리(받는 중인 도구 끊기)를 돌려준다."""
-
+def register_ledger_refresh_routes(app: FastAPI, service: LedgerRefreshService) -> None:
     @app.get(LEDGER_REFRESH_PATH, operation_id="getLedgerRefresh")
     def get_status() -> LedgerRefreshBody:
         return _body(service.status())
@@ -172,8 +176,3 @@ def register_ledger_refresh_routes(
                 409,
                 detail={"code": "ledger_refresh.rejected", "message": error.status.message},
             ) from error
-
-    async def stop() -> None:
-        await asyncio.to_thread(service.stop)
-
-    return stop

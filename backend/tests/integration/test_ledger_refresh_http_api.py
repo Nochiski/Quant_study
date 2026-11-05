@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -134,9 +135,12 @@ def test_shutting_down_after_a_reload_closes_the_app_in_use() -> None:
 
         return FastAPI(lifespan=lifespan)
 
-    holder = ReloadableApp().load(build)
+    holder = ReloadableApp().load(build, on_shutdown=lambda: events.append("stop"))
     with TestClient(holder):
         holder.apply()
         assert events == ["open1", "open2", "close1"]
-    # 서버가 끝나면 바꿔 끼운 앱(run worker 정리 등)을 닫는다
-    assert events == ["open1", "open2", "close1", "close2"]
+    # 서버가 끝나면 받는 중인 도구를 끊고(반영을 넘어 사는 정리), 바꿔 끼운 앱(run worker 정리
+    # 등)을 닫는다
+    assert events == ["open1", "open2", "close1", "stop", "close2"]
+    with pytest.raises(RuntimeError):  # 끝난 서버는 다시 세우지 않는다
+        holder.apply()

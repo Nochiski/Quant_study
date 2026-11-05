@@ -51,6 +51,9 @@ class VerifyReport:
     findings: list[Finding] = field(default_factory=list)
     checked: dict[str, int] = field(default_factory=dict)
     skipped: dict[str, int] = field(default_factory=dict)  # 검사할 수 없어 건너뛴 항목(사유별)
+    # 서버가 로컬보다 앞선 표 — 새 판을 올렸거나 표를 은퇴시켰다. 그 표의 차이는 로컬 손상이
+    # 아니라 다음 받기에서 맞춰질 차이다(앱이 영문 문장을 해석하지 않고 가른다).
+    remote_ahead: set[str] = field(default_factory=set)
 
     @property
     def ok(self) -> bool:
@@ -125,6 +128,7 @@ def verify_manifest(remote: RemoteFS, remote_root: str, layer_root: Path, state:
                        f"table missing locally — remote={view.current_build}")
             continue
         if view.current_build != local.build_id:
+            report.remote_ahead.add(table)
             report.add(Level.MANIFEST, table,
                        f"current_build differs — remote={view.current_build} "
                        f"local={local.build_id}")
@@ -138,6 +142,7 @@ def verify_manifest(remote: RemoteFS, remote_root: str, layer_root: Path, state:
         if wanted is not None and table not in wanted:
             continue
         if table not in seen:
+            report.remote_ahead.add(table)
             report.add(Level.MANIFEST, table, "table synced locally but absent on remote")
     if wanted is None:
         _verify_disk_matches_state(layer_root, state, report)

@@ -4,10 +4,10 @@ from strategy_workbench.application.ledger_refresh._service import (
     LedgerRefreshService,
     RefreshCode,
     RefreshFailure,
+    RefreshOutcome,
     RefreshRejectedError,
     RefreshStatus,
     RemoteState,
-    UnavailableReason,
     classify,
 )
 from strategy_workbench.application.ledger_refresh.ports.outgoing.ledger_sync import (
@@ -22,6 +22,7 @@ from strategy_workbench.application.ledger_refresh.ports.outgoing.ledger_sync im
     SyncPlan,
     SyncProgress,
     SyncStage,
+    UnavailableReason,
 )
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "LedgerSyncPort",
     "RefreshCode",
     "RefreshFailure",
+    "RefreshOutcome",
     "RefreshRejectedError",
     "RefreshStatus",
     "RemoteState",

@@ -50,6 +50,13 @@ def test_constants_match_the_ledger_sync_module(name: str) -> None:
     assert getattr(_process, name) == getattr(import_ledger_module("ledger_sync.__main__"), name)
 
 
+def test_the_kept_builds_and_layer_match_the_tool() -> None:
+    pull = import_ledger_module("ledger_sync.pull")
+    main = import_ledger_module("ledger_sync.__main__")
+    assert _process.KEEP_BUILDS > pull.KEEP_DEFAULT  # 도구 기본값보다 한 판 더 남긴다
+    assert _process.LAYER in main.LAYERS
+
+
 def test_the_paramiko_pin_matches_the_wrappers() -> None:
     for wrapper in ("ledger_sync.ps1", "ledger_sync.sh"):
         text = (REPO / "database" / "scripts" / wrapper).read_text(encoding="utf-8")
@@ -116,6 +123,37 @@ def test_the_command_targets_the_app_root_without_resyncing_the_app_environment(
                 "pull": {"results": [{"outcome": "done"}], "drifted": ["price"]},
                 "catalog_rc": 0,
                 "verify": {"ok": False},
+            },
+            (None, 0, True, False, True, True),
+        ),
+        # 정리하기 동안 서버가 새 판을 올려 확인하기가 차이를 본다 — 로컬 판은 맞다(drifted 와 같다)
+        (
+            {
+                "exit_code": 4,
+                "pull": {"results": [{"outcome": "done"}], "drifted": []},
+                "catalog_rc": 0,
+                "verify": {
+                    "ok": False,
+                    "remote_ahead": ["price_daily"],
+                    "findings": [{"level": "manifest", "table": "price_daily", "detail": "x"}],
+                },
+            },
+            (None, 0, True, False, False, True),
+        ),
+        # 서버가 앞선 표 밖의 차이(로컬 손상)는 여전히 불일치다
+        (
+            {
+                "exit_code": 4,
+                "pull": {"results": []},
+                "catalog_rc": 0,
+                "verify": {
+                    "ok": False,
+                    "remote_ahead": ["price_daily"],
+                    "findings": [
+                        {"level": "manifest", "table": "price_daily", "detail": "x"},
+                        {"level": "manifest", "table": "_state", "detail": "y"},
+                    ],
+                },
             },
             (None, 0, True, False, True, True),
         ),
@@ -286,6 +324,8 @@ import json, sys, time
 from datetime import datetime, timezone
 now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 open(sys.argv[1], "w", encoding="utf-8").write(json.dumps({"pid": 1, "started_at_utc": now}))
+if len(sys.argv) > 2:  # 잠금을 잡은 뒤 진행 파일을 쓴다(도구 순서)
+    open(sys.argv[2], "w", encoding="utf-8").write(json.dumps({"stage": "download"}))
 time.sleep(120)
 """
 
@@ -297,15 +337,16 @@ def test_a_sync_past_its_deadline_is_killed_and_its_own_lock_removed(
     spawned: list[subprocess.Popen[bytes]] = []
 
     def spawn(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
+        progress = command[command.index("--progress-file") + 1]
         process = subprocess.Popen(  # 잠금을 잡고 멈춘 도구
-            [sys.executable, "-c", _HUNG_SYNC, str(lock)],
+            [sys.executable, "-c", _HUNG_SYNC, str(lock), progress],
             stdin=subprocess.DEVNULL,
             start_new_session=sys.platform != "win32",
         )
         spawned.append(process)
         return process
 
-    monkeypatch.setattr(_process, "SYNC_DEADLINE_S", 1.0)
+    monkeypatch.setattr(_process, "SYNC_DEADLINE_S", 1.5)
     job = _adapter(
         tmp_path, spawn=spawn, now=lambda: datetime.now(UTC) - timedelta(seconds=1)
     ).start()

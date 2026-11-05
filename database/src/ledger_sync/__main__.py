@@ -164,6 +164,7 @@ def _report_json(report: PullReport) -> dict[str, object]:
 
 def _verify_json(report: VerifyReport) -> dict[str, object]:
     return {"ok": report.ok, "checked": report.checked, "skipped": report.skipped,
+            "remote_ahead": sorted(report.remote_ahead),
             "findings": [asdict(f) | {"level": f.level.value} for f in report.findings]}
 
 

@@ -55,10 +55,18 @@ class ReloadableApp:
         self._stack: AsyncExitStack | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._closed = False
+        self._on_shutdown: Callable[[], None] | None = None
 
-    def load(self, build: Callable[[], FastAPI]) -> ReloadableApp:
-        """`build` 는 컨테이너를 `app.state.container` 에 실은 앱을 세운다(`build_http_app`)."""
+    def load(
+        self, build: Callable[[], FastAPI], *, on_shutdown: Callable[[], None] | None = None
+    ) -> ReloadableApp:
+        """`build` 는 컨테이너를 `app.state.container` 에 실은 앱을 세운다(`build_http_app`).
+
+        `on_shutdown` 은 서버가 끝날 때 한 번 부른다 — 반영을 넘어 사는 것(받는 중인 도구 끊기)의
+        정리다.
+        """
         self._build = build
+        self._on_shutdown = on_shutdown
         self._app = build()
         return self
 
@@ -92,6 +100,11 @@ class ReloadableApp:
         await send({"type": "lifespan.startup.complete"})
         await receive()  # lifespan.shutdown
         self._closed = True
+        if self._on_shutdown is not None:
+            try:
+                await asyncio.to_thread(self._on_shutdown)
+            except Exception:
+                logger.exception("reloadable app shutdown hook failed")
         try:
             # 반영으로 바꿔 끼웠으면 첫 앱의 스택은 이미 닫혔다 — 지금 앱의 스택을 닫는다.
             await self._stack.aclose()
@@ -109,6 +122,8 @@ class ReloadableApp:
         """
         if self._build is None:
             raise RuntimeError("reloadable app is not loaded — call load(build) first")
+        if self._closed:  # 서버가 끝나는 중이면 새 컨테이너를 세우지 않는다
+            raise RuntimeError("server is shutting down — not reloading")
         app = self._build()
         if self._loop is None or self._stack is None:
             self._app = app

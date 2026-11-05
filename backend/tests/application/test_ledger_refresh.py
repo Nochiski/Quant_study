@@ -17,6 +17,7 @@ from strategy_workbench.application.ledger_refresh.facade.refresh import (
     LedgerRefreshService,
     RefreshCode,
     RefreshFailure,
+    RefreshOutcome,
     RefreshRejectedError,
     RemoteState,
     SyncFailureKind,
@@ -47,7 +48,7 @@ class FakeJob:
 
     def wait(self, timeout_s: float) -> SyncOutcome | None:
         if self.service is not None:
-            self.seen_blocking.append(self.service.blocks_new_work())
+            self.seen_blocking.append(self.service.status().refreshing)
         return self.outcome
 
     def cancel(self) -> None:
@@ -117,9 +118,7 @@ def _service(
 
 
 def test_unavailable_never_starts_and_says_why() -> None:
-    service = LedgerRefreshService(
-        None, FakeWork(), FakeApply(), unavailable=UnavailableReason.NOT_CONFIGURED
-    )
+    service = LedgerRefreshService(UnavailableReason.NOT_CONFIGURED, FakeWork(), FakeApply())
     status = service.status()
     assert (status.code, status.reason, status.can_start) == (
         RefreshCode.UNAVAILABLE,
@@ -157,30 +156,33 @@ def test_active_work_blocks_the_start_and_names_what_is_running() -> None:
     status = service.status()
     assert (status.code, status.can_start) == (RefreshCode.BUSY_WORK, False)
     assert "백테스트 1건·실험 2개" in status.message
-    assert "일시정지한 실험도" in status.message  # 멈춘 실험도 새로고침을 막는다
+    assert "일시정지한 실험이 있으면" in status.message  # 멈춘 실험도 새로고침을 막는다
     with pytest.raises(RefreshRejectedError):
         service.start()
     assert sync.started == 0
 
 
-def test_another_sync_holding_the_lock_blocks_the_start() -> None:
-    service, sync, _ = _service(sync=FakeSync(held=SyncLock(started_at=NOW, stale=True)))
+def test_another_sync_holding_the_lock_blocks_the_start_unless_the_lock_is_stale() -> None:
+    service, sync, _ = _service(sync=FakeSync(held=SyncLock(started_at=NOW, stale=False)))
     status = service.status()
     assert (status.code, status.can_start) == (RefreshCode.LOCKED, False)
-    assert "멈춘 것 같아요" in status.message
     with pytest.raises(RefreshRejectedError):
         service.start()
+    # 멈춘 실행이 남긴 낡은 잠금은 도구가 받기를 시작할 때 치운다 — 막지 않는다
+    sync.held = SyncLock(started_at=NOW, stale=True)
+    assert service.status().can_start
 
 
 def test_a_clean_sync_blocks_new_work_then_applies_and_reports_up_to_date() -> None:
     service, sync, apply = _service()
+    assert service.status().last_outcome is None
     service.start()
     assert sync.seen_blocking == [True]  # 받는 동안 새 계산을 막는다
     status = service.status()
     assert (status.code, apply.applied, status.can_start) == (RefreshCode.SUCCEEDED, 1, True)
     assert status.remote.state is RemoteState.UP_TO_DATE
     assert status.progress is not None and status.progress.stage is SyncStage.CATALOG
-    assert not service.blocks_new_work()
+    assert (status.refreshing, status.last_outcome) == (False, RefreshOutcome.SUCCEEDED)
 
 
 def test_a_drifted_sync_applies_once_with_a_note_and_asks_the_server_again() -> None:
@@ -316,3 +318,64 @@ def test_stopping_the_server_cancels_the_running_sync() -> None:
     threads[0].join(10)
     assert job.cancelled.is_set()
     assert service.status().failure is RefreshFailure.UNEXPECTED  # 반영하지 않고 끝났다
+
+
+@pytest.mark.parametrize("kind", list(SyncFailureKind))
+def test_every_sync_failure_kind_has_a_refresh_failure(kind: SyncFailureKind) -> None:
+    # 포트에 갈래를 더하고 결과 어휘에 빠뜨리면 "예상 밖"으로 접혀 원인이 사라진다
+    assert classify(SyncOutcome(kind, 0, False, False, False, False)) == RefreshFailure(kind.value)
+
+
+def test_a_partial_result_stays_partial_after_new_work_starts() -> None:
+    work = FakeWork()
+    service, _, _ = _service(
+        sync=FakeSync(outcomes=[SyncOutcome(None, 2, False, False, False, False)]), work=work
+    )
+    service.start()
+    work.work = ActiveWork(backtests=1, experiments=0, evaluations=0)
+    status = service.status()
+    # 지금 상태는 "진행 중인 백테스트"이지만 끝난 받기의 결과는 그대로 "일부만 받음"이다
+    assert (status.code, status.last_outcome, status.failure) == (
+        RefreshCode.BUSY_WORK,
+        RefreshOutcome.PARTIAL,
+        RefreshFailure.TABLES_FAILED,
+    )
+
+
+@dataclass
+class FlakyWork:
+    """두 번째 세기(RUNNING 뒤)에서 실험 DB 읽기가 실패한다."""
+
+    reads: int = 0
+
+    def active(self) -> ActiveWork:
+        self.reads += 1
+        if self.reads == 2:
+            raise RuntimeError("database is locked")
+        return ActiveWork(0, 0, 0)
+
+
+def test_a_failed_work_count_after_running_does_not_leave_the_refresh_stuck() -> None:
+    service, sync, _ = _service(work=FlakyWork())  # pyright: ignore[reportArgumentType]  # reason: ActiveWorkPort 대역
+    with pytest.raises(RuntimeError):
+        service.start()
+    status = service.status()
+    assert (status.refreshing, sync.started) == (False, 0)
+    with service.admit_work():  # 계산 시작이 막혀 있지 않다
+        pass
+
+
+def test_a_stop_while_the_tool_is_starting_cancels_it_right_after() -> None:
+    job = HeldJob()
+    sync = FakeSync()
+    service = LedgerRefreshService(
+        sync, FakeWork(), FakeApply(), now=Clock(), background=lambda run: run()
+    )
+
+    def start_after_stop() -> HeldJob:
+        service.stop()  # 도구를 띄우는 사이에 서버가 끝나기 시작했다
+        return job
+
+    sync.start = start_after_stop  # pyright: ignore[reportAttributeAccessIssue]  # reason: 띄우는 순간을 붙잡는다
+    service.start()
+    assert job.cancelled.is_set()

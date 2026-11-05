@@ -1,0 +1,144 @@
+/* 홈 머리의 DB 새로고침과 끝남 알림. 패널은 버튼 아래에 뜨는 비모달 상자다. */
+.refresh-ledger {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2) var(--space-3);
+}
+
+.refresh-ledger__reason {
+  max-width: 22rem;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  text-align: end;
+}
+
+.refresh-ledger__panel {
+  position: absolute;
+  inset-block-start: calc(100% + var(--space-2));
+  inset-inline-end: 0;
+  z-index: var(--layer-popover);
+  display: grid;
+  gap: var(--space-3);
+  width: min(28rem, calc(100vw - var(--space-4) * 2));
+  padding: var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-popover);
+}
+
+.refresh-ledger__panel p {
+  margin: 0;
+}
+
+.refresh-ledger__muted,
+.refresh-ledger__note {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.refresh-ledger__warning {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-small);
+  background: var(--status-warn-soft);
+}
+
+.refresh-ledger__steps {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-size-label);
+}
+
+.refresh-ledger__steps li {
+  display: grid;
+  grid-template-columns: var(--space-4) minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.refresh-ledger__dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: 50%;
+}
+
+.refresh-ledger__steps li[data-state="done"] .refresh-ledger__dot {
+  border-color: var(--status-ok);
+  background: var(--status-ok);
+}
+
+.refresh-ledger__steps li[data-state="active"] .refresh-ledger__dot {
+  border-color: var(--status-info);
+  background: var(--status-info);
+}
+
+.refresh-ledger__steps li[data-state="active"] .refresh-ledger__step-name {
+  font-weight: var(--font-weight-label);
+}
+
+.refresh-ledger__bar {
+  width: 100%;
+  height: var(--space-2);
+  accent-color: var(--status-info);
+}
+
+.refresh-ledger__details {
+  margin: var(--space-2) 0 0;
+  padding-inline-start: var(--space-5);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.refresh-ledger__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+@media (max-width: 720px) {
+  .refresh-ledger__panel {
+    position: fixed;
+    inset-inline: var(--space-4);
+    inset-block-start: auto;
+    inset-block-end: var(--space-4);
+    width: auto;
+  }
+}
+
+.refresh-notice {
+  position: fixed;
+  inset-block-end: calc(var(--space-4) + var(--floating-launcher-reserve, 0px));
+  inset-inline-start: var(--space-4);
+  z-index: var(--layer-popover);
+  max-width: min(28rem, calc(100vw - var(--space-4) * 2));
+}
+
+.refresh-notice__item {
+  display: grid;
+  gap: var(--space-1) var(--space-3);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface-panel);
+}
+
+.refresh-notice__item > span {
+  grid-column: 1;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.refresh-notice__item > button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}

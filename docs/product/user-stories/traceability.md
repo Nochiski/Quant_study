@@ -20,10 +20,10 @@ PR은 GitHub 번호(`#123`)로 적는다.
 
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
-| 김철수 | 13 | 0 | 1 | 0 | 14 |
-| 정동민 | 16 | 0 | 0 | 0 | 16 |
-| 한상목 | 17 | 0 | 0 | 1 | 18 |
-| 합계 | 46 | 0 | 1 | 1 | 48 |
+| 김철수 | 13 | 1 | 1 | 0 | 15 |
+| 정동민 | 18 | 0 | 0 | 0 | 18 |
+| 한상목 | 17 | 1 | 0 | 1 | 19 |
+| 합계 | 48 | 2 | 1 | 1 | 52 |
 
 ### 스토리별 추적
 
@@ -43,6 +43,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-CS-12 | 김철수 | 팩터 회귀로 진짜 알파가 남는지 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.validation-reports.spec.ts` :: US-CS-12 실제 mock의 관측 부족과 별도 합성 회귀 숫자·근거를 구별해 읽는다 |
 | US-CS-13 | 김철수 | 기준을 먼저 적고 홀드아웃을 한 번만 연다 | `예정` | V6-01, V6-02 | V6-02 | — |
 | US-CS-14 | 김철수 | 빈 칸을 정한 값으로 채워 결측 규칙을 팩터 안에 적는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.fill-node.spec.ts` :: US-CS-14 빈 칸은 채운 값으로, 원장이 가린 칸은 채우지 않은 채로 추적에서 본다 |
+| US-CS-15 | 김철수 | 홈 시장 숫자가 어떤 정의로 계산됐는지 확인한다 | `구현됨-e2e없음` | — | — | — |
 | US-DM-01 | 정동민 | AI 공급자를 한 번 연결해 둔다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 설정에서 공급자를 등록하면 활성이 되고 키는 꼬리 4자리만 남는다 |
 | US-DM-02 | 정동민 | 모르는 말을 전략 화면에서 바로 묻는다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 사이드바 질문에 답이 스트리밍되고 새로고침해도 이력과 진행 중 턴이 이어진다 |
 | US-DM-03 | 정동민 | 말로 한 아이디어를 AI가 전략으로 바꿔 주고 바로 백테스트한다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다<br>`frontend/e2e/stories/dm.ai-new-strategy.spec.ts` :: US-DM-03 AI 창과 계약 서랍을 어느 입구로 펼쳐도 머리 줄이 펼친 자리에서 눌린다<br>`frontend/e2e/stories/dm.ai-new-strategy.spec.ts` :: US-DM-03 빈 새 전략에서 AI에게 아이디어를 말해 받은 전략을 적용하고 백테스트한다<br>`frontend/e2e/stories/dm.sidebar-scrollbar.spec.ts` :: US-DM-03 스크롤바가 폭을 차지하는 창에서도 AI 창이 흔들리지 않는다 |
@@ -59,6 +60,8 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-DM-14 | 정동민 | 화면 테마를 설정에서 고른다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.settings-theme.spec.ts` :: US-DM-14 설정에서 어둡게를 고르면 바로 바뀌고 새로고침 뒤에도 유지된다 |
 | US-DM-15 | 정동민 | 앱을 열면 이어서 할 일과 돌고 있는 일을 먼저 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.research-home.spec.ts` :: US-DM-15 연구 홈은 최근 결과와 작업 기록을 보이고 계좌 칸에는 숫자 없이 미연결만 말한다 |
 | US-DM-16 | 정동민 | 백테스트 결과에서 무엇을 샀고 무엇을 들고 있었는지 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.backtest-holdings.spec.ts` :: US-DM-16 결과 화면에서 매매한 날을 골라 그날 들고 있던 종목을 보고, 종목별 체결 기록을 연다 |
+| US-DM-17 | 정동민 | 홈에서 마지막 장이 어땠는지 쉬운 말로 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.home-market.spec.ts` :: US-DM-17 연습용 데이터로 켜진 홈은 시장 숫자 없이 실제 데이터 연결 안내만 보이고 연구 카드가 그 아래에 있다 |
+| US-DM-18 | 정동민 | 버튼 하나로 최신 시장 데이터를 받는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.home-market.spec.ts` :: US-DM-18 받을 실제 데이터가 없는 연습용 데이터에서는 DB 새로고침 버튼이 보이지 않는다 |
 | US-SM-01 | 한상목 | YAML을 붙여 넣고 오타를 필드 경로로 찾아 고친다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
 | US-SM-02 | 한상목 | 필드의 단위·범위·기본값을 계약 패널에서 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.field-contract.spec.ts` :: US-SM-02 전략 구조에서 필드를 고르면 계약 패널이 단위·범위·표시 값을 알려 준다 |
 | US-SM-03 | 한상목 | 저장할 때마다 새 버전이 쌓이고 버전끼리의 차이와 충돌을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
@@ -77,4 +80,5 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-SM-16 | 한상목 | 실행 전에 이 실행이 시도 수를 늘리는지 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.research-window.spec.ts` :: US-SM-13 봉인 구간과 겹치는 시작일은 이유와 교정 버튼과 함께 막히고, 실행 전에 시도 수 영향을 알려 준다 |
 | US-SM-17 | 한상목 | 전략 하나의 버전·백테스트·실험을 세션 화면에서 한 흐름으로 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.strategy-session.spec.ts` :: US-SM-17 세션 화면은 버전마다 그 버전으로 돌린 백테스트를 묶고 의도·시도 원장·버전 지문을 함께 보인다 |
 | US-SM-18 | 한상목 | 내 PC에서 내 키움 모의 계좌를 연결하고 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.kiwoom-mock-connection.spec.ts` :: US-SM-18 설정에서 키움 모의 키를 저장하면 계좌 끝 4자리만 보이고 연결 확인이 계좌 대조 결과를 말한다 |
+| US-SM-19 | 한상목 | 데이터를 새로 받아도 진행 중인 실행과 실험의 데이터가 섞이지 않는다 | `구현됨-e2e없음` | — | — | — |
 <!-- USER-STORY-TRACE:END -->

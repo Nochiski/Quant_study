@@ -22,6 +22,7 @@ import {
 
 import { App } from "../app";
 import type { BacktestResult } from "../../entities/backtest";
+import { practiceDataHandlers } from "./practice-data-handlers";
 
 /**
  * 결과 화면의 AI 패널(결과 설명 spec R1·R4). 진입점은 완료된 결과에만 있고, 대화는 실행에 붙으며
@@ -112,6 +113,7 @@ let listedRunIds: (string | null)[];
 let turnSessionIds: string[];
 
 const server = setupServer(
+  ...practiceDataHandlers(API),
   http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
     HttpResponse.json({
       run_id: params.runId,

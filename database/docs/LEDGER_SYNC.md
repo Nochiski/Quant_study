@@ -64,6 +64,13 @@ database/scripts/ledger_sync.sh verify --offline
   JSON 한 덩어리로 원자 교체해 쓴다. 받기 단계만 끝(전체)을 안다.
 - `_sync/last_run.json` 의 `error_kind`: 실패 갈래(`connect`·`transfer`·`disk`·`locked`·`unexpected`). 카탈로그
   실패는 `catalog_rc`, 검증 불일치는 `exit_code=4`·`verify.findings` 로 본다.
+
+앱(워크벤치 홈의 "DB 새로고침")은 래퍼와 같은 인터프리터 구성으로 `uv run --project backend --no-sync --with
+paramiko … python -m ledger_sync --root <앱이 읽는 equity 루트의 부모> --layer equity sync --progress-file …` 을
+부른다. `--no-sync` 는 앱이 쓰고 있는 backend 환경(개발용 Rust 코어 포함)을 동기화로 바꾸지 않으려는 것이다.
+받기가 끝나면 앱은 컨테이너를 새로 세워 새 판본을 읽는다(서버를 다시 띄우지 않는다). 앱이 켜진 채 터미널에서
+sync 를 돌리면 앱의 정리된 데이터(재무·수정주가) 질의는 `catalog_changed` 로 멈춘다 — 앱의 DB 새로고침이나 서버
+재시작으로 반영한다.
 `--remote-root` 는 서버 SFTP 루트(기본 `/`)다. `pull`·`sync` 는 받기 전에 받을 바이트와 재사용
 바이트만큼 로컬 여유 공간을 확인하고, `--no-space-check` 로 끌 수 있다.
 

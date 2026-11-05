@@ -23,6 +23,7 @@ import {
 
 import { App } from "../app";
 import type { ResearchCatalog } from "../../shared/api";
+import { practiceDataHandlers } from "./practice-data-handlers";
 
 const API = "http://localhost:8000";
 
@@ -183,6 +184,7 @@ const storedBacktests = () => [
 ];
 
 const server = setupServer(
+  ...practiceDataHandlers(API),
   // 실행 설정 유니버스 칸·요약 띠가 읽는 연결된 시장 데이터의 유니버스 목록.
   http.get(`${API}/api/v1/equity/universes`, () =>
     HttpResponse.json([
@@ -583,8 +585,14 @@ describe("App Shell routes", () => {
       ),
     );
     const history = mount("/");
-    await screen.findByText("첫 전략을 만들어 보세요");
+    const first = await screen.findByText("첫 전략을 만들어 보세요");
     expect(history.location.pathname).toBe("/");
+    // 첫 방문의 주 행동이 시장보다 위에 있고, 연습용 데이터면 시장 숫자·새로고침 버튼이 없다(US-DM-15·17·18).
+    const market = await screen.findByRole("region", { name: "시장" });
+    expect(first.compareDocumentPosition(market) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(market).toHaveTextContent("시장 정보는 실제 데이터를 연결해야 보여요");
+    expect(market.textContent).not.toMatch(/\d/u);
+    expect(screen.queryByRole("button", { name: "DB 새로고침" })).toBeNull();
     expect(screen.getByRole("link", { name: "새 전략 만들기" })).toHaveAttribute(
       "href",
       "/research/strategies/new?guide=true",
@@ -654,6 +662,13 @@ describe("App Shell routes", () => {
     try {
       mount("/");
       const todo = await screen.findByRole("region", { name: "오늘 이어서 할 일" });
+      // 할 일 요약 줄이 시장보다 먼저 읽힌다(US-DM-15).
+      const summary = await screen.findByRole("navigation", { name: "이어서 할 일 요약" });
+      expect(summary).toHaveTextContent("백테스트 1건");
+      expect(summary).toHaveTextContent("실험 1개");
+      const market = screen.getByRole("region", { name: "시장" });
+      expect(summary.compareDocumentPosition(market) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(market.compareDocumentPosition(todo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(await within(todo).findByText("후보 선택 대기")).toBeInTheDocument();
       expect(within(todo).getByRole("link", { name: "후보 보기" })).toHaveAttribute(
         "href",

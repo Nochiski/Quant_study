@@ -16,9 +16,9 @@
   background: var(--surface-raised);
 }
 
-.research-home__card h2 {
+.research-home__card h3 {
   margin: 0;
-  font-size: var(--text-size-section-title);
+  font-size: var(--text-size-subsection);
 }
 
 .research-home__card p {
@@ -64,4 +64,77 @@
 .research-home__muted {
   color: var(--text-muted);
   font-size: var(--text-size-small);
+}
+
+/* 머리: 제목 · 시장 데이터 기준일 · DB 새로고침. 그 아래 할 일 요약 줄 → 시장 → 연구 순서로 읽는다. */
+.research-home {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.research-home__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-5);
+}
+
+.research-home__header h1 {
+  margin: 0;
+}
+
+.research-home__data {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2) var(--space-3);
+}
+
+.research-home__session {
+  font-size: var(--text-size-label);
+  font-weight: var(--font-weight-label);
+}
+
+.research-home__skip {
+  position: absolute;
+  inset-inline-start: -10000px;
+}
+
+.research-home__skip:focus {
+  position: static;
+}
+
+.research-home__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+  font-size: var(--text-size-label);
+}
+
+.research-home__summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-height-dense);
+}
+
+.research-home__summary > .research-home__muted {
+  margin-inline-start: auto;
+}
+
+.research-home__research {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.research-home__research > h2 {
+  margin: 0;
+  font-size: var(--text-size-section-title);
 }

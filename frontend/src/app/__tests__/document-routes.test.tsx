@@ -46,6 +46,7 @@ import type {
 import { readBackendFixture } from "../../shared/testing/backend-fixtures";
 import { t } from "../../shared/config";
 import { App } from "../app";
+import { practiceDataHandlers } from "./practice-data-handlers";
 
 const API = "http://localhost:8000";
 
@@ -236,6 +237,7 @@ const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
 ) as Record<string, unknown>;
 
 const server = setupServer(
+  ...practiceDataHandlers(API),
   // 실행 설정 유니버스 칸·요약 띠가 읽는 연결된 시장 데이터의 유니버스 목록.
   http.get(`${API}/api/v1/equity/universes`, () =>
     HttpResponse.json([

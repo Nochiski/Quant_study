@@ -60,6 +60,11 @@
   --return-down: #1f5fcc;
   --return-up-soft: #fdeeec;
   --return-down-soft: #e1ebfb;
+  /* 섹터맵 칸처럼 면 전체를 방향으로 칠할 때의 진한 짝과 그 위 글자(대비 4.5:1 이상). 옅은 짝은
+   * 칸끼리 구분이 안 돼(1.1:1) 면 칠에 쓰지 않는다. */
+  --return-up-fill: #c8322b;
+  --return-down-fill: #1f5fcc;
+  --text-on-return: #ffffff;
 
   /* chart series on the light canvas (>= 3:1 for lines, legend text uses the same ink) */
   --chart-series-1: #0b6a60;
@@ -202,6 +207,9 @@
   --return-down: #8fb2ff;
   --return-up-soft: #3a2224;
   --return-down-soft: #1c2a45;
+  --return-up-fill: #ff8a80;
+  --return-down-fill: #8fb2ff;
+  --text-on-return: #132248;
 
   /* chart series tuned for the dark canvas */
   --chart-series-1: #4fc3b1;

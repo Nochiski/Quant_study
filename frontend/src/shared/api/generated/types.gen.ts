@@ -4309,7 +4309,9 @@ export type InvestorAmountBody = {
 /**
  * InvestorGroup
  *
- * 화면이 주체를 어디에 두는가. 응답이 주체마다 싣는다 — 화면은 묶음을 다시 적지 않는다.
+ * 주체의 묶음: 네 주체(합하면 내외국인과 함께 0)·기관 세부(합이 기관)·그 밖(내외국인).
+ *
+ * 응답이 주체마다 싣는다 — 화면은 묶음을 다시 적지 않는다.
  */
 export type InvestorGroup = "main" | "institution_part" | "footnote";
 
@@ -4363,6 +4365,10 @@ export type LedgerRefreshBody = {
    * Finished At
    */
   finished_at: string | null;
+  /**
+   * 마지막으로 끝난 받기의 결과(finished_at 과 짝). 지금 code 와 다를 수 있다.
+   */
+  last_outcome: RefreshOutcome | null;
   /**
    * Message
    *
@@ -6089,6 +6095,13 @@ export type RefreshFailure =
   | "apply"
   | "tables_failed"
   | "catalog";
+
+/**
+ * RefreshOutcome
+ *
+ * 끝난 받기의 결과. 지금 상태(`code`)가 바뀌어도(계산 시작·잠금) 그대로 남는다.
+ */
+export type RefreshOutcome = "succeeded" | "failed" | "partial";
 
 /**
  * RemoteCheckBody
@@ -9414,6 +9427,8 @@ export type UnaryOperator = "negate" | "lag";
 
 /**
  * UnavailableReason
+ *
+ * 앱에서 받을 수 없는 이유. 동기화 도구를 찾는 쪽(어댑터·조립)이 만든다.
  */
 export type UnavailableReason =
   "practice_data" | "not_configured" | "root_mismatch" | "sync_tool_missing";

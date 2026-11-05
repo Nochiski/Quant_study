@@ -787,6 +787,7 @@ export type {
   RebalanceFrequency,
   RefreshCode,
   RefreshFailure,
+  RefreshOutcome,
   RemoteCheckBody,
   RemoteState,
   RequestValidationIssue,

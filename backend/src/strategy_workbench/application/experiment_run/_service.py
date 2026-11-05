@@ -657,6 +657,23 @@ class ExperimentRunService:
             self._runs.schedule(experiment_id, paused=controls.paused, priority=controls.priority)
         return self.get(experiment_id)
 
+    def unfinished_count(self) -> int:
+        """취소하지 않았고 끝나지 않은 실험 수(대기 trial·복구를 기다리는 trial 포함).
+
+        저장된 실험 하나를 읽지 못하면 끝나지 않은 것으로 센다 — DB 새로고침이 그 실험의 trial 을
+        새 판으로 돌리지 않게 하는 보수 쪽이다.
+        """
+        count = 0
+        for experiment_id in self._repository.open_ids():
+            try:
+                record = self._repository.get(experiment_id)
+                finished = self._experiment(record).status is ExperimentStatus.COMPLETED
+            except Exception:
+                logger.exception("experiment unreadable — experiment_id=%s", experiment_id)
+                finished = False
+            count += not finished
+        return count
+
     def recover(self) -> None:
         """재시작 뒤 취소하지 않은 실험의 대기열 조작을 되살리고 남은 trial 을 다시 넘긴다(spec D6).
 

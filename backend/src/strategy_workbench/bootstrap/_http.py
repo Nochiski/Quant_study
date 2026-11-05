@@ -1,8 +1,20 @@
 import os
+import shutil
+from functools import partial
 from pathlib import Path
 
+from fastapi import FastAPI
+
 from strategy_workbench.adapters.inbound.http_api.facade.api import create_app
+from strategy_workbench.adapters.outbound.ledger_sync_process.facade.process import (
+    LedgerSyncProcess,
+)
 from strategy_workbench.application.backtest_run.facade.runs import DEFAULT_RUN_SLOTS
+from strategy_workbench.application.ledger_refresh.facade.refresh import (
+    LedgerRefreshService,
+    LedgerSyncPort,
+    UnavailableReason,
+)
 
 from . import _secrets
 from ._assistant import (
@@ -11,7 +23,8 @@ from ._assistant import (
     AssistantSettings,
     scripted_provider_factories,
 )
-from ._container import DEFAULT_RUN_ISOLATION, build_container
+from ._container import DEFAULT_RUN_ISOLATION, BackendContainer, build_container
+from ._reload import ContainerActiveWork, ReloadableApp
 
 DEFAULT_STRATEGY_REPOSITORY_PATH = (
     Path(__file__).resolve().parents[3] / ".local" / "strategy-revisions.sqlite3"
@@ -43,6 +56,12 @@ ASSISTANT_FAKE_PROVIDER_ENV = "STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER"
 CREDENTIALS_ENV_PATH_ENV = "STRATEGY_WORKBENCH_CREDENTIALS_ENV_PATH"
 # 브라우저 e2e 전용. 키움 "연결 확인"을 대본 probe로 바꾼다. 정확히 "1"일 때만 켠다.
 BROKER_FAKE_PROBE_ENV = "STRATEGY_WORKBENCH_BROKER_FAKE_PROBE"
+# DB 새로고침이 부르는 동기화 도구의 접속 설정. 값은 하위 프로세스가 읽고 여기서는 있는지만 본다.
+LEDGER_SYNC_REQUIRED_ENV = ("QL_SYNC_HOST", "QL_SYNC_USER")
+# 연구 보존 루트(`database/src/equity/research_snapshot.py` 의 `SNAPSHOT_NAME`·`PENDING_NAME`)는
+# 앱에서 새로 받지 않는다 — 받으면 보존본을 덮는다.
+RESEARCH_SNAPSHOT_MARKERS = ("_research_snapshot.json", "_research_snapshot.pending")
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def runtime_strategy_repository_path() -> Path:
@@ -194,6 +213,43 @@ def runtime_broker_fake_probe() -> bool:
     return os.environ.get(BROKER_FAKE_PROBE_ENV, "").strip() == "1"
 
 
+def runtime_ledger_sync(
+    equity_adapter: str, equity_root: Path | None
+) -> tuple[LedgerSyncPort | None, UnavailableReason | None]:
+    """DB 새로고침이 쓸 동기화 도구, 또는 쓸 수 없는 이유."""
+    if equity_adapter != "duckdb" or equity_root is None:
+        return None, UnavailableReason.PRACTICE_DATA
+    root = equity_root.resolve()
+    if root.name != "equity" or any((root / name).exists() for name in RESEARCH_SNAPSHOT_MARKERS):
+        return None, UnavailableReason.ROOT_MISMATCH
+    if not all(os.environ.get(name, "").strip() for name in LEDGER_SYNC_REQUIRED_ENV):
+        return None, UnavailableReason.NOT_CONFIGURED
+    uv = shutil.which("uv")
+    if uv is None or not (REPO_ROOT / "database" / "src" / "ledger_sync").is_dir():
+        return None, UnavailableReason.SYNC_TOOL_MISSING
+    return LedgerSyncProcess(uv, REPO_ROOT, root), None
+
+
+class _NotReloadable:
+    """`ApplyDataPort` 자리 — 바꿔 끼울 수 없는 앱(테스트·OpenAPI 내보내기)용."""
+
+    def apply(self) -> None:
+        raise RuntimeError("this app cannot reload its container")
+
+
+def _unavailable_refresh(
+    equity_adapter: str, container: BackendContainer
+) -> LedgerRefreshService:
+    reason = (
+        UnavailableReason.PRACTICE_DATA
+        if equity_adapter != "duckdb"
+        else UnavailableReason.NOT_CONFIGURED
+    )
+    return LedgerRefreshService(
+        None, ContainerActiveWork(lambda: container), _NotReloadable(), unavailable=reason
+    )
+
+
 def build_http_app(
     *,
     strategy_repository_path: str | Path | None = None,
@@ -209,7 +265,43 @@ def build_http_app(
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
     allowed_origins: tuple[str, ...] = DEFAULT_ALLOWED_ORIGINS,
     broker_fake_probe: bool = False,
-):  # return type is inferred from the FastAPI factory at this composition root
+    ledger_refresh: LedgerRefreshService | None = None,
+) -> FastAPI:
+    return _build_app(
+        strategy_repository_path=strategy_repository_path,
+        research_db_path=research_db_path,
+        continuous_db_path=continuous_db_path,
+        artifact_root=artifact_root,
+        run_slots=run_slots,
+        trial_hold_seconds=trial_hold_seconds,
+        run_isolation=run_isolation,
+        run_memory_reserve_gb=run_memory_reserve_gb,
+        equity_adapter=equity_adapter,
+        equity_root=equity_root,
+        assistant=assistant,
+        allowed_origins=allowed_origins,
+        broker_fake_probe=broker_fake_probe,
+        ledger_refresh=ledger_refresh,
+    )[0]
+
+
+def _build_app(
+    *,
+    strategy_repository_path: str | Path | None,
+    research_db_path: str | Path | None,
+    continuous_db_path: str | Path | None,
+    artifact_root: Path | None,
+    run_slots: int,
+    trial_hold_seconds: float,
+    run_isolation: str,
+    run_memory_reserve_gb: float | None,
+    equity_adapter: str,
+    equity_root: Path | None,
+    assistant: AssistantSettings,
+    allowed_origins: tuple[str, ...],
+    broker_fake_probe: bool,
+    ledger_refresh: LedgerRefreshService | None,
+) -> tuple[FastAPI, BackendContainer]:
     container = build_container(
         strategy_repository_path=strategy_repository_path,
         research_db_path=research_db_path,
@@ -224,7 +316,7 @@ def build_http_app(
         assistant=assistant,
         broker_fake_probe=broker_fake_probe,
     )
-    return create_app(
+    app = create_app(
         strategy_design=container.strategy_design,
         strategy_authoring=container.strategy_authoring,
         strategy_documents=container.strategy_documents,
@@ -239,6 +331,7 @@ def build_http_app(
         factor_library=container.factor_library,
         broker_connections=container.broker_connections,
         market_overview=container.market_overview,
+        ledger_refresh=ledger_refresh or _unavailable_refresh(equity_adapter, container),
         assistant_profiles=container.assistant_profiles,
         assistant_chat=container.assistant_chat,
         assistant_turns=container.assistant_turns,
@@ -246,12 +339,23 @@ def build_http_app(
         credentials_file_issues=container.credentials_file_issues,
         allowed_origins=allowed_origins,
     )
+    return app, container
 
 
-def build_runtime_http_app():
-    """Uvicorn factory: only an actual server process opens the durable runtime database."""
+def build_runtime_http_app() -> ReloadableApp:
+    """Uvicorn factory: only an actual server process opens the durable runtime database.
+
+    DB 새로고침이 끝나면 같은 설정으로 컨테이너를 다시 세워 바꿔 끼운다(`ReloadableApp`). 설정은
+    여기서 한 번 읽는다 — 다시 세울 때 환경 변수가 바뀌어 다른 원천을 열지 않게.
+    """
     adapter, root = runtime_equity_selection()
-    return build_http_app(
+    holder = ReloadableApp()
+    sync, unavailable = runtime_ledger_sync(adapter, root)
+    refresh = LedgerRefreshService(
+        sync, ContainerActiveWork(lambda: holder.container), holder, unavailable=unavailable
+    )
+    build = partial(
+        _build_app,
         strategy_repository_path=runtime_strategy_repository_path(),
         research_db_path=runtime_research_db_path(),
         continuous_db_path=runtime_continuous_db_path(),
@@ -265,4 +369,6 @@ def build_runtime_http_app():
         assistant=runtime_assistant_settings(),
         broker_fake_probe=runtime_broker_fake_probe(),
         allowed_origins=runtime_allowed_origins(),
+        ledger_refresh=refresh,
     )
+    return holder.load(build)

@@ -157,10 +157,13 @@ def test_runs_over_the_limit_wait_queued_and_start_in_acceptance_order(
         assert accepted.run.stage == "queued"
         assert accepted.run.message == "Waiting for a free run slot"
         assert runs.state(accepted.run.run_id).status is RunStatus.QUEUED
+    # DB 새로고침이 보는 수 — 도는 run 과 기다리는 run 을 모두 센다
+    assert runs.active_run_count() == 3
     port.release.set()
 
     for run_id in ("queue-1", "queue-2", "queue-3"):
         assert wait_for_terminal_run(runs, run_id).status is RunStatus.COMPLETED
+    assert runs.active_run_count() == 0
     # 접수 순서대로 돌았고, 어느 run 이 원시 관측을 읽기 시작할 때도 도는 run 은 자기 하나였다.
     assert entries == [
         (date(2024, 1, 12), 1),

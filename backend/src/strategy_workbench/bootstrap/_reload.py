@@ -1,0 +1,127 @@
+"""DB 새로고침의 앱 반영: 컨테이너를 통째로 새로 세우고 HTTP 앱을 바꿔 끼운다.
+
+한 컨테이너는 부팅 때 원장 판본을 고정한다(`EquityDuckdbAdapter`). 새 판본을 읽으려면 그 판본으로 새
+컨테이너를 세우는 수밖에 없다 — 같은 컨테이너 안에서 판본을 바꾸면 run 하나가 두 판을 섞는다.
+`ReloadableApp` 은 uvicorn 이 띄우는 ASGI 앱이고, 요청을 지금 앱에 넘긴다. 반영은
+1) 새 컨테이너·앱을 이벤트 루프 밖에서 세우고 2) 루프에서 새 앱의 lifespan 을 연 뒤 바꿔 끼우고
+3) 옛 앱의 lifespan 을 닫는다(run worker 정리 등). 바꾸는 동안 도는 요청은 옛 앱에서 끝난다.
+새로고침은 진행 중 계산이 없을 때만 시작하고 받는 동안 새 계산을 막으므로 옛 앱이 쥔 계산이 없다.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable, MutableMapping
+from contextlib import AsyncExitStack
+from typing import Any
+
+from fastapi import FastAPI
+
+from strategy_workbench.application.ledger_refresh.facade.refresh import ActiveWork
+
+from ._container import BackendContainer
+
+logger = logging.getLogger(__name__)
+
+# reason: ASGI 3 메시지는 공개 계약이 dict 다(키가 메시지 종류마다 다르다).
+Scope = MutableMapping[str, Any]
+Message = MutableMapping[str, Any]
+Receive = Callable[[], Awaitable[Message]]
+Send = Callable[[Message], Awaitable[None]]
+Built = tuple[FastAPI, BackendContainer]
+
+
+class ContainerActiveWork:
+    """`ActiveWorkPort` — 지금 컨테이너가 쥔 계산을 센다."""
+
+    def __init__(self, container: Callable[[], BackendContainer]) -> None:
+        self._container = container
+
+    def active(self) -> ActiveWork:
+        container = self._container()
+        return ActiveWork(
+            backtests=container.backtest_runs.active_run_count(),
+            experiments=container.experiments.unfinished_count(),
+            evaluations=container.continuous_accounts.running_count(),
+        )
+
+
+class ReloadableApp:
+    """요청을 지금 앱으로 넘기는 ASGI 앱. `load` 로 첫 앱을 세우고 `apply` 로 바꿔 끼운다."""
+
+    def __init__(self) -> None:
+        self._build: Callable[[], Built] | None = None
+        self._built: Built | None = None
+        self._stack: AsyncExitStack | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def load(self, build: Callable[[], Built]) -> ReloadableApp:
+        self._build = build
+        self._built = build()
+        return self
+
+    @property
+    def app(self) -> FastAPI:
+        if self._built is None:
+            raise RuntimeError("reloadable app is not loaded — call load(build) first")
+        return self._built[0]
+
+    @property
+    def container(self) -> BackendContainer:
+        if self._built is None:
+            raise RuntimeError("reloadable app is not loaded — call load(build) first")
+        return self._built[1]
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "lifespan":
+            await self._lifespan(receive, send)
+            return
+        await self.app(scope, receive, send)
+
+    async def _lifespan(self, receive: Receive, send: Send) -> None:
+        await receive()  # lifespan.startup
+        self._loop = asyncio.get_running_loop()
+        stack = AsyncExitStack()
+        try:
+            await stack.enter_async_context(self.app.router.lifespan_context(self.app))
+        except Exception as error:
+            logger.exception("app startup failed")
+            await send({"type": "lifespan.startup.failed", "message": repr(error)})
+            return
+        self._stack = stack
+        await send({"type": "lifespan.startup.complete"})
+        await receive()  # lifespan.shutdown
+        try:
+            await stack.aclose()
+        except Exception as error:
+            logger.exception("app shutdown failed")
+            await send({"type": "lifespan.shutdown.failed", "message": repr(error)})
+            return
+        await send({"type": "lifespan.shutdown.complete"})
+
+    def apply(self) -> None:
+        """`ApplyDataPort` — 새 원장으로 컨테이너를 다시 세워 바꿔 끼운다. 실패하면 옛 앱이 남는다.
+
+        이벤트 루프 밖(새로고침 스레드)에서 부른다. lifespan 이 없는 앱(테스트 클라이언트)은 바꿔
+        끼우기만 한다.
+        """
+        if self._build is None:
+            raise RuntimeError("reloadable app is not loaded — call load(build) first")
+        built = self._build()
+        if self._loop is None or self._stack is None:
+            self._built = built
+            return
+        asyncio.run_coroutine_threadsafe(self._swap(built), self._loop).result()
+
+    async def _swap(self, built: Built) -> None:
+        stack = AsyncExitStack()
+        await stack.enter_async_context(built[0].router.lifespan_context(built[0]))
+        old = self._stack
+        self._built, self._stack = built, stack
+        logger.info("app reloaded with new ledger data")
+        if old is not None:
+            try:
+                await old.aclose()
+            except Exception:
+                logger.exception("old app shutdown failed after reload")

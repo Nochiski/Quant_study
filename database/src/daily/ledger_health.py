@@ -26,6 +26,7 @@ from backfill_wise import (  # 종목당 일일 요청 수·실패 회복 규칙
     req_covered_on,
 )
 from daily import calendar as _cal
+from doc_targets import TARGETS_ON_DATE_SQL  # 원문 대상 술어의 정본(수집기 · 일일 DART 게이트와 같은 술어)
 
 KST = dt.timezone(dt.timedelta(hours=9))
 
@@ -454,9 +455,7 @@ def check_dart(con: sqlite3.Connection, d: str, trading_day: bool, kst_day_start
         out.append(Check("dart.disclosure.rows", Level.REQUIRED, Status.PASS if (n >= 400 or not trading_day) else Status.FAIL, n, exp))
         if _has_table(con, "doc_store"):
             row = con.execute(
-                "WITH tgt AS (SELECT DISTINCT rcept_no FROM dart_disclosure WHERE rcept_dt=? AND stock_code<>'' AND ("
-                " report_nm LIKE '%주식분할결정%' OR report_nm LIKE '%주식병합결정%' OR (report_nm NOT LIKE '%연장신고%' AND ("
-                " report_nm LIKE '%사업보고서%' OR report_nm LIKE '%반기보고서%' OR report_nm LIKE '%분기보고서%')))) "
+                f"WITH tgt AS ({TARGETS_ON_DATE_SQL}) "
                 "SELECT COUNT(*), SUM(s.rcept_no IS NULL), SUM(s.zip_ok=0 AND s.http_status<>'014') "
                 "FROM tgt t LEFT JOIN doc_store s USING (rcept_no)", (d,)).fetchone()
             n_t, never, failed = (int(row[0]), int(row[1] or 0), int(row[2] or 0)) if row else (0, 0, 0)

@@ -111,7 +111,7 @@ class StrategyTraceService:
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
-        # preview·run 과 같은 관문이다 — 없거나 연구 구간 밖이면 domain 오류를 그대로 올려, 세
+        # preview·run 과 같은 관문이다 — 없으면 domain 오류를 그대로 올려, 세
         # 경로가 같은 접수 거절 코드·detail 로 거절한다(#351).
         environment = require_environment(
             request.environment, requested_by=f"strategy.trace({spec.title!r})"

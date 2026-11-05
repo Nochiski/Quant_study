@@ -2,8 +2,12 @@
 
 출처는 한국은행 "한국은행 기준금리 추이"
 (https://www.bok.or.kr/portal/singl/baseRate/list.do?dataSeCd=01&menuNo=200643)이고 확인일은
-`BASE_RATE_CONFIRMED_ON`이다. 2008-03 이전 값은 한국은행이 같은 표에 싣는 콜금리 목표다. 갱신 절차는
-`.claude/rules/strategy-workbench-sot.md`의 "무위험수익률" 행이 정본이다.
+`BASE_RATE_CONFIRMED_ON`이다. 2008-03 이전 값은 한국은행이 같은 표에 싣는 콜금리 목표다. 이 모듈이
+무위험수익률 금리 이력의 owner다.
+
+갱신 절차: 한국은행이 금리를 바꾸면 원문과 대조해 `_CHANGES`에 새 변경일 한 행을 더하고,
+`BASE_RATE_CONFIRMED_ON`을 대조한 날로 고치고, `_registry.py`의 `REGISTRY_VERSION`을 올린다. 재현
+지문이 registry 버전을 담으므로 옛 실행과 지문이 갈린다.
 """
 
 from __future__ import annotations

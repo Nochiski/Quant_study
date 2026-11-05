@@ -5,7 +5,6 @@
 
 - 표마다 MANIFEST 의 `current_build` 폴더만 연다. 옛 빌드 폴더가 남아 있어 표 폴더 전체를 읽으면
   날짜가 겹친다.
-- 2020-01-02(홀드아웃 하한) 앞 연도 파티션은 열지 않는다. 위험 보고의 가장 이른 구간은 2020-01-22다.
 - 원장이 가린 조정 공백(`v_adj_close`)은 다시 판정하지 않는다. 표의 값을 그대로 넘기고, 가격제한
   밖 하루 수익률은 보고 계산(`domain.risk`)이 빼고 목록으로 보인다.
 - 읽지 못하면 실패 결과(`PriceHistoryStatus.UNAVAILABLE`)다. 문장에 서버 경로를 싣지 않는다.
@@ -26,7 +25,6 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     PriceHistoryStatus,
 )
 
-HISTORY_FLOOR = date(2020, 1, 2)
 KOSPI_INDEX_NAME = "코스피"
 _PRICES, _INDEX = "price_adj_daily", "index_daily"
 
@@ -40,7 +38,6 @@ class LedgerPriceHistory:
         self._root = equity_root
 
     def history(self, symbols: Sequence[str], since: date) -> PriceHistory:
-        since = max(since, HISTORY_FLOOR)
         try:
             prices_build, prices_dir = _current(self._root, _PRICES)
             index_build, index_dir = _current(self._root, _INDEX)

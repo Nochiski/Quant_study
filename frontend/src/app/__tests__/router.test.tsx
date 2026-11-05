@@ -150,15 +150,6 @@ const trialLedger = (trialCount: number) => ({
       ],
     },
   ],
-  blocked: [
-    {
-      blocked_at: "2026-09-05T03:00:00Z",
-      lineage_id: "s1",
-      trial_key: "d".repeat(64),
-      spec_hash: "e".repeat(64),
-      start: "2018-01-02",
-    },
-  ],
 });
 
 const openTrialLedger = async (user: ReturnType<typeof userEvent.setup>) => {
@@ -210,7 +201,6 @@ const server = setupServer(
       merged_lineage_ids: [],
       trial_count: 0,
       trials: [],
-      blocked: [],
     }),
   ),
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
@@ -841,7 +831,6 @@ describe("App Shell routes", () => {
           merged_lineage_ids: [],
           trial_count: params.strategyId === "good" ? 3 : 1,
           trials: [],
-          blocked: [],
         }),
       ),
       http.get(`${API}/api/v1/experiments`, () =>
@@ -1056,11 +1045,6 @@ describe("App Shell routes", () => {
     expect(row("run-first")).toHaveTextContent("시도로 셈");
     expect(row("run-again")).toHaveTextContent("재확인");
     expect(row("run-cancelled")).toHaveTextContent("시도 수 제외");
-    expect(
-      within(ledger).getByText(
-        /봉인 구간과 겹쳐 거절된 요청 · 시작일 2018-01-02/u,
-      ),
-    ).toBeInTheDocument();
     expect(
       within(ledger)
         .getAllByRole("button")

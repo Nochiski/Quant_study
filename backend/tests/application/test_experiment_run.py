@@ -210,12 +210,12 @@ class _FakeRuns:
             strategy=self.strategy,
             parameter_values={"scale": 1.0, "mode": "a", **request.parameter_values},
         )
-        return AdmittedRun(resolved, summarize_trial_ledger("s-1", (), self.ledger_entries, ()))
+        return AdmittedRun(resolved, summarize_trial_ledger("s-1", (), self.ledger_entries))
 
     def trial_ledger(self, request: BacktestRunSpec) -> TrialLedger:
         if self.on_ledger is not None:
             self.on_ledger()
-        return summarize_trial_ledger("s-1", (), self.ledger_entries, ())
+        return summarize_trial_ledger("s-1", (), self.ledger_entries)
 
     def start(
         self, request: BacktestRunSpec, *, trial_key: str, owner: str, controls: ExperimentControls
@@ -1001,8 +1001,15 @@ def _write_legacy_research_file(
         connection.execute("ATTACH DATABASE ? AS fixture", (str(path),))
         for _, _, ddl in objects:
             connection.execute(ddl)
+        # 현행 판본이 지운 표(v11 의 `sealed_window_blocks`)는 옮길 행이 없다.
+        current = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM fixture.sqlite_schema WHERE type = 'table'"
+            ).fetchall()
+        }
         for kind, name, _ in objects:
-            if kind == "table":
+            if kind == "table" and name in current:
                 connection.execute(f'INSERT INTO "{name}" SELECT * FROM fixture."{name}"')
         connection.execute(f"PRAGMA application_id = {application_id}")
         connection.execute(f"PRAGMA user_version = {version}")

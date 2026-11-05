@@ -192,7 +192,7 @@ Phase가 끝날 때마다 작업분 SoT·책임 분리 점검을 하고, W9-01�
   V-2 측정에는 배정 시점의 가용 메모리와 메모리 가드 판정(대기 여부)을 함께 남겨, 실패했을 때 병렬성 문제인지 가드인지 가른다.
 - 최장 허용 구간(2020-01-02~) 실데이터 V-3: 스레드 방식과 프로세스 방식(예비 worker)의 결과 전체가 같다. W2-01은 1년 구간만 쟀다
   (run 하나 약 7GB, 같은 PC에 다른 작업이 돌았다).
-- `strategy-workbench-sot.md` 75·87·90행과 "백테스트 run 접수" 행, validation-lab spec D6 개정 링크, `backend/README.md`, `README.md`,
+- 바뀐 기본값을 말하는 owner 모듈 docstring(`application/backtest_run`·`bootstrap/_http.py`), validation-lab spec D6 개정 링크, `backend/README.md`, `README.md`,
   `.claude/rules/testing.md`(하위 프로세스 경로 격리 예)를 고친다.
 - 실험 남은 시간 어림을 슬롯 병렬로 나눌지는 V-2 결과로 정한다. 사용자 문구가 바뀌면 US-SM-15 수용 기준과 e2e를 고친다.
 - 전체 e2e가 green이다.

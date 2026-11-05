@@ -96,8 +96,7 @@ const AppliedUpgrade = ({
 /**
  * 편집기 위에 고정되는 은퇴 버전 안내(WORKFLOW P2-02·P3-02). 은퇴 버전 텍스트면 backend 변환을 한 번
  * 호출해 편집기에 넣고, legacy JSON 동결 row면 생성된 현재 버전 텍스트를 새 revision으로 저장하라고만
- * 안내한다. 문구는 버전 중립이다 — 어떤 버전이 은퇴했는지는 backend 가 판정한다(SoT authoring schema
- * 버전 행). 적용한 뒤에는 응답의 warning 과 옛 문서의 실행 설정을 보이고, 실행 설정은 누를 때만 채운다.
+ * 안내한다. 문구는 버전 중립이다 — 어떤 버전이 은퇴했는지는 backend 가 판정한다(`domain/strategy/_upgrade.py`). 적용한 뒤에는 응답의 warning 과 옛 문서의 실행 설정을 보이고, 실행 설정은 누를 때만 채운다.
  */
 export const UpgradeBanner = ({
   upgrade,

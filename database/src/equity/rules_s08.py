@@ -512,6 +512,8 @@ FLOW_DAILY = register(EquityTable(
     # PK 에 `src` 가 든다(DESIGN §3 상보 결합) → EG1 좌변은 count(DISTINCT (date,ticker))
     # (GATES §5-B4). 정렬 축이기도 하다 — build.py 의 ORDER BY 가 이 순서다.
     grain=("date", "ticker", "src"),
+    # 셀 축 — 두 원천은 겹치지 않고(EG8-P05) 수집 전 셀은 src NULL 이다. 판 대조가 이 축으로 조인한다
+    cell_key=("date", "ticker"),
     # 컬럼 순서 = 키·원천 → 키움 원장 13주체 순서 계승 → 결측 어휘 → PIT 2.
     # 타입은 stage 키움 DECIMAL(15,0) 과 KIS DECIMAL(13~14,0) 의 UNION ALL 결과다(EG0 는 이름·
     # 순서만 대조한다 — DESIGN §4-3 이 KIS 를 상보 원천으로 못박아 두 스키마가 함께 결정한다).

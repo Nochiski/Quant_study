@@ -44,7 +44,7 @@ from tests.frozen_revision_rows import FROZEN_SPEC_HASH, seed_frozen_rows
 _SPLIT = {"mode": "rolling", "train_years": 1, "test_years": 1, "embargo_sessions": 0}
 
 
-def _experiment(client: TestClient, **environment: str) -> dict[str, Any]:
+def _experiment(client: TestClient) -> dict[str, Any]:
     template = client.get("/api/v1/strategies/template").json()
     template.pop("identity")
     template["schema_version"] = "1.2"
@@ -90,8 +90,7 @@ def _experiment(client: TestClient, **environment: str) -> dict[str, Any]:
             "start": "2021-01-04",
             "end": "2023-06-30",
             "universe_id": "krx.common-stock",
-        }
-        | environment,
+        },
     }
     return {"run": run, "search": {"scale": None}, "split": _SPLIT}
 
@@ -312,7 +311,6 @@ def test_a_capacity_sweep_from_a_finished_run_leaves_the_trial_count_as_it_was()
 def test_design_and_lookup_rejections_are_coded() -> None:
     client = TestClient(build_http_app())
     request = _experiment(client)
-    sealed = _experiment(client, start="2019-06-03")
     inline = request | {
         "run": request["run"]
         | {"strategy_source": None, "strategy": client.get("/api/v1/strategies/template").json()}
@@ -330,7 +328,6 @@ def test_design_and_lookup_rejections_are_coded() -> None:
             "/api/v1/experiments/preview",
             json=request | {"run": request["run"] | {"initial_cash": -1}},
         ),
-        "sealed": client.post("/api/v1/experiments", json=sealed),
         "capacity": client.post(
             "/api/v1/experiments/capacity/preview",
             json={"run": request["run"], "initial_cash": [1e8, 1e8, 2e8]},
@@ -349,7 +346,6 @@ def test_design_and_lookup_rejections_are_coded() -> None:
         "split": "experiment.split.invalid",
         "search": "experiment.search.unknown_parameter",
         "field": "backtest.run.field_invalid",
-        "sealed": "backtest.run.research_window_violation",
         "capacity": "experiment.capacity.invalid_amounts",
         "capacity_base": "experiment.capacity.base_not_run",
     }
@@ -362,9 +358,6 @@ def test_design_and_lookup_rejections_are_coded() -> None:
         404,
         "experiment.not_found",
     )
-    # 실험 기반 검사는 실행 요청이 아니므로 봉인 원장에 차단 기록을 남기지 않는다.
-    sealed_lineage = sealed["run"]["strategy_source"]["strategy_id"]
-    assert client.get(f"/api/v1/strategies/{sealed_lineage}/trials").json()["blocked"] == []
 
 
 def test_a_frozen_revision_cannot_be_the_base(tmp_path: Path) -> None:

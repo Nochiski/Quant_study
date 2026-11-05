@@ -1,5 +1,8 @@
 # 검증 랩 설계 spec
 
+> **2026-11-05 폐기 주석:** D1(연구 구간 잠금)·D11(봉인 원장·홀드아웃 1회 개봉)은 사용자 결정("홀드아웃은 개별
+> 실험 중에 할 일이지 앱이 할 일이 아니다")으로 폐기했고 코드는 #679에서 지웠다. 본문은 당시 결정 기록이다.
+
 - 작성: 2026-09-29
 - 상태: 제품 소유자 결정 반영(2026-09-29). 기획 패키지는 [docs/planning/validation-lab](../../planning/validation-lab/README.md).
 - 디자인보드: [전략 검증 랩 UI/UX 기획](https://claude.ai/artifact/5jYGBTPKcWFHhjB4fvEtup) — 보드 13장

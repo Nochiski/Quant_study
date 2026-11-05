@@ -1,16 +1,19 @@
-"""연구 DB 판본 2 — 시도 원장·계열 합치기·봉인 원장 차단 기록(검증 랩 spec D2·D11, V1-05)."""
+"""연구 DB 판본 2 — 시도 원장·계열 합치기(검증 랩 spec D2, V1-05)."""
 
 from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from strategy_workbench.adapters.outbound.research_sqlite._schema import V1_SCHEMA_OBJECTS
+from strategy_workbench.adapters.outbound.research_sqlite._schema import (
+    V1_SCHEMA_OBJECTS,
+    V10_SCHEMA_OBJECTS,
+)
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     ResearchStorageError,
     SQLiteBacktestRunRepository,
@@ -27,7 +30,6 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     StrategyProvenance,
     StrategySourceKind,
 )
-from strategy_workbench.domain.backtest.facade.trials import BlockedTrialAttempt
 
 _AT = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
 
@@ -62,12 +64,51 @@ def test_a_version_1_file_is_upgraded_and_its_old_runs_stay_outside_every_lineag
     assert [entry.run_id for entry in repository.trial_ledger("s-1").entries] == ["run-1"]
 
 
+def test_a_version_10_file_drops_the_retired_holdout_tables_with_their_rows(
+    tmp_path: Path,
+) -> None:
+    """v11 은 폐기한 V6 표와 봉인 원장을 행째 지운다. 하나라도 남으면 manifest 대조가 파일을
+    거부한다."""
+    path = tmp_path / "research.sqlite3"
+    with sqlite3.connect(path) as connection:
+        for _object_type, _name, statement in V10_SCHEMA_OBJECTS:
+            connection.execute(statement)
+        # 지우기를 막는 트리거가 걸린 표에도 행이 있어야 DROP 이 트리거를 타지 않는지 보인다.
+        connection.execute(
+            "INSERT INTO holdout_simulation_registrations VALUES ('r', 'h', '{}', 's')"
+        )
+        connection.execute(
+            "INSERT INTO holdout_simulation_claims "
+            "VALUES ('q', 'r', 'h', 'n', 'w', 't', 'claimed', NULL)"
+        )
+        connection.execute("INSERT INTO holdout_simulation_results VALUES ('q', '{}', 's')")
+        connection.execute(
+            "INSERT INTO sealed_window_blocks "
+            "(blocked_at, lineage_id, trial_key, spec_hash, start) "
+            f"VALUES ('t', 'a', '{'e' * 64}', '{'f' * 64}', '2019-06-03')"
+        )
+        connection.execute("PRAGMA application_id = 1398231635")
+        connection.execute("PRAGMA user_version = 10")
+
+    SQLiteBacktestRunRepository(path).close()
+
+    with closing(sqlite3.connect(path)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (
+            SQLiteBacktestRunRepository.SCHEMA_VERSION,
+        )
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_schema "
+                "WHERE name LIKE 'holdout%' OR name LIKE 'sealed_window%'"
+            ).fetchall()
+            == []
+        )
+
+
 def test_merges_follow_the_surviving_lineage_and_keep_every_member(tmp_path: Path) -> None:
     repository = SQLiteBacktestRunRepository(tmp_path / "research.sqlite3")
     for run_id, lineage_id in (("run-a", "a"), ("run-b", "b"), ("run-c", "c"), ("run-x", None)):
         _add(repository, run_id, lineage_id)
-    blocked = BlockedTrialAttempt(_AT, "a", "e" * 64, "f" * 64, date(2019, 6, 3))
-    repository.record_blocked_attempt(blocked)
 
     repository.merge_lineages("a", "b", merged_at=_AT)
     repository.merge_lineages("b", "c", merged_at=_AT)
@@ -75,7 +116,6 @@ def test_merges_follow_the_surviving_lineage_and_keep_every_member(tmp_path: Pat
 
     assert (records.lineage_id, records.merged_lineage_ids) == ("c", ("a", "b"))
     assert [entry.run_id for entry in records.entries] == ["run-a", "run-b", "run-c"]
-    assert records.blocked == (blocked,)
     with pytest.raises(TrialLineageAlreadyMergedError, match="lineage_id=c"):
         repository.merge_lineages("a", "c", merged_at=_AT)
 

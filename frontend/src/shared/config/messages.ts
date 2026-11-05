@@ -535,7 +535,6 @@ const ko = {
   "runEnvironment.summary.fill": "실행 설정 채우기",
   "runEnvironment.summary.fix": "실행 설정 고치기",
   "runEnvironment.summary.outside": "전략 문서 밖의 값입니다. 바꿔도 전략 버전은 그대로입니다.",
-  "runEnvironment.fix.researchStart": "시작일을 {research_start}로",
   "backtest.trial.label": "시도 영향",
   "backtest.trial.updating": "갱신 중 · 직전 답:",
   "backtest.trial.pending": "실행 설정을 다 채우면 이 실행이 시도 수에 어떻게 들어가는지 여기 보입니다.",
@@ -2247,8 +2246,6 @@ const ko = {
     "이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 전략 편집기에서 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
   "backtest.error.backtest.run.environment_required":
     "실행 설정이 없습니다. 실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
-  "backtest.error.backtest.run.research_window_violation":
-    "시작일이 연구 구간 밖입니다. {sealed_start}~{sealed_end}은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 {research_start} 이후로 옮긴 뒤 다시 실행하세요.",
   "backtest.error.backtest.run.parameter_invalid":
     "전략 파라미터 {parameter_id}의 값을 쓸 수 없습니다. 문서에 선언된 파라미터인지, 값이 그 범위·선택지 안인지 확인한 뒤 다시 시작하세요.",
   "backtest.error.portfolio.strategy.invalid":
@@ -2519,7 +2516,6 @@ const ko = {
   "history.trials.role.recheck": "재확인",
   "history.trials.role.pending": "결과 대기",
   "history.trials.role.no_result": "시도 수 제외",
-  "history.trials.blocked": "봉인 구간과 겹쳐 거절된 요청 · 시작일 {start}",
   "history.trials.merge": "다른 계열과 합치기",
   "history.trials.merge.title": "다른 계열과 합치기",
   "history.trials.merge.description":
@@ -3770,7 +3766,6 @@ export const messages = {
     "runEnvironment.summary.fill": "Fill the run settings",
     "runEnvironment.summary.fix": "Fix the run settings",
     "runEnvironment.summary.outside": "These values live outside the strategy document; changing them keeps the strategy version.",
-    "runEnvironment.fix.researchStart": "Move the start date to {research_start}",
     "backtest.trial.label": "Trial impact",
     "backtest.trial.updating": "Updating · previous answer:",
     "backtest.trial.pending": "Once the run settings are complete, this shows how the run counts toward trials.",
@@ -5508,8 +5503,6 @@ export const messages = {
       "This run request cannot start. Read the server reason and fix the run settings (period, OOS start) or the strategy in the strategy editor.",
     "backtest.error.backtest.run.environment_required":
       "There are no run settings. Fill the start date, end date and universe in the run settings.",
-    "backtest.error.backtest.run.research_window_violation":
-      "The start date is outside the research window. {sealed_start} to {sealed_end} is the sealed holdout and earlier dates are not measured. In the strategy editor's run settings, move the start date to {research_start} or later, then run it again.",
     "backtest.error.backtest.run.parameter_invalid":
       "The value for strategy parameter {parameter_id} cannot be used. Check that the document declares the parameter and that the value is within its range or choices, then start again.",
     "backtest.error.portfolio.strategy.invalid":
@@ -5774,7 +5767,6 @@ export const messages = {
     "history.trials.role.recheck": "Recheck",
     "history.trials.role.pending": "Waiting for result",
     "history.trials.role.no_result": "Not counted",
-    "history.trials.blocked": "Request refused for overlapping the sealed window · start {start}",
     "history.trials.merge": "Merge another lineage",
     "history.trials.merge.title": "Merge another lineage",
     "history.trials.merge.description":

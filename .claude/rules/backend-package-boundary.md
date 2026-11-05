@@ -155,11 +155,6 @@ bootstrap ─> application + adapters
   `build_run_versions`로 한 번 계산한 묶음과 worker 의 `ready`를 비교한다(D6). e2e hold 판정은
   `bootstrap`의 `_TrialHold.release` 하나를 스레드 전송(엔진 앞)과 프로세스 전송(`engine_ready` 왕복,
   D11)이 함께 부른다.
-- V6-01 모의 사전등록은 `domain/backtest`의 동결 등록·필수 기준 비교와
-  `application/holdout_registration`의 자체 source-pin·simulation-executor·ledger 포트가 소유한다.
-  다른 application 서비스를 직접 import하지 않는다. 기존 `research_sqlite`가 schema v9의
-  별도 simulation 등록·claim·결과 테이블과 commit을 맡는다. commit 성공 반환 뒤에만 executor를
-  호출하며 실제 원천 adapter·HTTP·bootstrap 연결은 없다. 기존 trial/N·blocked-attempt를 쓰지 않는다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
 - 연속 계좌 평가는 `application/continuous_account`가 자체 실험 출처·파이프라인·실행·이력
   포트를 소유하고, 기존 `application/backtest_run`의 outgoing 데이터 포트만 재사용한다.
@@ -209,8 +204,9 @@ bootstrap ─> application + adapters
   composition root가 정한다: `bootstrap/_http.py`가 `STRATEGY_WORKBENCH_EQUITY_ADAPTER`(기본
   `mock`)와 `STRATEGY_WORKBENCH_EQUITY_ROOT`를 읽고, 허용 값 목록은 `bootstrap/_container.py`의
   `EQUITY_ADAPTERS`다.
-- 두 어댑터가 같은 field_id에 답하는 필드 계약(단위·값 타입·랙·빈도)의 owner는
-  `.claude/rules/strategy-workbench-sot.md`의 equity 필드 계약 행이다.
+- 두 어댑터가 같은 field_id에 답하는 필드 계약(단위·값 타입·랙·빈도)은 원장 선언을 따르고(빈도처럼
+  어휘가 다른 칸은 대응으로), 일치는
+  `tests/contract/test_equity_field_contract_parity.py`가 대조한다.
 - 실제 DB에 맞춰 domain/application을 DB 스키마대로 바꾸지 않는다. `equity_duckdb`가 port에
   맞춘다.
 - 설정한 adapter가 없거나 실패하면 mock으로 조용히 fallback하지 않는다.

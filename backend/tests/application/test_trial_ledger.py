@@ -1,7 +1,7 @@
 """시도 원장 — 새로 고를 거리가 생긴 실행만 N 에 센다(검증 랩 spec D2, V1-05).
 
 실제 run 서비스·연구 DB 파일·mock 데이터로 돌린다. 원장이 파일에 남아 재시작 뒤에도 같은지,
-미리 계산이 실제 기록과 같은지, 봉인 겹침 거절이 봉인 원장에만 남는지를 본다.
+미리 계산이 실제 기록과 같은지를 본다.
 """
 
 from __future__ import annotations
@@ -54,10 +54,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     MetricScope,
     build_default_metric_registry,
 )
-from strategy_workbench.domain.backtest.facade.environment import (
-    ResearchWindowViolationError,
-    RunEnvironment,
-)
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
 from strategy_workbench.domain.backtest.facade.trials import TrialRunRole, representative_sharpe
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
@@ -273,27 +270,6 @@ def test_runs_without_a_result_are_recorded_but_not_counted(lab: _Lab) -> None:
     assert lab.runs.preview_trial(_saved_run(saved)).new_trial is True
 
 
-def test_a_sealed_window_run_is_blocked_into_the_seal_ledger_but_a_preview_is_not(
-    lab: _Lab,
-) -> None:
-    saved = lab.save(_spec())
-    sealed = _saved_run(saved, start=date(2019, 6, 3))
-
-    with pytest.raises(ResearchWindowViolationError):
-        lab.runs.preview_trial(sealed)
-    with pytest.raises(ResearchWindowViolationError):
-        lab.runs.start(sealed)
-
-    ledger = lab.service().trial_ledger("s-1")
-    (blocked,) = ledger.blocked
-    assert (blocked.lineage_id, blocked.start, blocked.spec_hash) == (
-        "s-1",
-        date(2019, 6, 3),
-        saved.spec_hash,
-    )
-    assert (ledger.trial_count, ledger.trials) == (0, ())
-
-
 def test_unresolvable_parameter_values_are_refused_before_any_ledger_record(
     lab: _Lab,
 ) -> None:
@@ -303,11 +279,10 @@ def test_unresolvable_parameter_values_are_refused_before_any_ledger_record(
     # 미리 계산은 시작과 같은 코드로 거절한다(`backtest.run.parameter_invalid`).
     with pytest.raises(BacktestParameterValueError, match="parameter_id=missing"):
         lab.runs.preview_trial(unknown)
-    # 봉인 겹침과 해소 실패가 겹치면 봉인 겹침으로 거절하되, 전략이 확정되지 않았으니 남기지 않는다.
-    with pytest.raises(ResearchWindowViolationError):
-        lab.runs.start(replace(unknown, environment=replace(_ENVIRONMENT, start=date(2019, 6, 3))))
+    with pytest.raises(BacktestParameterValueError, match="parameter_id=missing"):
+        lab.runs.start(unknown)
 
-    assert lab.runs.trial_ledger("s-1").blocked == ()
+    assert lab.runs.trial_ledger("s-1").trials == ()
 
 
 def test_inline_drafts_join_a_lineage_only_when_they_name_one(lab: _Lab) -> None:
@@ -370,33 +345,3 @@ def test_a_run_status_that_never_finished_stays_out_of_n_after_restart(lab: _Lab
     finally:
         held.release.set()
         join_run_thread("run-1")
-
-
-def test_invalid_strategy_does_not_pollute_sealed_attempt_ledger(lab: _Lab) -> None:
-    """봉인 오류가 우선이어도 없는 필드를 참조한 초안은 확정된 전략의 시도가 아니다(#332)."""
-    from strategy_workbench.domain.factor.facade.expression import FieldNode
-
-    saved = lab.save(_spec())
-    original = saved.spec
-    factor = original.factors[0]
-    invalid = replace(
-        original,
-        factors=(
-            replace(
-                factor,
-                graph=replace(
-                    factor.graph,
-                    nodes=(FieldNode("missing", "nonexistent.field", "field"),),
-                    output_node_id="missing",
-                ),
-            ),
-        ),
-    )
-    request = BacktestRunSpec(
-        strategy_source=InlineDraft(invalid, "inline_draft", "hash"),
-        lineage_strategy_id=saved.spec.identity.strategy_id,
-        environment=replace(_ENVIRONMENT, start=date(2019, 6, 3)),
-    )
-    with pytest.raises(ResearchWindowViolationError):
-        lab.runs.start(request)
-    assert lab.runs.trial_ledger(saved.spec.identity.strategy_id).blocked == ()

@@ -10,7 +10,6 @@ private commit(Windows `peak_pagefile`)도 잰다. `--experiment-start`·`--expe
 
 run 은 한 번에 하나만 돈다. 시작 전 가용 메모리가 `--min-available-gb` 보다 작으면 돌리지
 않는다(페이징 방지). 측정 절차와 결과의 정본은 `docs/planning/run-worker-process/BENCHMARK.md` 다.
-구간 시작은 홀드아웃 규칙에 따라 2020-01-02 이후만 받는다(`.claude/rules/holdout-window.md`).
 
 사용법:
     uv run --no-sync --with psutil python scripts/bench_run_memory.py \
@@ -28,7 +27,6 @@ import shutil
 import tempfile
 import threading
 import time
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +36,6 @@ from strategy_workbench.adapters.outbound.run_worker_process._memory import (
     available_memory_bytes,
 )
 from strategy_workbench.bootstrap.facade.http import build_http_app
-from strategy_workbench.domain.backtest.facade.environment import RESEARCH_START
 
 try:
     import psutil
@@ -260,10 +257,6 @@ def main() -> None:
         "--min-available-gb", type=float, default=4.0, help="시작 전에 있어야 하는 가용 메모리"
     )
     args = parser.parse_args()
-    for value in (args.start, args.experiment_start):
-        if value is not None and date.fromisoformat(value) < RESEARCH_START:
-            raise SystemExit(f"구간 시작은 {RESEARCH_START} 이후여야 한다(홀드아웃) — got={value}")
-
     records = _Records()
     logger = logging.getLogger("strategy_workbench")
     logger.setLevel(logging.INFO)

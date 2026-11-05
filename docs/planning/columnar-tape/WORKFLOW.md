@@ -36,7 +36,7 @@ T0-01 기획 패키지 ──────┴─ T1-01 대조 하네스 골격
 4. W2-02 메모리 추정식 계수는 T4-03 측정 뒤 W 쪽에서 다시 맞춘다.
 5. T6-03은 W4-01 머지 뒤에 한다(같은 factor-regression 구간).
 6. W5-00 측정은 T6-01 뒤에 한다(trace·preview가 빨라지면 판단이 달라진다).
-7. SoT 행: W3-01은 "실험 시간 어림"·"백테스트 run 접수"·"백테스트 run 기록" 행, T7-01은 팩터 관련 행(T7-01 packet)을 고친다. 행이 겹치지 않는다.
+7. owner docstring: W3-01은 실험 시간 어림·백테스트 run 접수·run 기록 owner 모듈의 docstring, T7-01은 팩터 관련 owner 모듈의 docstring(T7-01 packet)을 고친다. 겹치지 않는다.
 8. 비트 동일의 기준 판은 CPython 3.11이다(spec D3). Python 판 상향은 이 initiative 밖에서 판본 결정과 함께 한다.
 
 ## 2. 공통 gate
@@ -85,7 +85,7 @@ Phase마다 작업분 SoT·책임 분리 점검을 하고, T9-01에서 portfolio
 | T6-01 | trace 서비스 | 기준일 원시 행·구성원·팩터 값을 열에서 읽는다 | - | `_trace_service.py` | trace HTTP 통합 |
 | T6-02 | S03·연속 계좌 | 정합 검사를 열로, 필요한 날짜만 객체 | analytics | `signal_pipeline/_adapter.py`, `continuous_pipeline/_adapter.py` | 기존 S03·S04 통합 |
 | T6-03 | factor-regression 입력 | `factor_periods`가 `PortfolioPanel`을 읽는다(W4-01 뒤) | 회귀 공식 | `backtest_run/_factor_regression.py`, `_service.py` | `test_factor_regression*` |
-| T7-01 | 객체 평가기 삭제 | 옛 평가기·변환 삭제, digest 고정, SoT("팩터 정의"·"팩터의 세션 읽기 창"·"팩터 **값**"·"팩터 값의 공개일"·"결합 전 정규화"·"팩터 평가 규칙 판본" 행)·경계 규칙·`test_forbidden_imports` 갱신 | - | `_evaluation.py`, `_service.py`, tests, rules | 전체 |
+| T7-01 | 객체 평가기 삭제 | 옛 평가기·변환 삭제, digest 고정, 팩터 정의·세션 읽기 창·팩터 **값**·팩터 값의 공개일·결합 전 정규화·팩터 평가 규칙 판본 owner 모듈의 docstring·경계 규칙·`test_forbidden_imports` 갱신 | - | `_evaluation.py`, `_service.py`, tests, rules | 전체 |
 | T7-02 | 객체 컴파일러 삭제 | T5 대조 끝, 옛 `_compile_frame` 경로 삭제. `compile_target_tape(observations=...)`는 패널 변환 경계 함수로 남김 | - | `_compiler.py`, tests | 전체 |
 | T7-03 | 어댑터 단일화 | duckdb 행 API를 열 경로에서 파생, `_signal_labels`도 열 경로로, `RawObservationSet.validate_contract`를 `RawPanel` 검증에서 파생(계약 검증 하나). L0 대조 규칙도 한 벌로 합친다 — 지금은 `scripts/parity_tape.py`의 열 대조기 `panel_differences`(실원장용, 칸 수만)와 테스트의 `_projection`+`tests/parity/_compare.py`(손 픽스처용, 값까지) 두 벌이다(#582 리뷰 nit-1) | 포트 행 메서드 제거 결정 | `equity_duckdb/*` | L0, 계약 테스트 |
 | T9-01 | 종료 리뷰 | 경로 단일성·SoT·경계 감사, 도메인 전체 리뷰 | - | - | - |

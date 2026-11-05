@@ -33,11 +33,6 @@ from strategy_workbench.domain.backtest._requirement import (
     MissingRunEnvironmentError,
     require_environment,
 )
-from strategy_workbench.domain.backtest._research_window import (
-    RESEARCH_START,
-    ResearchWindowViolationError,
-    require_research_window,
-)
 from strategy_workbench.domain.backtest._retired import (
     RetiredEnvironment,
     environment_from_retired_settings,
@@ -55,7 +50,6 @@ __all__ = [
     "PRICE_ADJUSTING_ACTIONS",
     "MAX_IMPACT_FRACTION",
     "DEFAULT_MISSING_POLICY",
-    "RESEARCH_START",
     "RUN_ENVIRONMENT_CONSTRAINTS",
     "STATUTORY_SELL_TAX_BPS",
     "DataFrequency",
@@ -64,7 +58,6 @@ __all__ = [
     "Market",
     "MissingRunEnvironmentError",
     "ParticipationBasis",
-    "ResearchWindowViolationError",
     "RetiredEnvironment",
     "RunEnvironment",
     "SellTax",
@@ -73,7 +66,6 @@ __all__ = [
     "environment_hash",
     "settlement_multipliers",
     "require_environment",
-    "require_research_window",
     "run_environment_schema",
     "backtest_run_options_schema",
     "run_environment_schema_hash",

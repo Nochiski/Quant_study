@@ -60,3 +60,36 @@ def test_p4_takes_preliminary_earnings_from_2026_07_only_and_skips_subsidiary_on
     plan = m.build_plan(con, [4])
     assert [r for _, r in plan] == ["20261029800635", "20261027800047", "20261021900206", "20260701800001"]
     assert {p for p, _ in plan} == {4}
+
+
+def test_daily_gate_and_health_count_the_same_documents_the_collector_takes(tmp_path, monkeypatch):
+    """원문 대상 술어의 정본은 `doc_targets` 하나다 — 그날 수집기가 받을 원문과 dart_daily documents 게이트 ·
+    ledger_health dart.docs 가 세는 원문이 같아야 한다. 사본이 따로 있을 때 #655 결함(괄호)은 게이트 쪽에만,
+    잠정실적 누락은 건전성 쪽에만 났다."""
+    from types import SimpleNamespace
+
+    from daily import dart_daily as dd
+    from daily import ledger_health as lh
+
+    m = _load(tmp_path, monkeypatch)
+    con = _db(tmp_path)
+    d = "20261029"
+    con.executemany("INSERT INTO dart_disclosure VALUES (?,?,?,?)", [
+        ("20261029000001", d, "005930", "주식분할결정"),
+        ("20261029000002", d, "005930", "주식병합결정"),
+        ("20261029000003", d, "005930", "사업보고서 (2025.12)"),
+        ("20261029000004", d, "005930", "사업보고서제출기한연장신고서"),
+        ("20261029000005", d, "005930", "[기재정정]반기보고서 (2026.06)"),
+        ("20261029000006", d, "005930", "분기보고서 (2026.09)"),
+        ("20261029800007", d, "005930", "연결재무제표기준영업(잠정)실적(공정공시)"),
+        ("20261029800008", d, "000660", "연결재무제표기준영업(잠정)실적(공정공시)(자회사의 주요경영사항)"),
+        ("20261029000009", d, "", "사업보고서 (2025.12)"),
+        ("20261029000010", d, "005930", "임원ㆍ주요주주특정증권등소유상황보고서"),
+        ("20261028000011", "20261028", "005930", "분기보고서 (2026.09)")])
+    on_d = {r for (r,) in con.execute("SELECT rcept_no FROM dart_disclosure WHERE rcept_dt = ?", (d,))}
+    taken = {r for _, r in m.build_plan(con, [1, 2, 3, 4]) if r in on_d}
+    assert taken == {"20261029000001", "20261029000002", "20261029000003", "20261029000005",
+                     "20261029000006", "20261029800007"}
+    assert dd._gate_docs(con, SimpleNamespace(date=d)).metrics["n_target"] == len(taken)
+    health = {c.name: c for c in lh.check_dart(con, d, True, "2026-10-28T15:00:00")}["dart.docs"]
+    assert health.value["target"] == len(taken)

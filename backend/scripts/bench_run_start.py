@@ -5,8 +5,7 @@ run 마다 worker 를 띄운다. 같은 요청을 번갈아 보내 접수부터 
 그 run 을 취소한다(결과를 만들지 않는다). 같은 요청은 진행 중 run 에 합쳐지므로 초기자본을 1원씩
 바꾼다. 이어 job 을 기다리는 예비 하나의 RSS·private 메모리·CPU 를 잰다(psutil 이 있으면).
 
-측정 절차와 결과의 정본은 `docs/planning/run-worker-process/BENCHMARK.md` 다. 구간 시작은 홀드아웃
-규칙에 따라 2020-01-02 이후만 받는다(`.claude/rules/holdout-window.md`).
+측정 절차와 결과의 정본은 `docs/planning/run-worker-process/BENCHMARK.md` 다.
 
 사용법:
     uv run --no-sync --with psutil python scripts/bench_run_start.py \
@@ -23,7 +22,6 @@ import statistics
 import tempfile
 import time
 from contextlib import ExitStack
-from datetime import date
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -36,7 +34,6 @@ from strategy_workbench.adapters.outbound.run_worker_process.facade.execution im
 )
 from strategy_workbench.bootstrap import _container
 from strategy_workbench.bootstrap.facade.http import build_http_app
-from strategy_workbench.domain.backtest.facade.environment import RESEARCH_START
 
 try:
     import psutil
@@ -157,9 +154,6 @@ def main() -> None:
     parser.add_argument("--cash", type=float, default=100_000_000.0)
     parser.add_argument("--idle-seconds", type=float, default=60.0)
     args = parser.parse_args()
-    if date.fromisoformat(args.start) < RESEARCH_START:
-        raise SystemExit(f"구간 시작은 {RESEARCH_START} 이후여야 한다(홀드아웃) — got={args.start}")
-
     tmp = Path(tempfile.mkdtemp(prefix="bench-run-start-"))
     latencies: dict[str, list[float]] = {"spare": [], "direct": []}
     with ExitStack() as stack:

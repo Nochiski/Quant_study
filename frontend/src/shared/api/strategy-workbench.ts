@@ -219,7 +219,7 @@ export class ApiRequestError extends Error {
    * 상세에만 쓴다 — 저장 상태 줄(409·422)은 `detail` 을 본문으로 그린다(#268 리뷰 P3-4).
    */
   readonly diagnostic: string | undefined;
-  /** detail 의 문자열 칸(`message` 제외). 거절 문장의 `{이름}` 자리표시자를 채운다(예: 연구 구간 날짜). */
+  /** detail 의 문자열 칸(`message` 제외). 거절 문장의 `{이름}` 자리표시자를 채운다(예: `parameter_invalid` 의 `{parameter_id}`). */
   readonly values: Readonly<Record<string, string>>;
 
   constructor(

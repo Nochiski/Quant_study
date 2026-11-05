@@ -18,8 +18,9 @@ from strategy_workbench.domain.equity.facade.research_data import (
 
 # 분할 사건 하나. `security_index` 종목은 `effective` 세션부터 원주가가 `1 / ratio`로 떨어지고,
 # 전방 조정 수정주가(첫 관측 수준 고정)는 사건 뒤 원주가 × `ratio`로 이어진다. 실제 삼성전자
-# 2018-05-04 50:1 액면분할을 본떴고, 날짜는 파이프라인이 측정할 수 있는 연구 구간(2020-01-02 이후,
-# spec D1) 안으로 옮겼다. fixture 달력(2024-01)은 사건 뒤라 그 안의 수정주가는 원주가 × `ratio`다.
+# 2018-05-04 50:1 액면분할을 본떴고, 날짜는 당시 앱이 측정을 허용하던 연구 구간(2020-01-02 이후,
+# spec D1, 2026-11-05 #679 폐기) 안으로 옮겼다. fixture 달력(2024-01)은 사건 뒤라 그 안의
+# 수정주가는 원주가 × `ratio`다.
 # 가격 변화 팩터가 원주가를 읽으면 이 사건에 오염된다(이슈 #214).
 @dataclass(frozen=True)
 class MockSplit:

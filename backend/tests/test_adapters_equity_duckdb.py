@@ -170,7 +170,8 @@ ALL_FIELDS = (
     *WB_WISE_FIELDS,
 )
 
-# 경고 문장이 한글로 완성됐는지 보는 표지(SoT 경고 문장 행, 이슈 #229).
+# 경고 문장이 한글로 완성됐는지 보는 표지. 문장은 경고를 만드는 `equity_duckdb/_adapter.py`가
+# 완성한다(이슈 #229).
 _HANGUL = re.compile("[가-힣]")
 
 

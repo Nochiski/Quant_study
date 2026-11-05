@@ -40,8 +40,6 @@ from strategy_workbench.domain.backtest.facade.account_report import (
 )
 from strategy_workbench.domain.backtest.facade.environment import (
     MissingRunEnvironmentError,
-    ResearchWindowViolationError,
-    RunEnvironment,
     environment_hash,
     require_environment,
 )
@@ -82,7 +80,6 @@ from strategy_workbench.domain.backtest.facade.runs import (
     run_input_key,
 )
 from strategy_workbench.domain.backtest.facade.trials import (
-    BlockedTrialAttempt,
     TrialLedger,
     TrialPreview,
     preview_trial,
@@ -403,12 +400,84 @@ class BacktestRunService:
             return self._run_slots, self._running
 
     def admit(self, request: BacktestRunSpec) -> RunAdmission:
-        """시작과 같은 판정(preflight·엔진 호환성 포함)을 타되 접수하지 않는다.
+        """요청을 실행할 spec 으로 해소하고 접수 판정(preflight·엔진 호환성 포함)을 모두 하되
+        접수하지 않는다. 데이터는 읽지 않는다.
 
-        실험 기반 요청 검사(검증 랩 V3-03)가 쓴다. 봉인 겹침 거절은 실행 요청이 아니므로 봉인 원장에
-        남기지 않는다.
+        `start` 와 실험 기반 요청 검사(검증 랩 V3-03)가 쓴다.
         """
-        return self._admit(request, record_blocked=False)
+        strategy, provenance = self._resolve(request)
+        spec = replace(request, strategy=strategy)
+        lineage_id = self._lineage(request, provenance)
+        # 실행 설정을 **preflight 앞에서** 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·
+        # tape·데이터 조회와 preflight 가 모두 같은 객체를 읽어야 명시 `environment` 가 조용히
+        # 무시되지 않는다(P2-01 P0). 1.2 는 문서에서 만드는 대체 경로가 없으므로 해소 단계가
+        # 사라졌고, 그래서 두 호출부가 다른 값을 볼 여지도 없다(P2-03 결정 항목).
+        environment = require_environment(
+            spec.environment, requested_by=f"backtest.run({strategy.title!r})"
+        )
+        spec = replace(spec, environment=environment)
+        # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
+        preflight = self._portfolio_design.preflight(
+            PortfolioPreviewRequest(strategy, environment=environment)
+        )
+        engine = preflight.engine
+        if not engine.compatible:
+            raise InvalidBacktestRunError(
+                "strategy exceeds engine capabilities — " + _describe_engine_issues(engine)
+            )
+        # 파라미터 값은 문서 검증(preflight) 뒤에 해소한다. 해소 결과가 실행 spec 에 박혀 지문·같은
+        # 입력 잇기·매니페스트·tape 가 모두 같은 값을 본다(spec D4).
+        try:
+            parameter_values = resolve_parameter_values(strategy.parameters, spec.parameter_values)
+        except InvalidParameterValueError as error:
+            raise BacktestParameterValueError(error) from error
+        spec = replace(spec, parameter_values=parameter_values)
+        for window in spec.metric_windows:
+            if window.start < environment.start or window.end > environment.end:
+                raise InvalidBacktestRunError(
+                    "metric window exceeds the run range — "
+                    f"scope={window.scope.value} window={window.start}..{window.end} "
+                    f"run={environment.start}..{environment.end}"
+                )
+        # TargetTape.strategy_hash 는 같은 spec 의 strategy_spec_hash 다. tape 없이도 provenance 를
+        # 확정할 수 있고, tape 단계가 이 값을 다시 대조한다.
+        executed_hash = strategy_spec_hash(strategy)
+        if provenance is None:
+            source_hash = (
+                request.strategy_source.source_hash
+                if isinstance(request.strategy_source, InlineDraft)
+                else None
+            )
+            provenance = StrategyProvenance(
+                kind=StrategySourceKind.INLINE_DRAFT,
+                spec_hash=executed_hash,
+                schema_version=strategy.identity.schema_version,
+                source_hash=source_hash,
+            )
+        elif provenance.spec_hash != executed_hash:  # pragma: no cover - 도달 불가 방어 분기
+            # StrategyRevisionRecord.__post_init__ 이 비동결 리비전에 같은 등식을 강제하고, 동결
+            # 리비전은 _resolve 가 앞에서 requires_upgrade 로 거부한다.
+            raise RuntimeError(
+                "saved strategy repository hash differs from the executed StrategySpec — "
+                f"strategy_id={provenance.strategy_id!r} revision={provenance.revision!r} "
+                f"stored={provenance.spec_hash!r} executed={executed_hash!r}"
+            )
+        return RunAdmission(
+            ResolvedBacktestRunSpec.from_request(
+                spec, strategy=strategy, environment=environment, parameter_values=parameter_values
+            ),
+            provenance,
+            lineage_id,
+            request.strategy_source,
+            request.lineage_strategy_id,
+            RunShape(
+                sessions=estimated_sessions(
+                    environment.start, environment.end, preflight.history_sessions
+                ),
+                fields=preflight.field_count,
+                factor_steps=preflight.factor_steps,
+            ),
+        )
 
     def start(
         self,
@@ -433,7 +502,7 @@ class BacktestRunService:
         같은 입력으로 도는 run 이 있으면 새 run 을 만들지 않고 그 run 을 돌려주고, 슬롯이 차 있으면
         `queued` 로 기다리게 한다(이슈 #161).
         """
-        admission = self._admit(request, record_blocked=True)
+        admission = self.admit(request)
         spec, provenance = admission.resolved, admission.provenance
         with self._lock:
             # 같은 입력(실행 지문의 요청 칸 `run_input_key`·provenance)·같은 계열·같은 시도 키로
@@ -506,92 +575,18 @@ class BacktestRunService:
             self._dispatch()
         return BacktestStartResponse(accepted)
 
-    def _admit(self, request: BacktestRunSpec, *, record_blocked: bool) -> RunAdmission:
-        """요청을 실행할 spec 으로 해소하고 접수 판정을 모두 한다. 데이터는 읽지 않는다."""
-        strategy, provenance = self._resolve(request)
-        spec = replace(request, strategy=strategy)
-        lineage_id = self._lineage(request, provenance)
-        # 실행 설정을 **preflight 앞에서** 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·
-        # tape·데이터 조회와 preflight 가 모두 같은 객체를 읽어야 명시 `environment` 가 조용히
-        # 무시되지 않는다(P2-01 P0). 1.2 는 문서에서 만드는 대체 경로가 없으므로 해소 단계가
-        # 사라졌고, 그래서 두 호출부가 다른 값을 볼 여지도 없다(P2-03 결정 항목).
-        environment = self._pin_environment(
-            spec, strategy, lineage_id, record_blocked=record_blocked
-        )
-        spec = replace(spec, environment=environment)
-        # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
-        preflight = self._portfolio_design.preflight(
-            PortfolioPreviewRequest(strategy, environment=environment)
-        )
-        engine = preflight.engine
-        if not engine.compatible:
-            raise InvalidBacktestRunError(
-                "strategy exceeds engine capabilities — " + _describe_engine_issues(engine)
-            )
-        # 파라미터 값은 문서 검증(preflight) 뒤에 해소한다. 해소 결과가 실행 spec 에 박혀 지문·같은
-        # 입력 잇기·매니페스트·tape 가 모두 같은 값을 본다(spec D4).
-        try:
-            parameter_values = resolve_parameter_values(strategy.parameters, spec.parameter_values)
-        except InvalidParameterValueError as error:
-            raise BacktestParameterValueError(error) from error
-        spec = replace(spec, parameter_values=parameter_values)
-        for window in spec.metric_windows:
-            if window.start < environment.start or window.end > environment.end:
-                raise InvalidBacktestRunError(
-                    "metric window exceeds the run range — "
-                    f"scope={window.scope.value} window={window.start}..{window.end} "
-                    f"run={environment.start}..{environment.end}"
-                )
-        # TargetTape.strategy_hash 는 같은 spec 의 strategy_spec_hash 다. tape 없이도 provenance 를
-        # 확정할 수 있고, tape 단계가 이 값을 다시 대조한다.
-        executed_hash = strategy_spec_hash(strategy)
-        if provenance is None:
-            source_hash = (
-                request.strategy_source.source_hash
-                if isinstance(request.strategy_source, InlineDraft)
-                else None
-            )
-            provenance = StrategyProvenance(
-                kind=StrategySourceKind.INLINE_DRAFT,
-                spec_hash=executed_hash,
-                schema_version=strategy.identity.schema_version,
-                source_hash=source_hash,
-            )
-        elif provenance.spec_hash != executed_hash:  # pragma: no cover - 도달 불가 방어 분기
-            # StrategyRevisionRecord.__post_init__ 이 비동결 리비전에 같은 등식을 강제하고, 동결
-            # 리비전은 _resolve 가 앞에서 requires_upgrade 로 거부한다.
-            raise RuntimeError(
-                "saved strategy repository hash differs from the executed StrategySpec — "
-                f"strategy_id={provenance.strategy_id!r} revision={provenance.revision!r} "
-                f"stored={provenance.spec_hash!r} executed={executed_hash!r}"
-            )
-        return RunAdmission(
-            ResolvedBacktestRunSpec.from_request(
-                spec, strategy=strategy, environment=environment, parameter_values=parameter_values
-            ),
-            provenance,
-            lineage_id,
-            request.strategy_source,
-            request.lineage_strategy_id,
-            RunShape(
-                sessions=estimated_sessions(
-                    environment.start, environment.end, preflight.history_sessions
-                ),
-                fields=preflight.field_count,
-                factor_steps=preflight.factor_steps,
-            ),
-        )
-
     def preview_trial(self, request: BacktestRunSpec) -> TrialPreview:
         """실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2).
 
-        `start` 와 같은 해소·계열·실행 설정 판정을 타서 같은 시도 키를 낸다. 봉인 겹침은 같은 422 로
-        거절하되 실행 요청이 아니므로 봉인 원장에 남기지 않는다. 전략 검증(preflight)은 하지 않는다.
+        `start` 와 같은 해소·계열·실행 설정 판정을 타서 같은 시도 키를 낸다. 전략 검증(preflight)은
+        하지 않는다.
         """
         strategy, provenance = self._resolve(request)
         spec = replace(request, strategy=strategy)
         lineage_id = self._lineage(request, provenance)
-        environment = self._pin_environment(spec, strategy, lineage_id, record_blocked=False)
+        environment = require_environment(
+            spec.environment, requested_by=f"backtest.run({strategy.title!r})"
+        )
         try:
             key = trial_key(replace(spec, environment=environment))
         except InvalidParameterValueError as error:
@@ -605,14 +600,14 @@ class BacktestRunService:
         return None if lineage_id is None else self.trial_ledger(lineage_id)
 
     def trial_ledger(self, lineage_id: str) -> TrialLedger:
-        """계열 원장 — 시도 묶음·재확인·N 제외 실행·차단한 시도.
+        """계열 원장 — 시도 묶음·재확인·N 제외 실행.
 
         합쳐진 계열을 물으면 남은 계열의 원장이다. 저장된 전략이 아니면 `StrategyNotFoundError`.
         """
         self._strategy_repository.get(lineage_id)
         records = self._repository.trial_ledger(lineage_id)
         return summarize_trial_ledger(
-            records.lineage_id, records.merged_lineage_ids, records.entries, records.blocked
+            records.lineage_id, records.merged_lineage_ids, records.entries
         )
 
     def merge_lineages(self, source_id: str, target_id: str) -> TrialLedger:
@@ -873,8 +868,9 @@ class BacktestRunService:
     ) -> _FactorReturns | FactorRegressionUnavailableReason:
         """계산해 둔 팩터 수익률. 없으면 뒤에서 계산을 걸고(같은 키는 한 번) `COMPUTING`.
 
-        데이터 판은 프로세스 안에서 고정이라(SoT "백테스트 run 접수" 행) 계산해 둔 값은 늘 지금
-        판과 같은 판의 것이고, 판이 달라 회귀하지 않는다는 답도 다시 계산하지 않고 그대로 둔다.
+        데이터 판은 프로세스 안에서 고정이라(equity 어댑터가 부팅 때 판을 고정한다.
+        `run_input_key`도 같은 가정으로 판을 키에서 뺀다) 계산해 둔 값은 늘 지금 판과 같은 판의
+        것이고, 판이 달라 회귀하지 않는다는 답도 다시 계산하지 않고 그대로 둔다.
         일시 실패(원천 부재·조회 중 판 경합·예상 밖 오류)는 사유를 한 번 돌려주고 잊는다 — 다음
         조회가 다시 계산한다.
         활성 계산이 있으면 다른 키도 `COMPUTING`만 답하며, 완료 후 다음 조회에서 접수한다.
@@ -1151,60 +1147,6 @@ class BacktestRunService:
                     f"lineage strategy not found — lineage_strategy_id={lineage_id}"
                 ) from error
         return lineage_id
-
-    def _pin_environment(
-        self,
-        spec: BacktestRunSpec,
-        strategy: StrategySpec,
-        lineage_id: str | None,
-        *,
-        record_blocked: bool,
-    ) -> RunEnvironment:
-        """요청의 실행 설정을 확정한다.
-
-        없거나 연구 구간 밖이면 domain 오류(`MissingRunEnvironmentError`·
-        `ResearchWindowViolationError`)를 그대로 올리고, 접수 거절 코드는 `rejection_code` 가 준다.
-        봉인 겹침 거절은 `record_blocked` 면 봉인 원장에 남긴다(spec D11).
-        """
-        try:
-            return require_environment(
-                spec.environment, requested_by=f"backtest.run({strategy.title!r})"
-            )
-        except ResearchWindowViolationError:
-            if record_blocked and spec.environment is not None:
-                self._record_blocked(spec, strategy, spec.environment, lineage_id)
-            raise
-
-    def _record_blocked(
-        self,
-        spec: BacktestRunSpec,
-        strategy: StrategySpec,
-        environment: RunEnvironment,
-        lineage_id: str | None,
-    ) -> None:
-        # 기록이 실패해도 거절은 그대로 돌려준다 — 막는 것이 먼저다.
-        try:
-            self._portfolio_design.validate_trial_strategy(strategy, missing=environment.missing)
-            key = trial_key(spec)
-        except (InvalidPortfolioRequestError, InvalidParameterValueError):
-            # 전략·팩터 플랜·파라미터가 확정되지 않은 요청은 봉인 감사 기록에 남기지 않는다.
-            return
-        try:
-            self._repository.record_blocked_attempt(
-                BlockedTrialAttempt(
-                    blocked_at=self._now(),
-                    lineage_id=lineage_id,
-                    trial_key=key,
-                    spec_hash=strategy_spec_hash(strategy),
-                    start=environment.start,
-                )
-            )
-        except Exception:
-            logger.exception(
-                "sealed-window block could not be recorded — lineage_id=%s start=%s",
-                lineage_id,
-                environment.start,
-            )
 
     def _record_completion(self, completed: BacktestRunState, committed: RunCommitted) -> None:
         """완료 전이와 대표 샤프·머리 지표를 한 트랜잭션에 적는다. 실패하면 원인을 남기고 올려
@@ -1554,10 +1496,9 @@ def _cancel_result(state: BacktestRunState, *, kept_by_owners: bool) -> Backtest
 
 # 실행 접수 거절과 그 안정 키. HTTP 거절(시작·미리 계산·실험 기반 검사와, 같은 판정을 타는
 # 미리보기·추적 — #351)과 실험 trial 제출이 이 목록 하나를 쓴다. 하위 타입을 먼저 둔다.
-# 실행 설정 거절은 domain 오류 그대로다 — 봉인 구간·연구 하한 날짜도 그 오류가 싣는다.
+# 실행 설정 거절은 domain 오류 그대로다.
 _REJECTION_CODES: tuple[tuple[type[Exception], AdmissionRejectionCode], ...] = (
     (MissingRunEnvironmentError, "backtest.run.environment_required"),
-    (ResearchWindowViolationError, "backtest.run.research_window_violation"),
     (BacktestParameterValueError, "backtest.run.parameter_invalid"),
     (InvalidParameterValueError, "backtest.run.parameter_invalid"),
     (InvalidBacktestRunError, "backtest.run.invalid"),

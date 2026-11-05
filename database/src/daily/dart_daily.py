@@ -63,6 +63,7 @@ _SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
+import doc_targets
 from daily import calendar as daily_calendar
 from daily import runlog
 
@@ -718,15 +719,9 @@ def _gate_received(name: str, units: Sequence[Unit], rec: Received, *,
                 f"{detail} missing={sample}{'…' if len(missing) > 5 else ''}", metrics)
 
 
-_DOC_TARGET_SQL = """
-WITH tgt AS (
-  SELECT DISTINCT rcept_no FROM dart_disclosure
-  WHERE rcept_dt = ? AND stock_code <> ''
-    AND (report_nm LIKE '%주식분할결정%' OR report_nm LIKE '%주식병합결정%'
-         OR (report_nm NOT LIKE '%연장신고%' AND
-             (report_nm LIKE '%사업보고서%' OR report_nm LIKE '%반기보고서%'
-              OR report_nm LIKE '%분기보고서%'))
-         OR (report_nm LIKE '%영업(잠정)실적(공정공시)%' AND report_nm NOT LIKE '%자회사%')))
+# 대상 = 수집기 우선순위 술어의 합(`doc_targets` — 수집기 · 원장 건전성과 같은 술어)
+_DOC_TARGET_SQL = f"""
+WITH tgt AS ({doc_targets.TARGETS_ON_DATE_SQL})
 SELECT COUNT(*),
        COALESCE(SUM(CASE WHEN s.zip_ok = 1 THEN 1 ELSE 0 END), 0),
        COALESCE(SUM(CASE WHEN s.rcept_no IS NULL THEN 1 ELSE 0 END), 0),

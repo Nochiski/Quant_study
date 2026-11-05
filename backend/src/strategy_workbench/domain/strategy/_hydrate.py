@@ -13,7 +13,7 @@ ADR: docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md (D1, D
   `ParameterValue` union keeps bool/str as-is and folds integral floats to int.
 
 진단 문장은 한국어로 완성해 보낸다(P1-05). Problems panel은 `message`를 그대로 보여주고 다시
-조립하지 않으므로(`.claude/rules/strategy-workbench-sot.md`), 화면 문구의 owner가 이 모듈이다.
+조립하지 않으므로, 구조 진단(`structure.*`) 코드와 화면 문구의 owner가 이 모듈이다.
 문장 뒤 `—` 다음에는 기계가 읽는 디테일(`got=`·`expected=`·`allowed=`·`missing=`)이 남는다
 (`.claude/rules/error-messages.md`). 키·kind·enum 오타에는 가까운 후보를 한 개 제안한다.
 버전 줄은 현재 버전인데 본문이 1.0 문법이면 그 자리의 진단이 `structure.legacy_shape`로 바뀐다.
@@ -45,8 +45,7 @@ from ._upgrade import (
 # 새 문서로 받는 버전 집합. 현재 버전 상수의 owner는 `_models.py`다(모델 기본값과 같은 값).
 SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = (CURRENT_SCHEMA_VERSION,)
 
-# 본문만 1.0 문법인 문서에 다는 힌트 코드. `structure.*`의 owner는 이 모듈이다
-# (`.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행).
+# 본문만 1.0 문법인 문서에 다는 힌트 코드. `structure.*`의 owner는 이 모듈이다.
 LEGACY_SHAPE_CODE = "structure.legacy_shape"
 # 버전 줄이 현재 판이 아니지만 업그레이더가 거절할 문서에 다는 코드. 업그레이드 배너는
 # `structure.unsupported_schema_version` 에만 뜬다(frontend `decideDocumentUpgrade`, #267 DEFECT-2).

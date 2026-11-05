@@ -73,7 +73,7 @@ describe("traceErrorMessage (Phase 1 감사 위험 5b)", () => {
   });
 });
 
-// #351: 봉인 구간·칸 규칙 같은 영구 조건이 "잠시 뒤 다시 추적하세요"로 보이면 안 된다. 실행 시 계약 파일
+// #351: 실행 설정·칸 규칙 같은 영구 조건이 "잠시 뒤 다시 추적하세요"로 보이면 안 된다. 실행 시 계약 파일
 // (backend `openapi.json`)과 대조한다 — 추적 거절 코드가 늘면 목록 단언이 먼저 깨진다.
 describe("trace rejection code vocabulary (#351)", () => {
   it("gives every coded trace rejection a sentence of its own", () => {
@@ -85,7 +85,6 @@ describe("trace rejection code vocabulary (#351)", () => {
       "backtest.run.environment_required",
       "backtest.run.field_invalid",
       "backtest.run.parameter_invalid",
-      "backtest.run.research_window_violation",
       "portfolio.data.unavailable",
       "portfolio.raw_observation.invalid",
       "portfolio.strategy.invalid",
@@ -113,36 +112,6 @@ describe("trace rejection code vocabulary (#351)", () => {
           tOptional(`backtest.error.${code}`) !== null,
       ),
     ).toEqual([]);
-  });
-
-  it("says a run settings rejection with the backtest start sentence and its dates", () => {
-    const values = {
-      code: "backtest.run.research_window_violation",
-      sealed_start: "2016-01-01",
-      sealed_end: "2019-12-31",
-      research_start: "2020-01-02",
-    };
-    const rejection = new ApiRequestError(
-      "traceStrategy",
-      422,
-      values.code,
-      "측정 시작일이 연구 구간 밖이라 실행할 수 없다",
-      null,
-      null,
-      undefined,
-      undefined,
-      values,
-    );
-
-    expect(traceErrorMessage(rejection)).toBe(
-      backtestStartRejectionMessage(rejection),
-    );
-    expect(traceErrorMessage(rejection)).toContain(
-      "2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고",
-    );
-    expect(traceErrorMessage(rejection)).not.toContain("{research_start}");
-    // 백테스트 시작과 같은 문장이라 두 동작에 맞는 동사로 끝난다(#351 리뷰 P3-1).
-    expect(traceErrorMessage(rejection)).toMatch(/다시 실행하세요\.$/u);
   });
 
   it("does not point a trace input rejection at the run settings (#351 리뷰 P3-2)", () => {

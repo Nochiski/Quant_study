@@ -589,7 +589,7 @@ export const SeverityBadge = ({
 
 /**
  * 진단 본문을 그 자리(섹션 제목 아래·목록 항목 안·필드 아래·노드 카드 안)에 그대로 보인다. 문제
- * 목록과 같은 문장이고 backend가 완성해 보낸 것을 다시 조립하지 않는다(SoT "authoring 진단 코드" 행).
+ * 목록과 같은 문장이고 backend가 완성해 보낸 것을 다시 조립하지 않는다(`.claude/rules/error-messages.md`).
  *
  * live region이 아니다(P1-04 리뷰 P3). 예전에는 필드 오류마다 `role="alert"`를 달았는데, 오류가
  * 여럿인 문서를 열면 assertive 알림이 동시에 삽입돼 스크린리더가 서로를 끊어 먹고 마지막 하나만

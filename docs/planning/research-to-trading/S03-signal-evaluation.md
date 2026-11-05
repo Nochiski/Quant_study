@@ -47,7 +47,7 @@ return_fraction = P[security, label_end] / P[security, entry_session] - 1
 ## 공개 진입의 검증과 평가 시점
 
 - 신호·가격 데이터의 nonempty snapshot ID가 같아야 한다. 두 입력의 실제 파일 판본은 호출자 책임이며, 동일 문자열만으로 내용의 동일성을 인증하지 않는다.
-- `require_research_window`를 기존 `domain.backtest` facade에서 읽어 평가일과 모든 신호일에 적용한다. 2020-01-02 이전 신호의 측정은 새 공개 함수에서도 거절한다. 이번 테스트의 데이터는 전부 2024 합성값이다. 봉인 거절 테스트는 과거 데이터 계산 전에 예외를 확인한다.
+- (2026-11-05 폐기) 평가일·신호일에 걸던 연구 하한(`require_research_window`, 2020-01-02)은 사용자 결정으로 앱 관문을 없애며 #679에서 지웠다. 홀드아웃은 실험 사전등록으로 관리한다([홀드아웃 규칙](../../../.claude/rules/holdout-window.md)).
 - 공통 달력은 비어 있지 않고 중복 없이 오름차순이어야 한다. 가격과 신호의 `(session, security_id)`도 중복을 거절한다. 같은 관측 안의 중복 factor ID, 비유한 신호, 0 이하·비유한 가격을 거절한다.
 - 신호의 `available_date <= signal_session`을 만족해야 유효 쌍에 들어간다. 늦게 공개된 값이 크더라도 사용할 수 없다.
 - `label_end <= evaluation_as_of`와 진입·만기 가격의 `available_date <= evaluation_as_of`를 만족해야 한다. 입력에 미래 가격이 이미 있어도 아직 만기가 아니면 수익률을 반환하지 않는다.

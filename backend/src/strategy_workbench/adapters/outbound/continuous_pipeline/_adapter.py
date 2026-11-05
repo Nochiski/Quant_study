@@ -21,10 +21,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioPreviewRequest,
 )
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
-from strategy_workbench.domain.backtest.facade.environment import (
-    RunEnvironment,
-    require_research_window,
-)
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import RunStatus
 from strategy_workbench.domain.experiment.facade.trial import ExperimentStatus, TrialStatus
 from strategy_workbench.domain.portfolio.facade.scheduled_construction import ScheduledCandidate
@@ -197,7 +194,6 @@ class ContinuousPortfolioPipelineAdapter:
         self._bridge = bridge
 
     def preflight(self, source: FrozenExperimentInput, environment: RunEnvironment) -> None:
-        require_research_window(environment.start, requested_by="continuous_account")
         if not self._bridge.assess(source.strategy, environment).compatible:
             raise ContinuousAccountRejectedError(
                 "continuous.unsupported", "선택된 전략의 실행 요구를 현재 커널이 지원하지 않습니다."

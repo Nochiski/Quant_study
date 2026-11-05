@@ -1,7 +1,7 @@
-"""시도 원장·봉인 원장 차단 기록 포트 (검증 랩 spec D2·D11, V1-05).
+"""시도 원장 포트 (검증 랩 spec D2, V1-05).
 
 실행이 어느 계열의 어느 시도인지는 접수 때 run 기록과 한 트랜잭션으로 적는다
-(`BacktestRunRepositoryPort.add`). 이 포트는 그 뒤의 기록(대표 샤프·차단한 시도·계열 합치기)과 계열
+(`BacktestRunRepositoryPort.add`). 이 포트는 그 뒤의 기록(대표 샤프·계열 합치기)과 계열
 단위 조회를 맡는다. 시도로 묶고 N 을 세는 규칙은 domain(`summarize_trial_ledger`)이 소유한다.
 """
 
@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Protocol
 
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunState
-from strategy_workbench.domain.backtest.facade.trials import BlockedTrialAttempt, TrialLedgerEntry
+from strategy_workbench.domain.backtest.facade.trials import TrialLedgerEntry
 
 
 class TrialLineageAlreadyMergedError(ValueError):
@@ -26,7 +26,6 @@ class TrialLedgerRecords:
     lineage_id: str
     merged_lineage_ids: tuple[str, ...]
     entries: tuple[TrialLedgerEntry, ...]
-    blocked: tuple[BlockedTrialAttempt, ...]
 
 
 @dataclass(frozen=True)
@@ -56,10 +55,6 @@ class TrialLedgerPort(Protocol):
         함께 적어 완료가 아닌 run 에 대표 샤프·머리 지표가 남지 않게 한다 — 서비스는 취소와
         선형화해 완료가 이긴 뒤에만 부른다(#581 리뷰).
         """
-        ...
-
-    def record_blocked_attempt(self, attempt: BlockedTrialAttempt) -> None:
-        """봉인 겹침으로 거절한 실행 요청을 봉인 원장에 적는다. 이 기록이 정본이다."""
         ...
 
     def trial_ledger(self, lineage_id: str) -> TrialLedgerRecords:

@@ -23,10 +23,6 @@ type DocumentToolbarProps = {
   runSettings?: ReactNode;
   /** 거절이 가리킨 요청 본문의 칸(점 경로) → 실행 설정 칸 이름. 모르면 null. */
   runFieldLabel?: (field: string) => string | null;
-  /** 시작 거절을 한 번에 고치는 교정(예: 연구 구간 거절의 시작일 옮기기). 없으면 null. */
-  runRejectionFix?: (
-    error: unknown,
-  ) => { label: string; apply: () => void } | null;
   decision: BacktestSourceDecision;
   runStatus: RunBacktestStatus;
 };
@@ -63,14 +59,9 @@ export const DocumentToolbar = ({
   runBlockedReason,
   runSettings,
   runFieldLabel,
-  runRejectionFix,
   decision,
   runStatus,
 }: DocumentToolbarProps) => {
-  const fix =
-    runStatus.kind === "failed" && runRejectionFix !== undefined
-      ? runRejectionFix(runStatus.error)
-      : null;
   return (
     <div className="doc-toolbar">
       <dl className="doc-toolbar__identity">
@@ -130,13 +121,7 @@ export const DocumentToolbar = ({
           title={t("toolbar.run.failed")}
           message={backtestStartRejectionMessage(runStatus.error, runFieldLabel)}
           reason={failureReason(runStatus.error)}
-        >
-          {fix === null ? undefined : (
-            <Button size="small" tone="primary" onClick={fix.apply}>
-              {fix.label}
-            </Button>
-          )}
-        </FailureNotice>
+        />
       ) : null}
     </div>
   );

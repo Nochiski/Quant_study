@@ -622,7 +622,6 @@ export const NewStrategyPage = () => {
               />
             }
             runFieldLabel={runSettings.runFieldLabel}
-            runRejectionFix={runSettings.rejectionFix}
             decision={backtest.decision}
             runStatus={backtest.status}
           />

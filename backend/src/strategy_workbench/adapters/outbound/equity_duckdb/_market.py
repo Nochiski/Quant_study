@@ -21,8 +21,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
-
-import duckdb
+from typing import TYPE_CHECKING
 
 from strategy_workbench.application.market_overview.facade.overview import (
     MarketDataUnreadableError,
@@ -47,6 +46,9 @@ from ._specs import (
     SOURCE_BY_NAME,
     UNIVERSE_TABLE,
 )
+
+if TYPE_CHECKING:
+    import duckdb
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +97,12 @@ def _require(adapter: EquityDuckdbAdapter, *tables: str) -> None:
 def _connection(card: str) -> Iterator[duckdb.DuckDBPyConnection]:
     """질의 연결. 표를 읽지 못하면(판 파일이 지워짐·열이 바뀜 등) 로그를 남기고 포트 오류로 바꾼다 —
     카드 하나만 실패한다. `card` 는 그 카드의 주 표 이름이다."""
+    import duckdb as module  # 지연 import — `_adapter._open` 과 같은 이유(optional extra `equity`)
+
     con = _open(None)
     try:
         yield con
-    except duckdb.Error as error:
+    except module.Error as error:
         logger.warning("market card query failed — card=%s error=%r", card, error, exc_info=True)
         raise MarketDataUnreadableError(card, repr(error)) from error
     finally:

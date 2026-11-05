@@ -34,6 +34,7 @@ from datetime import datetime, timedelta
 BASE = os.environ.get("QL_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "src"))
 import api
+from doc_targets import PRIORITIES  # 우선순위 술어의 정본 — 일일 게이트 · 원장 건전성이 같은 술어를 센다
 
 DB    = os.path.join(BASE, "data", "raw", "dart.db")
 DOCS  = os.path.join(BASE, "data", "raw", "documents")
@@ -42,19 +43,6 @@ URL   = "https://opendart.fss.or.kr/api/document.xml?crtfc_key={key}&rcept_no={r
 PACE  = 0.3               # 응답이 평균 0.5MB 라 조회 API 보다 한 박자 느리게
 QUOTA_LIMIT = 40_000      # 평일 실측 한도. 주말 완화는 미검증이라 기대하지 않는다
 RETRY_MAX, RETRY_BASE = 3, 5.0
-
-# 사업보고서 LIKE 매칭이 "사업보고서제출기한연장신고서" 를 물지 않게 막는다.
-NOT_REPORT = "report_nm NOT LIKE '%연장신고%'"
-# 연결·별도 잠정실적과 그 정정·첨부추가. 자회사 실적 공시는 상장사 본인 숫자가 아니라 뺀다(dart_daily 게이트도 같은 술어)
-PRELIM = "(report_nm LIKE '%영업(잠정)실적(공정공시)%' AND report_nm NOT LIKE '%자회사%')"
-PRIORITIES = {
-    1: ("분할·병합", ("(report_nm LIKE '%주식분할결정%' OR report_nm LIKE '%주식병합결정%') "
-                    "AND stock_code <> ''")),
-    2: ("사업보고서", f"report_nm LIKE '%사업보고서%' AND {NOT_REPORT} AND stock_code <> ''"),
-    3: ("반기·분기", ("(report_nm LIKE '%반기보고서%' OR report_nm LIKE '%분기보고서%') "
-                    f"AND {NOT_REPORT} AND stock_code <> ''")),
-    4: ("잠정실적", f"{PRELIM} AND stock_code <> '' AND rcept_dt >= '20260701'"),
-}
 
 DDL = """CREATE TABLE IF NOT EXISTS doc_store (
   rcept_no    TEXT PRIMARY KEY,

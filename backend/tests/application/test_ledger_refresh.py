@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -10,6 +11,7 @@ import pytest
 from strategy_workbench.application.ledger_refresh.facade.refresh import (
     REMOTE_CHECK_TTL,
     ActiveWork,
+    DataRefreshingError,
     LedgerRefreshService,
     RefreshCode,
     RefreshFailure,
@@ -246,3 +248,27 @@ def test_a_failed_apply_reports_a_restart_and_keeps_serving() -> None:
         1,
     )
     assert "서버를 다시 시작해 주세요" in status.message
+
+
+def test_work_admitted_before_the_start_blocks_it_and_work_after_it_is_refused() -> None:
+    service, sync, _ = _service(sync=FakeSync(outcomes=[OK]))
+    with service.admit_work():
+        # 접수 중인 계산이 있으면 받기를 시작하지 않는다 — 판정과 접수 사이에 끼어들지 않게
+        with pytest.raises(RefreshRejectedError) as rejected:
+            service.start()
+        assert (rejected.value.status.code, sync.started) == (RefreshCode.BUSY_WORK, 0)
+    held: list[bool] = []
+
+    def run_later(run: Callable[[], None]) -> None:
+        # 받는 중에 들어온 계산 시작은 자리를 쥐지 못한다
+        with pytest.raises(DataRefreshingError):
+            with service.admit_work():
+                pass
+        held.append(True)
+        run()
+
+    service._background = run_later  # noqa: SLF001  # reason: 받는 중의 한 순간을 붙잡는다
+    service.start()
+    assert held == [True] and service.status().code is RefreshCode.SUCCEEDED
+    with service.admit_work():  # 끝나면 다시 받는다
+        pass

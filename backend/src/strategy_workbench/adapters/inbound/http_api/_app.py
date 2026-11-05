@@ -183,7 +183,7 @@ from ._execution_error_contract import (
 )
 from ._experiment_routes import register_experiment_routes
 from ._factor_library_routes import register_factor_library_routes
-from ._ledger_refresh_routes import register_ledger_refresh_routes
+from ._ledger_refresh_routes import STARTS_WORK, register_ledger_refresh_routes
 from ._market_routes import register_market_routes
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
 from ._settings_routes import CredentialsFileIssue, register_settings_routes
@@ -537,6 +537,7 @@ def create_app(
         status_code=status.HTTP_202_ACCEPTED,
         route_class_override=CodedBodyValidationRoute,
         responses=admission_responses,
+        dependencies=[STARTS_WORK],
     )
     app.router.add_api_route(
         "/api/v1/backtests/trial-preview",
@@ -559,6 +560,8 @@ def create_app(
         register_broker_connection_routes(app, broker_connections)
     if market_overview is not None:
         register_market_routes(app, market_overview)
+    # 계산을 시작하는 라우트의 `STARTS_WORK` 가 읽는다.
+    app.state.ledger_refresh = ledger_refresh
     if ledger_refresh is not None:
         register_ledger_refresh_routes(app, ledger_refresh)
 

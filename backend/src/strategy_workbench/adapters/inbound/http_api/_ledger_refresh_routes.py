@@ -1,23 +1,23 @@
-"""홈 "DB 새로고침" API와, 받는 동안 계산을 시작하는 요청을 막는 가드.
+"""홈 "DB 새로고침" API와, 계산을 시작하는 라우트가 다는 의존성(`STARTS_WORK`).
 
-상태 판정과 문장은 `application.ledger_refresh`가 정한다. 여기서는 응답 모양으로 옮기고, 받는 동안
-(`blocks_new_work`) 계산을 시작하는 경로를 409 `data.refreshing`으로 돌려보낸다 — 앱을 새 데이터로
-다시 세울 때 옛 앱이 쥔 계산이 없어야 판본이 섞이지 않는다.
+상태 판정과 문장은 `application.ledger_refresh`가 정한다. 여기서는 응답 모양으로 옮긴다. 계산을
+시작하는 라우트(백테스트 시작·실험 만들기·재시도·연속 평가 등)는 정의에 `STARTS_WORK` 를 달아
+요청을 처리하는 동안 자리를 쥐고(`admit_work`), 받는 동안에는 409 `data.refreshing` 으로 돌아간다 —
+앱을 새 데이터로 다시 세울 때 옛 앱이 쥔 계산이 없어야 판본이 섞이지 않는다.
 """
 
 from __future__ import annotations
 
-import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import Field
 
 from strategy_workbench.application.ledger_refresh.facade.refresh import (
+    DataRefreshingError,
     LedgerRefreshService,
     RefreshCode,
     RefreshFailure,
@@ -29,21 +29,28 @@ from strategy_workbench.application.ledger_refresh.facade.refresh import (
 )
 
 LEDGER_REFRESH_PATH = "/api/v1/ledger-refresh"
-DATA_REFRESHING_MESSAGE = (
-    "데이터를 새로 받는 중이에요. 받기가 끝나고 앱에 반영된 뒤 다시 시작해 주세요."
-)
-# 계산을 시작하는 요청(POST). 미리보기·추적·조회는 막지 않는다 — 부팅 때 고정한 판본만 읽는다.
-_COMPUTE_STARTS = tuple(
-    re.compile(pattern)
-    for pattern in (
-        r"^/api/v1/backtests$",
-        r"^/api/v1/backtests/[^/]+/robustness-check$",
-        r"^/api/v1/experiments$",
-        r"^/api/v1/experiments/capacity$",
-        r"^/api/v1/experiments/[^/]+/trials/[^/]+/retry$",
-        r"^/api/v1/experiments/[^/]+/continuous-account$",
-    )
-)
+
+
+def _admit_work(request: Request) -> Iterator[None]:
+    """계산을 시작하는 요청을 처리하는 동안 자리를 쥔다. 본문을 읽기 전에 판정한다.
+
+    미리보기·추적·조회에는 달지 않는다 — 부팅 때 고정한 판본만 읽는다.
+    """
+    service: LedgerRefreshService | None = request.app.state.ledger_refresh
+    if service is None:
+        yield
+        return
+    try:
+        with service.admit_work():
+            yield
+    except DataRefreshingError as error:  # 자리를 쥐기 전에만 난다
+        raise HTTPException(
+            status_code=409, detail={"code": error.code, "message": error.message}
+        ) from error
+
+
+# 계산을 시작하는 라우트가 `dependencies=[STARTS_WORK]` 로 단다.
+STARTS_WORK = Depends(_admit_work)
 
 
 @dataclass(frozen=True)
@@ -133,21 +140,6 @@ def _body(status: RefreshStatus) -> LedgerRefreshBody:
 
 
 def register_ledger_refresh_routes(app: FastAPI, service: LedgerRefreshService) -> None:
-    @app.middleware("http")
-    async def refuse_compute_while_refreshing(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        if (
-            request.method == "POST"
-            and any(pattern.match(request.url.path) for pattern in _COMPUTE_STARTS)
-            and service.blocks_new_work()
-        ):
-            return JSONResponse(
-                status_code=409,
-                content={"detail": {"code": "data.refreshing", "message": DATA_REFRESHING_MESSAGE}},
-            )
-        return await call_next(request)
-
     @app.get(LEDGER_REFRESH_PATH, operation_id="getLedgerRefresh")
     def get_status() -> LedgerRefreshBody:
         return _body(service.status())

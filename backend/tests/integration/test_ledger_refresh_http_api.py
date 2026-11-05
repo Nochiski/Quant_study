@@ -25,6 +25,15 @@ from strategy_workbench.bootstrap._reload import ContainerActiveWork, Reloadable
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 PATH = "/api/v1/ledger-refresh"
+# 계산을 시작하는 라우트 — 저마다 `STARTS_WORK` 를 단다.
+COMPUTE_STARTS = (
+    "/api/v1/backtests",
+    "/api/v1/backtests/run-1/robustness-check",
+    "/api/v1/experiments",
+    "/api/v1/experiments/capacity",
+    "/api/v1/experiments/exp-1/trials/0/retry",
+    "/api/v1/experiments/exp-1/continuous-account",
+)
 
 
 def test_practice_data_hides_the_refresh_and_rejects_a_start() -> None:
@@ -91,9 +100,12 @@ def test_a_refresh_blocks_new_runs_then_swaps_in_a_new_container() -> None:
         assert started.status_code == 202, started.text
         assert started.json()["code"] == "running"
         # 받는 동안 계산을 시작하는 요청은 본문을 읽기 전에 막는다
-        blocked = client.post("/api/v1/backtests", json={})
-        assert blocked.status_code == 409
-        assert blocked.json()["detail"]["code"] == "data.refreshing"
+        for path in COMPUTE_STARTS:
+            blocked = client.post(path, json={})
+            assert blocked.status_code == 409, path
+            assert blocked.json()["detail"]["code"] == "data.refreshing", path
+        # 미리 계산은 막지 않는다(본문 오류로 끝난다)
+        assert client.post("/api/v1/experiments/preview", json={}).status_code == 422
         assert client.get("/api/v1/market/overview").status_code == 200  # 조회는 돈다
         sync.release.set()
         deadline = time.monotonic() + 30

@@ -2,8 +2,10 @@
 
 판본을 섞지 않는 것이 이 유스케이스의 약속이다.
 
-- 진행 중인 백테스트·실험·연속 평가가 있으면 시작하지 않는다. 받는 동안에는 계산을 시작하는 요청을
-  막는다(`blocks_new_work`). 그래서 앱을 다시 세울 때 옛 앱이 쥔 계산이 없다.
+- 진행 중인 백테스트·실험·연속 평가가 있으면 시작하지 않는다. 계산을 시작하는 요청은 처리하는
+  동안 `admit_work` 로 자리를 쥐고, 받거나 반영하는 동안에는 거절된다. 받기 시작은 쥔 자리가 없을
+  때만 한다 — 같은 잠금 안에서 판정하므로, 판정과 접수 사이에 계산이 끼어들지 않는다. 그래서 앱을
+  다시 세울 때 옛 앱이 쥔 계산이 없다.
 - 앱 반영은 새 컨테이너로 통째 바꾸는 것이다(`ApplyDataPort`). 한 컨테이너 안에서 판본이 바뀌지
   않는다.
 - 정리하기가 카탈로그를 다시 만들었으면 옛 앱은 정리된 데이터를 못 읽으므로, 확인하기가 판을
@@ -18,7 +20,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -135,6 +138,11 @@ FAILURE_MESSAGES: dict[RefreshFailure, str] = {
 }
 _PARTIAL = frozenset({RefreshFailure.TABLES_FAILED, RefreshFailure.CATALOG})
 RUNNING_MESSAGE = "데이터를 받는 중이에요. 이 탭을 닫아도 계속돼요. 앱을 끄면 멈춰요."
+DATA_REFRESHING_MESSAGE = (
+    "데이터를 새로 받는 중이에요. 받기가 끝나고 앱에 반영된 뒤 다시 시작해 주세요."
+)
+ADMITTING_MESSAGE = "계산을 시작하는 요청을 처리하는 중이에요. 잠시 뒤 다시 시도해 주세요."
+_BUSY = frozenset({RefreshCode.RUNNING, RefreshCode.APPLYING})
 APPLYING_MESSAGE = "받은 데이터로 앱을 다시 세우는 중이에요. 잠시 뒤 저절로 다시 연결돼요."
 SUCCEEDED_MESSAGE = "새 데이터를 앱에 반영했어요."
 DRIFTED_NOTE = " 받는 동안 서버가 데이터를 또 만들어 일부는 다음 받기에서 맞춰져요."
@@ -178,6 +186,16 @@ class RefreshRejectedError(Exception):
     def __init__(self, status: RefreshStatus) -> None:
         super().__init__(f"ledger refresh rejected — code={status.code} reason={status.reason}")
         self.status = status
+
+
+class DataRefreshingError(Exception):
+    """데이터를 받거나 반영하는 중이라 계산을 시작하지 않는다. 화면 문장은 `message` 다."""
+
+    code = "data.refreshing"
+    message = DATA_REFRESHING_MESSAGE
+
+    def __init__(self) -> None:
+        super().__init__("ledger refresh in progress — new work is refused until it is applied")
 
 
 def classify(outcome: SyncOutcome) -> RefreshFailure | None:
@@ -243,6 +261,7 @@ class LedgerRefreshService:
         self._background = background
         self._lock = threading.Lock()
         self._state = _State()
+        self._admitting = 0  # 처리 중인 계산 시작 요청 수
 
     # ── 조회 ──────────────────────────────────────────────────────────────────
 
@@ -254,7 +273,24 @@ class LedgerRefreshService:
     def blocks_new_work(self) -> bool:
         """받거나 반영하는 동안에는 새 계산을 시작하지 않는다(교체할 때 옛 앱이 쥔 계산이 없게)."""
         with self._lock:
-            return self._state.code in (RefreshCode.RUNNING, RefreshCode.APPLYING)
+            return self._state.code in _BUSY
+
+    @contextmanager
+    def admit_work(self) -> Iterator[None]:
+        """계산을 시작하는 요청 하나를 처리하는 동안 자리를 쥔다.
+
+        받거나 반영하는 중이면 `DataRefreshingError`. 요청이 계산을 접수하고 끝날 때까지 쥐므로,
+        자리를 놓은 뒤에는 그 계산이 `ActiveWorkPort` 에 보인다.
+        """
+        with self._lock:
+            if self._state.code in _BUSY:
+                raise DataRefreshingError
+            self._admitting += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._admitting -= 1
 
     # ── 명령 ──────────────────────────────────────────────────────────────────
 
@@ -279,19 +315,26 @@ class LedgerRefreshService:
         if not status.can_start or self._sync is None:
             raise RefreshRejectedError(status)
         with self._lock:
-            if self._state.code in (RefreshCode.RUNNING, RefreshCode.APPLYING):
-                raise RefreshRejectedError(self._status(replace(self._state)))
+            refused = self._state.code in _BUSY or self._admitting > 0
             previous = self._state
-            self._state = replace(
-                previous,
-                code=RefreshCode.RUNNING,
-                failure=None,
-                drifted=False,
-                progress=None,
-                started_at=self._now(),
-                finished_at=None,
-            )
-        # 위 판정과 RUNNING 사이에 계산이 시작됐을 수 있다 — 이제 새 계산은 막히므로 한 번 더 센다.
+            if not refused:
+                self._state = replace(
+                    previous,
+                    code=RefreshCode.RUNNING,
+                    failure=None,
+                    drifted=False,
+                    progress=None,
+                    started_at=self._now(),
+                    finished_at=None,
+                )
+        if refused:
+            rejected = self._status(replace(previous))
+            if previous.code not in _BUSY:  # 계산을 시작하는 요청이 처리되는 중이다
+                rejected = replace(
+                    rejected, code=RefreshCode.BUSY_WORK, can_start=False, message=ADMITTING_MESSAGE
+                )
+            raise RefreshRejectedError(rejected)
+        # RUNNING 앞에 접수를 끝낸 계산을 센다. 이제 새 계산은 `admit_work` 에서 막힌다.
         if self._active_work.active().any:
             with self._lock:
                 self._state = previous

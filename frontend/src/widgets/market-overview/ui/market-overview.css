@@ -370,6 +370,64 @@
   background: var(--surface-panel);
 }
 
+/* 한 수준의 칸 층. 줌 전환은 이 층의 transform·opacity 만 움직인다(SectorMap). */
+.market-map__layer {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+
+.market-map__layer[inert] {
+  pointer-events: none;
+}
+
+/* 줌이 도는 동안 칸 글자·외곽선은 숨긴다(층 transform 이 글자를 늘이지 않게). 끝나면 글자가 은은히 드러난다. */
+.market-map__layer .market-map__tile > *,
+.market-map__layer .market-map__head {
+  transition: opacity 160ms ease-out;
+}
+
+.market-map__layer--zooming .market-map__tile > *,
+.market-map__layer--zooming .market-map__head {
+  opacity: 0;
+  transition: none;
+}
+
+.market-map__layer--zooming .market-map__tile:is(:hover, :focus-visible) {
+  outline: none;
+}
+
+/* 다음 수준을 불러오는 동안 커진 칸 위에 은은하게 뜬다. */
+.market-map__loading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  pointer-events: none;
+}
+
+.market-map__loading span {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-small);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-card);
+  color: var(--text-muted);
+  font-size: var(--text-size-label);
+  animation: market-map-pulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes market-map-pulse {
+  from {
+    opacity: 0.55;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 .market-map__tile {
   position: absolute;
   box-sizing: border-box;

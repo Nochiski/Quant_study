@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
+import { useState } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { MarketOverviewBody } from "../../../entities/market";
@@ -210,6 +211,101 @@ describe("MarketOverview", () => {
     expect(onSector).toHaveBeenCalledWith(expect.stringMatching(/^G\d+$/u));
     // 칸 이름은 방향을 글자로도 말한다
     expect(tiles[0]).toHaveAccessibleName(/(상승|하락)/u);
+  });
+
+  it("drills inside the same map, keeping the last level on screen until the next one arrives", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ width: 1000, height: 400 }),
+    );
+    let reads = 0;
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(`${API}/api/v1/market/overview`, () => {
+        reads += 1;
+        return HttpResponse.json(OVERVIEW);
+      }),
+      http.get(`${API}/api/v1/market/sectors/:code`, async () => {
+        await gate;
+        return HttpResponse.json({
+          status: "available",
+          message: null,
+          parent: group("G45", "IT", 3_000 * 1e9, -4.88),
+          group: group("G4530", "반도체와반도체장비", 2_000 * 1e9, -4.97),
+          session: "2026-10-30",
+          snapshot_date: "2026-10-30",
+          securities: [
+            { ticker: "005930", name: "삼성전자", size_weight_krw: 1_500 * 1e9, return_pct: -5.1 },
+          ],
+        } satisfies MarketSectorBody);
+      }),
+    );
+    const Harness = () => {
+      const [sector, setSector] = useState<string>();
+      return <MarketOverview sector={sector} onSector={setSector} />;
+    };
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <Harness />
+      </QueryClientProvider>,
+    );
+    const map = await screen.findByRole("group", { name: /섹터맵, 방향키로/u });
+    const card = screen.getByRole("article", { name: "섹터맵" });
+    await user.click(within(map).getByRole("button", { name: /반도체와반도체장비/u }));
+    // 종목이 오기 전: 카드는 그대로이고, 방금 보던 지도가 (읽히지 않는 채로) 남은 위에 불러오는 중이 뜬다 — 빈 칸이 없다
+    expect(await within(card).findByRole("status")).toHaveTextContent("시장 데이터를 불러오는 중");
+    expect(screen.getByRole("article", { name: /^반도체와반도체장비/u })).toBe(card);
+    expect(map).toBeInTheDocument();
+    expect(within(card).queryByRole("group", { name: /섹터맵, 방향키로/u })).toBeNull();
+    release();
+    expect(await within(card).findByRole("group", { name: /종목 지도/u })).toBeInTheDocument();
+    expect(map).not.toBeInTheDocument();
+    expect(within(card).queryByRole("status")).toBeNull();
+    // 드릴다운은 시장 블록을 다시 묻지 않는다
+    expect(reads).toBe(1);
+  });
+
+  it("comes straight back to the whole map when the user leaves a level that is still loading", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ width: 1000, height: 400 }),
+    );
+    server.use(
+      http.get(`${API}/api/v1/market/sectors/:code`, () => new Promise<never>(() => {})),
+    );
+    // 줌 전환이 도는 브라우저처럼 Web Animations 를 둔다(jsdom 에는 없다). 전환은 끝나지 않은 채로 둔다.
+    Object.defineProperty(HTMLElement.prototype, "animate", {
+      configurable: true,
+      value: () => ({ finished: new Promise(() => {}), cancel: () => {} }),
+    });
+    const Harness = () => {
+      const [sector, setSector] = useState<string>();
+      return <MarketOverview sector={sector} onSector={setSector} />;
+    };
+    const user = userEvent.setup();
+    try {
+      render(
+        <QueryClientProvider
+          client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+        >
+          <Harness />
+        </QueryClientProvider>,
+      );
+      const map = await screen.findByRole("group", { name: /섹터맵, 방향키로/u });
+      await user.click(within(map).getByRole("button", { name: /반도체와반도체장비/u }));
+      const card = screen.getByRole("article", { name: /^반도체와반도체장비/u });
+      await user.click(within(card).getByRole("button", { name: "전체 시장" }));
+      // 커진 채 남아 있던 지도와 돌아온 지도가 겹쳐 두 벌이 되지 않는다
+      // (떠나는 층은 inert 라 역할 질의에 잡히지 않아 이름 속성으로 센다)
+      expect(card.querySelectorAll('[aria-label^="섹터맵, 방향키로"]')).toHaveLength(1);
+      expect(within(card).queryByRole("status")).toBeNull();
+    } finally {
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+    }
   });
 
   it("falls back to the movers list when the card is narrow and remembers a collapse", async () => {

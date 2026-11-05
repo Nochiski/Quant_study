@@ -1,10 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
-  type KeyboardEvent,
   type RefObject,
 } from "react";
 
@@ -14,45 +14,29 @@ import {
   layoutLeaves,
   layoutSectorMap,
   marketSectorQuery,
-  percentMagnitude,
   sectorMovers,
   sessionShort,
   toMapGroup,
   toMapParents,
   type MapGroup,
-  type MapHead,
   type MapTile,
   type SectorCardBody,
   type SectorGroupBody,
   type SectorMapBody,
 } from "../../../entities/market";
-import { ApiRequestError } from "../../../shared/api";
+import { ApiRequestError, type MarketSectorBody } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
-import { Button, SignedValue } from "../../../shared/ui";
+import { Button } from "../../../shared/ui";
+import { Change, SectorMap, type MapLayer } from "./sector-map";
 
 /** 카드 폭이 이보다 좁으면 지도 대신 많이 오른·내린 업종 목록을 보인다. */
 const MAP_MIN_WIDTH = 560;
-const MAP_HEIGHT = 320;
-const DRILL_HEIGHT = 400;
+/** 지도 높이 — 줌 전환이 칸을 카드 크기로 그대로 키우도록 모든 수준이 같다. */
+const MAP_HEIGHT = 400;
 /** 많이 오른·내린 목록에 넣는 세부 업종의 유동시총 하한(원) — 10조. */
 const MOVER_FLOOR_KRW = 10_000_000_000_000;
 
 type View = "map" | "table";
-
-const direction = (value: number | null): string =>
-  value === null || value === 0
-    ? ""
-    : t(value > 0 ? "market.direction.up" : "market.direction.down");
-
-const tone = (value: number | null): string =>
-  value === null || value === 0 ? "flat" : value > 0 ? "up" : "down";
-
-const Change = ({ value }: { value: number | null }) =>
-  value === null ? (
-    <span>—</span>
-  ) : (
-    <SignedValue value={value} magnitude={percentMagnitude(value)} />
-  );
 
 const useWidth = (ref: RefObject<HTMLElement | null>): number => {
   const [width, setWidth] = useState(0);
@@ -68,138 +52,6 @@ const useWidth = (ref: RefObject<HTMLElement | null>): number => {
     return () => observer.disconnect();
   }, [ref]);
   return width;
-};
-
-const tileLabel = (tile: MapTile): string =>
-  tile.kind === "others"
-    ? tFill("market.sector.others", { count: tile.members })
-    : tile.name;
-
-/**
- * 칸들. Tab 정지는 하나이고 방향키로 칸을 옮긴다(로빙 tabindex). Enter 는 칸의 기본 동작(들어가기)이다.
- * 이름이 들어가지 않는 빈 영역(`filler`)은 초점을 받지 않는다.
- */
-const Tiles = ({
-  tiles,
-  heads,
-  width,
-  height,
-  label,
-  onOpen,
-  opens,
-}: {
-  tiles: readonly MapTile[];
-  heads: readonly MapHead[];
-  width: number;
-  height: number;
-  label: string;
-  onOpen: (tile: MapTile) => void;
-  // 누를 수 있는 칸. 누를 수 없는 칸(종목 칸)은 버튼이 아니라 이름만 읽힌다(기본: 모든 칸).
-  opens?: (tile: MapTile) => boolean;
-}) => {
-  const focusable = tiles.filter(
-    (tile) => tile.kind !== "filler" && (opens?.(tile) ?? true),
-  );
-  const [active, setActive] = useState(0);
-  const refs = useRef<(HTMLButtonElement | null)[]>([]);
-  const current = Math.min(active, Math.max(0, focusable.length - 1));
-  const move = (event: KeyboardEvent, index: number) => {
-    const next =
-      event.key === "ArrowRight" || event.key === "ArrowDown"
-        ? index + 1
-        : event.key === "ArrowLeft" || event.key === "ArrowUp"
-          ? index - 1
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? focusable.length - 1
-              : null;
-    if (next === null) return;
-    event.preventDefault();
-    const bounded = (next + focusable.length) % focusable.length;
-    setActive(bounded);
-    refs.current[bounded]?.focus();
-  };
-  const place = (rect: { x: number; y: number; w: number; h: number }) => ({
-    left: `${(rect.x / width) * 100}%`,
-    top: `${(rect.y / height) * 100}%`,
-    width: `${(rect.w / width) * 100}%`,
-    height: `${(rect.h / height) * 100}%`,
-  });
-  return (
-    <div
-      className="market-map"
-      role="group"
-      aria-label={label}
-      style={{ height }}
-    >
-      {tiles.map((tile) => {
-        if (tile.kind === "filler")
-          return (
-            <div
-              key={tile.key}
-              className="market-map__tile market-map__tile--filler"
-              style={place(tile)}
-              aria-hidden="true"
-            />
-          );
-        const index = focusable.indexOf(tile);
-        const name = tileLabel(tile);
-        const aria = tFill("market.sector.tile", {
-          group: tile.parentName ?? "",
-          name,
-          direction: direction(tile.returnPct),
-          change:
-            tile.returnPct === null ? "—" : percentMagnitude(tile.returnPct),
-        }).replace(/^ · /u, "");
-        const className = `market-map__tile market-map__tile--${tone(tile.returnPct)}${
-          tile.kind === "others" ? " market-map__tile--others" : ""
-        }`;
-        if (index < 0)
-          return (
-            <div
-              key={tile.key}
-              role="img"
-              className={className}
-              style={place(tile)}
-              aria-label={aria}
-              title={aria}
-            >
-              <span className="market-map__name">{name}</span>
-              <Change value={tile.returnPct} />
-            </div>
-          );
-        return (
-          <button
-            key={tile.key}
-            ref={(element) => {
-              refs.current[index] = element;
-            }}
-            type="button"
-            tabIndex={index === current ? 0 : -1}
-            className={className}
-            style={place(tile)}
-            aria-label={aria}
-            title={aria}
-            onFocus={() => setActive(index)}
-            onKeyDown={(event) => move(event, index)}
-            onClick={() => onOpen(tile)}
-          >
-            <span className="market-map__name">{name}</span>
-            <Change value={tile.returnPct} />
-          </button>
-        );
-      })}
-      {heads.map((head) => (
-        <div key={head.key} className="market-map__group" style={place(head)}>
-          <span className="market-map__head">
-            <span className="market-map__name">{head.name}</span>{" "}
-            <Change value={head.returnPct} />
-          </span>
-        </div>
-      ))}
-    </div>
-  );
 };
 
 const GroupTable = ({
@@ -274,107 +126,102 @@ const allChildren = (sectorMap: SectorMapBody) =>
     parent.children.map((group) => ({ parent: parent.group.name, group })),
   );
 
-/** 세부 업종 하나의 종목 지도·표(응답은 drill 할 때 읽는다). */
-const StockLevel = ({
-  code,
+const StockTable = ({
   name,
-  view,
-  width,
-  onTable,
+  stocks,
 }: {
-  code: string;
   name: string;
-  view: View;
-  width: number;
-  onTable: () => void;
+  stocks: MarketSectorBody["securities"];
 }) => {
-  const detail = useQuery(marketSectorQuery(code));
-  if (detail.isPending)
-    return <p className="market-card__muted">{t("market.loading")}</p>;
-  if (detail.isError)
-    return detail.error instanceof ApiRequestError &&
-      detail.error.code === "market.sector.not_found" ? (
-      <p className="market-card__issue">{t("market.sector.unknown")}</p>
-    ) : (
-      <div className="market-card__issue" role="alert">
-        <p>{t("market.error")}</p>
-        <Button size="small" onClick={() => void detail.refetch()}>
-          {t("market.retry")}
-        </Button>
-      </div>
-    );
-  const stocks = detail.data.securities;
-  if (view === "table" || width < MAP_MIN_WIDTH) {
-    const label = tFill("market.sector.stockTableLabel", { name });
-    return (
-      <div
-        className="market-table-scroll market-table-scroll--tall"
-        tabIndex={0}
-        aria-label={label}
-      >
-        <table className="data-list-page__table">
-          <caption className="sr-only">{label}</caption>
-          <thead>
-            <tr>
-              <th scope="col">{t("market.sector.stock")}</th>
-              <th scope="col">{t("market.sector.size")}</th>
-              <th scope="col">{t("market.sector.change")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stocks.map((stock) => (
-              <tr key={stock.ticker}>
-                <td>{stock.name}</td>
-                <td>{joWon(stock.size_weight_krw)}</td>
-                <td>
-                  {stock.return_pct === null ||
-                  stock.return_pct === undefined ? (
-                    t("market.sector.untraded")
-                  ) : (
-                    <Change value={stock.return_pct} />
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-  const tiles = layoutLeaves(
-    stocks.map((stock) => ({
-      code: stock.ticker,
-      name: stock.name,
-      sizeWeight: stock.size_weight_krw,
-      returnWeight:
-        stock.return_pct === null || stock.return_pct === undefined
-          ? 0
-          : stock.size_weight_krw,
-      returnPct: stock.return_pct ?? null,
-    })),
-    width,
-    DRILL_HEIGHT,
-    null,
-  );
+  const label = tFill("market.sector.stockTableLabel", { name });
   return (
-    <>
-      <Tiles
-        tiles={tiles}
-        heads={[]}
-        width={width}
-        height={DRILL_HEIGHT}
-        label={t("market.sector.stockMapLabel")}
-        onOpen={onTable}
-        opens={(tile) => tile.kind === "others"}
-      />
-      <p className="market-card__muted">{t("market.sector.stocksNote")}</p>
-    </>
+    <div
+      className="market-table-scroll market-table-scroll--tall"
+      tabIndex={0}
+      aria-label={label}
+    >
+      <table className="data-list-page__table">
+        <caption className="sr-only">{label}</caption>
+        <thead>
+          <tr>
+            <th scope="col">{t("market.sector.stock")}</th>
+            <th scope="col">{t("market.sector.size")}</th>
+            <th scope="col">{t("market.sector.change")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {stocks.map((stock) => (
+            <tr key={stock.ticker}>
+              <td>{stock.name}</td>
+              <td>{joWon(stock.size_weight_krw)}</td>
+              <td>
+                {stock.return_pct === null || stock.return_pct === undefined ? (
+                  t("market.sector.untraded")
+                ) : (
+                  <Change value={stock.return_pct} />
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
+};
+
+/** 지금 수준의 지도 칸 배치. 응답·폭이 그대로면 같은 값을 돌려줘야 지도가 층을 갈아 끼우지 않는다(useMemo). */
+const mapLayerOf = (
+  sectorMap: SectorMapBody,
+  parentCode: string | null,
+  stocks: MarketSectorBody["securities"] | null | undefined,
+  width: number,
+): MapLayer | null => {
+  if (stocks === null) return null;
+  if (stocks !== undefined)
+    return {
+      tiles: layoutLeaves(
+        stocks.map((stock) => ({
+          code: stock.ticker,
+          name: stock.name,
+          sizeWeight: stock.size_weight_krw,
+          returnWeight:
+            stock.return_pct === null || stock.return_pct === undefined
+              ? 0
+              : stock.size_weight_krw,
+          returnPct: stock.return_pct ?? null,
+        })),
+        width,
+        MAP_HEIGHT,
+        null,
+      ),
+      heads: [],
+      label: t("market.sector.stockMapLabel"),
+      opens: (tile) => tile.kind === "others",
+    };
+  const parentBody = sectorMap.parents.find(
+    (item) => item.group.code === parentCode,
+  );
+  if (parentBody !== undefined)
+    return {
+      tiles: layoutLeaves(
+        parentBody.children.map(toMapGroup),
+        width,
+        MAP_HEIGHT,
+        null,
+      ),
+      heads: [],
+      label: t("market.sector.mapLabel"),
+    };
+  return {
+    ...layoutSectorMap(toMapParents(sectorMap), width, MAP_HEIGHT),
+    label: t("market.sector.mapLabel"),
+  };
 };
 
 /**
  * 섹터맵 카드: 전체 시장 → 상위 업종 → 세부 업종(종목) 드릴다운. 들어간 자리는 주소(`?sector=`)가 갖고
- * 뒤로 가기로 돌아온다. 카드가 좁으면 지도 대신 목록이다.
+ * 뒤로 가기로 돌아온다. 수준이 바뀌어도 지도(`SectorMap`)는 그대로 있고 칸만 줌 전환으로 바뀐다. 카드가 좁으면
+ * 지도 대신 목록·표다.
  */
 export const SectorCard = ({
   card,
@@ -390,6 +237,7 @@ export const SectorCard = ({
   const titleId = useId();
   const box = useRef<HTMLDivElement>(null);
   const width = useWidth(box);
+  const queryClient = useQueryClient();
   const [view, setView] = useState<View>("map");
   const [shownSector, setShownSector] = useState(sector);
   if (shownSector !== sector) {
@@ -401,68 +249,96 @@ export const SectorCard = ({
   const location = sectorMap && sector ? findSector(sectorMap, sector) : null;
   const parent = location?.parent ?? null;
   const child = location?.child ?? null;
-  const parentBody = parent
-    ? sectorMap?.parents.find((item) => item.group.code === parent.code)
-    : undefined;
-  const narrow = width > 0 && width < MAP_MIN_WIDTH;
+  // 세부 업종의 종목은 그 업종에 들어갈 때 읽는다.
+  const detail = useQuery({
+    ...marketSectorQuery(child?.code ?? ""),
+    enabled: child !== null,
+  });
+  const stocks =
+    child === null ? undefined : (detail.data?.securities ?? null);
+  const showMap = view === "map" && width >= MAP_MIN_WIDTH;
+  const layer = useMemo(
+    () =>
+      sectorMap && showMap
+        ? mapLayerOf(sectorMap, parent?.code ?? null, stocks, width)
+        : null,
+    [sectorMap, showMap, parent?.code, stocks, width],
+  );
   const open = (tile: MapTile) => {
     if (tile.target === null) setView("table");
     else onSector(tile.target);
   };
-  const fillers = (tiles: readonly MapTile[]) =>
-    tiles.some((tile) => tile.kind === "filler");
-
-  let body;
-  if (sectorMap === null || sectorMap === undefined) {
-    body = <p className="market-card__issue">{card.issue?.message}</p>;
-  } else if (child !== null && parent !== null) {
-    body = (
-      <StockLevel
-        code={child.code}
-        name={child.name}
-        view={view}
-        width={width}
-        onTable={() => setView("table")}
+  // 세부 업종 칸을 가리키거나 초점을 주면 그 종목 응답을 미리 읽어 둔다(실패는 들어간 뒤 카드가 말한다).
+  const prefetch = (tile: MapTile) => {
+    if (tile.target === null || sectorMap === null || sectorMap === undefined)
+      return;
+    if (findSector(sectorMap, tile.target)?.child == null) return;
+    queryClient
+      .ensureQueryData(marketSectorQuery(tile.target))
+      .catch(() => undefined);
+  };
+  const movers =
+    sectorMap === null || sectorMap === undefined ? null : (
+      <Movers
+        groups={allChildren(sectorMap).map(({ group }) => toMapGroup(group))}
       />
     );
-  } else if (parentBody !== undefined) {
-    const rows = parentBody.children.map((group) => ({
-      parent: parentBody.group.name,
-      group,
-    }));
-    if (view === "table" || narrow) {
-      body = <GroupTable rows={rows} label={t("market.sector.tableLabel")} />;
-    } else {
-      const tiles = layoutLeaves(
-        parentBody.children.map(toMapGroup),
-        width,
-        DRILL_HEIGHT,
-        null,
+
+  // 지도 밖 내용: 지도 아래 덧말, 또는 지도를 그리지 않을 때의 표·목록.
+  let rest;
+  if (sectorMap === null || sectorMap === undefined) {
+    rest = <p className="market-card__issue">{card.issue?.message}</p>;
+  } else if (child !== null && detail.isError) {
+    rest =
+      detail.error instanceof ApiRequestError &&
+      detail.error.code === "market.sector.not_found" ? (
+        <p className="market-card__issue">{t("market.sector.unknown")}</p>
+      ) : (
+        <div className="market-card__issue" role="alert">
+          <p>{t("market.error")}</p>
+          <Button size="small" onClick={() => void detail.refetch()}>
+            {t("market.retry")}
+          </Button>
+        </div>
       );
-      body = (
-        <Tiles
-          tiles={tiles}
-          heads={[]}
-          width={width}
-          height={DRILL_HEIGHT}
-          label={t("market.sector.mapLabel")}
-          onOpen={open}
-        />
-      );
-    }
+  } else if (child !== null) {
+    rest = showMap ? (
+      <p className="market-card__muted">{t("market.sector.stocksNote")}</p>
+    ) : detail.data ? (
+      <StockTable name={child.name} stocks={detail.data.securities} />
+    ) : (
+      <p className="market-card__muted">{t("market.loading")}</p>
+    );
+  } else if (parent !== null) {
+    rest = showMap ? null : (
+      <GroupTable
+        rows={(
+          sectorMap.parents.find((item) => item.group.code === parent.code)
+            ?.children ?? []
+        ).map((group) => ({ parent: parent.name, group }))}
+        label={t("market.sector.tableLabel")}
+      />
+    );
+  } else if (showMap) {
+    rest = (
+      <>
+        {layer?.tiles.some((tile) => tile.kind === "filler") ? (
+          <p className="market-card__muted">{t("market.sector.fillerNote")}</p>
+        ) : null}
+        {movers}
+      </>
+    );
   } else if (view === "table") {
-    body = (
+    rest = (
       <GroupTable
         rows={allChildren(sectorMap)}
         label={t("market.sector.tableLabel")}
       />
     );
-  } else if (narrow || width === 0) {
-    body = (
+  } else {
+    rest = (
       <>
-        <Movers
-          groups={allChildren(sectorMap).map(({ group }) => toMapGroup(group))}
-        />
+        {movers}
         <button
           type="button"
           className="market-link"
@@ -472,27 +348,9 @@ export const SectorCard = ({
         </button>
       </>
     );
-  } else {
-    const layout = layoutSectorMap(toMapParents(sectorMap), width, MAP_HEIGHT);
-    body = (
-      <>
-        <Tiles
-          tiles={layout.tiles}
-          heads={layout.heads}
-          width={width}
-          height={MAP_HEIGHT}
-          label={t("market.sector.mapLabel")}
-          onOpen={open}
-        />
-        {fillers(layout.tiles) ? (
-          <p className="market-card__muted">{t("market.sector.fillerNote")}</p>
-        ) : null}
-        <Movers
-          groups={allChildren(sectorMap).map(({ group }) => toMapGroup(group))}
-        />
-      </>
-    );
   }
+  const mapShown =
+    showMap && sectorMap !== null && sectorMap !== undefined && !detail.isError;
 
   return (
     <article className="market-card market-sector" aria-labelledby={titleId}>
@@ -595,7 +453,20 @@ export const SectorCard = ({
         </div>
       </div>
       <div ref={box} className="market-sector__body">
-        {body}
+        {mapShown ? (
+          <SectorMap
+            sceneKey={child?.code ?? parent?.code ?? ""}
+            path={[parent?.code, child?.code].filter(
+              (code): code is string => code !== undefined,
+            )}
+            layer={layer}
+            width={width}
+            height={MAP_HEIGHT}
+            onOpen={open}
+            onIntent={prefetch}
+          />
+        ) : null}
+        {rest}
       </div>
       {sectorMap && session && sectorMap.session !== session ? (
         <p className="market-card__muted">

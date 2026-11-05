@@ -693,7 +693,9 @@ RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
 
 # 실행 접수 거절 코드 어휘의 단일 정본. 시작 요청 422·404·409 detail 과 실험 attempt·창 선택의
 # `error_code` 가 같은 문자열이고, 프론트는 `backtest.error.<code>` 로 번역한다. 어떤 오류가 어느
-# 코드인지는 실행 유스케이스의 `rejection_code` 가 정한다.
+# 코드인지는 실행 유스케이스의 `rejection_code` 가 정한다. 값은 지우거나 이름을 바꾸지 않는다 —
+# 저장된 attempt·창 선택이 그 값을 싣고 있어 읽을 때 검증에 걸려 실험 조회가 500 이 된다. 바꿔야
+# 하면 그 PR 이 읽기 쪽 호환(옛 값을 새 값으로 옮기기)을 둔다.
 AdmissionRejectionCode = Literal[
     "backtest.run.environment_required",
     "backtest.run.parameter_invalid",

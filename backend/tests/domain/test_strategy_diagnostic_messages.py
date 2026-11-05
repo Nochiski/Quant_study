@@ -1,9 +1,9 @@
 """P1-05 진단 문장 golden: 구조 오류 코드마다 사용자가 읽을 한글 문장 하나를 고정한다.
 
 compile 진단의 `message`는 backend가 한글 문장으로 완성해 보내고 Problems panel이 그대로 보여준다
-(`.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행). 그래서 화면 문구의 golden이
-frontend가 아니라 여기 있다. 기계가 읽는 디테일(`got=`·`expected=`·`allowed=`·`missing=`)은 문장
-뒤에 남는다(`.claude/rules/error-messages.md`).
+(구조 코드·문장의 owner는 `domain/strategy/_hydrate.py`, codec 문장은 `document_codec/_codec.py`).
+그래서 화면 문구의 golden이 frontend가 아니라 여기 있다. 기계가 읽는 디테일(`got=`·`expected=`·
+`allowed=`·`missing=`)은 문장 뒤에 남는다(`.claude/rules/error-messages.md`).
 
 이 파일이 지키는 불변식 두 개.
 

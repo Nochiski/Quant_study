@@ -20,8 +20,8 @@
 > 적용 조건표 `FIELD_APPLICABILITY`는 `/risk/risk_factor_id` 행이 더해져 9행이다. 은퇴 revision
 > 실행 거부 코드는 422 `backtest.strategy.requires_upgrade`(추적은 `trace.strategy.requires_upgrade`)다.
 > 이 문서의 `strategy_revision_requires_upgrade`는 구현된 적이 없다. 현행 계약은
-> [schema 1.2 설계](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md)와
-> [SoT 대장](../../../.claude/rules/strategy-workbench-sot.md)이다. 아래는 2026-09-17 설계 기록이다.
+> [schema 1.2 설계](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md)와 각 owner 모듈의
+> docstring이다. 아래는 2026-09-17 설계 기록이다.
 
 ## 1. 맥락
 

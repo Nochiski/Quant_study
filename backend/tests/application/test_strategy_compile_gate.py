@@ -175,7 +175,7 @@ def test_an_unknown_field_is_a_compile_error_once_an_adapter_is_connected() -> N
     diagnostic = compiled.diagnostics[0]
     assert "price.closee" in diagnostic.message
     # 문제 목록은 backend 문장을 그대로 보인다.
-    # frontend 는 진단 코드를 번역하지 않는다(SoT 진단 코드 행).
+    # frontend 는 진단 코드를 번역하지 않는다(`.claude/rules/error-messages.md`).
     assert _HANGUL.search(diagnostic.message.split("field_id=")[0]), diagnostic.message
     assert diagnostic.range is not None, "편집기가 그 노드 줄을 짚을 수 있다"
 

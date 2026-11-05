@@ -41,7 +41,7 @@
   후보만이 아니라 횡단면 정규화·결측 채움 동료·기준일 요약·추적 모집단이 함께 줄어든다(문서와 매뉴얼에 적는다).
 - **형식 정본**: `domain/backtest/_models.py` 에 `KRX_TICKER_PATTERN = ^[0-9A-Z]{6}$`, 최대 50개(`RUN_ENVIRONMENT_CONSTRAINTS` 행). `__post_init__` 이 strip·대문자·정렬로
   정규화하고(같은 묶음은 같은 값), 중복·형식 위반은 `InvalidRunFieldError("tickers", values=…)` → `backtest.run.field_invalid`. duckdb `_TICKER_RE` 는 id 해석 가드라고
-  주석으로 가른다(입력 형식 규칙이 아니다). 대장에 "티커 형식" 행을 둔다.
+  주석으로 가른다(입력 형식 규칙이 아니다). `domain/backtest/_models.py`의 `KRX_TICKER_PATTERN` docstring이 형식 정본임을 말한다.
 - **신원(해시)**: 새 칸은 기본값일 때 신원 payload 에서 뺀다. 그 규칙을 `domain/backtest/_canonical.py` 의 한 함수(`canonical_environment_payload`)에 두고 실행 지문 ·
   `environment_hash` 가 모두 그것을 쓴다 → 옛 run·기록의 신원이 그대로다.
   시도 키는 `_trial_key._environment_key` 가 이미 기본값을 빼므로 `TRIAL_KEY_ROLES["tickers"] = KEY` 한 줄과 `test_run_environment_ownership.py` 분류만 더한다.
@@ -217,7 +217,7 @@
 | IT-08 | 투자 비중 팩터·알파 없음 규칙·정적 시장 수준 판정·s 실행·정본 YAML | IT-05b, IT-07 | US-CS-17, US-CS-06, US-DM-16 |
 | IT-09 | T9 엔진판 확인(코드 변경 없음, 실험 기록) | IT-02~08 | — |
 
-- 각 PR: 대장(`strategy-workbench-sot.md`) 해당 행 갱신, OpenAPI·SDK 재생성(생성 파일은 직렬 머지 + 머지 직전 main 병합·재생성), 리뷰어 셋(SoT · 책임 경계 · 잠재 결함)
+- 각 PR: owner 모듈 docstring 갱신, OpenAPI·SDK 재생성(생성 파일은 직렬 머지 + 머지 직전 main 병합·재생성), 리뷰어 셋(SoT · 책임 경계 · 잠재 결함)
   병렬 리뷰, CI 전체 green 후 머지.
 - 손절 브랜치(`Nochiski/stop-loss-exit-p1-language`, 미머지)와 `RiskStep`·`_canonical.py`·`_constraints.py`·`runtime-schema.json`·`messages.ts` 가 겹친다 — 먼저 머지되는 쪽에
   맞춰 다른 쪽이 rebase 한다.

@@ -19,7 +19,8 @@ used to be told `yaml.too_deep`), YAML-only constructs stay `yaml.<reason>`, and
 carries the format that failed. Untrusted input never raises out of `parse()`: every rejection is a
 diagnostic.
 
-진단 문장은 한국어로 완성해 보낸다(P1-05, `.claude/rules/strategy-workbench-sot.md`). `—` 뒤에는
+진단 문장은 한국어로 완성해 보낸다(P1-05). Problems panel은 `message`를 다시 조립하지 않으므로 codec
+진단 문장의 owner는 이 모듈이고, 코드 어휘의 owner는 포트의 `diagnostic_code`다. `—` 뒤에는
 기계가 읽는 디테일만 남고, 파서(ruamel·json)가 준 영어 원문은 `detail=` 값으로만 실린다. 문장
 golden은 `tests/domain/test_strategy_diagnostic_messages.py`다.
 """

@@ -204,8 +204,9 @@ bootstrap ─> application + adapters
   composition root가 정한다: `bootstrap/_http.py`가 `STRATEGY_WORKBENCH_EQUITY_ADAPTER`(기본
   `mock`)와 `STRATEGY_WORKBENCH_EQUITY_ROOT`를 읽고, 허용 값 목록은 `bootstrap/_container.py`의
   `EQUITY_ADAPTERS`다.
-- 두 어댑터가 같은 field_id에 답하는 필드 계약(단위·값 타입·랙·빈도)의 owner는
-  `.claude/rules/strategy-workbench-sot.md`의 equity 필드 계약 행이다.
+- 두 어댑터가 같은 field_id에 답하는 필드 계약(단위·값 타입·랙·빈도)은 원장 선언을 따르고(빈도처럼
+  어휘가 다른 칸은 대응으로), 일치는
+  `tests/contract/test_equity_field_contract_parity.py`가 대조한다.
 - 실제 DB에 맞춰 domain/application을 DB 스키마대로 바꾸지 않는다. `equity_duckdb`가 port에
   맞춘다.
 - 설정한 adapter가 없거나 실패하면 mock으로 조용히 fallback하지 않는다.

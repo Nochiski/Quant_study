@@ -10,7 +10,7 @@ from ._models import (
 )
 
 # 결합 전 정규화를 문장으로 옮기는 결합자. 진단 메시지와 같은 규칙으로 backend 가 한글 문장을
-# 완성해 내보낸다(SoT: authoring 진단 코드 행). 로케일별 문구는 frontend i18n 이 따로 갖는다.
+# 완성해 내보낸다(`.claude/rules/error-messages.md`). 로케일별 문구는 frontend i18n 이 따로 갖는다.
 _NORMALIZATION_SUMMARY: dict[SignalNormalization, str] = {
     SignalNormalization.NONE: "원시값 그대로 방향·가중치 가중합으로",
     SignalNormalization.RANK: "횡단면 순위로 맞춘 뒤 방향·가중치 가중합으로",

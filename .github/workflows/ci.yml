@@ -51,8 +51,8 @@ jobs:
           uv run --locked python -m unittest discover -s tools/tests -p 'test_*.py'
           uv run --project backend ruff check tools
           uv run --project backend pyright tools
-      # 해소되지 않은 병합 충돌 표식은 파일을 정상으로 읽히게 두면서 옛 행을 되살린다 —
-      # P1-02 rebase에서 SoT 대장 5행이 두 벌이 된 사고(Phase 1 감사)의 재발 방지다.
+      # 해소되지 않은 병합 충돌 표식은 파일을 정상으로 읽히게 두면서 옛 내용을 되살린다 —
+      # 그런 커밋이 조용히 머지되지 않게 막는다.
       - name: No committed merge conflict markers
         working-directory: .
         run: uv run --locked python -m quant_study_dev.conflict_markers

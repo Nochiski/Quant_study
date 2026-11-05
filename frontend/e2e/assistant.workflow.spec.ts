@@ -295,7 +295,7 @@ test.describe("AI 어시스턴트", () => {
       expect(changedLines).toEqual([`title: "${PROPOSED_TITLE}"`]);
       await expectPhase(page, "검증 통과");
 
-      // 적용은 편집 이력의 격리된 한 단계다(SoT 편집 이력 행). 툴바 "실행 취소" 한 번이면 적용 전
+      // 적용은 편집 이력의 격리된 한 단계다(이력 owner는 `shared/ui/code-editor`의 CodeMirror history). 툴바 "실행 취소" 한 번이면 적용 전
       // 원문 그대로라 저장된 리비전과 같아지고, "다시 실행"이 제안을 다시 넣는다(BACKLOG-009).
       await page.getByRole("button", { name: "실행 취소" }).click();
       expect(await currentSource(page)).toBe(before);

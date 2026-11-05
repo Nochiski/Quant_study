@@ -106,7 +106,7 @@ class AppliedStage(StrEnum):
 
     제약 행의 적용 시점(runtime schema `x-applied-stage`)과 그래프 표현의 단계(field
     metadata `stage` → `x-stage`, P4-01)가 이 어휘를 쓴다. 필드의 단계를 읽는 규칙은
-    정본 대장 "그래프 표현 투영" 행이 소유한다.
+    runtime schema(`_schema.py` 모듈 docstring)가 소유한다.
     """
 
     ELIGIBILITY = "eligibility"
@@ -325,7 +325,7 @@ class StrategySpec:
     title: str
     description: str = ""
     # 섹션마다 그래프 표현의 단계(`x-stage`)가 있고 문서 머리와 탐색 파라미터는 단계가 없다.
-    # 필드의 단계를 읽는 규칙은 정본 대장 "그래프 표현 투영" 행.
+    # 필드의 단계를 읽는 규칙은 `_schema.py` 모듈 docstring이 소유한다.
     eligibility: EligibilityStep = field(
         default=EligibilityStep(), metadata={"stage": AppliedStage.ELIGIBILITY}
     )

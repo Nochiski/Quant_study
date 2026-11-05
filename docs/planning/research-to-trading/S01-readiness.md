@@ -68,7 +68,7 @@ profile에서 `point_in_time=false`·`requires_confirmation=true`다. consumer �
 |---|---|---|
 | 원본 분리 보존 | [S01 보존 계약](S01-snapshot.md)의 `equity.research_snapshot create`로 current와 참조 파티션·출처를 새 root에 복사 | 누락·해시 불일치·원본 경합·복사 실패·미완성 공개 |
 | 실행 직전 재검증 | 같은 owner의 `verify/open --repo-root`, descriptor와 코드·계약·환경 출처 | pending·위치 이동·현재 코드/계약 불일치·검증 뒤 외부 변경 |
-| 필드와 PIT 근거 | 원장 `dataset_profile`, 기존 `EquityDataPort`/`RawObservationPort`, [필드 계약](../../../database/docs/EQUITY_FIELD_MAP.md) §3과 [정본 대장](../../../.claude/rules/strategy-workbench-sot.md) | 필수 필드 unavailable·설명되지 않은 lag fallback·필요한 실제 공개시점 근거 부재 |
+| 필드와 PIT 근거 | 원장 `dataset_profile`, 기존 `EquityDataPort`/`RawObservationPort`, [필드 계약](../../../database/docs/EQUITY_FIELD_MAP.md) §3과 duckdb 선언표 [`_specs.py`](../../../backend/src/strategy_workbench/adapters/outbound/equity_duckdb/_specs.py) | 필수 필드 unavailable·설명되지 않은 lag fallback·필요한 실제 공개시점 근거 부재 |
 | 가격과 라벨 지원 | 원장 `price_adj_daily`·`v_adj_close`, 기존 bar 판정과 [S03 runner](S03-runner.md)의 label loader | 필수 조정가 부재·카탈로그 실패·요청 범위 MASKED·미지원 조정 경로 |
 | 모집단과 상장구간 | 원장 유니버스·`security_span`, 기존 adapter와 S03 label loader | 당시 모집단을 재현할 수 없음·알 수 없는 종료 사유·수집 상한 불일치 |
 | 기존 품질·소비 계약 | `equity.gates`와 `equity.contract`, [게이트 사양](../../../database/docs/EQUITY_GATES.md)·[워크플로우](../../../database/docs/EQUITY_WORKFLOW.md) | 해당 결론에 필요한 검사 FAIL. stage/fixture/baseline 부재면 그 재검증 미실행과 영향 범위를 명시 |

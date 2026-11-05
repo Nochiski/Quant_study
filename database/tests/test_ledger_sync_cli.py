@@ -142,6 +142,49 @@ def test_catalog_is_equity_only_and_delegates_to_equity_cli(tmp_path: Path, caps
     assert "--stage-root" in command
 
 
+def test_sync_progress_file_tracks_stages_tables_and_bytes(remote: FakeRemote,
+                                                          tmp_path: Path) -> None:
+    progress = tmp_path / "progress.json"
+    seen: list[str] = []
+    original = cli.ProgressFile._write
+
+    def spy(self: cli.ProgressFile) -> None:  # 단계가 바뀔 때마다 파일에 무엇이 실렸나
+        original(self)
+        seen.append(json.loads(progress.read_text(encoding="utf-8"))["stage"])
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cli.ProgressFile, "_write", spy)
+        assert cli.main([*_base(tmp_path), "sync", "--no-space-check", "--skip-catalog",
+                         "--progress-file", str(progress)]) == cli.EXIT_OK
+    doc = json.loads(progress.read_text(encoding="utf-8"))
+    assert doc["stage"] == "done"
+    assert (doc["tables_total"], doc["tables_done"]) == (1, 1)
+    assert doc["bytes_total"] == doc["bytes_done"] > 0
+    # 받기 → 확인하기 → 끝. --skip-catalog 라 정리하기(catalog) 단계는 없다
+    assert [stage for i, stage in enumerate(seen) if i == 0 or seen[i - 1] != stage] == [
+        "download", "verify", "done"]
+    assert not progress.with_name(progress.name + ".tmp").exists()
+
+
+def test_sync_records_the_error_kind_when_it_cannot_connect(monkeypatch: pytest.MonkeyPatch,
+                                                            tmp_path: Path) -> None:
+    @contextmanager
+    def refuse(endpoint, *, accept_new_host_key=False):  # noqa: ANN001, ANN202  # reason: open_sftp 대체
+        raise cli.RemoteConnectError("refused")
+        yield
+
+    monkeypatch.setattr(cli, "open_sftp", refuse)
+    assert cli.main([*_base(tmp_path), "sync", "--no-space-check"]) == cli.EXIT_ERROR
+    last = json.loads((tmp_path / "equity" / "_sync" / "last_run.json").read_text(encoding="utf-8"))
+    assert last["error_kind"] == "connect"
+
+
+def test_plan_json_carries_the_build_window_flag(remote: FakeRemote, tmp_path: Path,
+                                                 capsys) -> None:
+    assert cli.main([*_base(tmp_path), "--json", "plan"]) == cli.EXIT_OK
+    assert isinstance(json.loads(capsys.readouterr().out)["in_build_window"], bool)
+
+
 def test_build_window_detection() -> None:
     from datetime import UTC, datetime
 
@@ -229,6 +272,7 @@ def test_lock_rejects_a_concurrent_pull_and_is_released_after(remote: FakeRemote
     assert rc == cli.EXIT_ERROR
     last = json.loads((tmp_path / "equity" / "_sync" / "last_run.json").read_text(encoding="utf-8"))
     assert last["exit_code"] == cli.EXIT_ERROR and "holds the lock" in last["error"]
+    assert last["error_kind"] == "locked"
     capsys.readouterr()
     assert cli.main([*_base(tmp_path), "status"]) == cli.EXIT_OK
     assert "lock: held pid=1" in capsys.readouterr().out

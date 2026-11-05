@@ -90,9 +90,19 @@ class InsufficientDiskSpace(RuntimeError):
 
 
 Log = Callable[[str], None]
+BytesProgress = Callable[[int], None]
+TableProgress = Callable[[TableResult], None]
 
 
 def _noop_log(_: str) -> None:
+    return None
+
+
+def _noop_bytes(_: int) -> None:
+    return None
+
+
+def _noop_table(_: TableResult) -> None:
     return None
 
 
@@ -157,7 +167,7 @@ def _failed(plan: TablePlan, build_id: str, detail: str, *, downloaded: int, reu
 
 
 def _pull_table(remote: RemoteFS, layer_root: Path, plan: TablePlan, state: SyncState,
-                log: Log, *, clear_incoming: bool) -> TableResult:
+                log: Log, *, clear_incoming: bool, on_bytes: BytesProgress) -> TableResult:
     build = plan.remote_build
     if plan.action is TableAction.ERROR or build is None or plan.remote is None:
         return TableResult(plan.table, TableOutcome.ERROR, None, detail=plan.detail)
@@ -187,10 +197,12 @@ def _pull_table(remote: RemoteFS, layer_root: Path, plan: TablePlan, state: Sync
                     _link_or_copy(source, target)
                 files[f"{reuse.partition_path}/{name}"] = FileRecord(size, ORIGIN_REUSED)
                 bytes_reused += size
+                on_bytes(size)
         for transfer in plan.downloads:
             target = _inside(table_root, incoming / transfer.rel_path.split("/", 1)[1])
             if target.is_file() and target.stat().st_size == transfer.size:
                 files[transfer.rel_path] = FileRecord(transfer.size, ORIGIN_DOWNLOADED)
+                on_bytes(transfer.size)
                 continue
             try:
                 got = remote.download(transfer.remote_path, target)
@@ -209,6 +221,7 @@ def _pull_table(remote: RemoteFS, layer_root: Path, plan: TablePlan, state: Sync
             files[transfer.rel_path] = FileRecord(transfer.size, ORIGIN_DOWNLOADED)
             bytes_downloaded += got
             files_downloaded += 1
+            on_bytes(got)
             log(f"  {plan.table} {transfer.rel_path} {got:,}B")
         _replace_dir(incoming, _inside(table_root, table_root / build.dir_name))
         _write_bytes_atomic(table_root / MANIFEST_NAME, plan.remote.raw)
@@ -296,15 +309,19 @@ def gc_table(layer_root: Path, table: str, state: SyncState, keep: int,
 
 def execute_plan(remote: RemoteFS, plan: SyncPlan, layer_root: Path, state: SyncState, *,
                  keep: int = KEEP_DEFAULT, check_space: bool = True,
-                 log: Log = _noop_log) -> PullReport:
+                 log: Log = _noop_log, on_bytes: BytesProgress = _noop_bytes,
+                 on_table: TableProgress = _noop_table) -> PullReport:
+    """`on_bytes` 는 파일 하나를 받거나 재사용할 때마다 그 크기를, `on_table` 은 표 하나가 끝날 때마다
+    결과를 받는다(진행 표시용 — `sync --progress-file`). 둘 다 계획 실행에 영향을 주지 않는다."""
     started = time.monotonic()
     report = PullReport(plan.layer)
     if check_space:
         check_free_space(layer_root, plan.download_bytes + plan.reused_bytes)
     for table_plan in plan.tables:
         result = _pull_table(remote, layer_root, table_plan, state, log,
-                             clear_incoming=not plan.reuse)
+                             clear_incoming=not plan.reuse, on_bytes=on_bytes)
         report.results.append(result)
+        on_table(result)
         log(f"{result.table:22s} {result.outcome.value:9s} {result.build_id or '-'} "
             f"down={result.bytes_downloaded:,} reused={result.bytes_reused:,}"
             + (f"  {result.detail}" if result.detail else ""))

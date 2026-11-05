@@ -6,7 +6,9 @@
   gc        로컬 구판본 정리(current 보호, `--keep`)
   catalog   `python -m equity catalog` 위임 — equity.duckdb 매크로를 로컬 절대경로로 재생성
   sync      pull → catalog → verify(manifest·files) 를 한 번에. 일일 작업이 부르는 동사.
-            결과는 `_sync/last_run.json`, 로그는 `_sync/logs/`
+            결과는 `_sync/last_run.json`(실패면 `error_kind` 로 갈래), 로그는 `_sync/logs/`.
+            `--progress-file PATH` 를 주면 단계·받은 표·바이트를 그 파일에 원자 교체로 쓴다
+            (앱의 DB 새로고침 화면이 읽는다 — 사람용 로그를 해석하지 않게)
   status    마지막 실행 결과 + 테이블별 로컬 빌드. `--remote` 면 서버 current_build 와 대조해 뒤처진
             테이블을 보여 준다
 
@@ -36,6 +38,7 @@ from .pull import (
     Log,
     PullReport,
     TableOutcome,
+    TableResult,
     execute_plan,
     gc_table,
 )
@@ -122,6 +125,8 @@ def _print_plan(plan: SyncPlan) -> None:
 def _plan_json(plan: SyncPlan) -> dict[str, object]:
     return {
         "layer": plan.layer,
+        # 빌드 창의 정본은 이 모듈이다 — 앱은 이 값을 받아 쓰고 시각을 다시 적지 않는다.
+        "in_build_window": _in_build_window(datetime.now(UTC)),
         "download_bytes": plan.download_bytes,
         "reused_bytes": plan.reused_bytes,
         "warnings": list(plan.warnings),
@@ -187,7 +192,7 @@ def _pull_exit(report: PullReport) -> int:
 
 
 def _run_pull(remote: RemoteFS, args: argparse.Namespace, layer_root: Path, state: SyncState,
-              log: Log) -> tuple[PullReport, SyncPlan]:
+              log: Log, progress: ProgressFile | None = None) -> tuple[PullReport, SyncPlan]:
     now = datetime.now(UTC)
     if _in_build_window(now):
         log(f"warning: inside server build window (utc={now:%H:%M}) — expect drifted tables")
@@ -196,8 +201,16 @@ def _run_pull(remote: RemoteFS, args: argparse.Namespace, layer_root: Path, stat
                      reuse_check=trusting_reuse_check if args.no_reuse_check else None)
     if not args.json:
         _print_plan(plan)
+    if progress is None:
+        report = execute_plan(remote, plan, layer_root, state, keep=args.keep,
+                              check_space=not args.no_space_check, log=log)
+        return report, plan
+    # 표 파일만 센다 — meta 파일(baseline.json 등)은 `on_bytes` 로 오지 않는다
+    progress.totals(len(plan.by_action(TableAction.NEW_BUILD)),
+                    sum(t.download_bytes + t.reused_bytes for t in plan.tables))
     report = execute_plan(remote, plan, layer_root, state, keep=args.keep,
-                          check_space=not args.no_space_check, log=log)
+                          check_space=not args.no_space_check, log=log,
+                          on_bytes=progress.add_bytes, on_table=progress.table_done)
     return report, plan
 
 
@@ -465,6 +478,67 @@ def _write_last_run(layer_root: Path, payload: dict[str, object]) -> Path:
     return path
 
 
+class ProgressFile:
+    """`sync --progress-file` — 단계·받은 표 수·바이트를 JSON 한 덩어리로 원자 교체해 쓴다.
+
+    stage: `download`(받기) → `catalog`(정리하기) → `verify`(확인하기) → `done`. 받기 단계만 끝을 안다
+    (`tables_total`·`bytes_total`), 나머지는 시작 시각만 준다. 쓰기 실패는 sync 를 멈추지 않는다.
+    """
+
+    def __init__(self, path: Path | None) -> None:
+        self._path = path
+        self._doc: dict[str, object] = {
+            "started_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+            "stage": "download", "stage_started_at_utc": None,
+            "tables_total": None, "tables_done": 0, "bytes_total": None, "bytes_done": 0,
+        }
+        self._tables_done = 0
+        self._bytes_done = 0
+
+    def stage(self, name: str) -> None:
+        self._doc["stage"] = name
+        self._doc["stage_started_at_utc"] = datetime.now(UTC).isoformat(timespec="seconds")
+        self._write()
+
+    def totals(self, tables: int, nbytes: int) -> None:
+        self._doc["tables_total"], self._doc["bytes_total"] = tables, nbytes
+        self._write()
+
+    def add_bytes(self, n: int) -> None:
+        self._bytes_done += n
+        self._doc["bytes_done"] = self._bytes_done
+        self._write()
+
+    def table_done(self, result: TableResult) -> None:
+        if result.outcome is TableOutcome.DONE:
+            self._tables_done += 1
+            self._doc["tables_done"] = self._tables_done
+            self._write()
+
+    def _write(self) -> None:
+        if self._path is None:
+            return
+        try:
+            tmp = self._path.with_name(self._path.name + ".tmp")
+            tmp.write_text(json.dumps(self._doc, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, self._path)
+        except OSError as error:
+            print(f"warning: could not write progress file — {error!r}", file=sys.stderr)
+
+
+def _error_kind(error: BaseException) -> str:
+    """`last_run.json` 의 `error_kind` — 앱이 영문 문장을 해석하지 않고 실패 갈래를 고른다."""
+    if isinstance(error, LayerLocked):
+        return "locked"
+    if isinstance(error, RemoteConnectError):
+        return "connect"
+    if isinstance(error, RemoteTransferError):
+        return "transfer"
+    if isinstance(error, InsufficientDiskSpace):
+        return "disk"
+    return "unexpected"
+
+
 def cmd_sync(args: argparse.Namespace) -> int:
     layer_root = _layer_root(args)
     state = load_state(layer_root, args.layer)
@@ -475,7 +549,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         # 스케줄러가 매일 이 코드로 끝나면 status 가 낡은 성공을 계속 보고하면 안 된다 — 기록한다
         _write_last_run(layer_root, {
             "started_at_utc": started.isoformat(timespec="seconds"), "layer": args.layer,
-            "error": str(error), "exit_code": EXIT_ERROR,
+            "error": str(error), "error_kind": _error_kind(error), "exit_code": EXIT_ERROR,
             "finished_at_utc": datetime.now(UTC).isoformat(timespec="seconds")})
         raise
     log, handle, log_path = _log_writer(layer_root, "sync")
@@ -484,9 +558,11 @@ def cmd_sync(args: argparse.Namespace) -> int:
     exit_code = EXIT_ERROR
     payload: dict[str, object] = {"started_at_utc": started.isoformat(timespec="seconds"),
                                   "layer": args.layer, "log": str(log_path)}
+    progress = ProgressFile(Path(args.progress_file) if args.progress_file else None)
     try:
+        progress.stage("download")
         with open_sftp(_endpoint(args), accept_new_host_key=args.accept_new) as remote:
-            report, _ = _run_pull(remote, args, layer_root, state, log)
+            report, _ = _run_pull(remote, args, layer_root, state, log, progress)
             _print_pull_summary(report)
             payload["pull"] = _report_json(report)
             exit_code = _pull_exit(report)
@@ -494,11 +570,13 @@ def cmd_sync(args: argparse.Namespace) -> int:
             # "재생성하라" 는 finding 을 내는데, 그 재생성이 바로 이 단계다. pull 이 전송 실패 없이
             # 끝났으면 (drifted 여도 로컬 빌드 집합 기준으로) 다시 만든다.
             if args.layer == "equity" and not args.skip_catalog and not report.failed:
+                progress.stage("catalog")
                 catalog_rc = run_catalog(layer_root, log)
                 payload["catalog_rc"] = catalog_rc
                 if catalog_rc != EXIT_OK and exit_code == EXIT_OK:
                     exit_code = EXIT_ERROR  # 첫 비영 코드(drifted 3)는 유지한다
             state = load_state(layer_root, args.layer)
+            progress.stage("verify")
             verify_report = _run_verify(remote, args, layer_root, state,
                                         [Level.MANIFEST, Level.FILES])
             # 이번에 받은(재사용 포함) 테이블은 내용(hash)까지 본다 — 하루치는 파티션 몇 개라 싸다.
@@ -517,9 +595,11 @@ def cmd_sync(args: argparse.Namespace) -> int:
     except (RemoteConnectError, RemoteTransferError, InsufficientDiskSpace) as error:
         log(f"sync aborted — {error}")
         payload["error"] = str(error)
+        payload["error_kind"] = _error_kind(error)
         exit_code = EXIT_ERROR
     except BaseException as error:
         payload["error"] = f"unexpected {type(error).__name__}: {error}"
+        payload["error_kind"] = _error_kind(error)
         exit_code = EXIT_ERROR
         raise
     finally:
@@ -533,6 +613,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
             # finally 안의 실패가 원인 예외를 가리지 않게 한다 — 기록 실패는 stderr 로만 남긴다
             print(f"warning: could not write last_run.json — {error!r}", file=sys.stderr)
         _release_lock(layer_root)
+        progress.stage("done")
     print(f"== sync {args.layer}: exit={exit_code} log={log_path}")
     return exit_code
 
@@ -654,6 +735,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync = sub.add_parser("sync", help="pull → catalog → verify")
     add_pull_options(p_sync)
     p_sync.add_argument("--skip-catalog", action="store_true")
+    p_sync.add_argument("--progress-file", default=None,
+                        help="단계·받은 표·바이트를 이 JSON 파일에 원자 교체로 쓴다(앱 진행 표시용)")
     p_sync.add_argument("--hash-all", action="store_true",
                         help="이번에 받은 표만이 아니라 전 표의 파티션 content_hash 를 재계산한다")
     p_sync.set_defaults(fn=cmd_sync)

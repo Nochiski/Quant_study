@@ -56,6 +56,14 @@ database/scripts/ledger_sync.sh verify --offline
 | `status` | 마지막 실행 결과·테이블별 로컬 빌드. `--remote` 면 서버 current_build 와 대조해 `BEHIND` 표시 | 0 |
 
 `--tables a b` 로 일부 테이블만, `--json` 으로 기계용 출력, `--layer stage` 로 stage 층(같은 규약).
+
+기계가 읽는 칸(앱의 DB 새로고침이 쓴다 — 사람용 로그를 해석하지 않게):
+
+- `plan --json` 의 `in_build_window`: 지금이 서버 빌드 창 안인가. 창 시각의 정본은 `ledger_sync` 하나다.
+- `sync --progress-file PATH`: 단계(`download`·`catalog`·`verify`·`done`)·받을 표 수·받은 표 수·표 파일 바이트를
+  JSON 한 덩어리로 원자 교체해 쓴다. 받기 단계만 끝(전체)을 안다.
+- `_sync/last_run.json` 의 `error_kind`: 실패 갈래(`connect`·`transfer`·`disk`·`locked`·`unexpected`). 카탈로그
+  실패는 `catalog_rc`, 검증 불일치는 `exit_code=4`·`verify.findings` 로 본다.
 `--remote-root` 는 서버 SFTP 루트(기본 `/`)다. `pull`·`sync` 는 받기 전에 받을 바이트와 재사용
 바이트만큼 로컬 여유 공간을 확인하고, `--no-space-check` 로 끌 수 있다.
 

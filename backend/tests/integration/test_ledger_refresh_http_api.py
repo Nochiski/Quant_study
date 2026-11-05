@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
-from typing import Any
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -22,7 +21,6 @@ from strategy_workbench.application.ledger_refresh.facade.refresh import (
     SyncProgress,
     SyncStage,
 )
-from strategy_workbench.bootstrap import _http
 from strategy_workbench.bootstrap._reload import ContainerActiveWork, ReloadableApp
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
@@ -80,20 +78,9 @@ def test_a_refresh_blocks_new_runs_then_swaps_in_a_new_container() -> None:
     refresh = LedgerRefreshService(sync, ContainerActiveWork(lambda: holder.container), holder)
     holder.load(
         partial(
-            _http._build_app,  # noqa: SLF001  # reason: 런타임 조립 경로를 연습용 원천으로 그대로 쓴다
-            strategy_repository_path=None,
-            research_db_path=None,
-            continuous_db_path=None,
-            artifact_root=None,
+            build_http_app,
             run_slots=2,
-            trial_hold_seconds=0.0,
             run_isolation="thread",
-            run_memory_reserve_gb=None,
-            equity_adapter="mock",
-            equity_root=None,
-            assistant=_http.DEFAULT_ASSISTANT_SETTINGS,
-            allowed_origins=_http.DEFAULT_ALLOWED_ORIGINS,
-            broker_fake_probe=False,
             ledger_refresh=refresh,
         )
     )
@@ -124,8 +111,7 @@ def test_a_refresh_blocks_new_runs_then_swaps_in_a_new_container() -> None:
 def test_shutting_down_after_a_reload_closes_the_app_in_use() -> None:
     events: list[str] = []
 
-    # reason: 컨테이너 자리는 이 테스트가 읽지 않는다
-    def build() -> tuple[FastAPI, Any]:
+    def build() -> FastAPI:
         number = sum(event.startswith("open") for event in events) + 1
 
         @asynccontextmanager
@@ -134,7 +120,7 @@ def test_shutting_down_after_a_reload_closes_the_app_in_use() -> None:
             yield
             events.append(f"close{number}")
 
-        return FastAPI(lifespan=lifespan), None
+        return FastAPI(lifespan=lifespan)
 
     holder = ReloadableApp().load(build)
     with TestClient(holder):

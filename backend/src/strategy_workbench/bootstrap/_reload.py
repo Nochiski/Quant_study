@@ -29,7 +29,6 @@ Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
 Receive = Callable[[], Awaitable[Message]]
 Send = Callable[[Message], Awaitable[None]]
-Built = tuple[FastAPI, BackendContainer]
 
 
 class ContainerActiveWork:
@@ -51,28 +50,27 @@ class ReloadableApp:
     """요청을 지금 앱으로 넘기는 ASGI 앱. `load` 로 첫 앱을 세우고 `apply` 로 바꿔 끼운다."""
 
     def __init__(self) -> None:
-        self._build: Callable[[], Built] | None = None
-        self._built: Built | None = None
+        self._build: Callable[[], FastAPI] | None = None
+        self._app: FastAPI | None = None
         self._stack: AsyncExitStack | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._closed = False
 
-    def load(self, build: Callable[[], Built]) -> ReloadableApp:
+    def load(self, build: Callable[[], FastAPI]) -> ReloadableApp:
+        """`build` 는 컨테이너를 `app.state.container` 에 실은 앱을 세운다(`build_http_app`)."""
         self._build = build
-        self._built = build()
+        self._app = build()
         return self
 
     @property
     def app(self) -> FastAPI:
-        if self._built is None:
+        if self._app is None:
             raise RuntimeError("reloadable app is not loaded — call load(build) first")
-        return self._built[0]
+        return self._app
 
     @property
     def container(self) -> BackendContainer:
-        if self._built is None:
-            raise RuntimeError("reloadable app is not loaded — call load(build) first")
-        return self._built[1]
+        return self.app.state.container
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "lifespan":
@@ -111,20 +109,20 @@ class ReloadableApp:
         """
         if self._build is None:
             raise RuntimeError("reloadable app is not loaded — call load(build) first")
-        built = self._build()
+        app = self._build()
         if self._loop is None or self._stack is None:
-            self._built = built
+            self._app = app
             return
-        asyncio.run_coroutine_threadsafe(self._swap(built), self._loop).result()
+        asyncio.run_coroutine_threadsafe(self._swap(app), self._loop).result()
 
-    async def _swap(self, built: Built) -> None:
+    async def _swap(self, app: FastAPI) -> None:
         stack = AsyncExitStack()
-        await stack.enter_async_context(built[0].router.lifespan_context(built[0]))
+        await stack.enter_async_context(app.router.lifespan_context(app))
         if self._closed:  # 세우는 동안 서버가 끝나기 시작했다 — 새 앱을 바로 닫는다
             await stack.aclose()
             raise RuntimeError("server is shutting down — the reloaded app was closed")
         old = self._stack
-        self._built, self._stack = built, stack
+        self._app, self._stack = app, stack
         logger.info("app reloaded with new ledger data")
         if old is not None:
             try:

@@ -1,7 +1,6 @@
 from strategy_workbench.adapters.outbound.ledger_sync_process._process import (
-    LOCK_STALE_S,
     LedgerSyncProcess,
-    ledger_sync_command,
+    discover_ledger_sync,
 )
 
-__all__ = ["LOCK_STALE_S", "LedgerSyncProcess", "ledger_sync_command"]
+__all__ = ["LedgerSyncProcess", "discover_ledger_sync"]

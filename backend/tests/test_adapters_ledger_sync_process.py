@@ -25,6 +25,7 @@ from strategy_workbench.adapters.outbound.ledger_sync_process._process import (
 from strategy_workbench.application.ledger_refresh.facade.refresh import (
     SyncFailureKind,
     SyncStage,
+    UnavailableReason,
 )
 from tests.equity_fixture import import_ledger_module
 
@@ -253,3 +254,28 @@ def test_a_stale_record_from_an_earlier_run_is_not_trusted(tmp_path: Path) -> No
     while outcome is None:
         outcome = job.wait(1.0)
     assert (outcome.failure, outcome.catalog_rebuilt) == (SyncFailureKind.UNEXPECTED, False)
+
+
+def test_research_snapshot_markers_match_the_ledger_module() -> None:
+    snapshot = import_ledger_module("equity.research_snapshot")
+    assert set(_process.RESEARCH_SNAPSHOT_MARKERS) == {
+        snapshot.SNAPSHOT_NAME,
+        snapshot.PENDING_NAME,
+    }
+
+
+def test_discovery_receives_only_the_equity_root_the_app_reads(tmp_path: Path) -> None:
+    root = tmp_path / "data" / "equity"
+    root.mkdir(parents=True)
+    configured = {"QL_SYNC_HOST": "203.0.113.7", "QL_SYNC_USER": "sync"}
+
+    def discover(path: Path, environ: dict[str, str] = configured, uv: str | None = "uv") -> object:
+        return _process.discover_ledger_sync(path, REPO, environ=environ, which=lambda _: uv)
+
+    found = discover(root)
+    assert isinstance(found, LedgerSyncProcess)
+    assert discover(tmp_path / "data") is UnavailableReason.ROOT_MISMATCH  # 이름이 equity 가 아니다
+    assert discover(root, environ={}) is UnavailableReason.NOT_CONFIGURED
+    assert discover(root, uv=None) is UnavailableReason.SYNC_TOOL_MISSING
+    (root / "_research_snapshot.pending").write_text("", encoding="utf-8")
+    assert discover(root) is UnavailableReason.ROOT_MISMATCH  # 연구 보존본을 덮지 않는다

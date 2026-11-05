@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -28,6 +29,7 @@ from strategy_workbench.application.ledger_refresh.facade.refresh import (
     SyncPlan,
     SyncProgress,
     SyncStage,
+    UnavailableReason,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,13 @@ EXIT_ERROR = 2
 EXIT_DRIFTED = 3
 EXIT_MISMATCH = 4
 PLAN_TIMEOUT_S = 120
+# 앱이 받는 층. 앱이 읽는 루트의 이름이 이것이어야 그 루트를 그대로 받는다(`--root` 부모·`--layer`).
+LAYER = "equity"
+# 도구가 서버에 접속할 설정. 값은 하위 프로세스가 읽고 여기서는 있는지만 본다.
+REQUIRED_ENV = ("QL_SYNC_HOST", "QL_SYNC_USER")
+# 연구 보존 루트 표식(`database/src/equity/research_snapshot.py` 의 `SNAPSHOT_NAME`·`PENDING_NAME`).
+# 보존 루트는 받지 않는다 — 받으면 보존본을 덮는다.
+RESEARCH_SNAPSHOT_MARKERS = ("_research_snapshot.json", "_research_snapshot.pending")
 PARAMIKO = "paramiko>=3.4,<4"
 # 표마다 남길 판본 수. 도구 기본값(2)보다 하나 더 남긴다 — 반영하지 못한 받기(일부만 받음) 뒤 다시
 # 받을 때, 옛 앱이 부팅 때 고정한 판을 gc 가 지우지 않게. 반영하지 못한 받기가 두 번 이어지면 지울
@@ -285,3 +294,22 @@ class LedgerSyncProcess:
         )
         logger.info("ledger sync started — pid=%s root=%s", process.pid, self._equity_root)
         return _ProcessJob(process, progress_path, self._sync_dir() / LAST_RUN_NAME, started)
+
+
+def discover_ledger_sync(
+    equity_root: Path,
+    repo_root: Path,
+    *,
+    environ: Mapping[str, str] = os.environ,
+    which: Callable[[str], str | None] = shutil.which,
+) -> LedgerSyncProcess | UnavailableReason:
+    """앱이 읽는 `equity_root` 를 받을 동기화 도구, 또는 받을 수 없는 이유."""
+    root = equity_root.resolve()
+    if root.name != LAYER or any((root / name).exists() for name in RESEARCH_SNAPSHOT_MARKERS):
+        return UnavailableReason.ROOT_MISMATCH
+    if not all(environ.get(name, "").strip() for name in REQUIRED_ENV):
+        return UnavailableReason.NOT_CONFIGURED
+    uv = which("uv")
+    if uv is None or not (repo_root / "database" / "src" / "ledger_sync").is_dir():
+        return UnavailableReason.SYNC_TOOL_MISSING
+    return LedgerSyncProcess(uv, repo_root, root, environ=environ)

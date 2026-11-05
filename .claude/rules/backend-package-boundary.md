@@ -100,6 +100,8 @@ bootstrap ─> application + adapters
   `RiskStore`(구현 `rebalance_files`)로 판정·기록을 남긴다. 종목 상태는 `MarketSource`가 `domain/risk` 값으로 답한다.
   일일 위험 보고(2026-10-31)는 자체 outgoing `PriceHistorySource`·`RiskReportStore`로 읽고 쓰며, 원장 가격은
   `adapters/outbound/ledger_prices`(pyarrow, `application.weekly_rebalance` facade에만 의존)가 읽는다.
+  오늘 정규장 상태(2026-11-05)는 자체 outgoing `MarketSession`이고 `kiwoom_mock`의 `KiwoomSessionLog`가 체결
+  기록기가 남긴 장운영 기록으로 답한다(키움 접속 없음). 명령줄은 bootstrap이 읽은 상태 낱말만 받는다.
   상세는 `docs/planning/research-to-trading/S07-weekly-rebalance.md`다.
 - 완료 run의 계좌 보고서는 `domain/backtest`의 순수 projection·전용
   `facade/account_report.py`가 금액·상태·초기자본 기준 해석을 소유한다.

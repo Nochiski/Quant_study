@@ -730,6 +730,11 @@ def fin_summary_sql(p: Params) -> str:
         슬롯(val_q*)은 기간 라벨이 없어 못 쓴다. 분기 capex·FCF 는 싣지 않는다 — `_q` 가 부호가
         섞인 누계의 차라 크기가 틀어진다(절단본 003540: 1Q −7.2억 → 반기 +13.7억).
         4Q 파생값을 실은 행의 `available_date` = max(사업보고서, 파생값 날짜)(T-43, fi1.8.0).
+      · WISE 분기(Q:IS)가 있는 종목은 분기 행을 WISE 에서 쓰고, WISE 확정 분기보다 **뒤** 기말만 DART 분기를
+        더한다(N-64 Q1, fi1.13.0 — 분기보고서는 나왔는데 WISE 가 아직 (E) 인 며칠). WISE 최신 분기 기준(연결 →
+        CFS · 별도 → OFS)과 같은 DART 행만 쓰고, 매출 순액(`revenue_basis` 'net' — 은행·증권·금융지주) 종목은 매출을
+        비운다(DART 매출과 정의가 다르다 — 11-05 서버 같은 분기 대조 0/18 일치, 영업이익·순이익 18/18). 지주사의
+        연결 아닌 DART 행은 WISE 갈래와 같이 손익을 비우고 표식. 5기 창은 WISE + DART 새 분기를 합쳐 센다.
       · `fs_basis` = WISE 라벨, WISE 가 없는 행은 'DART:' || fs_div. `capex_basis` 는 DART 그대로.
       · `dps`(보통주 주당배당금, 원) = equity `dividend_event`(사업보고서 11011 · stock_knd
         보통주/보통주식, 값이 없으면 법인 축 '-' · available_date ≤ D, 결산기 = stlm_dt 의
@@ -937,6 +942,35 @@ qtr AS (
                               f.report_code) AS k
     FROM fin f JOIN dsec s ON s.corp_code = f.corp_code
     WHERE f.rn = 1
+),
+wqlast AS (
+    -- 종목별 WISE 확정 분기의 최신 기말 · 그 분기 기준(연결 → CFS · 별도 → OFS) · 매출 계정(N-64 Q1)
+    SELECT ticker, period,
+           CASE WHEN q_basis LIKE '%연결%' THEN 'CFS' WHEN q_basis LIKE '%별도%' THEN 'OFS' END AS fs_div,
+           q_revenue_basis
+    FROM wq WHERE k = 1
+),
+qnew AS (
+    -- WISE 종목의 DART 분기 — WISE 확정 분기보다 뒤 기말 · 같은 기준만(N-64 Q1, fi1.13.0). 같은 기말은 WISE
+    SELECT q.*, l.q_revenue_basis AS w_revenue_basis,
+           row_number() OVER (PARTITION BY q.ticker ORDER BY q.period DESC) AS kn
+    FROM qtr q JOIN wqlast l ON l.ticker = q.ticker AND q.period > l.period AND q.fs_div = l.fs_div
+),
+qn AS (
+    SELECT ticker, count(*) AS n FROM qnew WHERE kn <= {FIN_QUARTERS} GROUP BY ticker
+),
+qsel AS (
+    -- DART 분기 행: WISE 분기가 없는 종목은 최근 5기, WISE 종목은 qnew. 매출 순액(금융) 종목은 매출을 비우고
+    -- (DART 매출과 정의가 다르다 — 11-05 서버 같은 분기 대조 0/18 일치, 영업이익 · 순이익은 18/18), 지주사의
+    -- 연결 아닌 행은 WISE 갈래와 같이 손익을 비운다
+    SELECT q.*, FALSE AS rev_blank, FALSE AS hold_blank
+    FROM qtr q
+    WHERE q.k <= {FIN_QUARTERS} AND q.ticker NOT IN (SELECT ticker FROM wqsnap)
+    UNION ALL
+    SELECT q.* EXCLUDE (w_revenue_basis, kn), coalesce(q.w_revenue_basis = 'net', FALSE) AS rev_blank,
+           h.ticker IS NOT NULL AND q.fs_div <> 'CFS' AS hold_blank
+    FROM qnew q LEFT JOIN hold h ON h.ticker = q.ticker
+    WHERE q.kn <= {FIN_QUARTERS}
 )
 SELECT ticker, period, 'annual' AS period_type,
        CAST(round(w_revenue) AS BIGINT)                                 AS revenue,
@@ -971,22 +1005,23 @@ WHERE k <= {FIN_ANNUAL_PERIODS}
 UNION ALL
 
 SELECT ticker, period, 'quarter' AS period_type,
-       CAST(round(q_revenue / {eok}) AS BIGINT)                         AS revenue,
-       CAST(round(q_op / {eok}) AS BIGINT)                              AS op,
-       CAST(round(q_ni / {eok}) AS BIGINT)                              AS ni,
+       CASE WHEN NOT (rev_blank OR hold_blank)
+            THEN CAST(round(q_revenue / {eok}) AS BIGINT) END           AS revenue,
+       CASE WHEN NOT hold_blank THEN CAST(round(q_op / {eok}) AS BIGINT) END AS op,
+       CASE WHEN NOT hold_blank THEN CAST(round(q_ni / {eok}) AS BIGINT) END AS ni,
        NULL AS eps, NULL AS bps, NULL AS per, NULL AS pbr, NULL AS roe, NULL AS roa,
        CAST(total_liab / nullif(total_equity, 0) * 100 AS DOUBLE)       AS debt_ratio,
        NULL AS fcf, NULL AS capex, NULL AS op_margin, NULL AS ni_margin,
        NULL AS dividend_yield, NULL AS dps, NULL AS shares, NULL AS ev_ebitda, NULL AS yoy,
-       CAST(round(q_gross_profit / {eok}) AS BIGINT)                    AS gross_profit,
+       CASE WHEN NOT hold_blank
+            THEN CAST(round(q_gross_profit / {eok}) AS BIGINT) END      AS gross_profit,
        CAST(round(total_asset / {eok}) AS BIGINT)                       AS total_assets,
-       'DART:' || fs_div                                                AS fs_basis,
+       'DART:' || fs_div || CASE WHEN hold_blank THEN '|지주사제외' ELSE '' END AS fs_basis,
        capex_basis,
        CAST(NULL AS VARCHAR)                                            AS revenue_basis,
        CAST(NULL AS INTEGER)                                            AS period_months,
        available_date
-FROM qtr
-WHERE k <= {FIN_QUARTERS} AND ticker NOT IN (SELECT ticker FROM wqsnap)
+FROM qsel
 
 UNION ALL
 
@@ -1012,7 +1047,8 @@ SELECT w.ticker, w.period, 'quarter' AS period_type,
        w.q_fetched                                                      AS available_date
 FROM wq w
 LEFT JOIN hold h ON h.ticker = w.ticker
-WHERE w.k <= {FIN_QUARTERS}"""
+LEFT JOIN qn n ON n.ticker = w.ticker                   -- 5기 창은 DART 새 분기와 합쳐 센다(N-64 Q1)
+WHERE w.k <= {FIN_QUARTERS} - coalesce(n.n, 0)"""
     return create("fi_fin_summary", inner)
 
 

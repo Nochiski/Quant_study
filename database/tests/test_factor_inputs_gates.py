@@ -522,3 +522,15 @@ def test_fg6_records_the_new_quarter_column_and_filtered_kinds(con) -> None:
     assert r.status is GateStatus.PASS and r.metrics["warn"] is False
     assert (r.metrics["new_quarter"], r.metrics["n_tickers_new_quarter"]) == ("2026/06", 1)
     assert r.metrics["fin_prelim_by_status"] == {"not_quarter": 1, "ok": 1}
+
+
+def test_fg6_counts_wise_tickers_on_a_newer_dart_quarter(con) -> None:
+    """N-64 Q1 — WISE 분기 행과 DART 분기 행을 함께 가진 종목만 센다(DART 만인 종목 · 연간 DART 행은 아님)."""
+    con.execute("INSERT INTO g_fi_fin_summary (ticker, period, period_type, op, fs_basis) VALUES "
+                "('000001', '2026/03', 'quarter', 9.0, 'WISE:IFRS연결'), "
+                "('000001', '2026/06', 'quarter', 10.0, 'DART:CFS'), "
+                "('000002', '2026/06', 'quarter', 5.0, 'DART:CFS'), "
+                "('000003', '2026/03', 'quarter', 7.0, 'WISE:IFRS연결'), "
+                "('000003', '2025/12', 'annual', 30.0, 'DART:CFS')")
+    r = gates.fg6_prelim(_ctx(con))
+    assert r.status is GateStatus.PASS and r.metrics["n_wise_tickers_dart_quarter"] == 1

@@ -251,6 +251,11 @@ class CompareInputError(RuntimeError):
     """대조를 시작할 수 없는 입력(rc 2)."""
 
 
+class RulesChangedDay(CompareInputError):
+    """fi 규칙을 올린 배포 다음 날 — 장 마감 판 · 연구 판 T 는 같은 규칙인데 연구 판 D'(배포 전 아침 판)만 다르다.
+    대조는 못 하지만(rc 2) 판정 파일에 `rules_changed_day` 를 달아 체인이 crit 대신 warn 으로 낸다."""
+
+
 # ── 값 ───────────────────────────────────────────────────────────────────────
 def _jsonable(v: object) -> object:
     if isinstance(v, datetime | date):
@@ -1192,13 +1197,16 @@ def _check_versions(ev: Side, rt: Side, rd: Mapping[str, object]) -> None:
     """세 판이 같은 규칙 판본이어야 차이를 데이터 범주로 설명할 수 있다."""
     got = {"장 마감 판": ev.fi_run.get("rules_version"), "연구 판 T": rt.fi_run.get("rules_version"),
            "연구 판 D'": rd.get("rules_version")}
-    if len(set(got.values())) != 1:
+    if len(set(got.values())) != 1 and got["장 마감 판"] != got["연구 판 T"]:
         raise CompareInputError(f"factor_inputs rules_version 이 다르다 — {got}")
     for sid in sorted(set(ev.model_run.specs) & set(rt.model_run.specs)):
         me, mr = _model_rules(ev, sid), _model_rules(rt, sid)
         if me != mr:
             raise CompareInputError(f"model {sid} rules_version 이 다르다 — 장 마감 판 {me} · "
                                     f"연구 판 {mr}")
+    if len(set(got.values())) != 1:       # 장 마감 판 = 연구 판 T 이고 D' 만 옛 규칙
+        raise RulesChangedDay(f"factor_inputs rules_version 이 다르다(fi 규칙 바뀐 첫날 — 연구 판 D' 만 "
+                              f"옛 규칙) — {got}")
 
 
 def read_stage(ev: Side, t: date) -> tuple[dict[str, str], frozenset[str]]:
@@ -1589,14 +1597,18 @@ def write_report(result: Result, out_root: Path) -> Path:
     return path
 
 
-def _write_error(out_root: Path, t: date, message: str) -> Path | None:
-    """rc 2 판정 파일 — 출력 루트가 있을 때만(없는 루트를 만들지 않는다). 못 쓰면 None."""
+def _write_error(out_root: Path, t: date, message: str, *, rules_changed_day: bool = False) -> Path | None:
+    """rc 2 판정 파일 — 출력 루트가 있을 때만(없는 루트를 만들지 않는다). 못 쓰면 None.
+    `rules_changed_day`(fi 규칙 바뀐 첫날 — `RulesChangedDay`)는 그때만 키를 단다 — 장 마감 체인이 warn 으로 낸다."""
     if not Path(out_root).is_dir():
         return None
     path = report_path(out_root, t)
+    payload: dict[str, object] = {"schema": SCHEMA, "tool": TOOL, "date": t.isoformat(),
+                                  "generated_at": _now(), "verdict": "error", "rc": 2, "error": message}
+    if rules_changed_day:
+        payload["rules_changed_day"] = True
     try:
-        _write_json(path, {"schema": SCHEMA, "tool": TOOL, "date": t.isoformat(),
-                           "generated_at": _now(), "verdict": "error", "rc": 2, "error": message})
+        _write_json(path, payload)
     except OSError:
         log.exception("두 판 대조 오류 판정 파일을 쓰지 못했다 — %s", path)
         return None
@@ -1680,12 +1692,13 @@ def main(argv: Sequence[str] | None = None) -> int:
               file=sys.stderr)
         return 2
     out_root = args.out_root or args.evening_root
+    changed_day = False
     try:
         result = compare(t, args.evening_root, args.research_root, calendar_dir=args.calendar_dir,
                          replay=args.replay, spearman_min=args.spearman_min, list_n=args.list_n)
         path = write_report(result, out_root)
     except CompareInputError as e:
-        msg = str(e)
+        msg, changed_day = str(e), isinstance(e, RulesChangedDay)
     except OSError as e:          # 보고서 쓰기 실패 — 판정이 남지 않으면 '대조 못 함'(rc 2)
         msg = f"보고서를 쓰지 못했다: {type(e).__name__}: {e}"
     except Exception as e:        # 예상 밖 예외도 '대조 못 함'(rc 2) — rc 1(미설명)로 읽히지 않게
@@ -1695,7 +1708,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(render(result, path, args.list_n))
         return result.rc
     print(f"{TOOL} 입력 오류(rc 2): {msg}", file=sys.stderr)
-    _write_error(out_root, t, msg)
+    _write_error(out_root, t, msg, rules_changed_day=changed_day)
     return 2
 
 

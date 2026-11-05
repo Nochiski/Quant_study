@@ -233,7 +233,8 @@ def _translate(error: Exception) -> HTTPException:
             detail={
                 "code": "library.factor.key_exists",
                 "message": (
-                    "같은 팩터 id 로 저장한 내 팩터가 있습니다. 새 버전으로 저장할 수 있습니다."
+                    "같은 팩터 id 로 저장한 내 팩터가 있습니다. "
+                    "새 버전으로 저장할 수 있습니다."
                 ),
                 "existing_library_id": error.existing_library_id,
             },

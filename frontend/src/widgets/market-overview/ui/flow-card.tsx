@@ -20,6 +20,15 @@ const PERIODS: readonly FlowPeriod[] = [
   "twenty_sessions",
 ];
 
+// 각주 묶음(내외국인) 합 — 네 주체와 더하면 0이 된다.
+const footnote = (amounts: readonly InvestorAmountBody[]): string => {
+  const value = ofGroup(amounts, "footnote").reduce(
+    (sum, item) => sum + item.amount_krw,
+    0,
+  );
+  return `${value < 0 ? "−" : "+"}${shortWon(value)}`;
+};
+
 // 주체를 어느 묶음에 두는지는 응답의 `group` 이 정한다(순서도 응답 그대로).
 const ofGroup = (
   amounts: readonly InvestorAmountBody[],
@@ -129,9 +138,7 @@ export const FlowCard = ({
           <Bars amounts={total.amounts} />
           <p className="market-card__muted">
             {tFill("market.flow.zeroSum", {
-              amount: `${amountOf(total.amounts, "resident_foreign") < 0 ? "−" : "+"}${shortWon(
-                amountOf(total.amounts, "resident_foreign"),
-              )}`,
+              amount: footnote(total.amounts),
             })}
           </p>
           <details className="ui-disclosure">

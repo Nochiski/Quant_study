@@ -22,6 +22,7 @@ const status = (overrides: Partial<LedgerRefreshBody>): LedgerRefreshBody => ({
   message: "서버에 받을 새 데이터가 있어요.",
   can_start: true,
   refreshing: false,
+  last_outcome: null,
   reason: null,
   failure: null,
   needs_check: false,
@@ -133,7 +134,7 @@ describe("LedgerRefreshControl", () => {
     renderControl();
     await waitFor(() => expect(checks).toBe(1));
     expect(
-      await screen.findByText("서버에 받을 새 데이터가 있어요"),
+      await screen.findByText("새 데이터 있음"),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "DB 새로고침" }));

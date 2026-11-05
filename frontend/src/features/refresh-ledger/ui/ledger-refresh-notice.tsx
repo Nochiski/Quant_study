@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import type { LedgerRefreshBody } from "../../../shared/api";
+import type { RefreshOutcome } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import { Button } from "../../../shared/ui";
 import {
@@ -10,23 +10,12 @@ import {
 } from "../model/refresh-queries";
 import "./ledger-refresh.css";
 
-type Outcome = "succeeded" | "failed" | "partial";
-
 interface Notice {
   finishedAt: string;
-  outcome: Outcome;
+  outcome: RefreshOutcome;
   // 지금 상태가 아직 그 결과를 말할 때만(끝난 뒤 계산을 시작하면 상태 문장이 바뀐다)
   message: string | null;
 }
-
-// 끝난 받기의 결과. 실패 갈래가 없으면 반영에 성공한 것이다 — 그 뒤 계산이 시작돼 code 가
-// 바뀌어도(`busy_work`) 결과는 같다.
-const outcomeOf = (status: LedgerRefreshBody): Outcome =>
-  status.failure === null || status.failure === undefined
-    ? "succeeded"
-    : status.code === "partial"
-      ? "partial"
-      : "failed";
 
 /**
  * DB 새로고침이 끝났다는 알림(어느 화면에서든). 처음 읽었을 때 이미 끝나 있던 결과는 알리지 않는다.
@@ -46,9 +35,11 @@ export const LedgerRefreshNotice = () => {
     data !== undefined &&
     finishedAt !== null &&
     finishedAt !== known &&
-    !data.refreshing
+    data.last_outcome !== null &&
+    data.last_outcome !== undefined
   ) {
-    const outcome = outcomeOf(data);
+    // 결과 갈래는 backend 가 싣는다 — 그 뒤 code 가 바뀌어도(`busy_work`·`locked`) 그대로다.
+    const outcome = data.last_outcome;
     setKnown(finishedAt);
     setNotice({
       finishedAt,

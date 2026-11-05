@@ -19,9 +19,10 @@ export const REFRESH_POLL_MS = 2_000;
 export const isRefreshing = (status: LedgerRefreshBody | undefined): boolean =>
   status?.refreshing === true;
 
-// 앱을 다시 세우는 동안의 끊김(연결 실패·502~504)만 다시 묻는다. 그 밖의 오류는 바로 보인다.
+// 앱을 다시 세우는 동안의 끊김(연결 실패 = status 0, 502~504)만 다시 묻는다. 그 밖의 오류는 바로
+// 보인다.
 const transient = (error: Error): boolean =>
-  !(error instanceof ApiRequestError) || error.status >= 502;
+  error instanceof ApiRequestError && (error.status === 0 || error.status >= 502);
 
 export const ledgerRefreshQuery = () =>
   queryOptions({

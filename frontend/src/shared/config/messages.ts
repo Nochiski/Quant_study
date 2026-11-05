@@ -3198,7 +3198,7 @@ const ko = {
   "market.sector.unknown": "그 업종을 지금 데이터에서 찾지 못했어요.",
   "refresh.button": "DB 새로고침",
   "refresh.hint": "서버에서 최신 시장 데이터를 받아요",
-  "refresh.badge.behind": "서버에 받을 새 데이터가 있어요",
+  "refresh.badge.behind": "새 데이터 있음",
   "refresh.badge.upToDate": "최신",
   "refresh.badge.running": "데이터 받는 중",
   "refresh.badge.partial": "확인 필요 · 데이터 일부만 바뀜",

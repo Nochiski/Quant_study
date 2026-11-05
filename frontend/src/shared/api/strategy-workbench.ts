@@ -188,6 +188,7 @@ export type {
   Investor,
   InvestorAmountBody,
   InvestorGroup,
+  RefreshOutcome,
   SectorCardBody,
   SectorGroupBody,
   SectorMapBody,

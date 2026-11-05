@@ -139,10 +139,9 @@ export const LedgerRefreshControl = () => {
     if (event.key === "Escape") close();
   };
   const remote = data.remote;
-  const finished =
-    data.code === "succeeded" ||
-    data.code === "failed" ||
-    data.code === "partial";
+  // 지금 상태가 마지막 결과를 말하는가(그 뒤 계산 시작·잠금으로 바뀌지 않았다)
+  const outcome = data.code === data.last_outcome ? data.last_outcome : null;
+  const finished = outcome !== null;
 
   return (
     <div className="refresh-ledger">
@@ -179,8 +178,8 @@ export const LedgerRefreshControl = () => {
           <strong id={titleId}>
             {isRefreshing(data)
               ? t("refresh.dialog.running")
-              : finished
-                ? t(`refresh.notice.${data.code as "succeeded" | "failed" | "partial"}`)
+              : outcome !== null
+                ? t(`refresh.notice.${outcome}`)
                 : t("refresh.dialog.confirm")}
           </strong>
           {isRefreshing(data) ? (
@@ -196,7 +195,7 @@ export const LedgerRefreshControl = () => {
           ) : null}
           <p
             className={
-              data.code === "failed" || data.code === "partial"
+              outcome === "failed" || outcome === "partial"
                 ? "refresh-ledger__warning"
                 : "refresh-ledger__muted"
             }

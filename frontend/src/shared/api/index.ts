@@ -78,6 +78,7 @@ export {
   type LedgerRefreshBody,
   type MarketOverviewBody,
   type MarketSectorBody,
+  type RefreshOutcome,
   type SectorCardBody,
   type SectorGroupBody,
   type SectorMapBody,

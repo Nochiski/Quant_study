@@ -6,16 +6,19 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import type { LedgerRefreshBody } from "../../../shared/api";
+import { messages } from "../../../shared/config";
 import { LedgerRefreshNotice } from "..";
 
 const PATH = "http://localhost:8000/api/v1/ledger-refresh";
 const FINISHED = "2026-11-05T03:10:00Z";
+const PARTIAL_TITLE = messages.ko["refresh.notice.partial"];
 
 const status = (overrides: Partial<LedgerRefreshBody>): LedgerRefreshBody => ({
   code: "idle",
   message: "서버에 있는 최신 데이터와 같아요.",
   can_start: true,
   refreshing: false,
+  last_outcome: null,
   reason: null,
   failure: null,
   needs_check: false,
@@ -62,19 +65,59 @@ describe("LedgerRefreshNotice", () => {
     await reload();
     expect(screen.queryByRole("status")).toBeNull();
 
-    current = status({ code: "succeeded", message: "새 데이터를 앱에 반영했어요.", finished_at: FINISHED });
+    current = status({
+      code: "succeeded",
+      last_outcome: "succeeded",
+      message: "새 데이터를 앱에 반영했어요.",
+      finished_at: FINISHED,
+    });
     await reload();
     expect(await screen.findByRole("status")).toHaveTextContent("새 데이터를 앱에 반영했어요.");
     await waitFor(() => expect(reads).toBe(2)); // 다른 조회를 한 번 다시 읽는다
 
     // 반영 뒤 계산을 시작하면 code 가 바뀌지만 같은 끝난 받기다 — 다시 알리거나 다시 읽지 않는다
-    current = status({ code: "busy_work", can_start: false, finished_at: FINISHED });
+    current = status({
+      code: "busy_work",
+      can_start: false,
+      last_outcome: "succeeded",
+      finished_at: FINISHED,
+    });
     await reload();
-    current = status({ code: "succeeded", message: "새 데이터를 앱에 반영했어요.", finished_at: FINISHED });
+    current = status({
+      code: "succeeded",
+      last_outcome: "succeeded",
+      message: "새 데이터를 앱에 반영했어요.",
+      finished_at: FINISHED,
+    });
     await reload();
     expect(reads).toBe(2);
     await userEvent.setup().click(screen.getByRole("button", { name: "알림 닫기" }));
     await reload();
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("keeps a partial result partial when the first status after it already says busy work", async () => {
+    current = status({});
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <LedgerRefreshNotice />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(client.getQueryData(["ledger-refresh"])).toBeDefined());
+    // 끝난 직후 다른 탭에서 백테스트를 시작했다 — code 는 바뀌었지만 결과는 "일부만 받음"이다
+    current = status({
+      code: "busy_work",
+      can_start: false,
+      failure: "tables_failed",
+      last_outcome: "partial",
+      message: "진행 중인 백테스트 1건이 끝나야 받을 수 있어요.",
+      finished_at: FINISHED,
+    });
+    await act(() => client.refetchQueries({ queryKey: ["ledger-refresh"] }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(PARTIAL_TITLE);
+    // 지금 상태 문장(진행 중인 계산)을 결과 문장처럼 보이지 않는다
+    expect(alert).not.toHaveTextContent("진행 중인 백테스트");
   });
 });

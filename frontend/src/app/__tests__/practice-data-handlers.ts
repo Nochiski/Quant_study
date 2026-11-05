@@ -24,6 +24,7 @@ export const practiceDataHandlers = (api: string) => [
       message: "연습용 데이터로 켜져 있어 DB 새로고침을 쓸 수 없어요.",
       can_start: false,
       refreshing: false,
+      last_outcome: null,
       reason: "practice_data",
       failure: null,
       needs_check: false,

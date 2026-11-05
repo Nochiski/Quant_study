@@ -482,7 +482,7 @@
   cursor: pointer;
 }
 
-/* 큰 칸은 큰 글자. 이름이 넘치면 sector-map.tsx 의 fitNames 가 data-fit="regular" 로 보통 글자로 되돌린다. */
+/* 큰 칸은 큰 글자. 이름이 넘치면 model/fit-names.ts 의 fitNames 가 data-fit="regular" 로 보통 글자로 되돌린다. */
 .market-map__tile--large:not([data-fit="regular"]) {
   gap: 2px;
 }
@@ -592,12 +592,11 @@
   outline: none;
 }
 
-/* 칸 이름: 띄어쓰기 단위로만 줄바꿈, 두 줄까지. 넘치면 fitNames 가 이름을 숨긴다(말줄임 없음). */
+/* 칸 이름: 띄어쓰기 단위로만 줄바꿈, 두 줄까지. 넘치면 model/fit-names.ts 의 fitNames 가 이름을 숨긴다(말줄임 없음). */
 .market-map__name {
   display: block;
   flex: none;
   max-width: 100%;
-  max-height: 2.4em;
   overflow: hidden;
   font-weight: var(--font-weight-label);
   word-break: keep-all;
@@ -632,7 +631,6 @@
   display: block;
   flex: 0 1 auto;
   min-width: 0;
-  max-height: none;
   overflow: hidden;
   color: var(--text);
   text-overflow: ellipsis;

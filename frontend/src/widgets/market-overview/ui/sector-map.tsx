@@ -15,6 +15,7 @@ import {
 import { t, tFill } from "../../../shared/config";
 import { useMediaQuery } from "../../../shared/lib/media";
 import { SignedValue } from "../../../shared/ui";
+import { fitNames } from "../model/fit-names";
 
 /** 한 수준(전체 시장·상위 업종·종목)의 칸 배치. 배치 계산은 `entities/market` 의 treemap 이 소유한다. */
 export type MapLayer = {
@@ -89,28 +90,6 @@ export const SectorLegend = () => (
 /** 큰 칸(px) — 이보다 넓고 높으면 큰 글자로 시작한다(이름이 넘치면 보통 글자로 다시 잰다). */
 const LARGE_TILE = { w: 150, h: 80 } as const;
 
-/**
- * 칸 이름 맞추기: 이름은 띄어쓰기 단위로만 줄을 바꾸고(CSS keep-all) 두 줄까지다. 그려진 뒤 실제 크기를 재서,
- * 큰 칸이 넘치면 보통 글자로 다시 재고, 그래도 두 줄을 넘거나 한 단어가 칸보다 넓거나 등락과 함께 칸 높이를
- * 넘으면 이름을 숨긴다(말줄임 없음 — 이름은 낭독 이름·툴팁에 남는다). React 가 다루지 않는 속성(`hidden`,
- * `data-fit`)만 바꾸므로 다시 그려도 지워지지 않고, 배치가 바뀔 때마다 처음부터 다시 잰다.
- */
-const fitNames = (root: HTMLElement) => {
-  for (const tile of root.querySelectorAll<HTMLElement>(".market-map__tile")) {
-    const name = tile.querySelector<HTMLElement>(".market-map__name");
-    if (name === null) continue;
-    name.hidden = false;
-    delete tile.dataset.fit;
-    const overflows = () =>
-      name.scrollWidth > name.clientWidth ||
-      name.scrollHeight > name.clientHeight ||
-      tile.scrollHeight > tile.clientHeight;
-    if (tile.classList.contains("market-map__tile--large") && overflows())
-      tile.dataset.fit = "regular";
-    if (overflows()) name.hidden = true;
-  }
-};
-
 export const Change = ({ value }: { value: number | null }) =>
   value === null ? (
     <span>—</span>
@@ -181,9 +160,22 @@ const Tiles = ({
   });
   // 툴팁: 가리키거나 초점이 간 칸 하나. 낭독 이름이 같은 내용을 가지므로 화면 전용(aria-hidden)이다.
   const [tip, setTip] = useState<MapTile | null>(null);
-  // 칸 크기가 정해진 뒤 칠하기 전에 이름이 들어가는지 잰다(그려진 크기 기준이라 어림과 어긋나지 않는다).
+  // 칸 크기가 정해진 뒤 칠하기 전에 이름이 들어가는지 잰다(그려진 크기 기준). 층 크기가 바뀌거나 웹 글꼴이
+  // 늦게 도착해 글자 폭이 바뀌면 다시 잰다 — 콜백은 DOM 만 읽고 바꾼다.
   useLayoutEffect(() => {
-    if (layerRef.current !== null) fitNames(layerRef.current);
+    const root = layerRef.current;
+    if (root === null) return;
+    const refit = () => fitNames(root);
+    refit();
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(refit);
+    observer?.observe(root);
+    const fonts = typeof document === "undefined" ? undefined : document.fonts;
+    fonts?.addEventListener?.("loadingdone", refit);
+    return () => {
+      observer?.disconnect();
+      fonts?.removeEventListener?.("loadingdone", refit);
+    };
   }, [layerRef, layer, width, height]);
   const hover = (tile: MapTile) => ({
     onPointerEnter: () => setTip(tile),

@@ -25,8 +25,9 @@ PENDING_NAME = "_research_snapshot.pending"
 SNAPSHOT_NAME = "_research_snapshot.json"
 FORMAT_VERSION = 1
 # 필드 의미·단위·공개시점·소비자 투영의 정본을 원문 그대로 보존한다.
-# `strategy-workbench-sot.md`는 이제 위치 대장이 아닌 원칙 문서지만, 검증(`_verify_contents`)이 기존
-# 스냅숏의 계약 파일 집합이 이 목록과 같기를 요구하므로 빼면 이미 만든 스냅숏이 모두 거절된다.
+# `strategy-workbench-sot.md`는 이제 위치 대장이 아닌 원칙 문서지만 목록에 남긴다. 검증
+# (`_verify_contents`)은 `repo_root`가 없어도 기존 스냅숏의 계약 파일 집합이 이 목록과 같은지 늘 보므로,
+# 빼면 이미 만든 스냅숏이 집합 불일치로 모두 거절된다. 빼려면 `FORMAT_VERSION`을 올리고 스냅숏을 다시 만든다.
 CONTRACT_FILES = (
     ".claude/rules/strategy-workbench-sot.md",
     "database/docs/EQUITY_DESIGN.md",

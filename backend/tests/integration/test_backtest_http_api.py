@@ -237,7 +237,8 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
         "equity.corporate_action_feed_empty",
         "equity.mock_data",
     }
-    # 경고 문장은 backend가 한글로 완성한다(SoT 경고 문장 행, 이슈 #229).
+    # 경고 문장은 그 경고를 만드는 mock 어댑터(`equity_mock/_adapter.py`)가 한글로 완성한다
+    # (이슈 #229).
     assert all(re.search("[가-힣]", item["message"]) for item in result["manifest"]["warnings"])
     assert len(result["metric_definitions"]) == 24
     assert len(result["metrics"]) == 48

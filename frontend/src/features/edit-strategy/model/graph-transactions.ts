@@ -149,7 +149,7 @@ const ANY_FACTOR = "/factors/0";
 /**
  * 노드 kind → 칸(#354). 연산 칸은 `x-operator`, 입력 칸은 `x-reference: node`(`nodeReferenceKeys`), 설정
  * 칸은 종류(`const`)·이름·연산·입력을 뺀 나머지다. kind·칸 표를 손으로 적지 않고 이 함수가 그 표의 owner다
- * — 실행 계획 투영(`factor-graph-projection.ts`)과 레시피 투영(`recipe-projection.ts`)이 같은 표를 읽는다.
+ * — 모든 노드 칸 투영이 이 함수를 읽는다.
  * 표는 팩터와 무관해 팩터마다 다시 읽지 않는다(#359 리뷰 P3-2).
  */
 export const nodeSlotsByKind = (

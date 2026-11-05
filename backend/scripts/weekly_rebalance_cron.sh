@@ -14,10 +14,15 @@
 #                         보낼 곳·때는 그 명령이 정한다(저장소에 두지 않는다, 2026-10-27 사용자 결정)
 #
 # 단계(prepare 밖의 단계는 휴장일에 아무것도 하지 않는다):
-#   fills    장중 실시간 체결 알림 기록(두 번째 인자 HH:MM 까지, crontab 이 넣는다)
+#   fills    장중 실시간 체결 알림과 장운영 신호 기록. 정규장 마감 신호 5분 뒤 끝나고, 신호가 없으면
+#            두 번째 인자 HH:MM(끝 상한, crontab 이 넣는다)에 끝난다
 #   open     직전 거래일 주문안이 있으면 전 종목을 낸다(매도 먼저)
 #   chase    잔량을 취소하고 그때 2호가로 다시 낸다(마지막 회차 주문은 장 마감까지)
 #   close    장 마감 대사·하루 기록·키움 원본, 이어서 일일 위험 보고(판단에 쓰지 않는다)
+# 장 시각이 바뀌는 날(수능일 10:00~16:30 · 새해 첫 거래일 10:00 개장)은 fills 가 남긴 키움 장운영 신호로
+# 알아차린다(2026-11-05 사용자 결정, 시각 표 없음): open·chase 는 장 시작 전이면 그 회차를 건너뛰고,
+# close 는 정규장 마감 신호를 받을 때까지 기다렸다 잰다. 신호가 없으면(기록기 실패·모의 서버가 안 보냄)
+# 지금처럼 정해진 시각에 돈다 — 새 신호가 없다는 이유로 주문을 잃지 않는다.
 #   prepare  휴장이 이어지는 첫날(보통 토요일)이고 그 전날이 그 주 마지막 거래일이면, 그날 분 WISE
 #            추정치까지 넣은 주말 보강판이 준비된 것을 확인한 뒤 그 거래일 순위로 주문안을 만들고
 #            텔레그램으로 주문지를 보낸다(만들지 못했으면 보류·실패 알림). 금요일 추정치가 토요일
@@ -80,6 +85,19 @@ wr() { (cd "$S07_BACKEND" && .venv/bin/python -m strategy_workbench.bootstrap.we
 
 approval_flag() { [ "${S07_REQUIRE_APPROVAL:-1}" = "0" ] && echo "--without-approval" || true; }
 
+session_phase() {  # 지금 정규장 상태 unknown|before_open|open|closed. 읽지 못하면 unknown
+  local phase
+  phase="$(wr session-status --workdir "$S07_WORKDIR")" || phase=unknown
+  case "$phase" in
+    before_open | open | closed) echo "$phase" ;;
+    *) echo unknown ;;
+  esac
+}
+
+recorder_running() {  # 체결 기록기(fills)가 아직 그 잠금을 쥐고 있나
+  ! flock -n "$S07_WORKDIR/.lock-fills" true
+}
+
 hold_lock() {  # hold_lock <묶음> — 같은 묶음 실행이 이미 돌면 건너뛴다
   mkdir -p "$S07_WORKDIR"
   exec 9>"$S07_WORKDIR/.lock-$1"
@@ -111,6 +129,18 @@ case "$PHASE" in
       log "직전 거래일($SIGNAL) 주문안 없음 — 건너뜀"
       exit 0
     fi
+    SESSION="$(session_phase)"
+    case "$SESSION" in
+      before_open)
+        log "장 시작 전(키움 장운영 신호) — 건너뜀, 다음 회차가 다시 본다"
+        exit 0
+        ;;
+      closed)
+        log "정규장이 끝남(키움 장운영 신호) — 건너뜀"
+        exit 0
+        ;;
+      unknown) log "장운영 신호 없음 — 정해진 시각에 진행" ;;
+    esac
     # shellcheck disable=SC2046  # 플래그가 없을 때 빈 인자를 넘기지 않는다
     wr execute --workdir "$S07_WORKDIR" --plan "$PLAN" --phase "$PHASE" --send $(approval_flag)
     ;;
@@ -120,6 +150,20 @@ case "$PHASE" in
       log "주문안이 아직 없음 — 건너뜀"
       exit 0
     fi
+    # 정규장이 끝난 뒤에 잰다 — 마감이 늦는 날(수능일 16:30) 15:40 은 장중이다. 1분마다 본다.
+    while true; do
+      SESSION="$(session_phase)"
+      [ "$SESSION" = closed ] && break
+      if [ "$SESSION" = unknown ]; then
+        log "장운영 신호 없음 — 정해진 시각에 잰다"
+        break
+      fi
+      if ! recorder_running; then
+        log "정규장 마감 신호 없이 체결 기록기가 끝남($SESSION) — 지금 잰다"
+        break
+      fi
+      sleep 60
+    done
     CLOSE_RC=0
     wr close --workdir "$S07_WORKDIR" || CLOSE_RC=$?
     # 일일 위험 보고(판단에 쓰지 않는다, 2026-10-31 사용자 승인). close 가 남긴 오늘 하루 기록을 읽고

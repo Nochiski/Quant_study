@@ -88,6 +88,10 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.risk_report 
     PriceHistoryStatus,
     RiskReportStore,
 )
+from strategy_workbench.application.weekly_rebalance.ports.outgoing.session import (
+    MarketPhase,
+    MarketSession,
+)
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.signal import (
     EarlierClose,
     SignalBasis,
@@ -120,6 +124,8 @@ __all__ = [
     "LedgerRepairService",
     "LedgerRepairState",
     "MarketError",
+    "MarketPhase",
+    "MarketSession",
     "MarketSource",
     "NoticeError",
     "NoticeSender",

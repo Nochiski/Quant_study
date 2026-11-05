@@ -8,7 +8,7 @@
     <작업 폴더>/ledger/execution.sqlite        S05 실행 원장(실행기가 만든다)
     <작업 폴더>/ledger/kiwoom-reference.sqlite 키움 모의 참조 원장
     <작업 폴더>/plans/                         주문안·승인
-    <작업 폴더>/records/                       실행 사건·하루 기록
+    <작업 폴더>/records/                       실행 사건·하루 기록·장중 체결 알림·장운영 기록
     <작업 폴더>/risk/                          리스크 판정·장 마감 점검·사람의 명령·위험 보고
 
 리스크 한도는 저장소의 `backend/scripts/weekly_rebalance_risk_limits.json` 하나에서 읽는다(전략 코드
@@ -40,6 +40,10 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import (
     system_trust_transport,
 )
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.market import KiwoomMarket
+from strategy_workbench.adapters.outbound.kiwoom_mock.facade.session import (
+    KiwoomSessionLog,
+    session_log_path,
+)
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.stream import (
     mock_connect,
     record_fills,
@@ -63,6 +67,8 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountState,
     AccountUnavailableError,
     LedgerRepairService,
+    MarketPhase,
+    MarketSession,
     RiskGuardService,
     RiskReportService,
     WeeklyExecutionService,
@@ -225,7 +231,9 @@ def open_ledger_repair(workdir: Path) -> Iterator[LedgerRepairService]:
 
 
 def record_today_fills(workdir: Path, until: clock_time) -> FillRecording:
-    """오늘 `until`(KST)까지 실시간 체결 알림을 `records/fills-<날짜>.jsonl`에 덧붙인다.
+    """오늘 실시간 체결 알림을 `records/fills-<날짜>.jsonl`에, 장운영을
+    `records/session-<날짜>.jsonl`에 덧붙인다. 정규장 마감 신호 5분 뒤 끝나고, 신호가 없으면
+    `until`(KST)에 끝난다.
 
     주문하지 않는다.
     """
@@ -244,11 +252,18 @@ def record_today_fills(workdir: Path, until: clock_time) -> FillRecording:
                 root / "records" / f"fills-{today.date().isoformat()}.jsonl",
                 datetime.combine(today.date(), until, KST),
                 lambda: datetime.now(KST),
+                sessions=session_log_path(root / "records", today.date()),
             )
         )
         return FillRecording(result.received, result.refused)
     finally:
         broker.close()
+
+
+def market_phase(workdir: Path) -> MarketPhase:
+    """체결 기록기가 남긴 장운영 기록으로 지금 정규장 상태를 읽는다. 키움에 접속하지 않는다."""
+    session: MarketSession = KiwoomSessionLog(outside_repository(workdir) / "records")
+    return session.phase(datetime.now(KST))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -263,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
             open_ledger_repair,
             build_risk_guard,
             build_risk_report,
+            session=market_phase,
         ),
         argv,
     )

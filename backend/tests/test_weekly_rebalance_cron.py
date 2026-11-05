@@ -1,11 +1,13 @@
-"""S07 서버 예약 실행 스크립트(`scripts/weekly_rebalance_cron.sh`)의 prepare·close 배선.
+"""S07 서버 예약 실행 스크립트(`scripts/weekly_rebalance_cron.sh`)의 prepare·open·close 배선.
 
 quant-ledger 달력은 고정 답을 내는 대역, backend python 은 받은 인자를 적는 대역이다. 신호 준비
-판정(signal-status)만 진짜 명령줄로 돌려 임시 폴더의 모델 빌드를 읽는다.
+판정(signal-status)과 장 상태(session-status)만 진짜 명령줄로 돌려 임시 폴더의 모델 빌드·장운영
+기록을 읽는다.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -122,8 +124,13 @@ def load():
 """
 
 
-def _close_rig(tmp_path: Path, *, close_rc: int, report_rc: int, hook: bool) -> tuple[Path, Path]:
-    """장 마감 단계를 대역으로 돌린다. backend python 은 인자를 적고 정한 종료 코드로 끝난다."""
+def _close_rig(
+    tmp_path: Path, *, close_rc: int, report_rc: int, hook: bool, recorder_running: bool = False
+) -> tuple[Path, Path]:
+    """장 마감·주문 단계를 대역으로 돌린다. backend python 은 인자를 적고 정한 종료 코드로 끝난다.
+
+    `recorder_running`이면 체결 기록기 잠금(.lock-fills)이 잡혀 있는 것으로 답한다.
+    """
     ledger = tmp_path / "ledger"
     _executable(ledger / ".venv" / "bin" / "python", f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
     _executable(ledger / "src" / "daily" / "__init__.py", "")
@@ -135,6 +142,7 @@ def _close_rig(tmp_path: Path, *, close_rc: int, report_rc: int, hook: bool) -> 
         f"""#!/bin/sh
 printf '%s\\n' "$*" >> "{calls}"
 case "$*" in
+  *session-status*) exec "{sys.executable}" "$@" ;;
   *" close "*) exit {close_rc} ;;
   *risk-report*) exit {report_rc} ;;
 esac
@@ -144,7 +152,14 @@ exit 0
     work = tmp_path / "work"
     (work / "plans").mkdir(parents=True)
     (work / "plans" / "weekly-2026-10-30.json").write_text("{}")
-    _executable(tmp_path / "bin" / "flock", "#!/bin/sh\nexit 0\n")
+    held = "  *lock-fills*) exit 1 ;;\n" if recorder_running else ""
+    _executable(tmp_path / "bin" / "flock", f'#!/bin/sh\ncase "$*" in\n{held}esac\nexit 0\n')
+    # 정규장 마감을 기다리는 동안 1분이 지나면 기록기가 마감 신호를 받는다
+    _executable(
+        tmp_path / "bin" / "sleep",
+        f"#!/bin/sh\necho \"sleep $*\" >> \"{calls}\"\nprintf '%s\\n' '{_session_row('8')}' "
+        f'>> "{work / "records" / f"session-{_today()}.jsonl"}"\n',
+    )
     after = tmp_path / "after_risk_report.sh"
     _executable(after, f'#!/bin/sh\necho "hook $*" >> "{calls}"\n')
     conf = tmp_path / "s07.env"
@@ -155,9 +170,11 @@ exit 0
     return conf, calls
 
 
-def _run_close(tmp_path: Path, conf: Path) -> subprocess.CompletedProcess[str]:
+def _run_close(
+    tmp_path: Path, conf: Path, phase: str = "close"
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", str(_CRON), "close"],
+        ["bash", str(_CRON), phase],
         env={
             **os.environ,
             "S07_CONF": str(conf),
@@ -174,13 +191,30 @@ def _today() -> str:
     return datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
 
 
+def _session_row(code: str, remaining: str | None = None, ago_minutes: int = 1) -> str:
+    """체결 기록기가 남기는 장운영(0s) 한 줄. 지금보다 `ago_minutes` 앞에 받은 것으로 적는다."""
+    at = datetime.now(ZoneInfo("Asia/Seoul")) - timedelta(minutes=ago_minutes)
+    values = {"215": code} if remaining is None else {"215": code, "214": remaining}
+    entry = {"type": "0s", "name": "장시작시간", "item": "", "values": values}
+    return json.dumps({"at": at.isoformat(timespec="seconds"), "kind": "0s", "msg": entry})
+
+
+def _write_session(tmp_path: Path, *rows: str) -> None:
+    records = tmp_path / "work" / "records"
+    records.mkdir(parents=True, exist_ok=True)
+    (records / f"session-{_today()}.jsonl").write_text("".join(row + "\n" for row in rows))
+
+
+def _commands(calls: Path) -> list[str]:
+    return [line.split()[2] for line in calls.read_text().splitlines() if line.startswith("-m ")]
+
+
 def test_close_is_followed_by_the_risk_report_and_the_server_hook(tmp_path: Path) -> None:
     conf, calls = _close_rig(tmp_path, close_rc=0, report_rc=0, hook=True)
     result = _run_close(tmp_path, conf)
     assert result.returncode == 0, result.stdout + result.stderr
     lines = calls.read_text().splitlines()
-    commands = [line.split()[2] for line in lines if line.startswith("-m ")]
-    assert commands == ["close", "risk-report"]
+    assert _commands(calls) == ["session-status", "close", "risk-report"]
     report = next(line for line in lines if "risk-report" in line)
     assert f"--equity-root {tmp_path / 'ledger' / 'data' / 'equity'} --day {_today()}" in report
     tomorrow = (date.fromisoformat(_today()) + timedelta(days=1)).isoformat()
@@ -196,4 +230,77 @@ def test_a_failed_report_or_close_keeps_the_close_result(tmp_path: Path) -> None
     conf, calls = _close_rig(tmp_path / "b", close_rc=1, report_rc=0, hook=False)
     result = _run_close(tmp_path / "b", conf)
     assert result.returncode == 1
-    assert [line.split()[2] for line in calls.read_text().splitlines()] == ["close", "risk-report"]
+    assert _commands(calls) == ["session-status", "close", "risk-report"]
+
+
+# 오늘이 늘 거래일이고 직전 거래일이 10-30 이라고 답하는 달력 대역(주문 단계 배선용)
+_ORDER_DAY_CALENDAR = """\
+import datetime as dt
+
+
+class _Calendar:
+    def is_trading_day(self, day):
+        return True
+
+    def prev_trading_day(self, day):
+        return dt.date(2026, 10, 30)
+
+
+def load():
+    return _Calendar()
+"""
+
+
+def _order_rig(tmp_path: Path) -> tuple[Path, Path]:
+    conf, calls = _close_rig(tmp_path, close_rc=0, report_rc=0, hook=False)
+    _executable(tmp_path / "ledger" / "src" / "daily" / "calendar.py", _ORDER_DAY_CALENDAR)
+    return conf, calls
+
+
+def test_orders_skip_rounds_before_a_late_opening(tmp_path: Path) -> None:
+    # 2027-01-04(월) 새해 첫 거래일은 10:00 개장인 주문일이다. 09:05 open 은 장 시작 전이라
+    # 내지 않고, 개장 뒤 chase 회차가 낸다(2026-11-05 사용자 결정: 키움 장운영 신호로 알아차린다).
+    conf, calls = _order_rig(tmp_path)
+    _write_session(tmp_path, _session_row("0", "005500"))
+    result = _run_close(tmp_path, conf, "open")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "장 시작 전" in result.stdout
+    assert _commands(calls) == ["session-status"]
+
+    _write_session(tmp_path, _session_row("0", "000100", ago_minutes=2), _session_row("3"))
+    result = _run_close(tmp_path, conf, "chase")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _commands(calls)[-2:] == ["session-status", "execute"]
+
+
+def test_orders_keep_the_fixed_schedule_without_session_signals(tmp_path: Path) -> None:
+    # 기록기가 돌지 않았거나 모의 서버가 장운영을 보내지 않으면 지금처럼 정해진 시각에 낸다 —
+    # 새 신호가 없다는 이유로 그 주 주문을 잃지 않는다
+    conf, calls = _order_rig(tmp_path)
+    result = _run_close(tmp_path, conf, "open")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "장운영 신호 없음" in result.stdout
+    assert _commands(calls) == ["session-status", "execute"]
+    execute = next(line for line in calls.read_text().splitlines() if " execute " in line)
+    assert "--plan weekly-2026-10-30 --phase open --send" in execute
+
+
+def test_close_waits_for_the_regular_close_on_a_late_closing_day(tmp_path: Path) -> None:
+    # 수능일(마감 16:30): 15:40 close 는 장중이다. 정규장 마감 신호를 받을 때까지 기다렸다 잰다
+    conf, calls = _close_rig(tmp_path, close_rc=0, report_rc=0, hook=False, recorder_running=True)
+    _write_session(tmp_path, _session_row("3", ago_minutes=60))
+    result = _run_close(tmp_path, conf)
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = calls.read_text().splitlines()
+    assert [line for line in lines if line.startswith("sleep")] == ["sleep 60"]
+    assert _commands(calls) == ["session-status", "session-status", "close", "risk-report"]
+
+
+def test_close_goes_ahead_when_the_recorder_ended_without_a_close_signal(tmp_path: Path) -> None:
+    # 마감 신호를 놓친 채 기록기가 끝났으면(잠금이 비었다) 더 기다리지 않고 잰다
+    conf, calls = _close_rig(tmp_path, close_rc=0, report_rc=0, hook=False)
+    _write_session(tmp_path, _session_row("3", ago_minutes=60))
+    result = _run_close(tmp_path, conf)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "정규장 마감 신호 없이 체결 기록기가 끝남" in result.stdout
+    assert _commands(calls) == ["session-status", "close", "risk-report"]

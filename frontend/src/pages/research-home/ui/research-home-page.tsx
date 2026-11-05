@@ -186,14 +186,26 @@ const TodoSummary = ({
   );
 };
 
-/** 섹터맵 드릴다운 자리는 주소가 갖는다 — 뒤로 가기가 전체 지도로 돌아온다. */
-const useSector = (): [string | undefined, (code: string | undefined) => void] => {
-  const search = useSearch({ from: "/" });
+/**
+ * 홈 시장 블록. 섹터맵 드릴다운 자리는 주소가 갖는다 — 뒤로 가기가 전체 지도로 돌아온다. 주소를 여기서만 읽어
+ * 드릴다운이 홈 전체가 아니라 시장 블록만 다시 그리게 하고, 같은 화면 안 이동이라 스크롤을 맨 위로 되돌리지
+ * 않는다(라우터 기본값 `resetScroll: true`는 칸을 누를 때마다 화면을 맨 위로 튀게 했다).
+ */
+const HomeMarket = () => {
+  const { sector } = useSearch({ from: "/" });
   const navigate = useNavigate();
-  return [
-    search.sector,
-    (code) => void navigate({ to: "/", search: code === undefined ? {} : { sector: code } }),
-  ];
+  return (
+    <MarketOverview
+      sector={sector}
+      onSector={(code) =>
+        void navigate({
+          to: "/",
+          search: code === undefined ? {} : { sector: code },
+          resetScroll: false,
+        })
+      }
+    />
+  );
 };
 
 export const ResearchHomePage = () => {
@@ -208,7 +220,6 @@ export const ResearchHomePage = () => {
   const titles = useStrategyTitles(
     runs.map((summary) => summary.strategy_provenance.strategy_id),
   );
-  const [sector, setSector] = useSector();
 
   if (strategies.isSuccess && strategies.data.total === 0)
     return (
@@ -228,7 +239,7 @@ export const ResearchHomePage = () => {
             </Link>
           }
         />
-        <MarketOverview sector={sector} onSector={setSector} />
+        <HomeMarket />
         <AccountCard />
       </section>
     );
@@ -256,7 +267,7 @@ export const ResearchHomePage = () => {
         awaiting={waiting.length}
         running={runningExperiments.length + runningBacktests.length}
       />
-      <MarketOverview sector={sector} onSector={setSector} />
+      <HomeMarket />
       <section
         id="home-research"
         className="research-home__research"

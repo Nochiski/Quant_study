@@ -685,6 +685,86 @@ describe("App Shell routes", () => {
     }
   });
 
+  it("drills the home sector map in place without scrolling to the top or refetching the home", async () => {
+    const sectorGroup = (code: string, name: string, size: number, returnPct: number) => ({
+      code,
+      name,
+      size_weight_krw: size,
+      return_weight_krw: size,
+      return_pct: returnPct,
+      securities: 3,
+      untraded: 0,
+    });
+    const reads = { overview: 0, strategies: 0 };
+    server.use(
+      http.get(`${API}/api/v1/market/overview`, () => {
+        reads.overview += 1;
+        return HttpResponse.json({
+          status: "available",
+          message: null,
+          session: "2026-10-30",
+          indices: [],
+          flows: [],
+          sectors: {
+            issue: null,
+            sector_map: {
+              snapshot_date: "2026-10-30",
+              session: "2026-10-30",
+              securities: 6,
+              untraded: 0,
+              parents: [
+                {
+                  group: sectorGroup("G45", "IT", 3_000e9, -4.88),
+                  children: [
+                    sectorGroup("G4530", "반도체와반도체장비", 2_000e9, -4.97),
+                    sectorGroup("G4520", "기술하드웨어와장비", 1_000e9, -7),
+                  ],
+                },
+                {
+                  group: sectorGroup("G40", "금융", 1_500e9, 0.4),
+                  children: [
+                    sectorGroup("G4010", "은행", 1_000e9, 0.28),
+                    sectorGroup("G4020", "보험", 500e9, -0.48),
+                  ],
+                },
+              ],
+            },
+          },
+        });
+      }),
+      http.get(`${API}/api/v1/strategies`, () => {
+        reads.strategies += 1;
+        return HttpResponse.json({ items: [], total: 1, offset: 0, limit: 10 });
+      }),
+    );
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ width: 1000, height: 400 }),
+    );
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    const user = userEvent.setup();
+    try {
+      const history = mount("/?sector=G45");
+      const crumbs = await screen.findByRole("navigation", { name: "섹터 위치" });
+      const card = screen.getByRole("article", { name: /^IT/u });
+      const research = screen.getByRole("heading", { level: 2, name: "연구" });
+      const before = { ...reads };
+      scrollTo.mockClear();
+      await user.click(within(crumbs).getByRole("button", { name: "전체 시장" }));
+      // 같은 카드 안에서 전체 지도로 바뀐다 — 주소만 바뀌고 홈의 다른 칸은 다시 묻지도, 다시 붙지도 않는다
+      await waitFor(() => expect(history.location.search).toBe(""));
+      expect(
+        await within(card).findByRole("group", { name: /섹터맵, 방향키로/u }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("article", { name: "섹터맵" })).toBe(card);
+      expect(screen.getByRole("heading", { level: 2, name: "연구" })).toBe(research);
+      expect(reads).toEqual(before);
+      // 라우터 기본값(resetScroll)은 칸을 누를 때마다 화면을 맨 위로 튀게 했다
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it("moves legacy bookmarks to a clean YAML draft route", async () => {
     const history = mount("/?step=portfolio&run=bt-42");
     await screen.findByRole("heading", { name: "새 전략" });

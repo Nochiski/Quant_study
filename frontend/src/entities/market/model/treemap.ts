@@ -4,8 +4,9 @@
  * 칸 크기 비율·등락은 backend 가 준 값이다. 여기서는 그 값을 카드의 실제 크기(px)에 놓기만 한다 —
  * 칸이 작아 이름과 부호 등락이 들어가지 않으면 같은 업종 안에서 "그 밖 N개"로 묶는다. 묶음조차 들어가지
  * 않으면 그 자리를 이름 없는 빈 영역(`filler`, 초점을 받지 않는다)으로 남기고 화면이 "표에서 읽어요"라고
- * 알린다 — 크기를 부풀리지 않는다. 그래서 초점을 받는 모든 칸이 이름과 부호 글자를 가진다(색만으로
- * 방향을 전하지 않는다). 묶음의 등락은 backend 와 같은 가중(`return_weight`)으로 다시 묶는다.
+ * 알린다 — 크기를 부풀리지 않는다. 그래서 초점을 받는 모든 칸이 이름 한 줄과 부호 등락이 들어갈 크기를
+ * 가진다(색만으로 방향을 전하지 않는다 — 이름이 길어 넘치면 화면이 글자를 줄이고 줄바꿈·말줄임으로 맞춘다). 묶음의
+ * 등락은 backend 와 같은 가중(`return_weight`)으로 다시 묶는다.
  */
 
 export type Rect = { x: number; y: number; w: number; h: number };
@@ -29,6 +30,8 @@ export type MapTile = Rect & {
   /** 칸 이름. `others` 는 묶인 수(`members`)로 화면이 문장을 만든다. */
   name: string;
   returnPct: number | null;
+  /** 칸 크기 가중(유동시총, 원) — 툴팁이 읽는다. 묶음은 합이다. */
+  sizeWeight: number;
   /** 누르면 들어갈 곳. `leaf`·`parent` 는 자기 코드, 업종 안 `others` 는 그 업종 코드. */
   target: string | null;
   members: number;
@@ -223,6 +226,7 @@ export const layoutSectorMap = (
         kind: othersKind(item),
         name: "",
         returnPct: group.returnPct,
+        sizeWeight: group.sizeWeight,
         target: null,
         members: merged,
         parentName: null,
@@ -247,6 +251,7 @@ export const layoutSectorMap = (
         kind: "parent",
         name: group.name,
         returnPct: group.returnPct,
+        sizeWeight: group.sizeWeight,
         target: group.code,
         members: 1,
         parentName: null,
@@ -268,6 +273,7 @@ export const layoutSectorMap = (
         kind: others ? othersKind(child) : "leaf",
         name: others ? "" : child.group.name,
         returnPct: child.group.returnPct,
+        sizeWeight: child.group.sizeWeight,
         target: others ? group.code : child.group.code,
         members: child.merged,
         parentName: group.name,
@@ -298,6 +304,7 @@ export const layoutLeaves = (
       kind: others ? othersKind(item) : "leaf",
       name: others ? "" : group.name,
       returnPct: group.returnPct,
+      sizeWeight: group.sizeWeight,
       target: others ? othersTarget : group.code,
       members: merged,
       parentName: null,

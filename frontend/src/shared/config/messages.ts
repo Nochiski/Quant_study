@@ -3162,8 +3162,7 @@ const ko = {
   "market.sector.title": "섹터맵",
   "market.sector.scope": "코스피+코스닥 · {date} 하루 등락",
   "market.sector.basis": "업종 분류 WICS {snapshot} 스냅샷(주 1회) · 칸 크기 = 사고팔 수 있는 주식의 시가총액(유동시총)",
-  "market.sector.legend.up": "+ 오른 업종",
-  "market.sector.legend.down": "− 내린 업종",
+  "market.sector.legend.scale": "하루 등락(%)",
   "market.sector.legend.other": "작은 업종 묶음",
   "market.sector.view": "섹터 보기 방식",
   "market.sector.view.map": "지도",
@@ -3229,6 +3228,7 @@ const ko = {
   "market.money.eok": "{value}억",
   "market.money.belowEok": "1억 미만",
   "market.sector.fillerNote": "지도에 이름이 들어가지 않는 작은 업종은 표에서 읽어요.",
+  "market.sector.tipSize": "유동시총 {size}",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -6422,8 +6422,7 @@ export const messages = {
     "market.sector.title": "Sector map",
     "market.sector.scope": "KOSPI+KOSDAQ · {date} daily change",
     "market.sector.basis": "WICS sectors, {snapshot} snapshot (weekly) · tile size = free-float market cap",
-    "market.sector.legend.up": "+ Rose",
-    "market.sector.legend.down": "− Fell",
+    "market.sector.legend.scale": "Daily change (%)",
     "market.sector.legend.other": "Small sectors grouped",
     "market.sector.view": "Sector view",
     "market.sector.view.map": "Map",
@@ -6489,6 +6488,7 @@ export const messages = {
     "market.money.eok": "{value} × 100M KRW",
     "market.money.belowEok": "under 100M KRW",
     "market.sector.fillerNote": "Sectors too small to label on the map are in the table.",
+    "market.sector.tipSize": "Free-float cap {size}",
   } satisfies Record<MessageKey, string>,
 } as const;
 

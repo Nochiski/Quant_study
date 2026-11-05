@@ -60,11 +60,25 @@
   --return-down: #1f5fcc;
   --return-up-soft: #fdeeec;
   --return-down-soft: #e1ebfb;
-  /* 섹터맵 칸처럼 면 전체를 방향으로 칠할 때의 진한 짝과 그 위 글자(대비 4.5:1 이상). 옅은 짝은
-   * 칸끼리 구분이 안 돼(1.1:1) 면 칠에 쓰지 않는다. */
+  /* 순매수 막대처럼 면을 방향으로 칠할 때의 진한 짝. 옅은 짝은 구분이 안 돼(1.1:1) 면 칠에 쓰지 않는다. */
   --return-up-fill: #c8322b;
   --return-down-fill: #1f5fcc;
-  --text-on-return: #ffffff;
+  /* 섹터맵 칸의 발산 척도(하루 등락 |%| 구간: 0.5 미만 중립, 0.5·1·2·3 경계로 4단계씩). 0 근처는 중립 회색,
+   * 커질수록 진해진다(밝은 테마는 명도가 내려가고 어두운 테마는 채도·명도가 오른다). OKLCH 로 단계를 잡고
+   * 칸 위 글자 대비 4.5:1 이상을 단계마다 계산해 두었다: 밝은 테마는 중립·1·2단계에 짙은 글자, 3·4단계에
+   * 흰 글자. 작은 업종 묶음은 등락 대신 중립 면이다. */
+  --sector-flat: #dadee3;
+  --sector-up-1: #f2c7c1;
+  --sector-up-2: #e78a80;
+  --sector-up-3: #c53b35;
+  --sector-up-4: #a01819;
+  --sector-down-1: #c1d3f4;
+  --sector-down-2: #80a7f0;
+  --sector-down-3: #356cd8;
+  --sector-down-4: #1b4eb3;
+  --sector-ink-soft: #172033;
+  --sector-ink-strong: #ffffff;
+  --sector-others: #edf1f7;
 
   /* chart series on the light canvas (>= 3:1 for lines, legend text uses the same ink) */
   --chart-series-1: #0b6a60;
@@ -95,6 +109,8 @@
   --text-size-label: 13px;
   --text-size-body: 14px;
   --text-size-small: 12px;
+  /* 섹터맵 좁은 칸 이름처럼 자리가 모자란 곳의 마지막 단계 */
+  --text-size-micro: 11px;
   --text-size-title: 20px;
   --text-size-display: 28px;
   --line-height-body: 1.6;
@@ -209,7 +225,18 @@
   --return-down-soft: #1c2a45;
   --return-up-fill: #ff8a80;
   --return-down-fill: #8fb2ff;
-  --text-on-return: #132248;
+  --sector-flat: #323842;
+  --sector-up-1: #603732;
+  --sector-up-2: #853630;
+  --sector-up-3: #a8322d;
+  --sector-up-4: #c22826;
+  --sector-down-1: #324464;
+  --sector-down-2: #2f508f;
+  --sector-down-3: #2d5cb8;
+  --sector-down-4: #2763d7;
+  --sector-ink-soft: #e9eef7;
+  --sector-ink-strong: #e9eef7;
+  --sector-others: #243247;
 
   /* chart series tuned for the dark canvas */
   --chart-series-1: #4fc3b1;

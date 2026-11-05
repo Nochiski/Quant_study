@@ -106,7 +106,9 @@ def test_v9_file_migrates_and_old_runs_have_no_headline(tmp_path: Path) -> None:
     SQLiteBacktestRunRepository(path).close()
 
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == (
+            SQLiteBacktestRunRepository.SCHEMA_VERSION
+        )
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'backtest_run_headlines'"
         ).fetchone() == ("backtest_run_headlines",)

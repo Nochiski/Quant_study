@@ -10,7 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from strategy_workbench.adapters.outbound.research_sqlite._schema import V1_SCHEMA_OBJECTS
+from strategy_workbench.adapters.outbound.research_sqlite._schema import (
+    V1_SCHEMA_OBJECTS,
+    V10_SCHEMA_OBJECTS,
+)
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     ResearchStorageError,
     SQLiteBacktestRunRepository,
@@ -60,6 +63,40 @@ def test_a_version_1_file_is_upgraded_and_its_old_runs_stay_outside_every_lineag
             SQLiteBacktestRunRepository.SCHEMA_VERSION,
         )
     assert [entry.run_id for entry in repository.trial_ledger("s-1").entries] == ["run-1"]
+
+
+def test_a_version_10_file_drops_the_retired_holdout_tables_with_their_rows(
+    tmp_path: Path,
+) -> None:
+    """v11 은 폐기한 V6 표를 행째 지운다. 하나라도 남으면 manifest 대조가 파일을 거부한다."""
+    path = tmp_path / "research.sqlite3"
+    with sqlite3.connect(path) as connection:
+        for _object_type, _name, statement in V10_SCHEMA_OBJECTS:
+            connection.execute(statement)
+        # 지우기를 막는 트리거가 걸린 표에도 행이 있어야 DROP 이 트리거를 타지 않는지 보인다.
+        connection.execute(
+            "INSERT INTO holdout_simulation_registrations VALUES ('r', 'h', '{}', 's')"
+        )
+        connection.execute(
+            "INSERT INTO holdout_simulation_claims "
+            "VALUES ('q', 'r', 'h', 'n', 'w', 't', 'claimed', NULL)"
+        )
+        connection.execute("INSERT INTO holdout_simulation_results VALUES ('q', '{}', 's')")
+        connection.execute("PRAGMA application_id = 1398231635")
+        connection.execute("PRAGMA user_version = 10")
+
+    SQLiteBacktestRunRepository(path).close()
+
+    with closing(sqlite3.connect(path)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (
+            SQLiteBacktestRunRepository.SCHEMA_VERSION,
+        )
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_schema WHERE name LIKE 'holdout%'"
+            ).fetchall()
+            == []
+        )
 
 
 def test_merges_follow_the_surviving_lineage_and_keep_every_member(tmp_path: Path) -> None:

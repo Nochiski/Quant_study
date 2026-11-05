@@ -479,7 +479,9 @@ def _busy_message(work: ActiveWork) -> str:
         )
         if count
     ]
+    # 대기·일시정지한 실험도 끝나지 않은 실험이다 — 그냥 두면 계속 막힌다.
+    paused = " 일시정지한 실험도 끝내거나 취소해야 해요." if work.experiments else ""
     return (
         f"진행 중인 {'·'.join(parts)}이 끝나야 받을 수 있어요. 받으면 앱을 새 데이터로 다시 "
-        "세워야 해서요."
+        f"세워야 해서요.{paused}"
     )

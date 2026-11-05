@@ -157,6 +157,7 @@ def test_active_work_blocks_the_start_and_names_what_is_running() -> None:
     status = service.status()
     assert (status.code, status.can_start) == (RefreshCode.BUSY_WORK, False)
     assert "백테스트 1건·실험 2개" in status.message
+    assert "일시정지한 실험도" in status.message  # 멈춘 실험도 새로고침을 막는다
     with pytest.raises(RefreshRejectedError):
         service.start()
     assert sync.started == 0

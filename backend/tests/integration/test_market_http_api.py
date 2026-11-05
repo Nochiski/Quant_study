@@ -20,7 +20,7 @@ def test_practice_data_returns_a_message_and_no_numbers() -> None:
 
 def test_real_data_overview_and_sector_detail(tmp_path: Path) -> None:
     pytest.importorskip("duckdb", reason="backend optional extra `equity`")
-    from tests.contract.test_market_data import LAST, build_market_root
+    from tests.test_adapters_equity_duckdb_market import LAST, build_market_root
 
     root = build_market_root(tmp_path / "root")
     client = TestClient(build_http_app(equity_adapter="duckdb", equity_root=root))

@@ -73,12 +73,16 @@ class SyncProgress:
 
 @dataclass(frozen=True)
 class SyncOutcome:
-    """끝난 sync 하나. `pulled` 는 표 판본을 하나라도 바꿨는가(받기 단계를 지났는가)다."""
+    """끝난 sync 하나를 뜻으로 옮긴 값. 도구의 종료 코드는 어댑터만 해석한다.
 
-    exit_code: int
+    `catalog_rebuilt` 는 정리하기가 카탈로그를 다시 만들었는가다. 다시 만들었으면 디스크가 앱이
+    부팅 때 고정한 카탈로그와 달라져, 옛 앱은 정리된 데이터를 읽는 계산을 멈춘다(`catalog_changed`).
+    `drifted` 는 받는 도중 서버 판이 바뀐 것이고, 그때 확인하기는 바뀐 판을 차이로 본다.
+    """
+
     failure: SyncFailureKind | None
-    pulled: bool
     tables_failed: int
+    catalog_rebuilt: bool
     catalog_failed: bool
     verify_mismatch: bool
     drifted: bool

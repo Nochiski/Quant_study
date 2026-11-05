@@ -32,15 +32,23 @@ from strategy_workbench.application.ledger_refresh.facade.refresh import (
 
 logger = logging.getLogger(__name__)
 
-# `database/src/ledger_sync/__main__.py` 의 `LOCK_STALE_S`·`LOCK_NAME`·`LAST_RUN_NAME`,
-# `layout.SYNC_DIR` 와 같은 값이다(backend 는 그 패키지를 import 하지 않는다 — 테스트가 원문과
-# 대조한다).
+# `database/src/ledger_sync/__main__.py` 의 `LOCK_STALE_S`·`LOCK_NAME`·`LAST_RUN_NAME`·`EXIT_*`,
+# `layout.SYNC_DIR` 와 같은 값이다(backend 는 그 패키지를 import 하지 않는다 — 테스트가 그 모듈의
+# 값과 대조한다). 종료 코드는 이 어댑터만 해석하고 포트에는 뜻(`SyncOutcome`)만 넘긴다.
 LOCK_STALE_S = 3 * 3600
 SYNC_DIR = "_sync"
 LOCK_NAME = "lock"
 LAST_RUN_NAME = "last_run.json"
+EXIT_OK = 0
+EXIT_ERROR = 2
+EXIT_DRIFTED = 3
+EXIT_MISMATCH = 4
 PLAN_TIMEOUT_S = 120
 PARAMIKO = "paramiko>=3.4,<4"
+# 표마다 남길 판본 수. 도구 기본값(2)보다 하나 더 남긴다 — 반영하지 못한 받기(일부만 받음) 뒤 다시
+# 받을 때, 옛 앱이 부팅 때 고정한 판을 gc 가 지우지 않게. 반영하지 못한 받기가 두 번 이어지면 지울
+# 수 있다(알려진 한계).
+KEEP_BUILDS = 3
 # last_run.json 이 이번 실행의 것인가 — 시작 시각보다 이 이상 앞이면 지난 실행의 기록이다.
 _CLOCK_SLACK = timedelta(seconds=5)
 
@@ -97,29 +105,30 @@ def _failure(value: object) -> SyncFailureKind | None:
 
 
 def outcome_from_last_run(payload: Mapping[str, object] | None, return_code: int) -> SyncOutcome:
-    """`last_run.json` 을 결과 값으로 옮긴다. 기록이 없거나 이번 실행의 것이 아니면 보수 쪽이다.
+    """`last_run.json` 을 결과 값으로 옮긴다. 기록이 없거나 이번 실행의 것이 아니면 예상 밖 실패다.
 
-    기록이 없으면 무엇이 바뀌었는지 모른다 — 표를 바꿨을 수도 있다고 보고(`pulled`) 실패로 둔다.
-    그러면 반영하지 않는다(`classify` 가 확인하지 않은 판으로 보고 막는다).
+    기록이 없으면(도구가 뜨기도 전에 실패) 카탈로그를 다시 만들었다는 근거가 없다. 모르는 종료
+    코드도 예상 밖 실패로 접는다.
     """
     if payload is None:
-        return SyncOutcome(
-            return_code or 2, SyncFailureKind.UNEXPECTED, True, 0, False, False, False
-        )
+        return SyncOutcome(SyncFailureKind.UNEXPECTED, 0, False, False, False, False)
     pull = payload.get("pull")
     results = pull.get("results") if isinstance(pull, dict) else None
     rows = [row for row in results if isinstance(row, dict)] if isinstance(results, list) else []
-    pulled = isinstance(pull, dict) and any(row.get("outcome") == "done" for row in rows)
-    exit_code = _int(payload.get("exit_code"))
+    recorded = _int(payload.get("exit_code"))
+    exit_code = return_code if recorded is None else recorded
+    failure = _failure(payload.get("error_kind"))
+    if failure is None and exit_code not in (EXIT_OK, EXIT_ERROR, EXIT_DRIFTED, EXIT_MISMATCH):
+        failure = SyncFailureKind.UNEXPECTED
     catalog_rc = _int(payload.get("catalog_rc"))
     verify = payload.get("verify")
     return SyncOutcome(
-        exit_code=return_code if exit_code is None else exit_code,
-        failure=_failure(payload.get("error_kind")),
-        pulled=pulled,
+        failure=failure,
         tables_failed=sum(row.get("outcome") in ("failed", "error") for row in rows),
-        catalog_failed=catalog_rc not in (None, 0),
-        verify_mismatch=exit_code == 4 or (isinstance(verify, dict) and verify.get("ok") is False),
+        catalog_rebuilt=catalog_rc == EXIT_OK,
+        catalog_failed=catalog_rc not in (None, EXIT_OK),
+        verify_mismatch=exit_code == EXIT_MISMATCH
+        or (isinstance(verify, dict) and verify.get("ok") is False),
         drifted=isinstance(pull, dict) and bool(pull.get("drifted")),
     )
 
@@ -215,7 +224,9 @@ class LedgerSyncProcess:
             return None
         except OSError:
             return SyncLock(None, True)
-        document = _read_json(path) or {}
+        document = _read_json(path)
+        if document is None:  # 도구의 `lock_info` 처럼 깨진 잠금은 낡은 것으로 본다
+            return SyncLock(None, True)
         return SyncLock(_parse_time(document.get("started_at_utc")), age_s > LOCK_STALE_S)
 
     def plan(self) -> SyncPlan:
@@ -263,7 +274,9 @@ class LedgerSyncProcess:
             self._sync_dir() / f"app_progress_{os.getpid()}_{started:%Y%m%dT%H%M%S}.json"
         )
         process = self._spawn(
-            self._command("sync", "--progress-file", str(progress_path)),
+            self._command(
+                "sync", "--keep", str(KEEP_BUILDS), "--progress-file", str(progress_path)
+            ),
             cwd=self._repo_root,
             env=_environment(self._repo_root, self._environ),
             stdin=subprocess.DEVNULL,

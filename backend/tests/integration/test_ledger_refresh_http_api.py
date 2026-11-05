@@ -50,7 +50,7 @@ class HeldJob:
     def wait(self, timeout_s: float) -> SyncOutcome | None:
         if not self.release.wait(timeout_s):
             return None
-        return SyncOutcome(0, None, True, 0, False, False, False)
+        return SyncOutcome(None, 0, True, False, False, False)
 
     def cancel(self) -> None:
         self.release.set()

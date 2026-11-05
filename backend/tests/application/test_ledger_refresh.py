@@ -26,8 +26,10 @@ from strategy_workbench.application.ledger_refresh.facade.refresh import (
 )
 
 NOW = datetime(2026, 11, 5, 3, 0, tzinfo=UTC)
-OK = SyncOutcome(0, None, True, 0, False, False, False)
-DRIFTED = SyncOutcome(3, None, True, 0, False, False, True)
+# (failure, tables_failed, catalog_rebuilt, catalog_failed, verify_mismatch, drifted)
+OK = SyncOutcome(None, 0, True, False, False, False)
+# 받는 도중 서버 판이 바뀌면 확인하기가 그 차이를 본다
+DRIFTED = SyncOutcome(None, 0, True, False, True, True)
 
 
 @dataclass
@@ -176,41 +178,48 @@ def test_a_clean_sync_blocks_new_work_then_applies_and_reports_up_to_date() -> N
     assert not service.blocks_new_work()
 
 
-def test_a_drifted_sync_retries_once_then_applies_with_a_note() -> None:
-    service, sync, apply = _service(sync=FakeSync(outcomes=[DRIFTED, DRIFTED]))
+def test_a_drifted_sync_applies_once_with_a_note_and_asks_the_server_again() -> None:
+    # 다시 받지 않는다 — 다시 받으면 gc 가 옛 앱이 고정한 판을 지울 수 있다
+    service, sync, apply = _service(sync=FakeSync(outcomes=[DRIFTED]))
     service.start()
-    assert (sync.started, apply.applied) == (2, 1)
-    assert "다음 받기에서 맞춰져요" in service.status().message
-    service, sync, apply = _service(sync=FakeSync(outcomes=[DRIFTED, OK]))
-    service.start()
-    assert sync.started == 2 and "다음 받기" not in service.status().message
+    status = service.status()
+    assert (sync.started, apply.applied, status.code) == (1, 1, RefreshCode.SUCCEEDED)
+    assert "다음 받기에서 맞춰져요" in status.message
+    assert (status.remote.state, status.needs_check) == (RemoteState.UNKNOWN, True)
 
 
 @pytest.mark.parametrize(
     ("outcome", "failure", "code"),
     [
         (
-            SyncOutcome(2, SyncFailureKind.CONNECT, False, 0, False, False, False),
+            SyncOutcome(SyncFailureKind.CONNECT, 0, False, False, False, False),
             RefreshFailure.CONNECT,
             RefreshCode.FAILED,
         ),
+        # 도구가 기록을 남기지 못했다
         (
-            SyncOutcome(2, None, True, 2, False, False, False),
+            SyncOutcome(SyncFailureKind.UNEXPECTED, 0, False, False, False, False),
+            RefreshFailure.UNEXPECTED,
+            RefreshCode.FAILED,
+        ),
+        (
+            SyncOutcome(None, 2, False, False, False, False),
             RefreshFailure.TABLES_FAILED,
             RefreshCode.PARTIAL,
         ),
         (
-            SyncOutcome(2, None, True, 0, True, False, False),
+            SyncOutcome(None, 0, False, True, False, False),
             RefreshFailure.CATALOG,
             RefreshCode.PARTIAL,
         ),
         (
-            SyncOutcome(4, None, True, 0, False, True, False),
+            SyncOutcome(None, 0, True, False, True, False),
             RefreshFailure.MISMATCH,
             RefreshCode.FAILED,
         ),
+        # 카탈로그는 다시 만들었는데 확인하기 도중 끊겼다
         (
-            SyncOutcome(2, SyncFailureKind.TRANSFER, True, 0, False, False, False),
+            SyncOutcome(SyncFailureKind.TRANSFER, 0, True, False, False, True),
             RefreshFailure.UNVERIFIED,
             RefreshCode.FAILED,
         ),

@@ -6,8 +6,10 @@
   막는다(`blocks_new_work`). 그래서 앱을 다시 세울 때 옛 앱이 쥔 계산이 없다.
 - 앱 반영은 새 컨테이너로 통째 바꾸는 것이다(`ApplyDataPort`). 한 컨테이너 안에서 판본이 바뀌지
   않는다.
-- 받기가 표 일부만 바꾸거나 정리하기(카탈로그)가 실패하면 반영하지 않는다. 옛 앱은 부팅 때 고정한
-  판본으로 계속 돈다. 그 상태로 서버를 다시 띄우면 백테스트가 멈추므로 문장이 그렇게 말한다.
+- 정리하기가 카탈로그를 다시 만들었으면 옛 앱은 정리된 데이터를 못 읽으므로, 확인하기가 판을
+  막지 않는 한 반영한다(받을 새 판이 없었어도). 받기가 표 일부만 바꾸거나 정리하기가 실패하면
+  반영하지 않는다. 옛 앱은 부팅 때 고정한 판본으로 계속 돈다. 그 상태로 서버를 다시 띄우면
+  백테스트가 멈추므로 문장이 그렇게 말한다.
 
 화면 문장은 여기서 한글로 완성해 코드와 함께 보낸다. 서버 주소·계정은 어디에도 싣지 않는다.
 """
@@ -35,8 +37,6 @@ logger = logging.getLogger(__name__)
 
 # 홈을 열 때 서버 판을 다시 확인할 간격. 확인은 원격 MANIFEST 만 읽어 싸지만 접속 한 번이다.
 REMOTE_CHECK_TTL = timedelta(minutes=10)
-# 받는 도중 서버 판이 바뀌면(drifted) 한 번만 자동으로 다시 받는다.
-MAX_ATTEMPTS = 2
 _POLL_S = 1.0
 
 
@@ -134,19 +134,12 @@ FAILURE_MESSAGES: dict[RefreshFailure, str] = {
     ),
 }
 _PARTIAL = frozenset({RefreshFailure.TABLES_FAILED, RefreshFailure.CATALOG})
-_SYNC_FAILURES: dict[SyncFailureKind, RefreshFailure] = {
-    SyncFailureKind.CONNECT: RefreshFailure.CONNECT,
-    SyncFailureKind.TRANSFER: RefreshFailure.TRANSFER,
-    SyncFailureKind.DISK: RefreshFailure.DISK,
-    SyncFailureKind.LOCKED: RefreshFailure.LOCKED,
-    SyncFailureKind.UNEXPECTED: RefreshFailure.UNEXPECTED,
-}
 RUNNING_MESSAGE = "데이터를 받는 중이에요. 이 탭을 닫아도 계속돼요. 앱을 끄면 멈춰요."
 APPLYING_MESSAGE = "받은 데이터로 앱을 다시 세우는 중이에요. 잠시 뒤 저절로 다시 연결돼요."
 SUCCEEDED_MESSAGE = "새 데이터를 앱에 반영했어요."
 DRIFTED_NOTE = " 받는 동안 서버가 데이터를 또 만들어 일부는 다음 받기에서 맞춰져요."
 BUILD_WINDOW_NOTE = (
-    "서버가 지금 데이터를 만드는 중일 수 있어요. 받는 도중 바뀌면 자동으로 한 번 더 받아요."
+    "서버가 지금 데이터를 만드는 중일 수 있어요. 받는 도중 바뀌면 일부는 다음 받기에서 맞춰져요."
 )
 REMOTE_MESSAGES: dict[RemoteState, str] = {
     RemoteState.BEHIND: "서버에 받을 새 데이터가 있어요.",
@@ -188,25 +181,25 @@ class RefreshRejectedError(Exception):
 
 
 def classify(outcome: SyncOutcome) -> RefreshFailure | None:
-    """끝난 sync 하나를 반영할지 가른다. None 이면 반영한다(drifted 는 호출자가 다시 받을지 정한다).
+    """끝난 sync 하나를 반영할지 가른다. None 이면 반영한다.
 
-    표를 하나도 바꾸지 않았으면 그 실패 갈래 그대로다. 표를 바꿨는데 일부만이거나 정리하기가
-    실패했으면 일부만 바뀐 것(`partial`)이다. 정리하기까지 했는데 확인하기가 실패했으면 반영하지
-    않는다 — 확인하지 않은 판으로 앱을 다시 세우지 않는다.
+    카탈로그를 다시 만들었으면(받을 새 판이 없었어도 다시 만든다) 반영한다. 다만 확인하기를 마치지
+    못했거나 받은 파일이 서버와 다르면 반영하지 않는다 — 확인하지 않은 판으로 앱을 다시 세우지
+    않는다. 받는 도중 서버 판이 바뀐 차이(drifted)는 판이 틀린 것이 아니라 반영한다. 다시 받지 않는
+    것은 그 받기가 옛 앱이 고정한 판을 지울 수 있어서다(`ledger_sync` gc). 카탈로그를 다시 만들기
+    전에 멈췄으면 표 일부만 바뀌었거나(`partial`) 그 실패 갈래 그대로다.
     """
-    if not outcome.pulled:
-        return _SYNC_FAILURES[outcome.failure or SyncFailureKind.UNEXPECTED]
+    if outcome.catalog_rebuilt:
+        if outcome.failure is not None:
+            return RefreshFailure.UNVERIFIED
+        if outcome.verify_mismatch and not outcome.drifted:
+            return RefreshFailure.MISMATCH
+        return None
     if outcome.tables_failed:
         return RefreshFailure.TABLES_FAILED
     if outcome.catalog_failed:
         return RefreshFailure.CATALOG
-    if outcome.verify_mismatch:
-        return RefreshFailure.MISMATCH
-    if outcome.failure is not None:
-        return RefreshFailure.UNVERIFIED
-    if outcome.exit_code not in (0, 3):
-        return RefreshFailure.UNEXPECTED
-    return None
+    return RefreshFailure(outcome.failure or SyncFailureKind.UNEXPECTED)
 
 
 @dataclass
@@ -314,19 +307,13 @@ class LedgerRefreshService:
             return
         applying = False
         try:
-            for attempt in range(1, MAX_ATTEMPTS + 1):
-                outcome = self._sync_once(sync)
-                failure = classify(outcome)
-                if failure is not None:
-                    self._finish(failure)
-                    return
-                if outcome.drifted and attempt < MAX_ATTEMPTS:
-                    logger.info("ledger refresh drifted — retrying (attempt=%d)", attempt)
-                    continue
-                with self._lock:
-                    self._state.drifted = outcome.drifted
-                break
+            outcome = self._sync_once(sync)
+            failure = classify(outcome)
+            if failure is not None:
+                self._finish(failure)
+                return
             with self._lock:
+                self._state.drifted = outcome.drifted
                 self._state.code = RefreshCode.APPLYING
             applying = True
             self._apply.apply()
@@ -338,7 +325,12 @@ class LedgerRefreshService:
         with self._lock:
             self._state.code = RefreshCode.SUCCEEDED
             self._state.finished_at = now
-            self._state.remote = RemoteCheck(RemoteState.UP_TO_DATE, 0, 0, False, now)
+            # 받는 동안 서버 판이 바뀌었으면 받을 것이 남았다 — 다음 조회가 다시 확인한다.
+            self._state.remote = (
+                RemoteCheck(RemoteState.UNKNOWN, 0, 0, False, None)
+                if self._state.drifted
+                else RemoteCheck(RemoteState.UP_TO_DATE, 0, 0, False, now)
+            )
 
     def _sync_once(self, sync: LedgerSyncPort) -> SyncOutcome:
         job = sync.start()

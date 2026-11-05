@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -13,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from strategy_workbench.adapters.outbound.ledger_sync_process import _process
 from strategy_workbench.adapters.outbound.ledger_sync_process._process import (
     LAST_RUN_NAME,
     LOCK_NAME,
@@ -26,18 +26,33 @@ from strategy_workbench.application.ledger_refresh.facade.refresh import (
     SyncFailureKind,
     SyncStage,
 )
+from tests.equity_fixture import import_ledger_module
 
 REPO = Path(__file__).resolve().parents[2]
 NOW = datetime(2026, 11, 5, 3, 0, tzinfo=UTC)
 
 
-def test_constants_match_the_ledger_sync_source() -> None:
-    main = (REPO / "database" / "src" / "ledger_sync" / "__main__.py").read_text(encoding="utf-8")
-    layout = (REPO / "database" / "src" / "ledger_sync" / "layout.py").read_text(encoding="utf-8")
-    assert re.search(r"^LOCK_STALE_S = 3 \* 3600\b", main, re.M) and LOCK_STALE_S == 3 * 3600
-    assert f'LOCK_NAME = "{LOCK_NAME}"' in main
-    assert f'LAST_RUN_NAME = "{LAST_RUN_NAME}"' in main
-    assert f'SYNC_DIR = "{SYNC_DIR}"' in layout
+@pytest.mark.parametrize(
+    "name",
+    [
+        "LOCK_STALE_S",
+        "LOCK_NAME",
+        "LAST_RUN_NAME",
+        "SYNC_DIR",
+        "EXIT_OK",
+        "EXIT_ERROR",
+        "EXIT_DRIFTED",
+        "EXIT_MISMATCH",
+    ],
+)
+def test_constants_match_the_ledger_sync_module(name: str) -> None:
+    assert getattr(_process, name) == getattr(import_ledger_module("ledger_sync.__main__"), name)
+
+
+def test_the_paramiko_pin_matches_the_wrappers() -> None:
+    for wrapper in ("ledger_sync.ps1", "ledger_sync.sh"):
+        text = (REPO / "database" / "scripts" / wrapper).read_text(encoding="utf-8")
+        assert _process.PARAMIKO in text, wrapper
 
 
 def test_the_command_targets_the_app_root_without_resyncing_the_app_environment() -> None:
@@ -52,10 +67,10 @@ def test_the_command_targets_the_app_root_without_resyncing_the_app_environment(
 @pytest.mark.parametrize(
     ("payload", "expected"),
     [
-        # 표를 받기 전에 접속 실패 — 아무것도 바뀌지 않았다
+        # 표를 받기 전에 접속 실패 — 카탈로그를 다시 만들지 않았다
         (
             {"exit_code": 2, "error": "x", "error_kind": "connect"},
-            (2, SyncFailureKind.CONNECT, False, 0, False, False, False),
+            (SyncFailureKind.CONNECT, 0, False, False, False, False),
         ),
         (
             {
@@ -64,15 +79,25 @@ def test_the_command_targets_the_app_root_without_resyncing_the_app_environment(
                 "catalog_rc": 0,
                 "verify": {"ok": True},
             },
-            (0, None, True, 0, False, False, False),
+            (None, 0, True, False, False, False),
+        ),
+        # 받을 새 판이 없어도 카탈로그는 다시 만든다
+        (
+            {
+                "exit_code": 0,
+                "pull": {"results": [{"outcome": "unchanged"}]},
+                "catalog_rc": 0,
+                "verify": {"ok": True},
+            },
+            (None, 0, True, False, False, False),
         ),
         (
             {"exit_code": 2, "pull": {"results": [{"outcome": "done"}, {"outcome": "failed"}]}},
-            (2, None, True, 1, False, False, False),
+            (None, 1, False, False, False, False),
         ),
         (
             {"exit_code": 2, "pull": {"results": [{"outcome": "done"}]}, "catalog_rc": 2},
-            (2, None, True, 0, True, False, False),
+            (None, 0, False, True, False, False),
         ),
         (
             {
@@ -81,38 +106,37 @@ def test_the_command_targets_the_app_root_without_resyncing_the_app_environment(
                 "catalog_rc": 0,
                 "verify": {"ok": False},
             },
-            (4, None, True, 0, False, True, False),
+            (None, 0, True, False, True, False),
         ),
+        # drifted 는 확인하기의 차이보다 먼저 남는 종료 코드다
         (
             {
                 "exit_code": 3,
                 "pull": {"results": [{"outcome": "done"}], "drifted": ["price"]},
                 "catalog_rc": 0,
+                "verify": {"ok": False},
             },
-            (3, None, True, 0, False, False, True),
+            (None, 0, True, False, True, True),
         ),
-        # 모르는 실패 갈래는 예상 밖으로 접는다
+        # 모르는 실패 갈래·종료 코드는 예상 밖으로 접는다
         (
             {"exit_code": 2, "error_kind": "weird"},
-            (2, SyncFailureKind.UNEXPECTED, False, 0, False, False, False),
+            (SyncFailureKind.UNEXPECTED, 0, False, False, False, False),
         ),
+        ({"exit_code": 9}, (SyncFailureKind.UNEXPECTED, 0, False, False, False, False)),
     ],
 )
 def test_last_run_is_read_into_an_outcome(payload: dict[str, object], expected: tuple) -> None:
     outcome = outcome_from_last_run(payload, 0)
     assert (
-        outcome.exit_code, outcome.failure, outcome.pulled, outcome.tables_failed,
-        outcome.catalog_failed, outcome.verify_mismatch, outcome.drifted,
+        outcome.failure, outcome.tables_failed, outcome.catalog_rebuilt, outcome.catalog_failed,
+        outcome.verify_mismatch, outcome.drifted,
     ) == expected  # fmt: skip
 
 
-def test_a_missing_record_is_treated_as_changed_and_failed() -> None:
+def test_a_missing_record_is_an_unexpected_failure_that_rebuilt_nothing() -> None:
     outcome = outcome_from_last_run(None, 1)
-    assert (outcome.pulled, outcome.failure, outcome.exit_code) == (
-        True,
-        SyncFailureKind.UNEXPECTED,
-        1,
-    )
+    assert (outcome.failure, outcome.catalog_rebuilt) == (SyncFailureKind.UNEXPECTED, False)
 
 
 def _adapter(tmp_path: Path, **kwargs: object) -> LedgerSyncProcess:
@@ -131,6 +155,10 @@ def test_lock_reports_the_holder_and_staleness(tmp_path: Path) -> None:
     assert held is not None and (held.started_at, held.stale) == (NOW, False)
     old = time.time() - LOCK_STALE_S - 60
     os.utime(lock, (old, old))
+    held = adapter.lock()
+    assert held is not None and held.stale
+    # 깨진 잠금은 도구(`lock_info`)처럼 낡은 것으로 본다
+    lock.write_text("{", encoding="utf-8")
     held = adapter.lock()
     assert held is not None and held.stale
 
@@ -205,7 +233,7 @@ def test_a_started_sync_reports_progress_then_the_recorded_outcome(tmp_path: Pat
     outcome = None
     while outcome is None and time.monotonic() < deadline:
         outcome = job.wait(0.2)
-    assert outcome is not None and (outcome.exit_code, outcome.pulled) == (0, True)
+    assert outcome is not None and (outcome.failure, outcome.catalog_rebuilt) == (None, True)
     assert not list(sync_dir.glob("app_progress_*.json"))  # 진행 파일을 치운다
 
 
@@ -224,4 +252,4 @@ def test_a_stale_record_from_an_earlier_run_is_not_trusted(tmp_path: Path) -> No
     outcome = None
     while outcome is None:
         outcome = job.wait(1.0)
-    assert (outcome.pulled, outcome.failure) == (True, SyncFailureKind.UNEXPECTED)
+    assert (outcome.failure, outcome.catalog_rebuilt) == (SyncFailureKind.UNEXPECTED, False)

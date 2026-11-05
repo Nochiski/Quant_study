@@ -6,7 +6,7 @@ import {
   runEnvironmentWireText,
   useRunEnvironmentSchema,
 } from "../../../entities/backtest";
-import { ApiRequestError, type RunEnvironment } from "../../../shared/api";
+import type { RunEnvironment } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import {
   initialRunEnvironmentValues,
@@ -89,12 +89,7 @@ const writeStored = (key: string, values: RunEnvironmentValues): void => {
 };
 
 
-/** 연구 구간 거절이 고치라는 칸(요청 본문의 `environment.start`). */
-const START_FIELD: keyof RunEnvironment = "start";
 /** 실행 계획 설명이 따로 싣는 결측 정책 칸(#357 C-P3-16). */
-
-/** 시작 거절을 한 번의 누름으로 고치는 교정(검증 랩 V5-05). */
-type RunRejectionFix = { label: string; apply: () => void };
 
 /**
  * 사용자가 고친 실행 설정(전략별). `wire` 는 요청 단위 기록이다(저장값·업그레이드 응답과 같은 모양). 표시
@@ -320,29 +315,6 @@ export const useBacktestRunSettings = (storageKey: string) => {
     [environmentFields],
   );
   /**
-   * 시작 거절의 교정. 연구 구간 거절이면 시작일을 거절 detail 이 실은 연구 하한으로 옮긴다 — 날짜 owner 는
-   * backend 라 화면에 적지 않는다(spec D1). 고칠 수 있는 거절이 아니면 null.
-   */
-  const rejectionFix = useCallback(
-    (error: unknown): RunRejectionFix | null => {
-      if (!(error instanceof ApiRequestError)) return null;
-      const researchStart = error.values.research_start;
-      if (
-        error.code !== "backtest.run.research_window_violation" ||
-        researchStart === undefined
-      )
-        return null;
-      return {
-        label: t("runEnvironment.fix.researchStart").replace(
-          "{research_start}",
-          researchStart,
-        ),
-        apply: () => setEnvironmentValue(START_FIELD, researchStart),
-      };
-    },
-    [setEnvironmentValue],
-  );
-  /**
    * 업그레이드 응답처럼 완성된 실행 설정으로 칸 전부를 바꾼다(사용자가 누른 뒤에만 부른다). 스키마를 아직
    * 읽지 못했어도 값을 그대로 들고, 스키마가 오면 그 값으로 칸을 채운다(#352 C-P2-4).
    */
@@ -374,7 +346,6 @@ export const useBacktestRunSettings = (storageKey: string) => {
     applyEnvironment,
     /** 서버 거절의 `field`(요청 본문 점 경로) → 패널 칸 이름. 모르면 null. */
     runFieldLabel: fieldLabel,
-    rejectionFix,
     /** 검증을 통과한 실행 설정. 추적 요청이 같은 값을 싣는다. 없으면 null. */
     environment: environment.valid ? environment.environment : null,
     /**

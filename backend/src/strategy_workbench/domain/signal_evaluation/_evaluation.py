@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from datetime import date
 from math import fsum, isfinite, sqrt
 
-from strategy_workbench.domain.backtest.facade.environment import require_research_window
 from strategy_workbench.domain.factor.facade.cross_section import cross_sectional_rank
 from strategy_workbench.domain.portfolio.facade.construction import PortfolioObservation
 
@@ -44,9 +43,6 @@ def evaluate_signal(
     신호 방향을 사후 반전하거나 상관이 좋은 horizon을 선택하지 않는다. 각 날짜의 당시
     universe_member가 분모다. 상장 종료·결측을 사후 탈락시킨 완전관측 표본을 만들지 않는다.
     """
-    require_research_window(evaluation_as_of, requested_by="signal_evaluation")
-    for observation in observations:
-        require_research_window(observation.as_of, requested_by="signal_evaluation")
     if not factor_id or not signal_snapshot_id or signal_snapshot_id != price_snapshot_id:
         raise ValueError("factor id and matching nonempty signal/price snapshots are required")
     calendar = tuple(sessions)

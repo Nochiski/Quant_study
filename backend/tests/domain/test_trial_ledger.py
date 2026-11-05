@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import math
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from strategy_workbench.domain.analytics.facade.metrics import session_sharpe
 from strategy_workbench.domain.backtest.facade.runs import RunFailureCode, RunStatus
 from strategy_workbench.domain.backtest.facade.trials import (
-    BlockedTrialAttempt,
     TrialLedgerEntry,
     TrialPreviewReason,
     TrialRunRole,
@@ -19,7 +18,7 @@ from strategy_workbench.domain.backtest.facade.trials import (
 )
 
 _AT = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
-_A, _B, _C = "a" * 64, "b" * 64, "c" * 64
+_A, _B = "a" * 64, "b" * 64
 
 
 def _entry(
@@ -56,7 +55,6 @@ def test_a_trial_counts_once_and_its_first_completed_run_is_the_representative()
             _entry("r4", _A, RunStatus.RUNNING),
             _entry("r5", _B, RunStatus.CANCELLED),
         ),
-        (),
     )
 
     first, second = ledger.trials
@@ -77,8 +75,7 @@ def test_a_trial_counts_once_and_its_first_completed_run_is_the_representative()
     assert [run.role for run in second.runs] == [TrialRunRole.NO_RESULT]
 
 
-def test_merged_lineages_share_trials_by_key_and_blocked_attempts_stay_out_of_n() -> None:
-    blocked = BlockedTrialAttempt(_AT, "s-2", _C, "d" * 64, date(2019, 6, 3))
+def test_merged_lineages_share_trials_by_key() -> None:
     ledger = summarize_trial_ledger(
         "s-1",
         ("s-2",),
@@ -87,12 +84,10 @@ def test_merged_lineages_share_trials_by_key_and_blocked_attempts_stay_out_of_n(
             _entry("s2-run", _A, RunStatus.COMPLETED, done_after_minutes=1, sharpe=0.2),
             _entry("s2-other", _B, RunStatus.COMPLETED, sharpe=0.3),
         ),
-        (blocked,),
     )
 
     assert ledger.trial_count == 2
     assert [trial.trial_key for trial in ledger.trials] == [_A, _B]
-    assert ledger.blocked == (blocked,)
 
 
 @pytest.mark.parametrize(
@@ -106,7 +101,6 @@ def test_the_preview_says_whether_a_result_would_add_a_trial(
         "s-1",
         (),
         (_entry("r1", _A, RunStatus.COMPLETED), _entry("r2", _B, RunStatus.FAILED)),
-        (),
     )
 
     preview = preview_trial(ledger, key)
@@ -147,7 +141,6 @@ def test_a_wiped_out_run_is_a_result_that_counts_without_a_sharpe() -> None:
             _entry("r2", _A, RunStatus.COMPLETED, done_after_minutes=5, sharpe=0.07),
             _entry("r3", _B, RunStatus.FAILED, error_code="backtest.run.internal"),
         ),
-        (),
     )
 
     first, second = ledger.trials

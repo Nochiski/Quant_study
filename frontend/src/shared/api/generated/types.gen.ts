@@ -649,37 +649,6 @@ export type BacktestRequestRetiredResponse = {
 };
 
 /**
- * BacktestResearchWindowViolationDetail
- *
- * 측정 시작일이 연구 구간 밖이다(spec D1).
- *
- * 화면 문장은 frontend 가 `code` 로 번역하되 날짜는 자리표시자로 두고 이 detail 의 값으로 채운다 —
- * 날짜 owner 는 `domain/backtest/_research_window.py` 하나다.
- */
-export type BacktestResearchWindowViolationDetail = {
-  /**
-   * Code
-   */
-  code: "backtest.run.research_window_violation";
-  /**
-   * Message
-   */
-  message: string;
-  /**
-   * Research Start
-   */
-  research_start: string;
-  /**
-   * Sealed End
-   */
-  sealed_end: string;
-  /**
-   * Sealed Start
-   */
-  sealed_start: string;
-};
-
-/**
  * BacktestResult
  */
 export type BacktestResult = {
@@ -1096,9 +1065,6 @@ export type BacktestUnprocessableResponse = {
         code: "backtest.run.environment_required";
       } & BacktestEnvironmentRequiredDetail)
     | ({
-        code: "backtest.run.research_window_violation";
-      } & BacktestResearchWindowViolationDetail)
-    | ({
         code: "backtest.run.parameter_invalid";
       } & BacktestParameterInvalidDetail)
     | ({
@@ -1136,34 +1102,6 @@ export type BinaryNode = {
  * BinaryOperator
  */
 export type BinaryOperator = "add" | "subtract" | "multiply" | "divide";
-
-/**
- * BlockedTrialAttempt
- *
- * 봉인 겹침으로 거절한 실행 요청(봉인 원장의 "차단한 시도"). 결과가 없어 N 에 들지 않는다.
- */
-export type BlockedTrialAttempt = {
-  /**
-   * Blocked At
-   */
-  blocked_at: string;
-  /**
-   * Lineage Id
-   */
-  lineage_id: string | null;
-  /**
-   * Spec Hash
-   */
-  spec_hash: string;
-  /**
-   * Start
-   */
-  start: string;
-  /**
-   * Trial Key
-   */
-  trial_key: string;
-};
 
 /**
  * BrokerErrorDetail
@@ -2638,9 +2576,6 @@ export type ExperimentAdmissionErrorResponse = {
     | ({
         code: "backtest.run.environment_required";
       } & BacktestEnvironmentRequiredDetail)
-    | ({
-        code: "backtest.run.research_window_violation";
-      } & BacktestResearchWindowViolationDetail)
     | ({
         code: "backtest.run.parameter_invalid";
       } & BacktestParameterInvalidDetail)
@@ -5093,10 +5028,7 @@ export type PortfolioUnprocessableResponse = {
       } & BacktestParameterInvalidDetail)
     | ({
         code: "backtest.run.environment_required";
-      } & BacktestEnvironmentRequiredDetail)
-    | ({
-        code: "backtest.run.research_window_violation";
-      } & BacktestResearchWindowViolationDetail);
+      } & BacktestEnvironmentRequiredDetail);
 };
 
 /**
@@ -8434,10 +8366,7 @@ export type TraceUnprocessableResponse = {
       } & BacktestParameterInvalidDetail)
     | ({
         code: "backtest.run.environment_required";
-      } & BacktestEnvironmentRequiredDetail)
-    | ({
-        code: "backtest.run.research_window_violation";
-      } & BacktestResearchWindowViolationDetail);
+      } & BacktestEnvironmentRequiredDetail);
 };
 
 /**
@@ -8500,7 +8429,6 @@ export type TrialAttempt = {
    */
   error_code?:
     | "backtest.run.environment_required"
-    | "backtest.run.research_window_violation"
     | "backtest.run.parameter_invalid"
     | "backtest.run.invalid"
     | "backtest.strategy.not_found"
@@ -8558,10 +8486,6 @@ export type TrialGroup = {
  * `lineage_id` 는 합친 뒤 남은 계열이고 `merged_lineage_ids` 는 거기 합쳐진 계열이다.
  */
 export type TrialLedger = {
-  /**
-   * Blocked
-   */
-  blocked: Array<BlockedTrialAttempt>;
   /**
    * Lineage Id
    */
@@ -9242,7 +9166,6 @@ export type WindowPick = {
    */
   error_code?:
     | "backtest.run.environment_required"
-    | "backtest.run.research_window_violation"
     | "backtest.run.parameter_invalid"
     | "backtest.run.invalid"
     | "backtest.strategy.not_found"

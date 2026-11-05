@@ -211,7 +211,7 @@ export const TrialLedgerPanel = ({
           onClose={() => setMerging(false)}
         />
       ) : null}
-      {data.trials.length === 0 && data.blocked.length === 0 ? (
+      {data.trials.length === 0 ? (
         <p>{t("history.trials.empty")}</p>
       ) : (
         <div className="data-list-page__scroll">
@@ -247,22 +247,6 @@ export const TrialLedgerPanel = ({
                         </li>
                       ))}
                     </ul>
-                  </td>
-                </tr>
-              ))}
-              {data.blocked.map((attempt) => (
-                <tr key={`${attempt.trial_key}-${attempt.blocked_at}`}>
-                  <td>
-                    <ShortKey value={attempt.trial_key} />
-                  </td>
-                  <td>
-                    <Badge tone={ROLE_TONE.no_result}>
-                      {roleLabel("no_result")}
-                    </Badge>{" "}
-                    {t("history.trials.blocked").replace(
-                      "{start}",
-                      attempt.start,
-                    )}
                   </td>
                 </tr>
               ))}

@@ -27,9 +27,6 @@ const classify = (response: StartBacktest422): string => {
     // schema 1.2 문서는 실행 설정을 담지 않으므로 시작 요청이 반드시 실어야 한다(P2-03).
     case "backtest.run.environment_required":
       return `environment:${detail.message}`;
-    // 봉인 구간을 측정하는 요청은 서버가 거절한다(검증 랩 spec D1).
-    case "backtest.run.research_window_violation":
-      return `research_window:${detail.message}`;
     // 문서에 없는 파라미터·허용 밖 값은 어느 파라미터인지 싣는다(검증 랩 spec D4).
     case "backtest.run.parameter_invalid":
       return `parameter:${detail.parameter_id}`;
@@ -48,7 +45,6 @@ type TrialRejectionCode = NonNullable<
 // `backtest.error.<code>` 로 번역한다. 코드가 늘면 이 표가 타입 오류로 먼저 깨진다(#382 DEFECT-V3D-08).
 const TRIAL_REJECTION_CODES: Record<TrialRejectionCode, true> = {
   "backtest.run.environment_required": true,
-  "backtest.run.research_window_violation": true,
   "backtest.run.parameter_invalid": true,
   "backtest.run.invalid": true,
   "backtest.strategy.not_found": true,
@@ -80,7 +76,6 @@ describe("backtest API rejection code translations", () => {
       "backtest.run.field_invalid",
       "backtest.run.invalid",
       "backtest.run.parameter_invalid",
-      "backtest.run.research_window_violation",
       "backtest.strategy.not_found",
       "backtest.strategy.requires_upgrade",
       "backtest.strategy.stale",

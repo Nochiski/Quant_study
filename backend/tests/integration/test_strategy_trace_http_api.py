@@ -860,7 +860,6 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     assert {
         "backtest.run.field_invalid",
         "backtest.run.environment_required",
-        "backtest.run.research_window_violation",
     } <= set(detail["discriminator"]["mapping"])
     assert responses["422"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "TraceUnprocessableResponse"
@@ -901,30 +900,6 @@ def test_a_missing_environment_is_coded_on_preview_and_trace_like_a_backtest_sta
         detail = response.json()["detail"]
         assert detail["code"] == "backtest.run.environment_required"
         assert "run_environment.required" in detail["message"]
-    TypeAdapter(Portfolio422Response).validate_python(responses[0].json())
-    TypeAdapter(Trace422Response).validate_python(responses[1].json())
-
-
-def test_measuring_the_sealed_window_is_coded_on_preview_and_trace_like_a_backtest_start() -> None:
-    """spec D1·#351: 연구 하한 전날(2020-01-01)부터 측정하면 세 실행 경로가 같은 detail 로 거절한다.
-
-    화면 문장의 날짜 자리표시자를 채울 봉인 구간·연구 하한을 detail 이 싣는다 — 추적 화면도 백테스트
-    시작과 같은 번역을 쓴다.
-    """
-    responses = _run_requests(TestClient(build_http_app()), _environment(start="2020-01-01"))
-
-    for response in responses:
-        assert response.status_code == 422, response.text
-        detail = response.json()["detail"]
-        assert {
-            key: detail[key] for key in ("code", "sealed_start", "sealed_end", "research_start")
-        } == {
-            "code": "backtest.run.research_window_violation",
-            "sealed_start": "2016-01-01",
-            "sealed_end": "2019-12-31",
-            "research_start": "2020-01-02",
-        }
-        assert "expected=start>=2020-01-02 got=start=2020-01-01" in detail["message"]
     TypeAdapter(Portfolio422Response).validate_python(responses[0].json())
     TypeAdapter(Trace422Response).validate_python(responses[1].json())
 

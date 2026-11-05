@@ -113,7 +113,7 @@ def compare(
 
 
 def format_report(report: ParityReport, *, values: bool) -> str:
-    """사람이 읽는 보고. `values=False` 면 기대·실제 값을 싣지 않는다(실원장, holdout-window.md)."""
+    """사람이 읽는 보고. `values=False` 면 기대·실제 값을 싣지 않는다(실원장)."""
     lines = [f"cases={report.cases} mismatches={report.total}"]
     for item in report.differences:
         line = f"  {item.layer} key={item.key} path={item.path or '<root>'}"

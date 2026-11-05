@@ -191,7 +191,6 @@ test("실원천 용량 비용과 장기 회귀의 원수치·판본을 화면에
     expect(after.trial_count).toBe(before.trial_count);
     expect(after.lineage_id).toBe(before.lineage_id);
     expect(after.merged_lineage_ids).toEqual(before.merged_lineage_ids);
-    expect(after.blocked).toEqual(before.blocked);
     expect(after.trials.map((trial) => trial.trial_key)).toEqual(
       before.trials.map((trial) => trial.trial_key),
     );

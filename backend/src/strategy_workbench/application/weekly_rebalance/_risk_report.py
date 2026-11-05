@@ -31,7 +31,7 @@ from strategy_workbench.domain.risk.facade.risk import (
     build_report,
 )
 
-# 가격 이력은 가장 이른 시나리오 시작일부터 읽는다(2020-01-22 — 홀드아웃 하한 2020-01-02 뒤다)
+# 가격 이력은 가장 이른 시나리오 시작일부터 읽는다
 HISTORY_SINCE = min(window.start for window in HISTORY_SCENARIOS)
 
 

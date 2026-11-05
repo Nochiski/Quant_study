@@ -17,6 +17,7 @@
 | 8 | 실험을 만든 결과 실행(검증 랩 V5-02 튼튼한지 확인하기): `experiment_sources` |
 | 9 | 합성 사전등록·모의 claim·관측 결과(실제 개봉 권위 없음) |
 | 10 | 완료 run 의 머리 지표(목록 응답, 재설계 결정 1): `backtest_run_headlines` |
+| 11 | 앱 홀드아웃 관문·V6 폐기(2026-11-05): v9 모의 표·`sealed_window_blocks` 를 지운다 |
 
 v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다. v5 에서 올린
 파일의 기존 run 은 시작 시각이 없어 시간 추정의 근거가 되지 않는다. v9 에서 올린 파일의 기존 완료
@@ -36,7 +37,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -462,6 +463,22 @@ _V10_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
 
 V10_SCHEMA_OBJECTS = V9_SCHEMA_OBJECTS + _V10_ADDED_OBJECTS
 
+# v11 은 표를 지우기만 한다. 홀드아웃은 앱이 아니라 실험마다 사전등록 문서로 관리한다(2026-11-05
+# 사용자 결정). 합성 모의 표에는 테스트가 만든 기록뿐이고, 봉인 원장의 차단 기록은 없어진 관문이
+# 거절한 요청(결과 없음, N 밖)이라 옮길 곳이 없다. 자식 표부터 지운다 — 외래 키가 켜져 있으면 부모
+# 표를 먼저 지울 때 자식 행이 막는다. 표의 트리거·인덱스는 표와 함께 지워진다.
+_V11_DROPPED_TABLES: tuple[str, ...] = (
+    "holdout_simulation_results",
+    "holdout_simulation_claims",
+    "holdout_simulation_registrations",
+    "sealed_window_blocks",
+)
+V11_SCHEMA_OBJECTS = tuple(
+    item
+    for item in V10_SCHEMA_OBJECTS
+    if not item[1].startswith(("holdout_simulation_", "sealed_window_blocks"))
+)
+
 
 def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Connection], None]:
     def apply(connection: sqlite3.Connection) -> None:
@@ -471,6 +488,11 @@ def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Conne
     return apply
 
 
+def _upgrade_v10_to_v11(connection: sqlite3.Connection) -> None:
+    for table in _V11_DROPPED_TABLES:
+        connection.execute(f"DROP TABLE {table}")
+
+
 def migrate_schema(connection: sqlite3.Connection) -> None:
     ensure_schema(
         connection,
@@ -478,7 +500,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V10_SCHEMA_OBJECTS,
+            objects=V11_SCHEMA_OBJECTS,
             error=ResearchStorageError,
             upgrades=(
                 SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _added(_V2_ADDED_OBJECTS)),
@@ -490,6 +512,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
                 SchemaUpgrade(7, V7_SCHEMA_OBJECTS, _added(_V8_ADDED_OBJECTS)),
                 SchemaUpgrade(8, V8_SCHEMA_OBJECTS, _added(_V9_ADDED_OBJECTS)),
                 SchemaUpgrade(9, V9_SCHEMA_OBJECTS, _added(_V10_ADDED_OBJECTS)),
+                SchemaUpgrade(10, V10_SCHEMA_OBJECTS, _upgrade_v10_to_v11),
             ),
         ),
     )

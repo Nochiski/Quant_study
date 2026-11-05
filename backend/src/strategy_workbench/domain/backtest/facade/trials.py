@@ -4,7 +4,6 @@ from strategy_workbench.domain.backtest._trial_key import (
     trial_key,
 )
 from strategy_workbench.domain.backtest._trial_ledger import (
-    BlockedTrialAttempt,
     ResolvedLineage,
     TrialLedger,
     TrialLedgerEntry,
@@ -23,7 +22,6 @@ from strategy_workbench.domain.backtest._trial_ledger import (
 __all__ = [
     "TRIAL_KEY_DEFAULTS_VERSION",
     "TRIAL_KEY_ROLES",
-    "BlockedTrialAttempt",
     "ResolvedLineage",
     "resolve_lineage",
     "lineage_root",

@@ -256,7 +256,7 @@ extra 목록과 ruff 대상은 CI(`.github/workflows/ci.yml` backend job)와 같
 | 변수 | 기본값 | 뜻 |
 |---|---|---|
 | `STRATEGY_WORKBENCH_DB_PATH` | `.local/strategy-revisions.sqlite3` | 전략 revision·초안 저장소 |
-| `STRATEGY_WORKBENCH_RESEARCH_DB_PATH` | `.local/research.sqlite3` | 백테스트 실행 기록(목록·상태·요청), 시도 원장·계열 합치기·봉인 차단 기록. 재시작 때 끝나지 않은 run 은 `backtest.run.interrupted` 로 닫는다 |
+| `STRATEGY_WORKBENCH_RESEARCH_DB_PATH` | `.local/research.sqlite3` | 백테스트 실행 기록(목록·상태·요청), 시도 원장·계열 합치기. 재시작 때 끝나지 않은 run 은 `backtest.run.interrupted` 로 닫는다 |
 | `STRATEGY_WORKBENCH_ARTIFACT_ROOT` | `.local/backtest-runs` | 연구 DB와 짝을 이루는 실행 결과 루트. 프로세스마다 분리하며 E2E는 격리 런타임 아래 경로를 주입한다 |
 | `STRATEGY_WORKBENCH_ALLOWED_ORIGINS` | `http://localhost:5173` | CORS 허용 origin(쉼표로 구분) |
 | `STRATEGY_WORKBENCH_EQUITY_ADAPTER` | `mock` | `mock` 또는 `duckdb` |

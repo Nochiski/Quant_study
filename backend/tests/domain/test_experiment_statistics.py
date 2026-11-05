@@ -51,7 +51,7 @@ def _ledger(trial_count: int, sharpes: Sequence[float]) -> TrialLedger:
             TrialLedgerEntry("recheck", "key-0", RunStatus.COMPLETED, at, at + timedelta(1), 9.9)
         )
     entries.append(TrialLedgerEntry("failed", "key-x", RunStatus.FAILED, at, at))
-    ledger = summarize_trial_ledger("s-1", (), entries, ())
+    ledger = summarize_trial_ledger("s-1", (), entries)
     assert ledger.trial_count == trial_count
     return ledger
 
@@ -122,7 +122,7 @@ def test_a_wiped_out_trial_counts_in_n_but_not_in_the_spread() -> None:
             "run-2", "key-2", RunStatus.FAILED, at, at, error_code="backtest.run.equity_wiped_out"
         ),
     ]
-    ledger = summarize_trial_ledger("s-1", (), entries, ())
+    ledger = summarize_trial_ledger("s-1", (), entries)
 
     # N = 3, V = 표본분산(0.01, 0.03) = 0.0002.
     assert deflated_sharpe(0.05 * math.sqrt(252), 0.03 * math.sqrt(252), 252, ledger) == (

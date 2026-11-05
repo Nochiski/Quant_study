@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
@@ -203,7 +203,11 @@ describe("MarketOverview", () => {
     const map = await screen.findByRole("group", { name: /섹터맵, 방향키로/u });
     const tiles = within(map).getAllByRole("button");
     expect(tiles.filter((tile) => tile.tabIndex === 0)).toHaveLength(1);
-    tiles[0].focus();
+    act(() => tiles[0].focus());
+    // 초점이 간 칸은 툴팁으로 등락·이름·유동시총을 보이고 Escape 로 닫힌다
+    expect(within(map).getByText(/^유동시총 \d/u)).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(within(map).queryByText(/^유동시총 \d/u)).toBeNull();
     await user.keyboard("{ArrowRight}");
     expect(tiles[1]).toHaveFocus();
     expect(tiles[1].tabIndex).toBe(0);

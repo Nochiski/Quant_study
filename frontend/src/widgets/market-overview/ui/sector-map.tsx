@@ -8,6 +8,7 @@ import {
 
 import {
   percentMagnitude,
+  shortWon,
   type MapHead,
   type MapTile,
 } from "../../../entities/market";
@@ -36,8 +37,93 @@ const direction = (value: number | null): string =>
     ? ""
     : t(value > 0 ? "market.direction.up" : "market.direction.down");
 
-const tone = (value: number | null): string =>
-  value === null || value === 0 ? "flat" : value > 0 ? "up" : "down";
+/**
+ * 칸 색 단계(발산 척도)의 경계 — 하루 등락 |%|. 0.5 미만은 중립, 그 위로 0.5·1·2·3 에서 한 단계씩 진해진다(3 이상이
+ * 가장 진하다). 색은 크기 감을 주고 정확한 값은 칸 글자가 전한다. 색 값은 `tokens.css` 의 `--sector-*` 가 소유한다.
+ */
+const STEP_BOUNDS = [0.5, 1, 2, 3] as const;
+
+const step = (value: number | null): string => {
+  if (value === null) return "flat";
+  const level = STEP_BOUNDS.filter((bound) => Math.abs(value) >= bound).length;
+  return level === 0 ? "flat" : `${value > 0 ? "up" : "down"}-${level}`;
+};
+
+const LEGEND_STEPS = [
+  ...STEP_BOUNDS.map((_, index) => `down-${STEP_BOUNDS.length - index}`),
+  "flat",
+  ...STEP_BOUNDS.map((_, index) => `up-${index + 1}`),
+];
+const LEGEND_TICKS = [
+  ...[...STEP_BOUNDS].reverse().map((bound) => `−${bound}`),
+  ...STEP_BOUNDS.map((bound) => `+${bound}`),
+];
+
+/** 범례: 칸 색 단계와 그 경계(척도), 작은 업종 묶음. 칸 글자가 값을 전하므로 장식이다. */
+export const SectorLegend = () => (
+  <span className="market-legend" aria-hidden="true">
+    <span className="market-legend__scale">
+      <span>{t("market.sector.legend.scale")}</span>
+      <span className="market-legend__ramp">
+        {LEGEND_STEPS.map((name) => (
+          <span key={name} className={`market-legend__step market-legend__step--${name}`} />
+        ))}
+        {LEGEND_TICKS.map((tick, index) => (
+          <span
+            key={tick}
+            className="market-legend__tick"
+            style={{ left: `${((index + 1) / LEGEND_STEPS.length) * 100}%` }}
+          >
+            {tick}
+          </span>
+        ))}
+      </span>
+    </span>
+    <span className="market-legend__item">
+      <span className="market-legend__swatch market-legend__swatch--others" />
+      {t("market.sector.legend.other")}
+    </span>
+  </span>
+);
+
+// 칸 글자 크기(px)와 줄 높이 배율 — CSS(.market-map__tile, --large)와 같은 값이다.
+const NAME_PX = { large: 16, regular: 12 } as const;
+const CHANGE_PX = { large: 13, regular: 12 } as const;
+const LINE = 1.2;
+// 칸 테두리(간격)·안쪽 여백을 뺀 글자 자리(px).
+const INSET_X = 10;
+const INSET_Y = 6;
+
+/** 글자 폭 어림(px): 한글·한자는 1em, 그 밖은 0.62em. */
+const textWidth = (text: string, px: number): number =>
+  [...text].reduce(
+    (width, char) =>
+      width + (/[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af\u4e00-\u9fff]/u.test(char) ? 1 : 0.62) * px,
+    0,
+  );
+
+/**
+ * 칸 글자 규칙: 큰 칸은 큰 글자, 이름은 두 줄까지 줄바꿈해 들어갈 때만 보인다(말줄임 대신). 들어가지 않으면 부호
+ * 등락만 보이고 이름은 낭독 이름·툴팁이 전한다.
+ */
+const tileText = (
+  tile: MapTile,
+  name: string,
+): { size: "large" | "regular"; showName: boolean } => {
+  const fits = (size: "large" | "regular") => {
+    const lines = Math.min(
+      2,
+      Math.floor(
+        (tile.h - INSET_Y - CHANGE_PX[size] * LINE) / (NAME_PX[size] * LINE),
+      ),
+    );
+    const needed = Math.ceil(textWidth(name, NAME_PX[size]) / (tile.w - INSET_X));
+    return lines >= 1 && needed <= lines;
+  };
+  if (tile.w >= 150 && tile.h >= 80 && fits("large"))
+    return { size: "large", showName: true };
+  return { size: "regular", showName: fits("regular") };
+};
 
 export const Change = ({ value }: { value: number | null }) =>
   value === null ? (
@@ -69,7 +155,7 @@ const Tiles = ({
   width: number;
   height: number;
   onOpen: (tile: MapTile) => void;
-  // 누르기 전 신호(가리키기·초점) — 들어갈 곳의 응답을 미리 읽는다.
+  // 누르기 전 신호(가리키기) — 들어갈 곳의 응답을 미리 읽는다.
   onIntent: (tile: MapTile) => void;
   layerRef: Ref<HTMLDivElement>;
   // 전환 중 사라지는 수준: 보이기만 하고 읽히거나 눌리지 않는다.
@@ -107,6 +193,12 @@ const Tiles = ({
     width: `${(rect.w / width) * 100}%`,
     height: `${(rect.h / height) * 100}%`,
   });
+  // 툴팁: 가리키거나 초점이 간 칸 하나. 낭독 이름이 같은 내용을 가지므로 화면 전용(aria-hidden)이다.
+  const [tip, setTip] = useState<MapTile | null>(null);
+  const hover = (tile: MapTile) => ({
+    onPointerEnter: () => setTip(tile),
+    onPointerLeave: () => setTip((shown) => (shown === tile ? null : shown)),
+  });
   return (
     <div
       ref={layerRef}
@@ -135,9 +227,18 @@ const Tiles = ({
           change:
             tile.returnPct === null ? "—" : percentMagnitude(tile.returnPct),
         }).replace(/^ · /u, "");
-        const className = `market-map__tile market-map__tile--${tone(tile.returnPct)}${
-          tile.kind === "others" ? " market-map__tile--others" : ""
-        }`;
+        const text = tileText(tile, name);
+        const className = `market-map__tile market-map__tile--${
+          tile.kind === "others" ? "others" : step(tile.returnPct)
+        }${text.size === "large" ? " market-map__tile--large" : ""}`;
+        const content = (
+          <>
+            {text.showName ? (
+              <span className="market-map__name">{name}</span>
+            ) : null}
+            <Change value={tile.returnPct} />
+          </>
+        );
         if (index < 0)
           return (
             <div
@@ -146,10 +247,9 @@ const Tiles = ({
               className={className}
               style={place(tile)}
               aria-label={aria}
-              title={aria}
+              {...hover(tile)}
             >
-              <span className="market-map__name">{name}</span>
-              <Change value={tile.returnPct} />
+              {content}
             </div>
           );
         return (
@@ -163,28 +263,78 @@ const Tiles = ({
             className={className}
             style={place(tile)}
             aria-label={aria}
-            title={aria}
             onFocus={() => {
               setActive(index);
+              setTip(tile);
+            }}
+            onBlur={() => setTip(null)}
+            onPointerEnter={() => {
+              setTip(tile);
               onIntent(tile);
             }}
-            onPointerEnter={() => onIntent(tile)}
-            onKeyDown={(event) => move(event, index)}
+            onPointerLeave={hover(tile).onPointerLeave}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setTip(null);
+              else move(event, index);
+            }}
             onClick={() => onOpen(tile)}
           >
-            <span className="market-map__name">{name}</span>
-            <Change value={tile.returnPct} />
+            {content}
           </button>
         );
       })}
       {heads.map((head) => (
         <div key={head.key} className="market-map__group" style={place(head)}>
           <span className="market-map__head">
-            <span className="market-map__name">{head.name}</span>{" "}
+            <span className="market-map__name">{head.name}</span>
             <Change value={head.returnPct} />
           </span>
         </div>
       ))}
+      {tip !== null ? (
+        <TileTip tile={tip} width={width} height={height} />
+      ) : null}
+    </div>
+  );
+};
+
+const TIP_HALF_WIDTH = 96;
+const TIP_HEIGHT = 64;
+
+/** 칸 툴팁: 등락(값이 먼저) · 이름 · 유동시총. 칸 위에 자리가 없으면 아래, 그것도 없으면 칸 안 위쪽에 뜬다. */
+const TileTip = ({
+  tile,
+  width,
+  height,
+}: {
+  tile: MapTile;
+  width: number;
+  height: number;
+}) => {
+  const center = Math.min(
+    Math.max(tile.x + tile.w / 2, TIP_HALF_WIDTH),
+    width - TIP_HALF_WIDTH,
+  );
+  const vertical =
+    tile.y >= TIP_HEIGHT
+      ? { bottom: `${((height - tile.y + 4) / height) * 100}%` }
+      : tile.y + tile.h + TIP_HEIGHT <= height
+        ? { top: `${((tile.y + tile.h + 4) / height) * 100}%` }
+        : { top: `${((tile.y + 8) / height) * 100}%` };
+  const name = tileLabel(tile);
+  return (
+    <div
+      className="market-map__tip"
+      aria-hidden="true"
+      style={{ left: `${(center / width) * 100}%`, ...vertical }}
+    >
+      <strong>
+        <Change value={tile.returnPct} />
+      </strong>
+      <span>{tile.parentName ? `${tile.parentName} · ${name}` : name}</span>
+      <span className="market-map__tip-size">
+        {tFill("market.sector.tipSize", { size: shortWon(tile.sizeWeight) })}
+      </span>
     </div>
   );
 };

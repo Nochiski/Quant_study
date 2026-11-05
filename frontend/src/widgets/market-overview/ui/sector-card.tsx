@@ -27,7 +27,7 @@ import {
 import { ApiRequestError, type MarketSectorBody } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
 import { Button } from "../../../shared/ui";
-import { Change, SectorMap, type MapLayer } from "./sector-map";
+import { Change, SectorLegend, SectorMap, type MapLayer } from "./sector-map";
 
 /** 카드 폭이 이보다 좁으면 지도 대신 많이 오른·내린 업종 목록을 보인다. */
 const MAP_MIN_WIDTH = 560;
@@ -268,7 +268,7 @@ export const SectorCard = ({
     if (tile.target === null) setView("table");
     else onSector(tile.target);
   };
-  // 세부 업종 칸을 가리키거나 초점을 주면 그 종목 응답을 미리 읽어 둔다(실패는 들어간 뒤 카드가 말한다).
+  // 세부 업종 칸을 가리키면 그 종목 응답을 미리 읽어 둔다(실패는 들어간 뒤 카드가 말한다).
   const prefetch = (tile: MapTile) => {
     if (tile.target === null || sectorMap === null || sectorMap === undefined)
       return;
@@ -416,20 +416,7 @@ export const SectorCard = ({
           ) : null}
         </div>
         <div className="market-sector__tools">
-          <span className="market-legend" aria-hidden="true">
-            <span className="market-legend__item">
-              <span className="market-legend__swatch market-legend__swatch--up" />
-              {t("market.sector.legend.up")}
-            </span>
-            <span className="market-legend__item">
-              <span className="market-legend__swatch market-legend__swatch--down" />
-              {t("market.sector.legend.down")}
-            </span>
-            <span className="market-legend__item">
-              <span className="market-legend__swatch market-legend__swatch--others" />
-              {t("market.sector.legend.other")}
-            </span>
-          </span>
+          <SectorLegend />
           <div
             className="market-segment"
             role="group"

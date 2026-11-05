@@ -1363,7 +1363,8 @@ export type CardIssueBody = {
 /**
  * CardIssueCode
  */
-export type CardIssueCode = "table_missing" | "no_rows" | "coverage_low";
+export type CardIssueCode =
+  "table_missing" | "unreadable" | "no_rows" | "coverage_low";
 
 /**
  * CellKind
@@ -4298,8 +4299,19 @@ export type InvestorAmountBody = {
    * 순매수(산 금액 − 판 금액), 원. 반올림하지 않은 합.
    */
   amount_krw: number;
+  /**
+   * 화면 묶음: 막대 네 줄(main)·기관 세부(institution_part)·각주(footnote).
+   */
+  group: InvestorGroup;
   investor: Investor;
 };
+
+/**
+ * InvestorGroup
+ *
+ * 화면이 주체를 어디에 두는가. 응답이 주체마다 싣는다 — 화면은 묶음을 다시 적지 않는다.
+ */
+export type InvestorGroup = "main" | "institution_part" | "footnote";
 
 /**
  * KiwoomMockConnectionBody
@@ -4365,6 +4377,12 @@ export type LedgerRefreshBody = {
   needs_check: boolean;
   progress: SyncProgressBody | null;
   reason: UnavailableReason | null;
+  /**
+   * Refreshing
+   *
+   * 받거나 반영하는 중인가. 이 동안 계산 시작은 409 data.refreshing.
+   */
+  refreshing: boolean;
   remote: RemoteCheckBody;
   /**
    * Started At

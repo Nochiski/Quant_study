@@ -598,6 +598,7 @@ export type {
   IntegerParameter,
   Investor,
   InvestorAmountBody,
+  InvestorGroup,
   KiwoomMockConnectionBody,
   KiwoomMockConnectionCheckBody,
   LedgerRefreshBody,

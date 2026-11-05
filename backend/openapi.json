@@ -2132,6 +2132,7 @@
       "CardIssueCode": {
         "enum": [
           "table_missing",
+          "unreadable",
           "no_rows",
           "coverage_low"
         ],
@@ -7037,16 +7038,31 @@
             "title": "Amount Krw",
             "type": "integer"
           },
+          "group": {
+            "$ref": "#/components/schemas/InvestorGroup",
+            "description": "화면 묶음: 막대 네 줄(main)·기관 세부(institution_part)·각주(footnote)."
+          },
           "investor": {
             "$ref": "#/components/schemas/Investor"
           }
         },
         "required": [
           "investor",
-          "amount_krw"
+          "amount_krw",
+          "group"
         ],
         "title": "InvestorAmountBody",
         "type": "object"
+      },
+      "InvestorGroup": {
+        "description": "화면이 주체를 어디에 두는가. 응답이 주체마다 싣는다 — 화면은 묶음을 다시 적지 않는다.",
+        "enum": [
+          "main",
+          "institution_part",
+          "footnote"
+        ],
+        "title": "InvestorGroup",
+        "type": "string"
       },
       "KiwoomMockConnectionBody": {
         "properties": {
@@ -7179,6 +7195,11 @@
               }
             ]
           },
+          "refreshing": {
+            "description": "받거나 반영하는 중인가. 이 동안 계산 시작은 409 data.refreshing.",
+            "title": "Refreshing",
+            "type": "boolean"
+          },
           "remote": {
             "$ref": "#/components/schemas/RemoteCheckBody"
           },
@@ -7199,6 +7220,7 @@
           "code",
           "message",
           "can_start",
+          "refreshing",
           "reason",
           "failure",
           "needs_check",

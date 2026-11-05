@@ -5,7 +5,8 @@
 이 질의는 옛 판본 하나만 본다.
 
 - 수급 격자: `flow_daily` × `universe_daily`, 코스피·코스닥, ETF·우선주 제외(우선주는 원장에
-  수급이 없다). 격자 밖 격리 행(`reject_reason`)은 넣지 않는다. 한 셀에 원천이 둘이면 백테스트
+  수급이 없다). 격리 행은 원장 빌드가 본표 밖(`_reject/`)에 쓰므로 본표에는 `reject_reason` 칸도
+  없다. 한 셀에 원천이 둘이면 백테스트
   필드와 같은 규칙(flow 원천 선언의 `pick_order`)으로 한 행만 고른다 — 두 행을 더하면 이중
   집계이고, 다른 규칙으로 고르면 홈과 백테스트가 같은 셀을 다르게 읽는다. 값이 없는 셀은 0으로
   치지 않고 측정 수에서 뺀다.
@@ -163,7 +164,7 @@ def flow_days(adapter: EquityDuckdbAdapter, end: date, sessions: int) -> tuple[F
             "WITH picked AS ("
             f"  SELECT date, ticker, {MEASURED_COLUMN} IS NOT NULL AS measured, {columns}"
             f"  FROM {adapter._source(FLOW_TABLE)} "  # noqa: SLF001
-            "   WHERE date BETWEEN ? AND ? AND reject_reason IS NULL"
+            "   WHERE date BETWEEN ? AND ?"
             "   QUALIFY row_number() OVER ("
             f"    PARTITION BY date, ticker ORDER BY {_FLOW_PICK_ORDER}) = 1"
             "), cells AS ("

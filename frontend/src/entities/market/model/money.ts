@@ -11,11 +11,15 @@ const JO = 10_000 * EOK;
  */
 export const shortWon = (amountKrw: number): string => {
   const magnitude = Math.abs(amountKrw);
-  if (magnitude >= JO) {
-    const jo = magnitude / JO;
-    return tFill("market.money.jo", { value: jo.toFixed(jo >= 10 ? 1 : 2) });
-  }
+  // 억으로 먼저 반올림하고 그 값으로 조·억을 고른다 — 9,999.5억이 "10,000억"이 되지 않게
+  // (backend 요약 문장의 `won_words` 와 같은 경계).
   const eok = Math.round(magnitude / EOK);
+  if (eok >= JO / EOK) {
+    const jo = magnitude / JO;
+    // 둘째 자리로 올림하면 10조가 되는 값(9.995조)은 10조 위의 표기(첫째 자리)를 쓴다.
+    const value = jo.toFixed(2) === "10.00" || jo >= 10 ? jo.toFixed(1) : jo.toFixed(2);
+    return tFill("market.money.jo", { value });
+  }
   if (eok === 0 && magnitude > 0) return tFill("market.money.belowEok", {});
   return tFill("market.money.eok", { value: eok.toLocaleString("ko-KR") });
 };

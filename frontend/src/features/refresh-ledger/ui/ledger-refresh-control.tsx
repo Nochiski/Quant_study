@@ -179,10 +179,8 @@ export const LedgerRefreshControl = () => {
           <strong id={titleId}>
             {isRefreshing(data)
               ? t("refresh.dialog.running")
-              : data.code === "succeeded" ||
-                  data.code === "failed" ||
-                  data.code === "partial"
-                ? t(`refresh.notice.${data.code}`)
+              : finished
+                ? t(`refresh.notice.${data.code as "succeeded" | "failed" | "partial"}`)
                 : t("refresh.dialog.confirm")}
           </strong>
           {isRefreshing(data) ? (

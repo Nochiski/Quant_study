@@ -6,6 +6,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { MarketOverviewBody } from "../../../entities/market";
+import type { MarketSectorBody } from "../../../shared/api";
 import { MarketOverview } from "..";
 
 const API = "http://localhost:8000";
@@ -26,8 +27,18 @@ const INVESTORS = [
   "government",
 ] as const;
 
+const MAIN = new Set(["individual", "foreign", "institution", "other_corporation"]);
+
 const amounts = (values: Partial<Record<(typeof INVESTORS)[number], number>>) =>
-  INVESTORS.map((investor) => ({ investor, amount_krw: values[investor] ?? 0 }));
+  INVESTORS.map((investor) => ({
+    investor,
+    amount_krw: values[investor] ?? 0,
+    group: MAIN.has(investor)
+      ? ("main" as const)
+      : investor === "resident_foreign"
+        ? ("footnote" as const)
+        : ("institution_part" as const),
+  }));
 
 const total = (
   period: "day" | "five_sessions" | "twenty_sessions",
@@ -213,6 +224,57 @@ describe("MarketOverview", () => {
     expect(screen.getByRole("button", { name: "시장 펼치기" })).toHaveAttribute(
       "aria-expanded",
       "false",
+    );
+  });
+
+  it("says why a sector read failed, retries it, and reads stock tiles without buttons", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 1000,
+      height: 400,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 400,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    let failing = true;
+    server.use(
+      http.get(`${API}/api/v1/market/sectors/:code`, () => {
+        if (failing) return HttpResponse.json({ detail: "boom" }, { status: 500 });
+        return HttpResponse.json({
+          status: "available",
+          message: null,
+          parent: group("G45", "IT", 3_000 * 1e9, -4.88),
+          group: group("G4530", "반도체와반도체장비", 2_000 * 1e9, -4.97),
+          session: "2026-10-30",
+          snapshot_date: "2026-10-30",
+          securities: [
+            { ticker: "005930", name: "삼성전자", size_weight_krw: 1_500 * 1e9, return_pct: -5.1 },
+            { ticker: "000660", name: "SK하이닉스", size_weight_krw: 500 * 1e9, return_pct: -4.5 },
+          ],
+        } satisfies MarketSectorBody);
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <MarketOverview sector="G4530" onSector={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    // 일시적인 실패를 "그 업종이 없다"고 말하지 않는다
+    const failed = await screen.findByRole("alert");
+    expect(failed).toHaveTextContent("시장 데이터를 불러오지 못했어요.");
+    failing = false;
+    await user.click(within(failed).getByRole("button", { name: "다시 시도" }));
+    const stocks = await screen.findByRole("group", { name: /종목 지도/u });
+    // 종목 칸은 누를 일이 없다 — 버튼이 아니라 이름과 등락만 읽힌다
+    expect(within(stocks).queryAllByRole("button")).toHaveLength(0);
+    expect(within(stocks).getAllByRole("img").map((tile) => tile.getAttribute("aria-label"))).toEqual(
+      expect.arrayContaining([expect.stringContaining("삼성전자")]),
     );
   });
 });

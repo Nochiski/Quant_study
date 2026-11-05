@@ -116,8 +116,7 @@ export const MarketOverview = ({
   } else if (data.status === "practice_data") {
     body = (
       <div className="market-card market-practice">
-        <strong>{t("market.practice.title")}</strong>
-        <p className="market-card__muted">{data.message}</p>
+        <p>{data.message}</p>
       </div>
     );
   } else if (collapsed) {

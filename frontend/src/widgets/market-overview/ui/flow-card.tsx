@@ -9,36 +9,22 @@ import {
   type FlowPeriod,
   type Investor,
   type InvestorAmountBody,
+  type InvestorGroup,
 } from "../../../entities/market";
 import { t, tFill } from "../../../shared/config";
 import { Badge, SignedValue } from "../../../shared/ui";
 
-const MAIN: readonly Investor[] = [
-  "individual",
-  "foreign",
-  "institution",
-  "other_corporation",
-];
-const PARTS: readonly Investor[] = [
-  "financial_investment",
-  "pension",
-  "investment_trust",
-  "private_equity",
-  "insurance",
-  "bank",
-  "other_financial",
-  "government",
-];
 const PERIODS: readonly FlowPeriod[] = [
   "day",
   "five_sessions",
   "twenty_sessions",
 ];
-const PERIOD_SESSIONS: Record<FlowPeriod, number> = {
-  day: 1,
-  five_sessions: 5,
-  twenty_sessions: 20,
-};
+
+// 주체를 어느 묶음에 두는지는 응답의 `group` 이 정한다(순서도 응답 그대로).
+const ofGroup = (
+  amounts: readonly InvestorAmountBody[],
+  group: InvestorGroup,
+): InvestorAmountBody[] => amounts.filter((item) => item.group === group);
 
 const amountOf = (
   amounts: readonly InvestorAmountBody[],
@@ -151,11 +137,11 @@ export const FlowCard = ({
           <details className="ui-disclosure">
             <summary>{t("market.flow.institution")}</summary>
             <dl className="market-flow__parts">
-              {PARTS.map((investor) => (
-                <div key={investor}>
-                  <dt>{t(`market.investor.${investor}`)}</dt>
+              {ofGroup(total.amounts, "institution_part").map((item) => (
+                <div key={item.investor}>
+                  <dt>{t(`market.investor.${item.investor}`)}</dt>
                   <dd>
-                    <Amount value={amountOf(total.amounts, investor)} />
+                    <Amount value={item.amount_krw} />
                   </dd>
                 </div>
               ))}
@@ -165,7 +151,10 @@ export const FlowCard = ({
             <summary>{t("market.flow.byDay")}</summary>
             <ByDay
               card={card}
-              sessions={PERIOD_SESSIONS[period]}
+              start={total.start}
+              investors={ofGroup(total.amounts, "main").map(
+                (item) => item.investor,
+              )}
               marketName={marketName}
             />
           </details>
@@ -181,12 +170,11 @@ export const FlowCard = ({
 
 /** 네 주체 막대. 막대 끝 = 이 시장·기간에서 가장 큰 값. 방향은 옆 숫자가 부호·낭독으로 전한다. */
 const Bars = ({ amounts }: { amounts: readonly InvestorAmountBody[] }) => {
-  const values = MAIN.map((investor) => amountOf(amounts, investor));
-  const scale = Math.max(...values.map(Math.abs), 1);
+  const main = ofGroup(amounts, "main");
+  const scale = Math.max(...main.map((item) => Math.abs(item.amount_krw)), 1);
   return (
     <div className="market-flow__bars">
-      {MAIN.map((investor, index) => {
-        const value = values[index];
+      {main.map(({ investor, amount_krw: value }) => {
         const half = (Math.abs(value) / scale) * 50;
         return (
           <div key={investor} className="market-flow__row">
@@ -213,16 +201,19 @@ const Bars = ({ amounts }: { amounts: readonly InvestorAmountBody[] }) => {
   );
 };
 
+/** 고른 기간(합의 첫날부터)의 날짜별 값. 기간 길이를 화면이 다시 세지 않는다. */
 const ByDay = ({
   card,
-  sessions,
+  start,
+  investors,
   marketName,
 }: {
   card: FlowCardBody;
-  sessions: number;
+  start: string;
+  investors: readonly Investor[];
   marketName: string;
 }) => {
-  const days = [...card.days].slice(-sessions).reverse();
+  const days = card.days.filter((day) => day.session >= start).reverse();
   return (
     <div
       className="market-table-scroll"
@@ -236,7 +227,7 @@ const ByDay = ({
         <thead>
           <tr>
             <th scope="col">{t("market.flow.date")}</th>
-            {MAIN.map((investor) => (
+            {investors.map((investor) => (
               <th key={investor} scope="col">
                 {t(`market.investor.${investor}`)}
               </th>
@@ -247,7 +238,7 @@ const ByDay = ({
           {days.map((day) => (
             <tr key={day.session}>
               <td>{sessionShort(day.session)}</td>
-              {MAIN.map((investor) => {
+              {investors.map((investor) => {
                 const value = amountOf(day.amounts, investor);
                 return (
                   <td key={investor}>

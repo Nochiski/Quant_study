@@ -711,6 +711,16 @@ describe("App Shell routes", () => {
     expect(legacyHistory.location.search).not.toContain("step=");
     expect(legacyHistory.location.search).not.toContain("run=");
     expect(screen.queryByText("Quick Builder")).not.toBeInTheDocument();
+    cleanup();
+
+    // 검색 파서가 숫자·빈 값으로 읽는 옛 북마크도 홈에 남지 않는다
+    const numeric = mount("/?run=123");
+    await screen.findByRole("heading", { name: "새 전략" });
+    expect(numeric.location.pathname).toBe("/research/strategies/new");
+    cleanup();
+    const empty = mount("/?step=");
+    await screen.findByRole("heading", { name: "새 전략" });
+    expect(empty.location.pathname).toBe("/research/strategies/new");
   });
 
   it("shows loading inside the shell and a localised error with a way back on 500", async () => {

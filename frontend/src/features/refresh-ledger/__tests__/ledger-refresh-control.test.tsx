@@ -21,6 +21,7 @@ const status = (overrides: Partial<LedgerRefreshBody>): LedgerRefreshBody => ({
   code: "idle",
   message: "서버에 받을 새 데이터가 있어요.",
   can_start: true,
+  refreshing: false,
   reason: null,
   failure: null,
   needs_check: false,
@@ -113,6 +114,7 @@ describe("LedgerRefreshControl", () => {
           status({
             code: "running",
             can_start: false,
+            refreshing: true,
             message: "데이터를 받는 중이에요.",
             started_at: "2026-11-05T03:00:00Z",
             progress: {

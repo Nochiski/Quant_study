@@ -26,8 +26,9 @@ import {
   type SectorGroupBody,
   type SectorMapBody,
 } from "../../../entities/market";
+import { ApiRequestError } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
-import { SignedValue } from "../../../shared/ui";
+import { Button, SignedValue } from "../../../shared/ui";
 
 /** 카드 폭이 이보다 좁으면 지도 대신 많이 오른·내린 업종 목록을 보인다. */
 const MAP_MIN_WIDTH = 560;
@@ -85,6 +86,7 @@ const Tiles = ({
   height,
   label,
   onOpen,
+  opens,
 }: {
   tiles: readonly MapTile[];
   heads: readonly MapHead[];
@@ -92,8 +94,12 @@ const Tiles = ({
   height: number;
   label: string;
   onOpen: (tile: MapTile) => void;
+  // 누를 수 있는 칸. 누를 수 없는 칸(종목 칸)은 버튼이 아니라 이름만 읽힌다(기본: 모든 칸).
+  opens?: (tile: MapTile) => boolean;
 }) => {
-  const focusable = tiles.filter((tile) => tile.kind !== "filler");
+  const focusable = tiles.filter(
+    (tile) => tile.kind !== "filler" && (opens?.(tile) ?? true),
+  );
   const [active, setActive] = useState(0);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const current = Math.min(active, Math.max(0, focusable.length - 1));
@@ -146,6 +152,23 @@ const Tiles = ({
           change:
             tile.returnPct === null ? "—" : percentMagnitude(tile.returnPct),
         }).replace(/^ · /u, "");
+        const className = `market-map__tile market-map__tile--${tone(tile.returnPct)}${
+          tile.kind === "others" ? " market-map__tile--others" : ""
+        }`;
+        if (index < 0)
+          return (
+            <div
+              key={tile.key}
+              role="img"
+              className={className}
+              style={place(tile)}
+              aria-label={aria}
+              title={aria}
+            >
+              <span className="market-map__name">{name}</span>
+              <Change value={tile.returnPct} />
+            </div>
+          );
         return (
           <button
             key={tile.key}
@@ -154,9 +177,7 @@ const Tiles = ({
             }}
             type="button"
             tabIndex={index === current ? 0 : -1}
-            className={`market-map__tile market-map__tile--${tone(tile.returnPct)}${
-              tile.kind === "others" ? " market-map__tile--others" : ""
-            }`}
+            className={className}
             style={place(tile)}
             aria-label={aria}
             title={aria}
@@ -226,7 +247,10 @@ const Movers = ({ groups }: { groups: readonly MapGroup[] }) => {
   const list = (title: string, items: readonly MapGroup[]) => (
     <div>
       <p className="market-card__muted market-movers__title">
-        {title} <span>({t("market.sector.moverFloor")})</span>
+        {title}{" "}
+        <span>
+          ({tFill("market.sector.moverFloor", { amount: joWon(MOVER_FLOOR_KRW) })})
+        </span>
       </p>
       <ol className="market-movers__list">
         {items.map((item) => (
@@ -268,7 +292,17 @@ const StockLevel = ({
   if (detail.isPending)
     return <p className="market-card__muted">{t("market.loading")}</p>;
   if (detail.isError)
-    return <p className="market-card__issue">{t("market.sector.unknown")}</p>;
+    return detail.error instanceof ApiRequestError &&
+      detail.error.code === "market.sector.not_found" ? (
+      <p className="market-card__issue">{t("market.sector.unknown")}</p>
+    ) : (
+      <div className="market-card__issue" role="alert">
+        <p>{t("market.error")}</p>
+        <Button size="small" onClick={() => void detail.refetch()}>
+          {t("market.retry")}
+        </Button>
+      </div>
+    );
   const stocks = detail.data.securities;
   if (view === "table" || width < MAP_MIN_WIDTH) {
     const label = tFill("market.sector.stockTableLabel", { name });
@@ -330,7 +364,8 @@ const StockLevel = ({
         width={width}
         height={DRILL_HEIGHT}
         label={t("market.sector.stockMapLabel")}
-        onOpen={(tile) => (tile.kind === "others" ? onTable() : undefined)}
+        onOpen={onTable}
+        opens={(tile) => tile.kind === "others"}
       />
       <p className="market-card__muted">{t("market.sector.stocksNote")}</p>
     </>

@@ -6,9 +6,9 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  ApiRequestError,
   strategyWorkbenchApi,
   type LedgerRefreshBody,
-  type RefreshCode,
 } from "../../../shared/api";
 
 export const ledgerRefreshKey = () => ["ledger-refresh"] as const;
@@ -16,10 +16,12 @@ export const ledgerRefreshKey = () => ["ledger-refresh"] as const;
 /** 받거나 반영하는 동안 다시 읽는 주기. 진행 상태는 서버가 갖고 있어 탭을 닫았다 열어도 같다. */
 export const REFRESH_POLL_MS = 2_000;
 
-const BUSY: ReadonlySet<RefreshCode> = new Set(["running", "applying"]);
-
 export const isRefreshing = (status: LedgerRefreshBody | undefined): boolean =>
-  status !== undefined && BUSY.has(status.code);
+  status?.refreshing === true;
+
+// 앱을 다시 세우는 동안의 끊김(연결 실패·502~504)만 다시 묻는다. 그 밖의 오류는 바로 보인다.
+const transient = (error: Error): boolean =>
+  !(error instanceof ApiRequestError) || error.status >= 502;
 
 export const ledgerRefreshQuery = () =>
   queryOptions({
@@ -28,7 +30,7 @@ export const ledgerRefreshQuery = () =>
     refetchInterval: (query) =>
       isRefreshing(query.state.data) ? REFRESH_POLL_MS : false,
     // 앱을 다시 세우는 동안 잠깐 연결이 끊긴다 — 다음 주기에 다시 묻는다.
-    retry: (failures) => failures < 30,
+    retry: (failures, error) => failures < 30 && transient(error),
     retryDelay: REFRESH_POLL_MS,
   });
 

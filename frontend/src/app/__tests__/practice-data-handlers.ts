@@ -1,5 +1,7 @@
 import { HttpResponse, http } from "msw";
 
+import type { LedgerRefreshBody, MarketOverviewBody } from "../../shared/api";
+
 /**
  * 앱 셸이 어느 화면에서든 읽는 DB 새로고침 상태와 홈 시장 블록 — 연습용 원천의 응답이다(숫자도 버튼도 없다).
  * 라우터를 띄우는 테스트가 함께 쓴다(실험 완료 알림의 실험 목록처럼 전역 알림이 읽는다).
@@ -14,13 +16,14 @@ export const practiceDataHandlers = (api: string) => [
       indices: [],
       flows: [],
       sectors: null,
-    }),
+    } satisfies MarketOverviewBody),
   ),
   http.get(`${api}/api/v1/ledger-refresh`, () =>
     HttpResponse.json({
       code: "unavailable",
       message: "연습용 데이터로 켜져 있어 DB 새로고침을 쓸 수 없어요.",
       can_start: false,
+      refreshing: false,
       reason: "practice_data",
       failure: null,
       needs_check: false,
@@ -35,6 +38,6 @@ export const practiceDataHandlers = (api: string) => [
       active_work: null,
       started_at: null,
       finished_at: null,
-    }),
+    } satisfies LedgerRefreshBody),
   ),
 ];

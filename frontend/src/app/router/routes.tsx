@@ -172,13 +172,17 @@ const newExperimentSearch = (
   from: textOf(search.from),
 });
 
+// 옛 빌더 북마크는 값이 무엇이든(`?run=123` 은 숫자, `?step=` 는 빈 값으로 읽힌다) 있기만 하면 보낸다.
+const presentOf = (value: unknown): string | undefined =>
+  value === undefined || value === null ? undefined : String(value);
+
 /** 홈: 섹터맵 드릴다운 자리(`sector`)와 옛 빌더 북마크(`step`·`run`)만 읽는다. */
 const homeSearch = (
   search: Record<string, unknown>,
 ): { sector?: string; step?: string; run?: string } => ({
   sector: textOf(search.sector),
-  step: textOf(search.step),
-  run: textOf(search.run),
+  step: presentOf(search.step),
+  run: presentOf(search.run),
 });
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({

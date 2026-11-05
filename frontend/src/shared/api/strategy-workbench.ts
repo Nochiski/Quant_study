@@ -181,27 +181,16 @@ import type {
 
 // 홈 시장 블록·DB 새로고침 응답의 부품 타입(생성 SDK 그대로).
 export type {
-  ActiveWorkBody,
-  CardIssueBody,
   FlowCardBody,
-  FlowDayBody,
   FlowMarket,
   FlowPeriod,
-  FlowTotalBody,
   IndexCardBody,
-  IndexSummaryBody,
   Investor,
   InvestorAmountBody,
-  RefreshCode,
-  RefreshFailure,
-  RemoteState,
+  InvestorGroup,
   SectorCardBody,
   SectorGroupBody,
   SectorMapBody,
-  SectorParentBody,
-  SecurityMoveBody,
-  SyncStage,
-  UnavailableReason,
 } from "./generated/types.gen";
 
 export const configureStrategyWorkbenchApi = (baseUrl: string): void => {

@@ -3,7 +3,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type Ref,
+  type RefObject,
 } from "react";
 
 import {
@@ -86,43 +86,29 @@ export const SectorLegend = () => (
   </span>
 );
 
-// 칸 글자 크기(px)와 줄 높이 배율 — CSS(.market-map__tile, --large)와 같은 값이다.
-const NAME_PX = { large: 16, regular: 12 } as const;
-const CHANGE_PX = { large: 13, regular: 12 } as const;
-const LINE = 1.2;
-// 칸 테두리(간격)·안쪽 여백을 뺀 글자 자리(px).
-const INSET_X = 10;
-const INSET_Y = 6;
-
-/** 글자 폭 어림(px): 한글·한자는 1em, 그 밖은 0.62em. */
-const textWidth = (text: string, px: number): number =>
-  [...text].reduce(
-    (width, char) =>
-      width + (/[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af\u4e00-\u9fff]/u.test(char) ? 1 : 0.62) * px,
-    0,
-  );
+/** 큰 칸(px) — 이보다 넓고 높으면 큰 글자로 시작한다(이름이 넘치면 보통 글자로 다시 잰다). */
+const LARGE_TILE = { w: 150, h: 80 } as const;
 
 /**
- * 칸 글자 규칙: 큰 칸은 큰 글자, 이름은 두 줄까지 줄바꿈해 들어갈 때만 보인다(말줄임 대신). 들어가지 않으면 부호
- * 등락만 보이고 이름은 낭독 이름·툴팁이 전한다.
+ * 칸 이름 맞추기: 이름은 띄어쓰기 단위로만 줄을 바꾸고(CSS keep-all) 두 줄까지다. 그려진 뒤 실제 크기를 재서,
+ * 큰 칸이 넘치면 보통 글자로 다시 재고, 그래도 두 줄을 넘거나 한 단어가 칸보다 넓거나 등락과 함께 칸 높이를
+ * 넘으면 이름을 숨긴다(말줄임 없음 — 이름은 낭독 이름·툴팁에 남는다). React 가 다루지 않는 속성(`hidden`,
+ * `data-fit`)만 바꾸므로 다시 그려도 지워지지 않고, 배치가 바뀔 때마다 처음부터 다시 잰다.
  */
-const tileText = (
-  tile: MapTile,
-  name: string,
-): { size: "large" | "regular"; showName: boolean } => {
-  const fits = (size: "large" | "regular") => {
-    const lines = Math.min(
-      2,
-      Math.floor(
-        (tile.h - INSET_Y - CHANGE_PX[size] * LINE) / (NAME_PX[size] * LINE),
-      ),
-    );
-    const needed = Math.ceil(textWidth(name, NAME_PX[size]) / (tile.w - INSET_X));
-    return lines >= 1 && needed <= lines;
-  };
-  if (tile.w >= 150 && tile.h >= 80 && fits("large"))
-    return { size: "large", showName: true };
-  return { size: "regular", showName: fits("regular") };
+const fitNames = (root: HTMLElement) => {
+  for (const tile of root.querySelectorAll<HTMLElement>(".market-map__tile")) {
+    const name = tile.querySelector<HTMLElement>(".market-map__name");
+    if (name === null) continue;
+    name.hidden = false;
+    delete tile.dataset.fit;
+    const overflows = () =>
+      name.scrollWidth > name.clientWidth ||
+      name.scrollHeight > name.clientHeight ||
+      tile.scrollHeight > tile.clientHeight;
+    if (tile.classList.contains("market-map__tile--large") && overflows())
+      tile.dataset.fit = "regular";
+    if (overflows()) name.hidden = true;
+  }
 };
 
 export const Change = ({ value }: { value: number | null }) =>
@@ -157,7 +143,7 @@ const Tiles = ({
   onOpen: (tile: MapTile) => void;
   // 누르기 전 신호(가리키기) — 들어갈 곳의 응답을 미리 읽는다.
   onIntent: (tile: MapTile) => void;
-  layerRef: Ref<HTMLDivElement>;
+  layerRef: RefObject<HTMLDivElement | null>;
   // 전환 중 사라지는 수준: 보이기만 하고 읽히거나 눌리지 않는다.
   leaving: boolean;
   // 줌이 도는 동안: 늘어난 글자가 보이지 않게 칸 글자를 숨겼다가 끝나면 드러낸다.
@@ -195,6 +181,10 @@ const Tiles = ({
   });
   // 툴팁: 가리키거나 초점이 간 칸 하나. 낭독 이름이 같은 내용을 가지므로 화면 전용(aria-hidden)이다.
   const [tip, setTip] = useState<MapTile | null>(null);
+  // 칸 크기가 정해진 뒤 칠하기 전에 이름이 들어가는지 잰다(그려진 크기 기준이라 어림과 어긋나지 않는다).
+  useLayoutEffect(() => {
+    if (layerRef.current !== null) fitNames(layerRef.current);
+  }, [layerRef, layer, width, height]);
   const hover = (tile: MapTile) => ({
     onPointerEnter: () => setTip(tile),
     onPointerLeave: () => setTip((shown) => (shown === tile ? null : shown)),
@@ -227,15 +217,13 @@ const Tiles = ({
           change:
             tile.returnPct === null ? "—" : percentMagnitude(tile.returnPct),
         }).replace(/^ · /u, "");
-        const text = tileText(tile, name);
+        const large = tile.w >= LARGE_TILE.w && tile.h >= LARGE_TILE.h;
         const className = `market-map__tile market-map__tile--${
           tile.kind === "others" ? "others" : step(tile.returnPct)
-        }${text.size === "large" ? " market-map__tile--large" : ""}`;
+        }${large ? " market-map__tile--large" : ""}`;
         const content = (
           <>
-            {text.showName ? (
-              <span className="market-map__name">{name}</span>
-            ) : null}
+            <span className="market-map__name">{name}</span>
             <Change value={tile.returnPct} />
           </>
         );

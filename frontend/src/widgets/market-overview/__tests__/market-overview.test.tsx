@@ -312,6 +312,30 @@ describe("MarketOverview", () => {
     }
   });
 
+  it("hides a tile name that does not fit as drawn but keeps it in the accessible name", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ width: 1000, height: 400 }),
+    );
+    // jsdom 은 배치를 하지 않는다 — 그려진 이름 한 단어가 칸보다 넓은 경우를 흉내 낸다
+    Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.textContent === "기술하드웨어와장비" ? 999 : 0;
+      },
+    });
+    try {
+      renderOverview();
+      const map = await screen.findByRole("group", { name: /섹터맵, 방향키로/u });
+      expect(within(map).getByText("기술하드웨어와장비")).not.toBeVisible();
+      expect(within(map).getByText("반도체와반도체장비")).toBeVisible();
+      expect(
+        within(map).getByRole("button", { name: /기술하드웨어와장비 하락 7\.00%/u }),
+      ).toBeInTheDocument();
+    } finally {
+      delete (HTMLElement.prototype as { scrollWidth?: unknown }).scrollWidth;
+    }
+  });
+
   it("falls back to the movers list when the card is narrow and remembers a collapse", async () => {
     const user = userEvent.setup();
     renderOverview();

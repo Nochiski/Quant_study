@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -74,6 +75,14 @@ class ContinuousAccountService:
         self._store = store
         self._data_mode = data_mode
         self._now = now
+        # 이 프로세스에서 지금 도는 평가 수. 저장소의 running claim 과 같은 수명이다(단일 서버).
+        self._running = 0
+        self._running_lock = threading.Lock()
+
+    def running_count(self) -> int:
+        """지금 도는 연속 평가 수(DB 새로고침이 시작해도 되는지 본다)."""
+        with self._running_lock:
+            return self._running
 
     def recover(self) -> None:
         """단일 서버 프로세스 시작 시에만 호출한다. 이전 실행을 자동 재실행하지 않는다."""
@@ -176,6 +185,18 @@ class ContinuousAccountService:
         )
         if not self._store.claim(state):
             return self._same_request(self._store.get(evaluation_id), experiment_id)
+        with self._running_lock:
+            self._running += 1
+        try:
+            return self._run_claimed(source, state)
+        finally:
+            with self._running_lock:
+                self._running -= 1
+
+    def _run_claimed(
+        self, source: FrozenExperimentInput, state: ContinuousAccountState
+    ) -> ContinuousAccountState:
+        evaluation_id = state.evaluation_id
 
         def progress(fraction: float, stage: ContinuousAccountStage) -> None:
             nonlocal state

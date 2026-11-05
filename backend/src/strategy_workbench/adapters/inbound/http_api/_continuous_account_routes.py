@@ -19,6 +19,7 @@ from strategy_workbench.application.continuous_account.facade.evaluation import 
 from strategy_workbench.domain.experiment.facade.design import ExperimentNotFoundError
 
 from ._backtest_contract import CodedBodyValidationRoute
+from ._ledger_refresh_routes import STARTS_WORK
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,7 @@ def register_continuous_account_routes(app: FastAPI, service: ContinuousAccountS
         operation_id="runExperimentContinuousAccount",
         responses=responses,
         route_class_override=_ContinuousBodyRoute,
+        dependencies=[STARTS_WORK],
     )
 
     @app.get(

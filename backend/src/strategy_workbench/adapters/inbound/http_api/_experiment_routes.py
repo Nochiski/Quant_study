@@ -54,6 +54,7 @@ from ._backtest_contract import (
     CodedBodyValidationRoute,
     backtest_field_invalid_detail,
 )
+from ._ledger_refresh_routes import STARTS_WORK
 from ._sse import SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_SECONDS, sse_frame
 
 # 실험 진행 스트림이 실험 상태를 다시 읽는 간격. 한 번 읽을 때 trial 마다 실행 상태를 모으므로
@@ -187,16 +188,17 @@ def register_experiment_routes(
         """용량 스윕(초기 자본만 바꾼 실행들, V4-04)을 만들고 금액마다 실행 대기열에 넘긴다."""
         return admitted(lambda: experiments.create_capacity(request))
 
-    for path, endpoint, operation_id, code in (
-        ("/api/v1/experiments/preview", preview_experiment, "previewExperiment", 200),
-        ("/api/v1/experiments", create_experiment, "createExperiment", 202),
+    for path, endpoint, operation_id, code, starts_work in (
+        ("/api/v1/experiments/preview", preview_experiment, "previewExperiment", 200, False),
+        ("/api/v1/experiments", create_experiment, "createExperiment", 202, True),
         (
             "/api/v1/experiments/capacity/preview",
             preview_capacity_sweep,
             "previewCapacitySweep",
             200,
+            False,
         ),
-        ("/api/v1/experiments/capacity", create_capacity_sweep, "createCapacitySweep", 202),
+        ("/api/v1/experiments/capacity", create_capacity_sweep, "createCapacitySweep", 202, True),
     ):
         app.router.add_api_route(
             path,
@@ -206,6 +208,7 @@ def register_experiment_routes(
             status_code=code,
             route_class_override=_ExperimentBodyRoute,
             responses=admission,
+            dependencies=[STARTS_WORK] if starts_work else None,
         )
 
     robustness = {
@@ -234,6 +237,7 @@ def register_experiment_routes(
         operation_id="createRobustnessCheck",
         status_code=202,
         responses=robustness,
+        dependencies=[STARTS_WORK],
     )
     def create_robustness_check(run_id: str) -> Experiment:
         """결과 실행의 기본 설계로 실험을 만들고 대기열에 넣는다(US-DM-11)."""
@@ -365,6 +369,7 @@ def register_experiment_routes(
     @app.post(
         "/api/v1/experiments/{experiment_id}/trials/{trial_index}/retry",
         operation_id="retryExperimentTrial",
+        dependencies=[STARTS_WORK],
         responses={
             404: {
                 "model": ExperimentErrorResponse | BacktestStrategyNotFoundResponse,

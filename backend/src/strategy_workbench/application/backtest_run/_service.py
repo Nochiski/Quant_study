@@ -389,6 +389,11 @@ class BacktestRunService:
         self._background = background or _start_daemon
         self._close_interrupted_runs()
 
+    def active_run_count(self) -> int:
+        """접수됐지만 끝나지 않은 run 수 — 대기·실행·취소 요청 중을 모두 센다."""
+        with self._lock:
+            return sum(not record.state.status.is_terminal for record in self._records.values())
+
     def slot_usage(self) -> tuple[int, int]:
         """(슬롯 수, 지금 도는 run 수)."""
         with self._lock:

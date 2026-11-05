@@ -78,6 +78,10 @@ from strategy_workbench.application.factor_research.facade.research import (
     FactorGraphValidation,
     FactorResearchService,
 )
+from strategy_workbench.application.ledger_refresh.facade.refresh import LedgerRefreshService
+from strategy_workbench.application.market_overview.facade.overview import (
+    MarketOverviewService,
+)
 from strategy_workbench.application.portfolio_design.facade.design import (
     IncompatiblePortfolioRequestError,
     InvalidPortfolioRequestError,
@@ -177,6 +181,8 @@ from ._execution_error_contract import (
 )
 from ._experiment_routes import register_experiment_routes
 from ._factor_library_routes import register_factor_library_routes
+from ._ledger_refresh_routes import STARTS_WORK, register_ledger_refresh_routes
+from ._market_routes import register_market_routes
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
 from ._settings_routes import CredentialsFileIssue, register_settings_routes
 from ._sse import SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_SECONDS, SSE_POLL_SECONDS, sse_frame
@@ -386,6 +392,8 @@ def create_app(
     continuous_accounts: ContinuousAccountService | None = None,
     factor_library: FactorLibraryService | None = None,
     broker_connections: BrokerConnectionService | None = None,
+    market_overview: MarketOverviewService | None = None,
+    ledger_refresh: LedgerRefreshService | None = None,
     assistant_profiles: ProviderProfileService | None = None,
     assistant_chat: AssistantChatService | None = None,
     assistant_turns: AssistantTurnRunner | None = None,
@@ -527,6 +535,7 @@ def create_app(
         status_code=status.HTTP_202_ACCEPTED,
         route_class_override=CodedBodyValidationRoute,
         responses=admission_responses,
+        dependencies=[STARTS_WORK],
     )
     app.router.add_api_route(
         "/api/v1/backtests/trial-preview",
@@ -547,6 +556,12 @@ def create_app(
     # 키움 모의 연결 설정(S06 ②-2)도 서비스가 올 때만 생긴다.
     if broker_connections is not None:
         register_broker_connection_routes(app, broker_connections)
+    if market_overview is not None:
+        register_market_routes(app, market_overview)
+    # 계산을 시작하는 라우트의 `STARTS_WORK` 가 읽는다.
+    app.state.ledger_refresh = ledger_refresh
+    if ledger_refresh is not None:
+        register_ledger_refresh_routes(app, ledger_refresh)
 
     strategy_not_found: dict[int | str, dict[str, Any]] = {
         404: {"model": StrategyNotFoundResponse, "description": "The strategy does not exist"}

@@ -779,6 +779,8 @@ def test_recover_skips_finished_and_unreadable_experiments(tmp_path: Path) -> No
         connection.execute(
             "UPDATE experiments SET design_json = '{}' WHERE experiment_id = ?", (broken,)
         )
+    # 끝나지 않은 실험 수 — 읽지 못하는 실험도 끝나지 않은 것으로 센다(DB 새로고침이 막히는 쪽)
+    assert service.unfinished_count() == 2
     pending: list[Callable[[], None]] = []
 
     _service(runs, repository=SQLiteExperimentRepository(path), spawn=pending.append).recover()

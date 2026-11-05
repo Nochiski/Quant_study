@@ -251,8 +251,10 @@ def test_in_flight_duplicate_returns_original_and_other_request_is_busy() -> Non
         with pytest.raises(ContinuousAccountRejectedError) as busy:
             service.run("experiment", str(uuid4()))
         assert busy.value.code == "continuous.busy"
+        assert service.running_count() == 1  # DB 새로고침이 보는 수
         pipeline.release.set()
         completed = pending.result(timeout=10)
+    assert service.running_count() == 0
     # POST 응답을 받지 못해도 같은 ID 조회·재전송은 같은 완료 이력만 돌려준다.
     assert asdict(service.get(request_id)) == asdict(completed)
     assert asdict(service.run("experiment", request_id)) == asdict(completed)

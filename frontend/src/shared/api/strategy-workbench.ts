@@ -35,6 +35,11 @@ import {
   getBacktestResult,
   getBacktestAccountReport,
   getBacktestMarketReference,
+  checkLedgerRefresh,
+  getLedgerRefresh,
+  getMarketOverview,
+  getMarketSector,
+  startLedgerRefresh,
   getBacktestHoldings,
   getBacktestSecurityTrades,
   getBacktestSessionHoldings,
@@ -125,6 +130,9 @@ import type {
   PageRevisionSummary,
   PageStrategySummary,
   SavedStrategy,
+  LedgerRefreshBody,
+  MarketOverviewBody,
+  MarketSectorBody,
   MarketReferenceReport,
   MarketReferenceSeries,
   AddLibraryVersionBody,
@@ -169,6 +177,21 @@ import type {
   ExperimentSelectionRequest,
   CellVerdict,
   SearchAxis,
+} from "./generated/types.gen";
+
+// 홈 시장 블록·DB 새로고침 응답의 부품 타입(생성 SDK 그대로).
+export type {
+  FlowCardBody,
+  FlowMarket,
+  FlowPeriod,
+  IndexCardBody,
+  Investor,
+  InvestorAmountBody,
+  InvestorGroup,
+  RefreshOutcome,
+  SectorCardBody,
+  SectorGroupBody,
+  SectorMapBody,
 } from "./generated/types.gen";
 
 export const configureStrategyWorkbenchApi = (baseUrl: string): void => {
@@ -734,6 +757,31 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getBacktestAccountReport");
   },
 
+  /** 홈 시장 블록. 연습용 원천이면 숫자 없이 `practice_data` 상태다. */
+  async getMarketOverview(): Promise<MarketOverviewBody> {
+    return unwrap(await getMarketOverview(), "getMarketOverview");
+  },
+
+  async getMarketSector(sectorCode: string): Promise<MarketSectorBody> {
+    return unwrap(
+      await getMarketSector({ path: { wics_l2_cd: sectorCode } }),
+      "getMarketSector",
+    );
+  },
+
+  async getLedgerRefresh(): Promise<LedgerRefreshBody> {
+    return unwrap(await getLedgerRefresh(), "getLedgerRefresh");
+  },
+
+  /** 서버 판을 다시 확인한다(원격 목록만 읽는다). */
+  async checkLedgerRefresh(): Promise<LedgerRefreshBody> {
+    return unwrap(await checkLedgerRefresh(), "checkLedgerRefresh");
+  },
+
+  async startLedgerRefresh(): Promise<LedgerRefreshBody> {
+    return unwrap(await startLedgerRefresh(), "startLedgerRefresh");
+  },
+
   async backtestMarketReference(runId: string): Promise<MarketReferenceReport> {
     const response = await getBacktestMarketReference({
       path: { run_id: runId },
@@ -1069,6 +1117,9 @@ export type EquityCatalogQuery = NonNullable<GetEquityCatalogData["query"]>;
 export type FactorCatalogQuery = NonNullable<GetFactorCatalogData["query"]>;
 
 export type {
+  LedgerRefreshBody,
+  MarketOverviewBody,
+  MarketSectorBody,
   RunFactorRegression,
   CapacitySweepRequest,
   CapacityReport,

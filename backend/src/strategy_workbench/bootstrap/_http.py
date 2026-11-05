@@ -1,8 +1,18 @@
 import os
+from functools import partial
 from pathlib import Path
 
+from fastapi import FastAPI
+
 from strategy_workbench.adapters.inbound.http_api.facade.api import create_app
+from strategy_workbench.adapters.outbound.ledger_sync_process.facade.process import (
+    discover_ledger_sync,
+)
 from strategy_workbench.application.backtest_run.facade.runs import DEFAULT_RUN_SLOTS
+from strategy_workbench.application.ledger_refresh.facade.refresh import (
+    LedgerRefreshService,
+    UnavailableReason,
+)
 
 from . import _secrets
 from ._assistant import (
@@ -12,6 +22,7 @@ from ._assistant import (
     scripted_provider_factories,
 )
 from ._container import DEFAULT_RUN_ISOLATION, build_container
+from ._reload import ContainerActiveWork, ReloadableApp
 
 DEFAULT_STRATEGY_REPOSITORY_PATH = (
     Path(__file__).resolve().parents[3] / ".local" / "strategy-revisions.sqlite3"
@@ -194,6 +205,13 @@ def runtime_broker_fake_probe() -> bool:
     return os.environ.get(BROKER_FAKE_PROBE_ENV, "").strip() == "1"
 
 
+class _NotReloadable:
+    """`ApplyDataPort` 자리 — 바꿔 끼울 수 없는 앱(테스트·OpenAPI 내보내기)용."""
+
+    def apply(self) -> None:
+        raise RuntimeError("this app cannot reload its container")
+
+
 def build_http_app(
     *,
     strategy_repository_path: str | Path | None = None,
@@ -209,7 +227,13 @@ def build_http_app(
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
     allowed_origins: tuple[str, ...] = DEFAULT_ALLOWED_ORIGINS,
     broker_fake_probe: bool = False,
-):  # return type is inferred from the FastAPI factory at this composition root
+    ledger_refresh: LedgerRefreshService | None = None,
+) -> FastAPI:
+    """컨테이너 하나로 HTTP 앱을 세운다. 컨테이너는 `app.state.container` 에 싣는다(앱 반영이
+    읽는다).
+
+    `ledger_refresh` 가 없으면(바꿔 끼울 수 없는 앱) DB 새로고침은 쓸 수 없다고 답한다.
+    """
     container = build_container(
         strategy_repository_path=strategy_repository_path,
         research_db_path=research_db_path,
@@ -224,7 +248,15 @@ def build_http_app(
         assistant=assistant,
         broker_fake_probe=broker_fake_probe,
     )
-    return create_app(
+    if ledger_refresh is None:
+        ledger_refresh = LedgerRefreshService(
+            UnavailableReason.PRACTICE_DATA
+            if equity_adapter != "duckdb"
+            else UnavailableReason.NOT_CONFIGURED,
+            ContainerActiveWork(lambda: container),
+            _NotReloadable(),
+        )
+    app = create_app(
         strategy_design=container.strategy_design,
         strategy_authoring=container.strategy_authoring,
         strategy_documents=container.strategy_documents,
@@ -238,6 +270,8 @@ def build_http_app(
         continuous_accounts=container.continuous_accounts,
         factor_library=container.factor_library,
         broker_connections=container.broker_connections,
+        market_overview=container.market_overview,
+        ledger_refresh=ledger_refresh,
         assistant_profiles=container.assistant_profiles,
         assistant_chat=container.assistant_chat,
         assistant_turns=container.assistant_turns,
@@ -245,12 +279,27 @@ def build_http_app(
         credentials_file_issues=container.credentials_file_issues,
         allowed_origins=allowed_origins,
     )
+    app.state.container = container
+    return app
 
 
-def build_runtime_http_app():
-    """Uvicorn factory: only an actual server process opens the durable runtime database."""
+def build_runtime_http_app() -> ReloadableApp:
+    """Uvicorn factory: only an actual server process opens the durable runtime database.
+
+    DB 새로고침이 끝나면 같은 설정으로 컨테이너를 다시 세워 바꿔 끼운다(`ReloadableApp`). 설정은
+    여기서 한 번 읽는다 — 다시 세울 때 환경 변수가 바뀌어 다른 원천을 열지 않게.
+    """
     adapter, root = runtime_equity_selection()
-    return build_http_app(
+    holder = ReloadableApp()
+    refresh = LedgerRefreshService(
+        UnavailableReason.PRACTICE_DATA
+        if adapter != "duckdb" or root is None
+        else discover_ledger_sync(root, _secrets.repository_root()),
+        ContainerActiveWork(lambda: holder.container),
+        holder,
+    )
+    build = partial(
+        build_http_app,
         strategy_repository_path=runtime_strategy_repository_path(),
         research_db_path=runtime_research_db_path(),
         continuous_db_path=runtime_continuous_db_path(),
@@ -264,4 +313,6 @@ def build_runtime_http_app():
         assistant=runtime_assistant_settings(),
         broker_fake_probe=runtime_broker_fake_probe(),
         allowed_origins=runtime_allowed_origins(),
+        ledger_refresh=refresh,
     )
+    return holder.load(build, on_shutdown=refresh.stop)

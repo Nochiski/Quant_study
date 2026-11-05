@@ -687,8 +687,11 @@ Claude·Codex 앱과는 관계없다. 저장소 README 「바로 실행」의 `u
   다시 시작하지 말고 `DB 새로고침`을 다시 누른다. 정리하기(카탈로그)가 과거 값 변경 승인을 기다리면
   [원장 동기화](../../../database/docs/LEDGER_SYNC.md)의 승인 절차를 먼저 따른다.
 - **받은 파일이 서버와 다르다**: 다시 누른다. 그래도 그대로면 터미널에서
-  `database\scripts\ledger_sync.ps1 verify`(macOS·Linux는 `ledger_sync.sh`)로 어느 표가 다른지 보고, 그 표를
-  다시 받는다(`sync --tables <표>`). 다시 받기 전까지 재무·수정주가처럼 정리된 데이터를 읽는 계산은 멈춘다.
+  `database\scripts\ledger_sync.ps1 verify --level hash`(macOS·Linux는 `ledger_sync.sh`)로 어느 표가 다른지 본다.
+  내용(hash)이 다른 표는 다시 눌러도 크기가 같으면 다시 받지 않는다 — 그 표의 `v=` 폴더를 지우고 다시 누른다.
+  다시 받기 전까지 재무·수정주가처럼 정리된 데이터를 읽는 계산은 멈춘다.
+- 터미널 명령은 기본으로 `QL_SYNC_ROOT`(없으면 `~/quant-ledger/data`)를 본다. 앱이 읽는 루트
+  (`STRATEGY_WORKBENCH_EQUITY_ROOT`)가 다르면 그 부모를 `--root`로 준다.
 - **다른 곳에서 받는 중(잠금)**: 예약 작업이나 터미널의 받기가 끝나면 다시 누른다. 그 작업이 오래 끝나지 않아
   멈춘 것 같으면 `ledger_sync.ps1 status`로 잠금을 잡은 실행을 확인하고, 그 실행이 죽은 것이 확실할 때만
   `ledger_sync.ps1 sync --break-lock`으로 잠금을 풀며 받는다.

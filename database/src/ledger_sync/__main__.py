@@ -583,10 +583,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
             # 이번에 받은(재사용 포함) 테이블은 내용(hash)까지 본다 — 하루치는 파티션 몇 개라 싸다.
             # 판본이 안 바뀐 표의 로컬 손상은 여기서 안 보이므로 `--hash-all`(주 1회 권장)로 전량을
             # 본다.
-            # 서버가 앞선 차이만 있으면(받는 도중·정리하기 동안 새 판) 로컬 판은 맞다 — 앞선 표를 뺀
-            # 받은 표는 그대로 hash 까지 본다.
-            changed = [r.table for r in report.results if r.outcome is TableOutcome.DONE
-                       and r.table not in verify_report.remote_ahead]
+            # 서버가 앞선 차이만 있으면(받는 도중·정리하기 동안 새 판) 로컬 판은 맞다 — 받은 표는
+            # 앞선 표여도 hash 까지 본다(hash 는 로컬 MANIFEST 와 로컬 파일만 대조한다).
+            changed = [r.table for r in report.results if r.outcome is TableOutcome.DONE]
             if verify_report.local_ok and (changed or args.hash_all):
                 verify_hash(layer_root, state, verify_report,
                             tables=None if args.hash_all else changed)

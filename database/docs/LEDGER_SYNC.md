@@ -63,9 +63,9 @@ database/scripts/ledger_sync.sh verify --offline
 - `sync --progress-file PATH`: 단계(`download`·`catalog`·`verify`·`done`)·받을 표 수·받은 표 수·표 파일 바이트를
   JSON 한 덩어리로 원자 교체해 쓴다. 받기 단계만 끝(전체)을 안다.
 - `_sync/last_run.json` 의 `error_kind`: 실패 갈래(`connect`·`transfer`·`disk`·`locked`·`unexpected`). 카탈로그
-  실패는 `catalog_rc`, 검증 불일치는 `exit_code=4`·`verify.findings` 로 본다. `verify.remote_ahead` 는 서버가
-  로컬보다 앞선 표(받는 도중이나 정리하기 동안 새 판을 올렸거나 표를 은퇴시킴)다 — 그 표의 차이는 로컬 손상이
-  아니라 다음 받기에서 맞춰질 차이다.
+  실패는 `catalog_rc`, 검증 불일치는 `exit_code=4`·`verify.findings` 로 본다. 차이마다 `remote_ahead` 가 서버가
+  앞서서(받는 도중이나 정리하기 동안 새 판을 올렸거나 표를 은퇴시킴) 난 차이인지 말한다 — 앱은 모든 차이가
+  그렇고 hash 차이가 없을 때만 반영한다. `verify.remote_ahead` 는 그런 표 목록이다.
 
 앱(워크벤치 홈의 "DB 새로고침")은 래퍼와 같은 인터프리터 구성으로 `uv run --project backend --no-sync --with
 paramiko … python -m ledger_sync --root <앱이 읽는 equity 루트의 부모> --layer equity sync --progress-file …` 을

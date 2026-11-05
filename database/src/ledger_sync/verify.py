@@ -232,8 +232,7 @@ def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: Sy
             if missing or extra or stray:
                 report.add(Level.FILES, table,
                            f"file set differs — path={partition.path} missing={missing} "
-                           f"extra={extra} stray_on_disk={stray}",
-                           remote_ahead=ahead and not stray)
+                           f"extra={extra} stray_on_disk={stray}")
             for rel, rec in local_files.items():
                 name = rel.rsplit("/", 1)[-1]
                 path = table_root / rel
@@ -251,7 +250,7 @@ def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: Sy
                         and entry.size != size_on_disk:
                     report.add(Level.FILES, table,
                                f"size differs from remote — {rel} remote={entry.size} "
-                               f"local={size_on_disk}", remote_ahead=ahead)
+                               f"local={size_on_disk}")
 
 
 def verify_hash(layer_root: Path, state: SyncState, report: VerifyReport, *,

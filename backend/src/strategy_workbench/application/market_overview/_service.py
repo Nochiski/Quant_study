@@ -14,12 +14,13 @@ from typing import TypeVar
 
 from strategy_workbench.application.market_overview.ports.outgoing.market_data import (
     MarketDataPort,
+    MarketDataUnreadableError,
     MarketTableMissingError,
 )
+from strategy_workbench.domain.backtest.facade.market_reference import MARKET_REFERENCE_INDICES
 from strategy_workbench.domain.market.facade.market import (
     FLOW_SESSIONS,
     INDEX_HISTORY_SESSIONS,
-    MARKET_REFERENCE_INDICES,
     FlowMarket,
     IndexSummary,
     MarketFlow,
@@ -42,14 +43,19 @@ class OverviewStatus(StrEnum):
 
 class CardIssueCode(StrEnum):
     TABLE_MISSING = "table_missing"
+    UNREADABLE = "unreadable"
     NO_ROWS = "no_rows"
     COVERAGE_LOW = "coverage_low"
 
 
+# 화면은 이 문장만 보인다(제목을 따로 두지 않는다).
 PRACTICE_DATA_MESSAGE = (
     "시장 정보는 실제 데이터를 연결해야 보여요. 지금은 연습용 데이터로 백테스트만 돌아요."
 )
 TABLE_MISSING_MESSAGE = "이 데이터는 아직 받지 않았어요. DB 새로고침으로 받을 수 있어요."
+UNREADABLE_MESSAGE = (
+    "이 데이터를 지금 읽지 못했어요. 잠시 뒤 다시 열어 보고, 계속되면 서버를 다시 시작해 주세요."
+)
 NO_ROWS_MESSAGE = "기준 장의 데이터가 원장에 없어요."
 
 
@@ -121,6 +127,8 @@ def _guarded(read: Callable[[], T]) -> T | CardIssue:
         return read()
     except MarketTableMissingError:
         return _missing()
+    except MarketDataUnreadableError:
+        return CardIssue(CardIssueCode.UNREADABLE, UNREADABLE_MESSAGE)
 
 
 class MarketOverviewService:

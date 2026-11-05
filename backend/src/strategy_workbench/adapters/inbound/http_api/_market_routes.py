@@ -1,7 +1,8 @@
 """홈 시장 블록 API: 지수·투자자별 순매수·섹터맵과 섹터 드릴다운.
 
 값과 문장은 `application.market_overview`가 정한다. 여기서는 응답 모양으로 옮기기만 한다 — 금액은
-원 단위 정수, 등락은 퍼센트 실수, 날짜는 ISO. 주체·시장 이름의 로케일 문장은 frontend 가 갖는다.
+원 단위 정수, 등락은 퍼센트 실수, 날짜는 ISO. 요약 문장은 backend 가 한글로 완성하고, 표 줄의 주체·
+시장 이름(로케일 문구)은 frontend 가 갖는다. 주체를 어느 묶음에 두는지는 응답의 `group` 이다.
 """
 
 from __future__ import annotations
@@ -30,8 +31,10 @@ from strategy_workbench.domain.market.facade.market import (
     FlowMarket,
     FlowPeriod,
     Investor,
+    InvestorGroup,
     SectorGroup,
     SectorMap,
+    investor_group,
 )
 
 MARKET_OVERVIEW_PATH = "/api/v1/market/overview"
@@ -80,6 +83,12 @@ class InvestorAmountBody:
     investor: Investor
     amount_krw: Annotated[
         int, Field(description="순매수(산 금액 − 판 금액), 원. 반올림하지 않은 합.")
+    ]
+    group: Annotated[
+        InvestorGroup,
+        Field(
+            description="화면 묶음: 막대 네 줄(main)·기관 세부(institution_part)·각주(footnote)."
+        ),
     ]
 
 
@@ -197,7 +206,10 @@ def _issue(issue: CardIssue | None) -> CardIssueBody | None:
 
 
 def _amounts(amounts: Mapping[Investor, int]) -> list[InvestorAmountBody]:
-    return [InvestorAmountBody(investor, amounts.get(investor, 0)) for investor in Investor]
+    return [
+        InvestorAmountBody(investor, amounts.get(investor, 0), investor_group(investor))
+        for investor in Investor
+    ]
 
 
 def _index(card: IndexCard) -> IndexCardBody:
@@ -249,8 +261,7 @@ def _flow(card: FlowCard) -> FlowCardBody:
             )
             for total in flow.totals
         ],
-        # 합을 보이지 않는 날(측정 비중 부족)에는 날짜별 값도 싣지 않는다
-        days=[_day(day) for day in flow.days] if flow.totals else [],
+        days=[_day(day) for day in flow.days],
         issue=_issue(card.issue),
     )
 

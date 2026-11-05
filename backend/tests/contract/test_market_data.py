@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import shutil
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -19,6 +20,7 @@ import pyarrow as pa
 
 from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import EquityDuckdbAdapter
 from strategy_workbench.application.market_overview.facade.overview import (
+    MarketDataUnreadableError,
     MarketTableMissingError,
 )
 from strategy_workbench.domain.market.facade.market import FlowMarket, Investor
@@ -85,8 +87,10 @@ def _flow(root: Path) -> None:
         ("005930", LAST, "kiwoom", None, 2 * EOK, -3 * EOK),
         # 같은 셀의 KIS 행 — 더하면 이중 집계다
         ("005930", LAST, "kis", None, 90 * EOK, 90 * EOK),
-        # 미측정 셀: 격자 수에는 들고 측정 수·합에는 들지 않는다
+        # 미측정 셀: 격자 수에는 들고 측정 수·합에는 들지 않는다. 같은 셀의 KIS 값이 있어도 백테스트
+        # 필드(`flow.*`)처럼 키움 행을 고른다 — 홈과 백테스트가 같은 셀을 다르게 읽지 않게
         ("000660", LAST, "kiwoom", None, None, None),
+        ("000660", LAST, "kis", None, 8 * EOK, 8 * EOK),
         # 격자 밖 격리 행
         ("000660", PREV, "kiwoom", "off_grid", 50 * EOK, 50 * EOK),
         # 우선주·ETF 는 수급 합에서 뺀다
@@ -240,3 +244,12 @@ def test_missing_tables_raise_instead_of_answering_empty(tmp_path: Path) -> None
     with pytest.raises(MarketTableMissingError) as sector_error:
         adapter.sector_members(LAST)
     assert sector_error.value.table == "sector_snapshot"
+
+
+def test_a_table_whose_build_files_vanished_raises_unreadable(market_root: Path) -> None:
+    adapter = EquityDuckdbAdapter(market_root)
+    for build in (market_root / "flow_daily").glob("v=*"):
+        shutil.rmtree(build)  # 다른 받기의 gc 가 부팅 때 고정한 판을 지운 경우
+    with pytest.raises(MarketDataUnreadableError) as error:
+        adapter.flow_days(LAST, 2)
+    assert error.value.table == "flow_daily"

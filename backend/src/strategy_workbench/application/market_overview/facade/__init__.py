@@ -5,4 +5,4 @@
 지어내지 않는다.
 """
 
-DEPENDS_ON: tuple[str, ...] = ("domain.market",)
+DEPENDS_ON: tuple[str, ...] = ("domain.backtest", "domain.market")

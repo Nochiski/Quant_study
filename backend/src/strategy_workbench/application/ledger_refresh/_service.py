@@ -171,6 +171,8 @@ class RefreshStatus:
     code: RefreshCode
     message: str
     can_start: bool
+    # 받거나 반영하는 중인가 — 이 동안 계산 시작은 409 `data.refreshing` 으로 돌아간다.
+    refreshing: bool
     reason: UnavailableReason | None
     failure: RefreshFailure | None
     remote: RemoteCheck
@@ -426,6 +428,7 @@ class LedgerRefreshService:
             code=state.code,
             message="",
             can_start=False,
+            refreshing=state.code in _BUSY,
             reason=self._unavailable,
             failure=state.failure,
             remote=state.remote,

@@ -85,6 +85,9 @@ class LedgerRefreshBody:
     code: RefreshCode
     message: Annotated[str, Field(description="지금 상태를 말하는 한 문장(backend 가 완성).")]
     can_start: bool
+    refreshing: Annotated[
+        bool, Field(description="받거나 반영하는 중인가. 이 동안 계산 시작은 409 data.refreshing.")
+    ]
     reason: UnavailableReason | None
     failure: RefreshFailure | None
     needs_check: Annotated[bool, Field(description="서버 판 확인이 오래돼 다시 확인할 때다.")]
@@ -112,6 +115,7 @@ def _body(status: RefreshStatus) -> LedgerRefreshBody:
         code=status.code,
         message=status.message,
         can_start=status.can_start,
+        refreshing=status.refreshing,
         reason=status.reason,
         failure=status.failure,
         needs_check=status.needs_check,

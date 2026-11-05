@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 
+from strategy_workbench.domain.market._flow import MARKET_LABELS, SUMMARY_LABELS
 from strategy_workbench.domain.market.facade.market import (
     INDEX_HISTORY_SESSIONS,
     FlowDay,
@@ -22,6 +24,7 @@ from strategy_workbench.domain.market.facade.market import (
     won_words,
 )
 
+REPO = Path(__file__).resolve().parents[3]
 EOK = 100_000_000
 D0 = date(2026, 10, 1)
 
@@ -100,7 +103,8 @@ def test_flow_hides_totals_when_the_measured_market_cap_share_is_low() -> None:
     flow = summarize_flow(FlowMarket.KOSPI, [_day(0, {Investor.FOREIGN: EOK}, measured_cap=94)])
     assert flow is not None
     assert not flow.coverage.sufficient
-    assert flow.totals == ()
+    # 합도 날짜별 값도 보이지 않는다
+    assert (flow.totals, flow.days) == ((), ())
     assert summarize_flow(FlowMarket.KOSDAQ, [_day(0, {})]) is None
 
 
@@ -184,3 +188,14 @@ def test_sector_securities_sorted_by_size_with_untraded_moves_empty() -> None:
     assert [move.ticker for move in moves] == ["B", "A"]
     assert moves[0].return_pct is None
     assert moves[1].return_pct == pytest.approx(20.0)
+
+
+def test_summary_sentence_names_match_the_screen_row_names() -> None:
+    # 요약 문장은 backend 가, 표 줄 이름은 frontend 가 쓴다 — 같은 화면에서 다른 낱말이 되지 않게
+    messages = (REPO / "frontend" / "src" / "shared" / "config" / "messages.ts").read_text(
+        encoding="utf-8"
+    )
+    for investor, label in SUMMARY_LABELS.items():
+        assert f'"market.investor.{investor.value}": "{label}",' in messages, investor
+    for market, label in MARKET_LABELS.items():
+        assert f'"market.market.{market.value}": "{label}",' in messages, market

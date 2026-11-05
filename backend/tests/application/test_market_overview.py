@@ -9,6 +9,7 @@ import pytest
 
 from strategy_workbench.application.market_overview.facade.overview import (
     CardIssueCode,
+    MarketDataUnreadableError,
     MarketOverviewService,
     MarketTableMissingError,
     OverviewStatus,
@@ -45,16 +46,20 @@ def _member(ticker: str, l2: str) -> SectorMember:
 
 @dataclass
 class FakeMarketData:
-    """`MarketDataPort` 대역. `missing` 에 든 메서드는 표가 없는 것처럼 답한다."""
+    """`MarketDataPort` 대역. `missing` 에 든 메서드는 표가 없는 것처럼, `unreadable` 은 읽다 실패한
+    것처럼 답한다."""
 
     session: date | None = SESSION
     flow_session: date = SESSION
     kosdaq_cap: int = 100
     missing: set[str] = field(default_factory=set)
+    unreadable: set[str] = field(default_factory=set)
 
     def _check(self, name: str, table: str) -> None:
         if name in self.missing:
             raise MarketTableMissingError(table)
+        if name in self.unreadable:
+            raise MarketDataUnreadableError(table, "IOException('No files found')")
 
     def latest_session(self) -> date | None:
         return self.session
@@ -97,6 +102,11 @@ def test_practice_data_answers_no_market_numbers() -> None:
 
 
 def test_each_card_fails_on_its_own_and_the_rest_still_answer() -> None:
+    unreadable = MarketOverviewService(FakeMarketData(unreadable={"sector"})).overview()
+    # 읽다 실패한 표도 그 카드만 사유로 답한다(500 이 아니다)
+    assert unreadable.sectors is not None and unreadable.sectors.issue is not None
+    assert unreadable.sectors.issue.code is CardIssueCode.UNREADABLE
+    assert all(card.flow is not None for card in unreadable.flows)
     overview = MarketOverviewService(FakeMarketData(missing={"flow"})).overview()
     assert overview.status is OverviewStatus.AVAILABLE
     kospi, kosdaq = overview.indices
@@ -116,7 +126,7 @@ def test_low_coverage_keeps_the_flow_but_hides_totals_with_a_reason() -> None:
     assert kospi.issue is None and kospi.flow is not None and kospi.flow.totals
     assert kosdaq.issue is not None and kosdaq.issue.code is CardIssueCode.COVERAGE_LOW
     assert "90%" in kosdaq.issue.message
-    assert kosdaq.flow is not None and kosdaq.flow.totals == ()
+    assert kosdaq.flow is not None and (kosdaq.flow.totals, kosdaq.flow.days) == ((), ())
 
 
 def test_the_header_session_is_the_earliest_card_date() -> None:

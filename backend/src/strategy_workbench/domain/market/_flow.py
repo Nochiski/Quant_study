@@ -33,6 +33,14 @@ class Investor(StrEnum):
     GOVERNMENT = "government"
 
 
+class InvestorGroup(StrEnum):
+    """화면이 주체를 어디에 두는가. 응답이 주체마다 싣는다 — 화면은 묶음을 다시 적지 않는다."""
+
+    MAIN = "main"  # 막대 네 줄과 요약 문장
+    INSTITUTION_PART = "institution_part"  # 기관을 펼친 세부 8주체
+    FOOTNOTE = "footnote"  # 각주(내외국인)
+
+
 # 화면 네 줄과 요약 문장이 보는 주체. 모두 더하면(내외국인 포함) 0이다.
 MAIN_INVESTORS = (
     Investor.INDIVIDUAL,
@@ -50,21 +58,23 @@ INSTITUTION_PARTS = (
     Investor.OTHER_FINANCIAL,
     Investor.GOVERNMENT,
 )
-INVESTOR_LABELS: Mapping[Investor, str] = {
+# 요약 문장(backend 가 완성하는 한글 문장)에 쓰는 이름. 표 줄 이름은 frontend 문구
+# (`market.investor.*`)가 갖는다 — 같은 낱말인지는 `tests/domain/test_market.py` 가 그 ko 문구와
+# 대조한다. 시장 이름도 같다(`market.market.*`).
+SUMMARY_LABELS: Mapping[Investor, str] = {
     Investor.INDIVIDUAL: "개인",
     Investor.FOREIGN: "외국인",
     Investor.INSTITUTION: "기관",
     Investor.OTHER_CORPORATION: "기타법인",
-    Investor.RESIDENT_FOREIGN: "내외국인",
-    Investor.FINANCIAL_INVESTMENT: "금융투자",
-    Investor.PENSION: "연기금등",
-    Investor.INVESTMENT_TRUST: "투신",
-    Investor.PRIVATE_EQUITY: "사모",
-    Investor.INSURANCE: "보험",
-    Investor.BANK: "은행",
-    Investor.OTHER_FINANCIAL: "기타금융",
-    Investor.GOVERNMENT: "국가",
 }
+
+
+def investor_group(investor: Investor) -> InvestorGroup:
+    if investor in MAIN_INVESTORS:
+        return InvestorGroup.MAIN
+    if investor in INSTITUTION_PARTS:
+        return InvestorGroup.INSTITUTION_PART
+    return InvestorGroup.FOOTNOTE
 
 
 class FlowMarket(StrEnum):
@@ -132,7 +142,7 @@ class MarketFlow:
     market: FlowMarket
     session: date
     coverage: FlowCoverage
-    # 측정 비중이 모자라면 비어 있다(합을 보이지 않는다).
+    # 측정 비중이 모자라면 둘 다 비어 있다(합도 날짜별 값도 보이지 않는다).
     totals: tuple[FlowTotal, ...]
     days: tuple[FlowDay, ...]
 
@@ -153,11 +163,11 @@ def summarize_flow(market: FlowMarket, days: Sequence[FlowDay]) -> MarketFlow | 
         measured_securities=last.measured_securities,
         mktcap_share=share,
     )
-    totals: tuple[FlowTotal, ...] = ()
-    if coverage.sufficient:
-        totals = tuple(
-            _total(market, period, ordered[-count:]) for period, count in PERIOD_SESSIONS.items()
-        )
+    if not coverage.sufficient:
+        return MarketFlow(market, last.session, coverage, (), ())
+    totals = tuple(
+        _total(market, period, ordered[-count:]) for period, count in PERIOD_SESSIONS.items()
+    )
     return MarketFlow(market, last.session, coverage, totals, tuple(ordered))
 
 
@@ -188,17 +198,16 @@ def flow_summary(
     )
     head = f"{MARKET_LABELS[market]} {when}: "
     values = {investor: amounts.get(investor, 0) for investor in MAIN_INVESTORS}
-    buyers = [INVESTOR_LABELS[investor] for investor, value in values.items() if value > 0]
+    buyers = [SUMMARY_LABELS[investor] for investor, value in values.items() if value > 0]
     seller = min(values, key=lambda investor: values[investor])
     if values[seller] >= 0:
         if not buyers:
             return head + "주체별로 더 사거나 판 금액이 없어요."
         top = max(values, key=lambda investor: values[investor])
         return (
-            head
-            + f"{INVESTOR_LABELS[top]}이 {won_words(values[top])} 원어치를 가장 많이 더 샀어요."
+            head + f"{SUMMARY_LABELS[top]}이 {won_words(values[top])} 원어치를 가장 많이 더 샀어요."
         )
-    sold = f"{INVESTOR_LABELS[seller]}이 {won_words(-values[seller])} 원어치를 가장 많이 더 팔았고"
+    sold = f"{SUMMARY_LABELS[seller]}이 {won_words(-values[seller])} 원어치를 가장 많이 더 팔았고"
     if not buyers:
         return head + sold.removesuffix("고") + "어요."
     return head + f"{sold}, {'·'.join(buyers)}이 더 샀어요."

@@ -70,6 +70,8 @@ CREDIT_TABLE = "credit_daily"
 CONSENSUS_MATRIX_TABLE = "consensus_matrix"
 CONSENSUS_ANNUAL_TABLE = "consensus_annual"
 FIN_RATIO_WISE_TABLE = "fin_ratio_wise"
+# WICS 업종 주간 스냅샷. 시점 축이 없어 필드로 내지 않고 홈 섹터맵(최신 장 하나)만 읽는다.
+SECTOR_TABLE = "sector_snapshot"
 
 ADJ_TABLE = "price_adj_daily"
 CONSENSUS_MACRO = "v_consensus"

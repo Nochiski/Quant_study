@@ -95,6 +95,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
 from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataSnapshot,
 )
+from strategy_workbench.application.market_overview.facade.overview import SectorSnapshot
 from strategy_workbench.application.portfolio_design.facade.ports import (
     RawFieldValue,
     RawObservation,
@@ -125,6 +126,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     FieldMetadata,
     field_metadata,
 )
+from strategy_workbench.domain.market.facade.market import FlowDay, IndexBar
 
 from ._source import (
     CATALOG_REBUILD,
@@ -1437,6 +1439,20 @@ class EquityDuckdbAdapter:
         """
         return _raw_panel.load_raw_panel(self, query, checkpoint=checkpoint, progress=progress)
 
+    # ── MarketDataPort(홈 시장 블록) ──────────────────────────────────────────
+
+    def latest_session(self) -> date | None:
+        return _market.latest_session(self)
+
+    def index_bars(self, index_name: str, end: date, sessions: int) -> tuple[IndexBar, ...]:
+        return _market.index_bars(self, index_name, end, sessions)
+
+    def flow_days(self, end: date, sessions: int) -> tuple[FlowDay, ...]:
+        return _market.flow_days(self, end, sessions)
+
+    def sector_members(self, session: date) -> SectorSnapshot | None:
+        return _market.sector_members(self, session)
+
     # ── MarketIndexPort ───────────────────────────────────────────────────────
 
     def load_market_index_closes(
@@ -2324,4 +2340,5 @@ class EquityDuckdbAdapter:
 # 불러오면 순환 import 라 정의가 모두 끝난 여기서 모듈을 불러온다(이름이 아니라 모듈이라 어느 쪽을
 # 먼저 불러도 된다). 호출 때 불러오지 않는다 — run worker 는 판본 대조 뒤 처음 import 되는 프로젝트
 # 모듈을 거절한다(run-worker spec D7, #591 2차 리뷰 P3-1).
-from . import _raw_panel  # noqa: E402  # reason: 위 순환 import 를 모듈 끝에서 푼다
+# `_market`(홈 시장 블록 행)도 같은 이유로 여기서 불러온다.
+from . import _market, _raw_panel  # noqa: E402  # reason: 위 순환 import 를 모듈 끝에서 푼다

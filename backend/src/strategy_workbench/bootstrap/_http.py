@@ -238,6 +238,7 @@ def build_http_app(
         continuous_accounts=container.continuous_accounts,
         factor_library=container.factor_library,
         broker_connections=container.broker_connections,
+        market_overview=container.market_overview,
         assistant_profiles=container.assistant_profiles,
         assistant_chat=container.assistant_chat,
         assistant_turns=container.assistant_turns,

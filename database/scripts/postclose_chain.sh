@@ -310,19 +310,15 @@ v3_morning_cmd() {
   bash scripts/v3_post.sh --date "$D" --basis morning --v3-db "$V3_DB" \
      --builds-from "$HIST/${D}_morning.json" ${SHADOW:+--shadow} 6>&- 7>&-
 }
-compare_cmd() {
-  local t0 rc
-  t0=$(date +%s)
-  $PY -m daily.board_compare --date "$D" --evening-root "$MDB" --research-root data; rc=$?
-  [ "$rc" -eq 1 ] || return "$rc"
-  # rc 1 은 PR-7 의 '불일치'(미설명·Spearman 하한 미달)지만 모듈 없음·import 예외도 rc 1 이다 — 이번 실행이 쓴 보고서가
-  # 그 날짜의 불일치 판정(verdict fail · rc 1)일 때만 1 을 돌려준다. 아니면 실패(2)로 올린다
-  if $PY - "$MDB/compare/${D}.json" "$D" "$t0" <<'PY'
+# 이번 실행(시작 t0 뒤)이 쓴 compare/<D>.json 이 그 날짜의 기대 판정인지 — fail(불일치 · rc 1) |
+# rules_changed(fi 규칙 바뀐 첫날 · verdict error · rc 2 · rules_changed_day)
+fresh_compare_report() {  # fresh_compare_report <t0> <fail|rules_changed>
+  $PY - "$MDB/compare/${D}.json" "$D" "$1" "$2" <<'PY'
 import json
 import os
 import sys
 
-path, d, t0 = sys.argv[1], sys.argv[2], int(sys.argv[3])
+path, d, t0, want = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 try:
     fresh = os.path.getmtime(path) >= t0
     with open(path, encoding="utf-8") as f:
@@ -330,10 +326,30 @@ try:
 except (OSError, ValueError):
     sys.exit(1)
 iso = f"{d[:4]}-{d[4:6]}-{d[6:]}"
-sys.exit(0 if fresh and isinstance(rep, dict) and rep.get("verdict") == "fail" and rep.get("rc") == 1
-         and str(rep.get("date")) == iso else 1)
+ok = fresh and isinstance(rep, dict) and str(rep.get("date")) == iso
+if want == "fail":
+    ok = ok and rep.get("verdict") == "fail" and rep.get("rc") == 1
+else:
+    ok = ok and rep.get("verdict") == "error" and rep.get("rc") == 2 and rep.get("rules_changed_day") is True
+sys.exit(0 if ok else 1)
 PY
-  then return 1; fi
+}
+compare_cmd() {
+  local t0 rc
+  t0=$(date +%s)
+  $PY -m daily.board_compare --date "$D" --evening-root "$MDB" --research-root data; rc=$?
+  # fi 규칙을 올린 배포 다음 날 — 연구 판 D'(배포 전 아침 판)만 옛 규칙이라 대조를 못 한다. 고장이 아니므로 3
+  # (rules_changed — warn)으로 돌려준다. 판정 파일은 verdict error 그대로라 X-2 창 판정은 실패로 센다
+  if [ "$rc" -eq 2 ] && fresh_compare_report "$t0" rules_changed; then
+    STEP_NOTE="fi 규칙 바뀐 첫날 — 연구 판 D' 만 옛 규칙이라 대조 못 함($MDB/compare/${D}.json)"
+    NOTE="${NOTE:+$NOTE · }$STEP_NOTE"
+    echo "  $STEP_NOTE — warn"
+    return 3
+  fi
+  [ "$rc" -eq 1 ] || return "$rc"
+  # rc 1 은 PR-7 의 '불일치'(미설명·Spearman 하한 미달)지만 모듈 없음·import 예외도 rc 1 이다 — 이번 실행이 쓴 보고서가
+  # 그 날짜의 불일치 판정(verdict fail · rc 1)일 때만 1 을 돌려준다. 아니면 실패(2)로 올린다
+  if fresh_compare_report "$t0" fail; then return 1; fi
   STEP_NOTE="board_compare rc 1 이지만 이번 실행의 $MDB/compare/${D}.json 이 불일치 판정이 아니다(모듈 없음·예외)"
   echo "  $STEP_NOTE — 실패로 본다"
   return 2
@@ -433,6 +449,7 @@ build_unlock() { [ -n "$BUILD_HELD" ] && flock -u 6; BUILD_HELD=""; return 0; }
 # ── 단계 실행 ─────────────────────────────────────────────────────────────────
 FAILED=""; FAILED_SOFT=""; WARNED=""; DONE=""; SKIP=""; SKIP_LEVEL=""; NOTE=""; NO_CLOSE=""
 ALT_RC=""; ALT_STATUS=""   # 그 단계의 rc 하나를 다른 상태로 기록한다 — 대조 1 → mismatch(warn) · 저녁 DART 판 1 → fallback
+ALT2_RC=""; ALT2_STATUS="" # 둘째 rc — 대조 3 → rules_changed(warn — fi 규칙 바뀐 첫날)
 DART_FROM=""; FELL_BACK="" # 저녁 DART 인계(ok 일 때만) · 전 거래일 공시 판으로 간 사유(D13 갈래 1)
 step() {  # step <런 로그 source> <이름> <명령…> — source 한 행(running → 상태). 실패하면 FAILED 에 남기고 1
   local src="$1" name="$2" rid rc t0 status
@@ -449,6 +466,7 @@ print(runlog.start(sys.argv[1], date=sys.argv[2], source=sys.argv[3]))' "$RUN_DB
   status=failed
   [ "$rc" -eq 0 ] && status=ok
   [ -n "$ALT_RC" ] && [ "$rc" -eq "$ALT_RC" ] && status="$ALT_STATUS"
+  [ -n "$ALT2_RC" ] && [ "$rc" -eq "$ALT2_RC" ] && status="$ALT2_STATUS"
   if [ -n "$rid" ]; then
     $PY -c 'import sys
 from daily import runlog
@@ -458,7 +476,7 @@ runlog.finish(sys.argv[1], int(sys.argv[2]), status=sys.argv[3], detail=sys.argv
   fi
   case "$status" in
     ok) DONE="$DONE $name"; return 0 ;;
-    mismatch) WARNED="${WARNED:+$WARNED, }$name($status)"; return 0 ;;
+    mismatch|rules_changed) WARNED="${WARNED:+$WARNED, }$name($status)"; return 0 ;;
     fallback) FELL_BACK="${STEP_NOTE:-$name rc=$rc}"; return 1 ;;
     *) FAILED="${FAILED:+$FAILED, }$name(rc=$rc)"; return 1 ;;
   esac
@@ -603,9 +621,9 @@ morning_main() {
     echo "  D=$D $NO_CLOSE"
   fi
   if [ "$(last_status postclose_model)" = ok ]; then
-    ALT_RC=1; ALT_STATUS=mismatch
+    ALT_RC=1; ALT_STATUS=mismatch; ALT2_RC=3; ALT2_STATUS=rules_changed
     step postclose_compare "두 판 대조" compare_cmd
-    ALT_RC=""; ALT_STATUS=""
+    ALT_RC=""; ALT_STATUS=""; ALT2_RC=""; ALT2_STATUS=""
   else
     NOTE="${NOTE:+$NOTE · }그날 장 마감 모델 판(④ postclose_model 마지막 런 ok)이 없다 — 두 판 대조 건너뜀"
     echo "  D=$D $NOTE"
@@ -634,7 +652,10 @@ if [ -n "$FAILED" ]; then
 elif [ -n "$SKIP" ]; then
   scripts/notify.sh "$SKIP_LEVEL" "$LABEL $SKIP — 건너뜀" "$BODY"
 elif [ -n "$WARNED" ]; then
-  scripts/notify.sh warn "$LABEL — 두 판 대조 불일치" "$BODY | 판정은 연속 창 집계($MDB/compare/${D}.json)"
+  case "$WARNED" in
+    *"(rules_changed)"*) scripts/notify.sh warn "$LABEL — 두 판 대조 건너뜀(fi 규칙 바뀐 첫날)" "$BODY" ;;
+    *) scripts/notify.sh warn "$LABEL — 두 판 대조 불일치" "$BODY | 판정은 연속 창 집계($MDB/compare/${D}.json)" ;;
+  esac
   RC=1
 elif [ "$MODE" = close ]; then
   scripts/notify.sh info "장 마감 수집·stage 준비 $(TZ=Asia/Seoul date +%H:%M)" "$BODY | $(( ($(date +%s) - T0) / 60 ))분"

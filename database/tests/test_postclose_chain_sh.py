@@ -52,8 +52,9 @@ if [ "$1" = "-m" ]; then
   fi
   if [ "$1" = daily.board_compare ] && [ -n "${COMPARE_VERDICT:-}" ]; then
     mkdir -p "$QL_HOME/data/model_db/compare"
-    printf '{"date": "%s-%s-%s", "verdict": "%s", "rc": %s}' "${d:0:4}" "${d:4:2}" "${d:6:2}" \\
-      "$COMPARE_VERDICT" "${RC_daily_board_compare:-0}" > "$QL_HOME/data/model_db/compare/$d.json"
+    extra=""; [ -n "${COMPARE_RULES_CHANGED:-}" ] && extra=', "rules_changed_day": true, "error": "fi 규칙 바뀐 첫날"'
+    printf '{"date": "%s-%s-%s", "verdict": "%s", "rc": %s%s}' "${d:0:4}" "${d:4:2}" "${d:6:2}" \\
+      "$COMPARE_VERDICT" "${RC_daily_board_compare:-0}" "$extra" > "$QL_HOME/data/model_db/compare/$d.json"
   fi
   if [ "$1" = compat ]; then
     case "$2" in
@@ -900,6 +901,29 @@ def test_morning_compare_rc1_without_its_report_is_failure(tmp_path: Path, repor
     assert r.rc == 2, r.out + r.log
     assert r.runs == [("postclose_v3_morning", "ok"), ("postclose_compare", "failed")]
     assert r.titles("crit") == ["장 마감 판 아침 잇기 실패: 두 판 대조(rc=2)"]
+
+
+@pytest.mark.parametrize("marked", [True, False], ids=["rules_changed_day", "other_input_error"])
+def test_morning_compare_on_the_fi_rules_changed_day_is_warn(tmp_path: Path, marked: bool) -> None:
+    """fi 규칙을 올린 배포 다음 날 — 대조 rc 2 이고 이번 실행의 compare/<D>.json 이 verdict error ·
+    `rules_changed_day` 면 rules_changed(런 로그 경고 상태) · warn 한 줄 · 체인 rc 1(10-20 · 10-21 · 11-05
+    오경보 crit). 표시가 없는 rc 2 는 지금처럼 실패 — crit · rc 2."""
+    root = _root(tmp_path)
+    _seed(root, T, "postclose_model", "ok")
+    env = {"RC_daily_board_compare": "2", "COMPARE_VERDICT": "error"}
+    if marked:
+        env["COMPARE_RULES_CHANGED"] = "1"
+    r = _chain(tmp_path, "morning", "--date", T, **env)
+    if marked:
+        assert r.rc == 1, r.out + r.log
+        assert r.runs == [("postclose_v3_morning", "ok"), ("postclose_compare", "rules_changed")]
+        assert r.titles("warn") == ["장 마감 판 아침 잇기 — 두 판 대조 건너뜀(fi 규칙 바뀐 첫날)"]
+        assert r.titles("crit") == []
+        assert "rules_changed" in runlog.WARN_STATUSES["postclose_compare"]
+    else:
+        assert r.rc == 2, r.out + r.log
+        assert r.runs == [("postclose_v3_morning", "ok"), ("postclose_compare", "failed")]
+        assert r.titles("crit") == ["장 마감 판 아침 잇기 실패: 두 판 대조(rc=2)"]
 
 
 def test_morning_v3_failure_does_not_block_the_compare(tmp_path: Path) -> None:

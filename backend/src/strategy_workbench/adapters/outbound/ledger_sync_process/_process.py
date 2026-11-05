@@ -134,9 +134,10 @@ def outcome_from_last_run(payload: Mapping[str, object] | None, return_code: int
     if failure is None and exit_code not in (EXIT_OK, EXIT_ERROR, EXIT_DRIFTED, EXIT_MISMATCH):
         failure = SyncFailureKind.UNEXPECTED
     catalog_rc = _int(payload.get("catalog_rc"))
-    verify = payload.get("verify") if isinstance(payload.get("verify"), dict) else {}
-    findings = verify.get("findings") if isinstance(verify, dict) else None
-    ahead = verify.get("remote_ahead") if isinstance(verify, dict) else None
+    raw_verify = payload.get("verify")
+    verify: Mapping[str, object] = raw_verify if isinstance(raw_verify, dict) else {}
+    findings = verify.get("findings")
+    ahead = verify.get("remote_ahead")
     ahead_tables = {str(table) for table in ahead} if isinstance(ahead, list) else set()
     found_tables = (
         {str(row.get("table")) for row in findings if isinstance(row, dict)}

@@ -28,8 +28,10 @@ POSTCLOSE_DART = "postclose_dart"
 WARN_STATUSES: dict[str, frozenset[str]] = {
     # 16:00 컷오프 · 16:00 뒤 시작(콜 0) · 세션 예외일 건너뜀 — 남은 종목은 QL-D 가 21:05 저녁 값
     "kiwoom_postclose": frozenset({"cutoff", "late", "session_exception"}),
-    # 두 판 대조(PR-7) rc 1 — 미설명 차이·Spearman 하한 미달. 실패가 아니라 기록이고 판정은 연속 창 집계 몫
-    POSTCLOSE_COMPARE: frozenset({"mismatch"}),
+    # 두 판 대조(PR-7) rc 1 — 미설명 차이·Spearman 하한 미달. 실패가 아니라 기록이고 판정은 연속 창 집계 몫.
+    # rules_changed — fi 규칙을 올린 배포 다음 날 연구 판 D' 만 옛 규칙이라 대조를 못 한 날(체인이 대조 rc 2 ·
+    # 판정 파일 `rules_changed_day` 를 이 상태로 남긴다)
+    POSTCLOSE_COMPARE: frozenset({"mismatch", "rules_changed"}),
     # 조용한 손실 기록형(N-42 Q4 — 그림자 시작 10-14 부터 2주 기록) — 미설명 > 0 · 판정 불가 표. 차단형으로 바꾸면
     # 같은 경우가 blocked(이 목록 밖 — 일일 리포트 crit)다
     SILENT_LOSS: frozenset({"unexplained", "undecidable"}),

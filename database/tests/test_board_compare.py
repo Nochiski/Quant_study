@@ -607,6 +607,24 @@ def test_input_errors_give_rc_2(same_pair, tmp_path, capsys, case: str) -> None:
     assert (rep["verdict"], rep["rc"]) == ("error", 2) and rep["error"]
 
 
+@pytest.mark.parametrize(("side", "changed_day"), [("dprime", True), ("evening", False)])
+def test_fi_rules_changed_day_is_marked_only_when_dprime_alone_differs(
+        same_pair, tmp_path, capsys, side: str, changed_day: bool) -> None:
+    """fi 규칙을 올린 배포 다음 날 아침 — 장 마감 판 · 연구 판 T 는 새 규칙, 연구 판 D' 만 옛 규칙(배포 전 아침 판).
+    대조는 그대로 못 하지만(rc 2 · verdict error — X-2 창 판정은 실패로 센다) 판정 파일에 `rules_changed_day` 를
+    달아 체인이 crit 대신 warn 으로 내게 한다(10-20 · 10-21 · 11-05 오경보). 장 마감 판이 다르면(진짜
+    어긋남) 표시하지 않는다."""
+    ev, rs = _copy_pair(same_pair, tmp_path)
+    run = (rs / "factor_inputs" / "_runs" / f"{DP_S}_morning.json" if side == "dprime"
+           else ev / "factor_inputs" / "_runs" / f"{T_S}_evening.json")
+    _edit_json(run, rules_version="fi0.0.0")
+    rc = bc.main(["--date", T_S, "--evening-root", str(ev), "--research-root", str(rs)])
+    err = capsys.readouterr().err
+    rep = report(ev)
+    assert rc == 2 and (rep["verdict"], rep["rc"]) == ("error", 2) and "rules_version" in rep["error"], err
+    assert rep.get("rules_changed_day", False) is changed_day
+
+
 def test_report_write_failure_is_rc_2(same_pair, tmp_path, capsys) -> None:
     """보고서를 못 쓰면 판정이 남지 않는다 — '대조 못 함'(rc 2), 미설명(rc 1)으로 읽히지 않게."""
     bad = tmp_path / "out_is_a_file"

@@ -1068,6 +1068,47 @@ def test_fin_summary_quarters_switch_to_wise_with_basis_holding_and_revenue_kind
     assert not any(str(r[4]).startswith("DART:") for r in a)
 
 
+# WISE 분기 확정은 2026/03 까지, 2026/06 은 아직 (E) — DART 반기보고서가 먼저 나온 모양(N-64 Q1)
+Q1_LABELS = (("202503", False, "IFRS연결"), ("202506", False, "IFRS연결"), ("202509", False, "IFRS연결"),
+             ("202512", False, "IFRS연결"), ("202603", False, "IFRS연결"), ("202606", True, "IFRS연결"))
+Q1_LABELS_SEP = tuple((per, est, "IFRS별도") for per, est, _ in Q1_LABELS)
+
+
+def test_fin_summary_wise_ticker_takes_dart_quarters_after_the_wise_latest(tmp_path: Path) -> None:
+    """N-64 Q1(②-2, fi1.13.0): WISE 종목도 WISE 확정 분기보다 뒤 기말의 DART 분기를 싣는다 — 같은 기말은 WISE.
+    WISE 최신 분기 기준(연결 ↔ CFS · 별도 ↔ OFS)이 같은 DART 행만 쓰고(E 는 기준이 달라 WISE 를 기다림),
+    매출 순액(금융) 종목은 매출을 비우며(DART 매출과 정의가 다르다 — 11-05 서버 대조 0/18 일치),
+    지주사(B)의 연결 아닌 행은 WISE 갈래와 같이 손익을 비우고 표식. 5기 창은 합쳐 다시 센다.
+    DART 행은 공개일 ≤ dart_asof 부터다(C)."""
+    y = dt.date
+    f = FETCH[0]
+    gross = {"매출액(수익)": [100, 110, 120, 130, 140, 150.0], "영업이익(발표기준)": [10, 11, 12, 13, 14, 15.0],
+             "당기순이익": [5, 6, 7, 8, 9, 10.0]}
+    net = {"순영업이익": [200, 210, 220, 230, 240, 250.0], "영업이익": [120, 130, 140, 150, 160, 170.0],
+           "당기순이익": [90, 95, 100, 105, 110, 115.0]}
+    wq = (_wq_rows(A, f, gross, Q1_LABELS) + _wq_rows(B, f, gross, Q1_LABELS_SEP)
+          + _wq_rows(C, f, net, Q1_LABELS) + _wq_rows(E, f, gross, Q1_LABELS))
+    half = y(2026, 6, 30)
+    fin = [_fin_std_row(B, half, "11012", y(2026, 8, 14), fs_div="OFS"),
+           _fin_std_row(C, half, "11012", FETCH[-2], scale=0.5),        # D 이틀 전 공개
+           _fin_std_row(E, half, "11012", y(2026, 8, 14), fs_div="OFS")]  # WISE 는 연결
+    roots = make_roots(tmp_path / "src", wise_q=wq, holding=frozenset({B}), extra={"fin_std": fin})
+    sql = ("SELECT period, revenue, op, ni, fs_basis, revenue_basis, available_date FROM _fi_fin_summary "
+           "WHERE ticker = '{}' AND period_type = 'quarter' ORDER BY period DESC")
+    a = _fin_summary_at(roots, D, sql.format(A))      # A 의 반기 DART 행은 기본 원천(scale 0.29, 08-14)
+    assert [r[0] for r in a] == ["2026/06", "2026/03", "2025/12", "2025/09", "2025/06"]   # 2025/03 은 창 밖
+    assert a[0] == ("2026/06", round(70 * 0.29 * 1e4), round(10 * 0.29 * 1e4), round(40 * 0.29 * 1e4),
+                    "DART:CFS", None, y(2026, 8, 14))
+    assert [r[1:5] for r in a[1:3]] == [(140, 14, 9, "WISE:IFRS연결"), (130, 13, 8, "WISE:IFRS연결")]
+    c = _fin_summary_at(roots, D, sql.format(C))
+    assert c[0] == ("2026/06", None, round(10 * 0.5 * 1e4), round(40 * 0.5 * 1e4), "DART:CFS", None, FETCH[-2])
+    assert c[1][5] == "net"
+    assert _fin_summary_at(roots, FETCH[-3], sql.format(C))[0][:5] == ("2026/03", 240, 160, 110, "WISE:IFRS연결")
+    assert _fin_summary_at(roots, D, sql.format(E))[0][:5] == ("2026/03", 140, 14, 9, "WISE:IFRS연결")
+    assert _fin_summary_at(roots, D, sql.format(B))[0] == (
+        "2026/06", None, None, None, "DART:OFS|지주사제외", None, y(2026, 8, 14))
+
+
 # ── 배포 묶음 7-2: stage 가 같은 원문을 접은 stg_fin_wise 를 (종목, ep) 단위로 읽는다 ─────────
 def _fin_version(t: str, f: dt.date, ep: str, off: float) -> list[dict]:
     """stg_fin_wise 한 판(종목 · 수집일 · ep) — 값 = 기본 × IDX + 칸 번호 + off."""

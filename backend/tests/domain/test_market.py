@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 
-from strategy_workbench.domain.market._flow import MARKET_LABELS, SUMMARY_LABELS
+from strategy_workbench.domain.market._flow import (
+    INVESTOR_GROUPS,
+    MARKET_LABELS,
+    SUMMARY_LABELS,
+    InvestorGroup,
+    investor_group,
+)
 from strategy_workbench.domain.market.facade.market import (
     INDEX_HISTORY_SESSIONS,
     FlowDay,
@@ -38,6 +45,9 @@ D0 = date(2026, 10, 1)
         (4_632 * EOK + 40_000_000, "4,632억"),
         (30_000_000, "1억 미만"),
         (-581 * EOK, "581억"),
+        # 반은 올림 — 화면 표기(`shortWon`)와 같은 규칙
+        (250_000_000, "3억"),
+        (50_000_000, "1억"),
     ],
 )
 def test_won_words_rounds_to_eok_and_reads_jo(amount: int, words: str) -> None:
@@ -195,7 +205,16 @@ def test_summary_sentence_names_match_the_screen_row_names() -> None:
     messages = (REPO / "frontend" / "src" / "shared" / "config" / "messages.ts").read_text(
         encoding="utf-8"
     )
-    for investor, label in SUMMARY_LABELS.items():
-        assert f'"market.investor.{investor.value}": "{label}",' in messages, investor
-    for market, label in MARKET_LABELS.items():
-        assert f'"market.market.{market.value}": "{label}",' in messages, market
+    for key, label in (
+        *((f"market.investor.{investor.value}", text) for investor, text in SUMMARY_LABELS.items()),
+        *((f"market.market.{market.value}", text) for market, text in MARKET_LABELS.items()),
+    ):
+        assert re.search(rf'"{re.escape(key)}"\s*:\s*"{re.escape(label)}"', messages), key
+
+
+def test_every_investor_has_exactly_one_group() -> None:
+    # 주체를 더하고 묶음을 정하지 않으면 조용히 각주로 가지 않고 여기서 멈춘다
+    assert set(INVESTOR_GROUPS) == set(Investor)
+    assert [i for i in Investor if investor_group(i) is InvestorGroup.FOOTNOTE] == [
+        Investor.RESIDENT_FOREIGN
+    ]

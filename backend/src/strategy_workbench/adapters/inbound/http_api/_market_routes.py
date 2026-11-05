@@ -201,7 +201,7 @@ class MarketErrorResponse:
     detail: MarketErrorDetail
 
 
-def _issue(issue: CardIssue | None) -> CardIssueBody | None:
+def _issue_body(issue: CardIssue | None) -> CardIssueBody | None:
     return None if issue is None else CardIssueBody(issue.code, issue.message)
 
 
@@ -217,7 +217,7 @@ def _index(card: IndexCard) -> IndexCardBody:
     return IndexCardBody(
         index_id=card.index_id,
         index_name=card.index_name,
-        issue=_issue(card.issue),
+        issue=_issue_body(card.issue),
         summary=None
         if summary is None
         else IndexSummaryBody(
@@ -240,7 +240,7 @@ def _day(day: FlowDay) -> FlowDayBody:
 def _flow(card: FlowCard) -> FlowCardBody:
     flow = card.flow
     if flow is None:
-        return FlowCardBody(card.market, None, [], [], _issue(card.issue))
+        return FlowCardBody(card.market, None, [], [], _issue_body(card.issue))
     coverage = flow.coverage
     return FlowCardBody(
         market=card.market,
@@ -262,7 +262,7 @@ def _flow(card: FlowCard) -> FlowCardBody:
             for total in flow.totals
         ],
         days=[_day(day) for day in flow.days],
-        issue=_issue(card.issue),
+        issue=_issue_body(card.issue),
     )
 
 
@@ -303,7 +303,7 @@ def _overview(overview: MarketOverview) -> MarketOverviewBody:
         if sectors is None
         else SectorCardBody(
             sector_map=None if sectors.sector_map is None else _sector_map(sectors.sector_map),
-            issue=_issue(sectors.issue),
+            issue=_issue_body(sectors.issue),
         ),
     )
 

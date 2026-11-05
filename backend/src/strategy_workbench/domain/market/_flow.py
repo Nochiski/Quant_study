@@ -34,11 +34,14 @@ class Investor(StrEnum):
 
 
 class InvestorGroup(StrEnum):
-    """화면이 주체를 어디에 두는가. 응답이 주체마다 싣는다 — 화면은 묶음을 다시 적지 않는다."""
+    """주체의 묶음: 네 주체(합하면 내외국인과 함께 0)·기관 세부(합이 기관)·그 밖(내외국인).
 
-    MAIN = "main"  # 막대 네 줄과 요약 문장
-    INSTITUTION_PART = "institution_part"  # 기관을 펼친 세부 8주체
-    FOOTNOTE = "footnote"  # 각주(내외국인)
+    응답이 주체마다 싣는다 — 화면은 묶음을 다시 적지 않는다.
+    """
+
+    MAIN = "main"
+    INSTITUTION_PART = "institution_part"
+    FOOTNOTE = "footnote"
 
 
 # 화면 네 줄과 요약 문장이 보는 주체. 모두 더하면(내외국인 포함) 0이다.
@@ -69,12 +72,16 @@ SUMMARY_LABELS: Mapping[Investor, str] = {
 }
 
 
+# 주체마다 묶음 하나 — 주체를 더하면 여기에 함께 적는다(테스트가 전수를 본다).
+INVESTOR_GROUPS: Mapping[Investor, InvestorGroup] = {
+    **dict.fromkeys(MAIN_INVESTORS, InvestorGroup.MAIN),
+    **dict.fromkeys(INSTITUTION_PARTS, InvestorGroup.INSTITUTION_PART),
+    Investor.RESIDENT_FOREIGN: InvestorGroup.FOOTNOTE,
+}
+
+
 def investor_group(investor: Investor) -> InvestorGroup:
-    if investor in MAIN_INVESTORS:
-        return InvestorGroup.MAIN
-    if investor in INSTITUTION_PARTS:
-        return InvestorGroup.INSTITUTION_PART
-    return InvestorGroup.FOOTNOTE
+    return INVESTOR_GROUPS[investor]
 
 
 class FlowMarket(StrEnum):

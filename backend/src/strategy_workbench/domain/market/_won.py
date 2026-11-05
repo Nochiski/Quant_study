@@ -7,8 +7,9 @@ JO = 10_000 * EOK
 
 
 def won_words(amount_krw: int) -> str:
-    """양수 원 금액을 억 단위로 반올림해 읽는다. 1억 미만은 '1억 원 미만'이 아니라 '1억 미만'."""
-    eok = round(abs(amount_krw) / EOK)
+    """양수 원 금액을 억 단위로 반올림(반은 올림 — 화면 표기와 같다)해 읽는다. 1억 미만은 '1억 원
+    미만'이 아니라 '1억 미만'."""
+    eok = (abs(amount_krw) + EOK // 2) // EOK
     if eok == 0:
         return "1억 미만"
     jo, rest = divmod(eok, 10_000)

@@ -15,11 +15,12 @@
 
 from __future__ import annotations
 
+import logging
 from bisect import bisect_right
-from collections.abc import Callable, Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
-from typing import TypeVar
 
 import duckdb
 
@@ -47,7 +48,7 @@ from ._specs import (
     UNIVERSE_TABLE,
 )
 
-T = TypeVar("T")
+logger = logging.getLogger(__name__)
 
 # 원장 열 → 주체. 13주체 중 화면이 쓰는 것만(대응 없는 열은 버린다).
 FLOW_COLUMNS: tuple[tuple[Investor, str], ...] = (
@@ -90,12 +91,18 @@ def _require(adapter: EquityDuckdbAdapter, *tables: str) -> None:
             raise MarketTableMissingError(table)
 
 
-def _read(table: str, query: Callable[[], T]) -> T:
-    """질의가 표를 읽지 못하면(판 파일이 지워짐 등) 포트 오류로 바꾼다 — 카드 하나만 실패한다."""
+@contextmanager
+def _connection(card: str) -> Iterator[duckdb.DuckDBPyConnection]:
+    """질의 연결. 표를 읽지 못하면(판 파일이 지워짐·열이 바뀜 등) 로그를 남기고 포트 오류로 바꾼다 —
+    카드 하나만 실패한다. `card` 는 그 카드의 주 표 이름이다."""
+    con = _open(None)
     try:
-        return query()
+        yield con
     except duckdb.Error as error:
-        raise MarketDataUnreadableError(table, repr(error)) from error
+        logger.warning("market card query failed — card=%s error=%r", card, error, exc_info=True)
+        raise MarketDataUnreadableError(card, repr(error)) from error
+    finally:
+        con.close()
 
 
 def _window(sessions: Sequence[date], end: date, count: int) -> tuple[date, date] | None:
@@ -117,21 +124,13 @@ def index_bars(
     window = _window(adapter._sessions, end, sessions)  # noqa: SLF001  # reason: 달력
     if window is None:
         return ()
-
-    def query() -> list[tuple[object, ...]]:
-        con = _open(None)
-        try:
-            return con.execute(
-                "SELECT date, close_idx, change_idx, fluc_pct, value_krw "
-                f"FROM {adapter._source(INDEX_TABLE)} "  # noqa: SLF001
-                "WHERE index_name = ? AND date BETWEEN ? AND ? AND close_idx IS NOT NULL "
-                "ORDER BY date",
-                [index_name, *window],
-            ).fetchall()
-        finally:
-            con.close()
-
-    rows = _read(INDEX_TABLE, query)
+    with _connection(INDEX_TABLE) as con:
+        rows = con.execute(
+            "SELECT date, close_idx, change_idx, fluc_pct, value_krw "
+            f"FROM {adapter._source(INDEX_TABLE)} "  # noqa: SLF001
+            "WHERE index_name = ? AND date BETWEEN ? AND ? AND close_idx IS NOT NULL ORDER BY date",
+            [index_name, *window],
+        ).fetchall()
     return tuple(
         IndexBar(
             session=_as_date(day, "index_daily.date"),
@@ -154,33 +153,27 @@ def flow_days(adapter: EquityDuckdbAdapter, end: date, sessions: int) -> tuple[F
     excluded = ", ".join(f"'{sec_type}'" for sec_type in EXCLUDED_SEC_TYPES)
     markets = ", ".join(f"'{market.value}'" for market in FlowMarket)
 
-    def query() -> list[tuple[object, ...]]:
-        con = _open(None)
-        try:
-            return con.execute(
-                # 원천 행 고르기는 수급 표 안에서 먼저 한다 — 선언의 열 이름이 그 표의 것이다.
-                "WITH picked AS ("
-                f"  SELECT date, ticker, {MEASURED_COLUMN} IS NOT NULL AS measured, {columns}"
-                f"  FROM {adapter._source(FLOW_TABLE)} "  # noqa: SLF001
-                "   WHERE date BETWEEN ? AND ? AND reject_reason IS NULL"
-                "   QUALIFY row_number() OVER ("
-                f"    PARTITION BY date, ticker ORDER BY {_FLOW_PICK_ORDER}) = 1"
-                "), cells AS ("
-                "  SELECT f.*, u.market AS market, coalesce(u.mktcap_krw, 0) AS mktcap"
-                "  FROM picked f "
-                f"  JOIN {adapter._source(UNIVERSE_TABLE)} u "  # noqa: SLF001
-                "     ON u.date = f.date AND u.ticker = f.ticker"
-                f"  WHERE u.market IN ({markets}) AND u.sec_type NOT IN ({excluded})"
-                ") "
-                "SELECT date, market, count(*), count(*) FILTER (WHERE measured), sum(mktcap), "
-                f"coalesce(sum(mktcap) FILTER (WHERE measured), 0), {sums} "
-                "FROM cells GROUP BY date, market ORDER BY date, market",
-                list(window),
-            ).fetchall()
-        finally:
-            con.close()
-
-    rows = _read(FLOW_TABLE, query)
+    with _connection(FLOW_TABLE) as con:
+        rows = con.execute(
+            # 원천 행 고르기는 수급 표 안에서 먼저 한다 — 선언의 열 이름이 그 표의 것이다.
+            "WITH picked AS ("
+            f"  SELECT date, ticker, {MEASURED_COLUMN} IS NOT NULL AS measured, {columns}"
+            f"  FROM {adapter._source(FLOW_TABLE)} "  # noqa: SLF001
+            "   WHERE date BETWEEN ? AND ? AND reject_reason IS NULL"
+            "   QUALIFY row_number() OVER ("
+            f"    PARTITION BY date, ticker ORDER BY {_FLOW_PICK_ORDER}) = 1"
+            "), cells AS ("
+            "  SELECT f.*, u.market AS market, coalesce(u.mktcap_krw, 0) AS mktcap"
+            "  FROM picked f "
+            f"  JOIN {adapter._source(UNIVERSE_TABLE)} u "  # noqa: SLF001
+            "     ON u.date = f.date AND u.ticker = f.ticker"
+            f"  WHERE u.market IN ({markets}) AND u.sec_type NOT IN ({excluded})"
+            ") "
+            "SELECT date, market, count(*), count(*) FILTER (WHERE measured), sum(mktcap), "
+            f"coalesce(sum(mktcap) FILTER (WHERE measured), 0), {sums} "
+            "FROM cells GROUP BY date, market ORDER BY date, market",
+            list(window),
+        ).fetchall()
     return tuple(
         FlowDay(
             session=_as_date(row[0], "flow_daily.date"),
@@ -207,33 +200,23 @@ def sector_members(adapter: EquityDuckdbAdapter, session: date) -> SectorSnapsho
     )
     name = "sec.name_current" if names else "NULL"
 
-    def query() -> tuple[date, list[tuple[object, ...]]] | None:
-        con = _open(None)
-        try:
-            snapshot = con.execute(
-                f"SELECT max(snapshot_date) FROM {adapter._source(SECTOR_TABLE)} "  # noqa: SLF001
-                "WHERE snapshot_date <= ?",
-                [session],
-            ).fetchone()
-            if snapshot is None or snapshot[0] is None:
-                return None
-            snapshot_date = _as_date(snapshot[0], "sector_snapshot.snapshot_date")
-            return snapshot_date, con.execute(
-                f"SELECT s.ticker, {name}, s.wics_l1_cd, s.wics_l1_nm, s.wics_l2_cd, "
-                "s.wics_l2_nm, s.float_shares_shr, p.base_price_krw, p.close, "
-                "coalesce(p.volume_shr, 0) > 0 "
-                f"FROM {adapter._source(SECTOR_TABLE)} s "  # noqa: SLF001
-                f"LEFT JOIN {adapter._source(PRICE_TABLE)} p "  # noqa: SLF001
-                f"ON p.ticker = s.ticker AND p.date = ? {names} WHERE s.snapshot_date = ?",
-                [session, snapshot_date],
-            ).fetchall()
-        finally:
-            con.close()
-
-    read = _read(SECTOR_TABLE, query)
-    if read is None:
-        return None
-    snapshot_date, rows = read
+    with _connection(SECTOR_TABLE) as con:
+        snapshot = con.execute(
+            f"SELECT max(snapshot_date) FROM {adapter._source(SECTOR_TABLE)} "  # noqa: SLF001
+            "WHERE snapshot_date <= ?",
+            [session],
+        ).fetchone()
+        if snapshot is None or snapshot[0] is None:
+            return None
+        snapshot_date = _as_date(snapshot[0], "sector_snapshot.snapshot_date")
+        rows = con.execute(
+            f"SELECT s.ticker, {name}, s.wics_l1_cd, s.wics_l1_nm, s.wics_l2_cd, s.wics_l2_nm, "
+            "s.float_shares_shr, p.base_price_krw, p.close, coalesce(p.volume_shr, 0) > 0 "
+            f"FROM {adapter._source(SECTOR_TABLE)} s "  # noqa: SLF001
+            f"LEFT JOIN {adapter._source(PRICE_TABLE)} p ON p.ticker = s.ticker AND p.date = ? "  # noqa: SLF001
+            f"{names} WHERE s.snapshot_date = ?",
+            [session, snapshot_date],
+        ).fetchall()
     members = tuple(
         SectorMember(
             ticker=str(ticker),

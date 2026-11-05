@@ -25,6 +25,7 @@ export const practiceDataHandlers = (api: string) => [
       can_start: false,
       refreshing: false,
       last_outcome: null,
+      outcome_message: null,
       reason: "practice_data",
       failure: null,
       needs_check: false,

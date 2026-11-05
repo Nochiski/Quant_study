@@ -39,7 +39,7 @@ const minutesSince = (
 const StatusBadge = ({ status }: { status: LedgerRefreshBody }) => {
   if (isRefreshing(status))
     return <Badge tone="info">{t("refresh.badge.running")}</Badge>;
-  if (status.code === "partial")
+  if (status.last_outcome === "partial")
     return <Badge tone="warn">{t("refresh.badge.partial")}</Badge>;
   if (status.remote.state === "behind")
     return <Badge tone="warn">{t("refresh.badge.behind")}</Badge>;
@@ -139,8 +139,8 @@ export const LedgerRefreshControl = () => {
     if (event.key === "Escape") close();
   };
   const remote = data.remote;
-  // 지금 상태가 마지막 결과를 말하는가(그 뒤 계산 시작·잠금으로 바뀌지 않았다)
-  const outcome = data.code === data.last_outcome ? data.last_outcome : null;
+  // 마지막으로 끝난 받기의 결과(받는 중에는 없다)
+  const outcome = data.refreshing ? null : (data.last_outcome ?? null);
   const finished = outcome !== null;
 
   return (

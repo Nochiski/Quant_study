@@ -13,7 +13,6 @@ import "./ledger-refresh.css";
 interface Notice {
   finishedAt: string;
   outcome: RefreshOutcome;
-  // 지금 상태가 아직 그 결과를 말할 때만(끝난 뒤 계산을 시작하면 상태 문장이 바뀐다)
   message: string | null;
 }
 
@@ -38,13 +37,13 @@ export const LedgerRefreshNotice = () => {
     data.last_outcome !== null &&
     data.last_outcome !== undefined
   ) {
-    // 결과 갈래는 backend 가 싣는다 — 그 뒤 code 가 바뀌어도(`busy_work`·`locked`) 그대로다.
-    const outcome = data.last_outcome;
+    // 결과 갈래와 문장은 backend 가 싣는다 — 그 뒤 code·message 가 바뀌어도(`busy_work`·`locked`)
+    // 그대로다.
     setKnown(finishedAt);
     setNotice({
       finishedAt,
-      outcome,
-      message: data.code === outcome ? data.message : null,
+      outcome: data.last_outcome,
+      message: data.outcome_message ?? null,
     });
   }
 

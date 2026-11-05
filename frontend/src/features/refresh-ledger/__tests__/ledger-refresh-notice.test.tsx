@@ -19,6 +19,7 @@ const status = (overrides: Partial<LedgerRefreshBody>): LedgerRefreshBody => ({
   can_start: true,
   refreshing: false,
   last_outcome: null,
+  outcome_message: null,
   reason: null,
   failure: null,
   needs_check: false,
@@ -68,6 +69,7 @@ describe("LedgerRefreshNotice", () => {
     current = status({
       code: "succeeded",
       last_outcome: "succeeded",
+      outcome_message: "새 데이터를 앱에 반영했어요.",
       message: "새 데이터를 앱에 반영했어요.",
       finished_at: FINISHED,
     });
@@ -86,6 +88,7 @@ describe("LedgerRefreshNotice", () => {
     current = status({
       code: "succeeded",
       last_outcome: "succeeded",
+      outcome_message: "새 데이터를 앱에 반영했어요.",
       message: "새 데이터를 앱에 반영했어요.",
       finished_at: FINISHED,
     });
@@ -111,13 +114,15 @@ describe("LedgerRefreshNotice", () => {
       can_start: false,
       failure: "tables_failed",
       last_outcome: "partial",
+      outcome_message: "데이터 일부만 받았어요. 앱을 다시 시작하지 마세요.",
       message: "진행 중인 백테스트 1건이 끝나야 받을 수 있어요.",
       finished_at: FINISHED,
     });
     await act(() => client.refetchQueries({ queryKey: ["ledger-refresh"] }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(PARTIAL_TITLE);
-    // 지금 상태 문장(진행 중인 계산)을 결과 문장처럼 보이지 않는다
+    // 결과 문장(다시 시작하지 말라는 경고)을 보이고, 지금 상태 문장(진행 중인 계산)은 보이지 않는다
+    expect(alert).toHaveTextContent("앱을 다시 시작하지 마세요");
     expect(alert).not.toHaveTextContent("진행 중인 백테스트");
   });
 });

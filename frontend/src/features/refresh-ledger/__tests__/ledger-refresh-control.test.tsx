@@ -23,6 +23,7 @@ const status = (overrides: Partial<LedgerRefreshBody>): LedgerRefreshBody => ({
   can_start: true,
   refreshing: false,
   last_outcome: null,
+  outcome_message: null,
   reason: null,
   failure: null,
   needs_check: false,

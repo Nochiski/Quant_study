@@ -109,6 +109,8 @@
   --text-size-label: 13px;
   --text-size-body: 14px;
   --text-size-small: 12px;
+  /* 섹터맵 좁은 칸 이름처럼 자리가 모자란 곳의 마지막 단계 */
+  --text-size-micro: 11px;
   --text-size-title: 20px;
   --text-size-display: 28px;
   --line-height-body: 1.6;

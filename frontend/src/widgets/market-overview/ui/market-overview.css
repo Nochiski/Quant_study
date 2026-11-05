@@ -482,16 +482,16 @@
   cursor: pointer;
 }
 
-/* 큰 칸은 큰 글자. 이름이 넘치면 model/fit-names.ts 의 fitNames 가 data-fit="regular" 로 보통 글자로 되돌린다. */
-.market-map__tile--large:not([data-fit="regular"]) {
+/* 큰 칸은 큰 글자. 이름이 넘치면 model/fit-names.ts 의 fitNames 가 data-fit 으로 단계를 내린다. */
+.market-map__tile--large:not([data-fit]) {
   gap: 2px;
 }
 
-.market-map__tile--large:not([data-fit="regular"]) .market-map__name {
+.market-map__tile--large:not([data-fit]) .market-map__name {
   font-size: var(--text-size-subsection);
 }
 
-.market-map__tile--large:not([data-fit="regular"]) .ui-signed {
+.market-map__tile--large:not([data-fit]) .ui-signed {
   font-size: var(--text-size-label);
 }
 
@@ -592,7 +592,8 @@
   outline: none;
 }
 
-/* 칸 이름: 띄어쓰기 단위로만 줄바꿈, 두 줄까지. 넘치면 model/fit-names.ts 의 fitNames 가 이름을 숨긴다(말줄임 없음). */
+/* 칸 이름: 숨기지 않는다. 띄어쓰기에서만 줄바꿈하다가, 넘치면 model/fit-names.ts 의 fitNames 가 단계를 내린다
+ * (작은 글자 → 음절 줄바꿈 → 마지막 줄 말줄임). */
 .market-map__name {
   display: block;
   flex: none;
@@ -601,6 +602,20 @@
   font-weight: var(--font-weight-label);
   word-break: keep-all;
   overflow-wrap: normal;
+}
+
+.market-map__tile:is([data-fit="small"], [data-fit="break"], [data-fit="clamp"]) .market-map__name {
+  font-size: var(--text-size-micro);
+}
+
+.market-map__tile:is([data-fit="break"], [data-fit="clamp"]) .market-map__name {
+  word-break: break-all;
+}
+
+.market-map__tile[data-fit="clamp"] .market-map__name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--name-lines, 1);
 }
 
 /* 상위 업종 묶음: 테두리 선 대신 바탕색 띠로 묶음 사이를 넓게 띄운다. */

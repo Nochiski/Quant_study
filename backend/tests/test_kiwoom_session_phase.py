@@ -69,10 +69,19 @@ def test_start_or_closing_auction_notices_mean_open(tmp_path: Path, hhmm: str, c
     assert _phase(tmp_path, _row(hhmm, code), hhmm) is MarketPhase.OPEN
 
 
-@pytest.mark.parametrize("code", ["4", "8", "a"])
+@pytest.mark.parametrize("code", ["4", "8"])
 def test_close_notices_mean_the_regular_session_ended(tmp_path: Path, code: str) -> None:
     rows = _row("10:00", "3") + _row("16:20", "2") + _row("16:30", code)
     assert _phase(tmp_path, rows, "16:31") is MarketPhase.CLOSED
+
+
+@pytest.mark.parametrize("code", ["a", "b", "g", "h", "9"])
+def test_after_hours_notices_do_not_close_the_regular_session(tmp_path: Path, code: str) -> None:
+    # 수능일 장 전 시간외 종가(09:30~09:40)가 시간외 코드로 와도 정규장은 아직 열리지 않았다.
+    # 접속 직후 전날 마지막 상태(9·h)가 와도 같다
+    rows = _row("08:55", "0", "010500") + _row("09:30", code)
+    assert _phase(tmp_path, rows, "09:31") is MarketPhase.BEFORE_OPEN
+    assert _phase(tmp_path, rows + _row("10:00", "3"), "15:40") is MarketPhase.OPEN
 
 
 def test_futures_and_nxt_notices_are_ignored(tmp_path: Path) -> None:

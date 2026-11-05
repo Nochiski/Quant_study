@@ -1,6 +1,6 @@
 """`MarketDataPort`(홈 시장 블록): duckdb 어댑터가 원장 행을 그대로 나르는가.
 
-- 수급은 코스피·코스닥 보통 격자만 더한다: ETF·우선주·격자 밖 격리 행은 빠지고, 한 셀에 원천이
+- 수급은 코스피·코스닥 보통 격자만 더한다: ETF·우선주는 빠지고, 한 셀에 원천이
   둘이면 백테스트 필드와 같은 규칙(키움 우선)으로 한 행만 센다. 값이 없는 셀은 0으로 치지 않고
   측정 수에서 뺀다. 읽다 실패하면 `MarketDataUnreadableError` 다.
 - 섹터는 장 이전 최신 스냅샷과 그 장 가격(전날 종가 = `base_price_krw`)을 붙인다.
@@ -82,36 +82,34 @@ def _universe(root: Path) -> None:
 
 
 def _flow(root: Path) -> None:
-    # (ticker, date, src, reject_reason, 개인, 외국인) — 나머지 주체는 기관 = 1억, 국가 = None
-    rows: list[tuple[str, date, str, str | None, int | None, int | None]] = [
-        ("005930", PREV, "kiwoom", None, 5 * EOK, -7 * EOK),
-        ("005930", LAST, "kiwoom", None, 2 * EOK, -3 * EOK),
+    # 실제 원장 본표처럼 `reject_reason` 칸이 없다 — 격리 행은 빌드가 `_reject/` 에 따로 쓴다.
+    # (ticker, date, src, 개인, 외국인) — 나머지 주체는 기관 = 1억, 국가 = None
+    rows: list[tuple[str, date, str, int | None, int | None]] = [
+        ("005930", PREV, "kiwoom", 5 * EOK, -7 * EOK),
+        ("005930", LAST, "kiwoom", 2 * EOK, -3 * EOK),
         # 같은 셀의 KIS 행 — 더하면 이중 집계다
-        ("005930", LAST, "kis", None, 90 * EOK, 90 * EOK),
+        ("005930", LAST, "kis", 90 * EOK, 90 * EOK),
         # 미측정 셀: 격자 수에는 들고 측정 수·합에는 들지 않는다. 같은 셀의 KIS 값이 있어도 백테스트
         # 필드(`flow.*`)처럼 키움 행을 고른다 — 홈과 백테스트가 같은 셀을 다르게 읽지 않게
-        ("000660", LAST, "kiwoom", None, None, None),
-        ("000660", LAST, "kis", None, 8 * EOK, 8 * EOK),
-        # 격자 밖 격리 행
-        ("000660", PREV, "kiwoom", "off_grid", 50 * EOK, 50 * EOK),
+        ("000660", LAST, "kiwoom", None, None),
+        ("000660", LAST, "kis", 8 * EOK, 8 * EOK),
         # 우선주·ETF 는 수급 합에서 뺀다
-        ("005935", LAST, "kiwoom", None, 40 * EOK, 40 * EOK),
-        ("069500", LAST, "kiwoom", None, 30 * EOK, 30 * EOK),
-        ("036220", LAST, "kiwoom", None, 1 * EOK, -1 * EOK),
+        ("005935", LAST, "kiwoom", 40 * EOK, 40 * EOK),
+        ("069500", LAST, "kiwoom", 30 * EOK, 30 * EOK),
+        ("036220", LAST, "kiwoom", 1 * EOK, -1 * EOK),
     ]
     money = pa.decimal128(15, 0)
 
     def column(values: list[int | None]) -> pa.Array:
         return pa.array([None if v is None else Decimal(v) for v in values], type=money)
 
-    measured = [r[4] is not None for r in rows]
+    measured = [r[3] is not None for r in rows]
     columns: dict[str, pa.Array] = {
         "date": pa.array([r[1] for r in rows], type=pa.date32()),
         "ticker": pa.array([r[0] for r in rows]),
         "src": pa.array([r[2] for r in rows]),
-        "reject_reason": pa.array([r[3] for r in rows], type=pa.string()),
-        "ind_invsr_krw": column([r[4] for r in rows]),
-        "frgnr_invsr_krw": column([r[5] for r in rows]),
+        "ind_invsr_krw": column([r[3] for r in rows]),
+        "frgnr_invsr_krw": column([r[4] for r in rows]),
     }
     for name in FLOW_COLUMNS[2:]:
         columns[name] = column([None if name == "natn_krw" or not m else EOK for m in measured])
@@ -208,7 +206,7 @@ def test_flow_days_sum_measured_common_cells_once_per_market(market_root: Path) 
     assert kospi.amounts[Investor.FOREIGN] == -3 * EOK
     assert kospi.amounts[Investor.INSTITUTION] == EOK
     assert kospi.amounts[Investor.GOVERNMENT] == 0
-    # 격자 밖 격리 행(000660 PREV)은 빠진다
+    # 전날 장도 같은 격자로 더한다
     assert days[(PREV, FlowMarket.KOSPI)].amounts[Investor.INDIVIDUAL] == 5 * EOK
     kosdaq = days[(LAST, FlowMarket.KOSDAQ)]
     assert (kosdaq.measured_securities, kosdaq.amounts[Investor.FOREIGN]) == (1, -EOK)

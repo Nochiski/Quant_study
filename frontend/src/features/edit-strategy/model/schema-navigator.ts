@@ -48,8 +48,8 @@ export type SchemaFacts = {
   valueLabelKeys: Readonly<Record<string, string>> | null;
   appliedStage: string | null;
   /**
-   * `x-stage`: 그래프 표현(파이프라인)의 단계(P4-01). 필드의 단계를 읽는 규칙은 정본 대장 "그래프 표현
-   * 투영" 행이 소유하고 `pipeline-projection.ts`가 그 규칙을 쓴다.
+   * `x-stage`: 그래프 표현(파이프라인)의 단계(P4-01). 필드의 단계를 읽는 규칙은 `pipeline-projection.ts`가
+   * 소유한다.
    */
   stage: string | null;
   catalog: string | null;

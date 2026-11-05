@@ -421,8 +421,9 @@ def test_factor_authoring_mapping_is_owned_by_the_runtime_schema() -> None:
 
 
 def _stage_by_pointer(schema: dict[str, Any]) -> dict[str, str | None]:
-    """스칼라 계약 행 pointer → 그래프 표현 단계. 규칙은 정본 대장 "그래프 표현 투영" 행이 소유하고
-    프론트 파이프라인 투영이 같은 규칙을 쓴다."""
+    """스칼라 계약 행 pointer → 그래프 표현 단계. 읽는 규칙의 owner는 프론트 파이프라인 투영
+    (`features/edit-strategy/model/pipeline-projection.ts`)이고, 이 함수는 같은 규칙으로
+    배정표를 고정한다."""
 
     def objects(node: dict[str, Any]) -> list[dict[str, Any]]:
         node = _resolve(schema, node)

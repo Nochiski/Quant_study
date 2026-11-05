@@ -269,9 +269,9 @@ const appendOperation = (
 };
 
 /**
- * 스코프를 갖는 identity 네임스페이스 → 항목 pointer에서 탐색 범위(SoT "전략 의미" 행: 스코프가 있으면
- * 호출자가 `within`을 넘긴다). `node`는 그 팩터의 `graph` 아래 — 다른 팩터의 같은 `node_id`는 참조가 아니다
- * (Phase 4 감사 DEFECT-P4X-002, Phase 5 감사 DEFECT-P5X-004). 여기 없는 네임스페이스(`factor`·`parameter`)는
+ * 스코프를 갖는 identity 네임스페이스 → 항목 pointer에서 탐색 범위(`document-references.ts`의
+ * `findReferences`는 스키마를 모르는 전역 탐색이라 스코프가 있으면 호출자가 `within`을 넘긴다).
+ * `node`는 그 팩터의 `graph` 아래 — 다른 팩터의 같은 `node_id`는 참조가 아니다(Phase 4 감사 DEFECT-P4X-002, Phase 5 감사 DEFECT-P5X-004). 여기 없는 네임스페이스(`factor`·`parameter`)는
  * 문서 전역이다.
  */
 const REFERENCE_SCOPES: Readonly<

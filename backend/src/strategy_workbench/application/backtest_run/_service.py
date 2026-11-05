@@ -868,8 +868,9 @@ class BacktestRunService:
     ) -> _FactorReturns | FactorRegressionUnavailableReason:
         """계산해 둔 팩터 수익률. 없으면 뒤에서 계산을 걸고(같은 키는 한 번) `COMPUTING`.
 
-        데이터 판은 프로세스 안에서 고정이라(SoT "백테스트 run 접수" 행) 계산해 둔 값은 늘 지금
-        판과 같은 판의 것이고, 판이 달라 회귀하지 않는다는 답도 다시 계산하지 않고 그대로 둔다.
+        데이터 판은 프로세스 안에서 고정이라(`domain/backtest/_canonical.py`의 `run_input_key`)
+        계산해 둔 값은 늘 지금 판과 같은 판의 것이고, 판이 달라 회귀하지 않는다는 답도 다시 계산하지
+        않고 그대로 둔다.
         일시 실패(원천 부재·조회 중 판 경합·예상 밖 오류)는 사유를 한 번 돌려주고 잊는다 — 다음
         조회가 다시 계산한다.
         활성 계산이 있으면 다른 키도 `COMPUTING`만 답하며, 완료 후 다음 조회에서 접수한다.

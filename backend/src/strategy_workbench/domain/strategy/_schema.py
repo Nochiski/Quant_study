@@ -24,8 +24,11 @@ Shape (JSON Schema 2020-12):
   the dataclass field metadata declared next to the field (P3-03).
 - required factor authoring fields carry `x-authoring-source` or `x-authoring-default`; this lets
   clients project a catalog row without duplicating FactorSignal field names or starter values.
-- field metadata `stage` 는 `x-stage`(`AppliedStage` 값, 그래프 표현의 단계)로 싣는다. 어디에
-  선언하고 필드의 단계를 어떻게 읽는지는 정본 대장 "그래프 표현 투영" 행이 소유한다(P4-01).
+- field metadata `stage` 는 `x-stage`(`AppliedStage` 값, 그래프 표현의 단계)로 싣는다(P4-01).
+  `StrategySpec` 섹션과, 적용 단계가 섹션과 다르고 제약 행이 없는 필드에만 선언한다.
+  한 필드에 `x-stage`와 제약 행의 `x-applied-stage`를 함께 두지 않는다
+  (`tests/domain/test_strategy_schema.py`가 고정). 필드의 단계를 읽는 규칙은 frontend
+  `features/edit-strategy/model/pipeline-projection.ts`가 소유한다.
 """
 
 from __future__ import annotations

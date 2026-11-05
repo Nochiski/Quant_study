@@ -27,7 +27,6 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategySourceKind,
 )
 from strategy_workbench.domain.backtest.facade.trials import (
-    BlockedTrialAttempt,
     TrialLedgerEntry,
     lineage_root,
     resolve_lineage,
@@ -247,23 +246,6 @@ class SQLiteBacktestRunRepository:
                     (headline.total_return, headline.sharpe, headline.max_drawdown, run_id),
                 )
 
-    def record_blocked_attempt(self, attempt: BlockedTrialAttempt) -> None:
-        with self._database.transaction(write=True) as connection:
-            connection.execute(
-                """
-                INSERT INTO sealed_window_blocks
-                    (blocked_at, lineage_id, trial_key, spec_hash, start)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    datetime_text(attempt.blocked_at, field="sealed window block blocked_at"),
-                    attempt.lineage_id,
-                    attempt.trial_key,
-                    attempt.spec_hash,
-                    attempt.start.isoformat(),
-                ),
-            )
-
     def trial_ledger(self, lineage_id: str) -> TrialLedgerRecords:
         with self._database.transaction(write=False) as connection:
             merges = _merges(connection)
@@ -281,13 +263,6 @@ class SQLiteBacktestRunRepository:
                 WHERE {where} ORDER BY accepted_order
                 """,
                 (RUN_START_PATH, RUN_END_PATH, *members),
-            ).fetchall()
-            blocked = connection.execute(
-                f"""
-                SELECT blocked_at, lineage_id, trial_key, spec_hash, start
-                FROM sealed_window_blocks WHERE {where} ORDER BY blocked_order
-                """,
-                members,
             ).fetchall()
         try:
             return TrialLedgerRecords(
@@ -308,16 +283,6 @@ class SQLiteBacktestRunRepository:
                         end=_optional_date(row["run_end"]),
                     )
                     for row in entries
-                ),
-                blocked=tuple(
-                    BlockedTrialAttempt(
-                        blocked_at=datetime.fromisoformat(row["blocked_at"]),
-                        lineage_id=row["lineage_id"],
-                        trial_key=row["trial_key"],
-                        spec_hash=row["spec_hash"],
-                        start=date.fromisoformat(row["start"]),
-                    )
-                    for row in blocked
                 ),
             )
         except (TypeError, ValueError) as error:

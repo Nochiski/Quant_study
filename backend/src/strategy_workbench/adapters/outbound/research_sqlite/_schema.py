@@ -17,7 +17,7 @@
 | 8 | 실험을 만든 결과 실행(검증 랩 V5-02 튼튼한지 확인하기): `experiment_sources` |
 | 9 | 합성 사전등록·모의 claim·관측 결과(실제 개봉 권위 없음) |
 | 10 | 완료 run 의 머리 지표(목록 응답, 재설계 결정 1): `backtest_run_headlines` |
-| 11 | v9 합성 사전등록 표를 지운다(2026-11-05 사용자 결정으로 검증 랩 V6 폐기) |
+| 11 | 앱 홀드아웃 관문·V6 폐기(2026-11-05): v9 모의 표·`sealed_window_blocks` 를 지운다 |
 
 v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다. v5 에서 올린
 파일의 기존 run 은 시작 시각이 없어 시간 추정의 근거가 되지 않는다. v9 에서 올린 파일의 기존 완료
@@ -464,16 +464,19 @@ _V10_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
 V10_SCHEMA_OBJECTS = V9_SCHEMA_OBJECTS + _V10_ADDED_OBJECTS
 
 # v11 은 표를 지우기만 한다. 홀드아웃은 앱이 아니라 실험마다 사전등록 문서로 관리한다(2026-11-05
-# 사용자 결정). 지우는 표는 테스트가 만든 합성 모의 기록뿐이라 옮길 행이 없다. 자식 표부터 지운다 —
-# 외래 키가 켜져 있으면 부모 표를 먼저 지울 때 자식 행이 막는다. 표의 트리거·인덱스는 표와 함께
-# 지워진다.
+# 사용자 결정). 합성 모의 표에는 테스트가 만든 기록뿐이고, 봉인 원장의 차단 기록은 없어진 관문이
+# 거절한 요청(결과 없음, N 밖)이라 옮길 곳이 없다. 자식 표부터 지운다 — 외래 키가 켜져 있으면 부모
+# 표를 먼저 지울 때 자식 행이 막는다. 표의 트리거·인덱스는 표와 함께 지워진다.
 _V11_DROPPED_TABLES: tuple[str, ...] = (
     "holdout_simulation_results",
     "holdout_simulation_claims",
     "holdout_simulation_registrations",
+    "sealed_window_blocks",
 )
 V11_SCHEMA_OBJECTS = tuple(
-    item for item in V10_SCHEMA_OBJECTS if not item[1].startswith("holdout_simulation_")
+    item
+    for item in V10_SCHEMA_OBJECTS
+    if not item[1].startswith(("holdout_simulation_", "sealed_window_blocks"))
 )
 
 

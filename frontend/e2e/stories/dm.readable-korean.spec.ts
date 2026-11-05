@@ -142,8 +142,8 @@ test(
 );
 
 /**
- * 연구 구간 규칙이 생기기 전 기간으로 돌다 자본 잠식으로 멈춘 옛 실행. 아래 두 테스트는 옛 실행의 이력·상태·결과·
- * 재실행을 브라우저에서 대신 응답한다 — 그런 실행을 실제로 만들면 e2e 이력 DB에 남아 다른 스토리의 이력 단언을
+ * 자본 잠식으로 멈춘 옛 실행. 아래 두 테스트는 옛 실행의 이력·상태·결과·재실행을
+ * 브라우저에서 대신 응답한다 — 그런 실행을 실제로 만들면 e2e 이력 DB에 남아 다른 스토리의 이력 단언을
  * 흔든다. 문장은 frontend 번역(run 실패 코드·백테스트 API 코드)이 소유한다.
  */
 const WIPED_OUT: BacktestRunState = {
@@ -159,7 +159,7 @@ const WIPED_OUT: BacktestRunState = {
   updated_at: "2026-09-01T00:00:05Z",
 };
 
-/** 연구 구간 규칙이 생기기 전 기간으로 기록된 옛 실행의 요청. 재실행은 이것을 그대로 다시 보낸다. */
+/** 옛 실행의 요청. 재실행은 이것을 그대로 다시 보낸다. */
 const OLD_RUN_REQUEST: BacktestRunSpec = {
   environment: {
     start: "2018-01-02",
@@ -208,12 +208,9 @@ test(
               status: 422,
               json: {
                 detail: {
-                  code: "backtest.run.research_window_violation",
+                  code: "backtest.run.invalid",
                   message:
-                    "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
-                  sealed_start: "2016-01-01",
-                  sealed_end: "2019-12-31",
-                  research_start: "2020-01-02",
+                    "run request cannot start — got=start=2018-01-02",
                 },
               },
             }),
@@ -256,7 +253,7 @@ test(
       name: "동일 설정으로 다시 실행하지 못했습니다",
     });
     await expect(rejection).toContainText(
-      "전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 실행하세요.",
+      "전략 편집기에서 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
     );
     await expect(rejection.getByRole("group")).toContainText(
       "got=start=2018-01-02",

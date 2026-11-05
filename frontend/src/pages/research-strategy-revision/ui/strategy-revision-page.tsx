@@ -405,7 +405,6 @@ export const StrategyRevisionPage = () => {
               />
             }
             runFieldLabel={runSettings.runFieldLabel}
-            runRejectionFix={runSettings.rejectionFix}
             decision={backtest.decision}
             runStatus={backtest.status}
           />

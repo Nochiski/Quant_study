@@ -6,7 +6,6 @@ from datetime import date
 from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
     require_environment,
-    require_research_window,
 )
 from strategy_workbench.domain.equity.facade.research_data import SNAPSHOT_CONTRACT_SEPARATOR
 from strategy_workbench.domain.signal_evaluation.facade.evaluation import (
@@ -77,7 +76,6 @@ class SignalResearchService:
     def run(self, request: SignalResearchRequest) -> SignalResearchOutcome:
         """신호 계획을 먼저 고정하고 별도 라벨을 읽은 뒤 검증된 입력의 평가 증거를 반환한다."""
         environment = require_environment(request.environment, requested_by="signal_research")
-        require_research_window(request.evaluation_as_of, requested_by="signal_research")
         if not environment.start <= environment.end <= request.evaluation_as_of:
             raise ValueError(
                 "signal window must end on or before evaluation_as_of — "

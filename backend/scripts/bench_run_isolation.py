@@ -1,8 +1,7 @@
 """run 실행 방식 측정: 서버 안 스레드 대 별도 프로세스. 실행 시간·API 응답·메모리를 잰다.
 
 측정 절차와 결과의 정본은 `docs/planning/run-worker-process/BENCHMARK.md` 다. 같은 요청은
-진행 중 run 에 합쳐지므로(US-SM-11) 동시 run 은 초기자본을 1원씩 달리한다. 구간 시작은
-홀드아웃 규칙에 따라 2020-01-02 이후만 받는다(`.claude/rules/holdout-window.md`).
+진행 중 run 에 합쳐지므로(US-SM-11) 동시 run 은 초기자본을 1원씩 달리한다.
 
 - `--mode thread`: `--server` 로 떠 있는 서버에 run 을 보내고, 끝날 때까지 health 지연을 잰다.
 - `--mode process`: run 마다 새 프로세스가 임시 경로로 앱을 조립해 run 하나를 돌린다(라이브
@@ -29,10 +28,7 @@ import tempfile
 import threading
 import time
 import urllib.request
-from datetime import date
 from pathlib import Path
-
-from strategy_workbench.domain.backtest.facade.environment import RESEARCH_START
 
 TERMINAL = ("completed", "failed", "cancelled")
 
@@ -278,10 +274,6 @@ def main() -> None:
     parser.add_argument("--cash", type=float, default=100_000_000.0)
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if date.fromisoformat(args.start) < RESEARCH_START:
-        raise SystemExit(
-            f"구간 시작이 연구 하한보다 이르다 — start={args.start} floor={RESEARCH_START}"
-        )
     if args.child:
         _child(args)
         return

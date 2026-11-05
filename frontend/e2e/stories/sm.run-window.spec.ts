@@ -1,11 +1,11 @@
 /**
- * 한상목의 스토리 e2e — 봉인 구간과 겹치는 실행이 이유와 교정 버튼과 함께 막히고(US-SM-13), 실행 전에 이
- * 실행이 새 시도인지 알려 준다(US-SM-16).
+ * 한상목의 스토리 e2e — 2020년 이전 시작일도 막히지 않고 실행되고(US-SM-13), 실행 전에 이 실행이 새 시도인지
+ * 알려 준다(US-SM-16).
  *
- * 스토리 문구와 수용 기준의 정본은 `docs/product/user-stories/stories/sm.md`다. 봉인 구간·연구 하한 날짜와
- * 새 시도 판정은 backend 가 소유한다(검증 랩 spec D1·D2). 여기서는 실제 backend 위에서 그 답이 화면에
- * 이유·교정 버튼·시도 영향 문장으로 보이는지를 본다. 팩터 미리보기의 같은 거절은 화면이 없어 backend 통합
- * 테스트가 지킨다(스토리 비고).
+ * 스토리 문구와 수용 기준의 정본은 `docs/product/user-stories/stories/sm.md`다. 홀드아웃은 실험마다 사전등록
+ * 문서로 관리하고 앱은 구간을 막지 않는다(2026-11-05 사용자 결정). 새 시도 판정은 backend 가 소유한다(검증 랩
+ * spec D2). 여기서는 실제 backend 위에서 예전 봉인 구간의 시작일이 그대로 실행되고, 그 답이 시도 영향 문장으로
+ * 보이는지를 본다.
  */
 import { expect, test } from "@playwright/test";
 
@@ -21,18 +21,18 @@ import {
   strategyIdentity,
 } from "../workbench-helpers";
 
-/** 봉인 구간(2016-01-01~2019-12-31) 안의 시작일. */
-const SEALED_START = "2018-01-02";
+/** 2016-01-01~2019-12-31(2026-11-04 개봉한 옛 봉인 구간) 안의 시작일. */
+const PAST_START = "2018-01-02";
 
 test(
-  "US-SM-13 봉인 구간과 겹치는 시작일은 이유와 교정 버튼과 함께 막히고, 실행 전에 시도 수 영향을 알려 준다",
+  "US-SM-13 2020년 이전 시작일도 막히지 않고 실행되며, 실행 전에 시도 수 영향을 알려 준다",
   { tag: ["@story", "@US-SM-13", "@US-SM-16"] },
   async ({ page }) => {
     test.setTimeout(180_000);
     await openEditor(page, "/research/strategies/new");
     await replaceSource(
       page,
-      mustReplace(GOLDEN, "퀄리티 모멘텀", "US-SM-13 봉인 구간"),
+      mustReplace(GOLDEN, "퀄리티 모멘텀", "US-SM-13 과거 구간"),
     );
     await expectPhase(page, "검증 통과");
     await fillRunEnvironment(page);
@@ -47,36 +47,16 @@ test(
     await saveAndWaitForRevision(page, 1);
     const { strategyId } = strategyIdentity(page);
     const strategyUrl = `/research/strategies/${strategyId}/revisions/1`;
-    // 시작일만 봉인 구간 안으로 옮긴다. 저장 뒤에도 방금 고른 실행 설정이 이어진다.
+    // 시작일만 2020년 이전으로 옮긴다. 저장 뒤에도 방금 고른 실행 설정이 이어진다.
     await toggle.click();
-    await page.getByLabel("시작일", { exact: true }).fill(SEALED_START);
-    await toggle.click();
-
-    // 실행이 시작되지 않고, 봉인 구간과 연구 구간 시작일을 설명하는 오류와 교정 버튼이 보인다.
-    await backtest(page).click();
-    const rejection = page.getByRole("alert", { name: "백테스트 시작 실패" });
-    await expect(rejection).toContainText(
-      "2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다.",
-    );
-    await expect(rejection).toContainText("시작일을 2020-01-02 이후로 옮긴 뒤");
-    await expect(page).toHaveURL(
-      /\/research\/strategies\/[^/]+\/revisions\/1(?:\?.*)?$/u,
-    );
-
-    // 버튼을 누르면 시작일이 2020-01-02로 바뀌고 실행할 수 있다.
-    await rejection
-      .getByRole("button", { name: "시작일을 2020-01-02로" })
-      .click();
-    await expect(rejection).toHaveCount(0);
-    await toggle.click();
-    await expect(page.getByLabel("시작일", { exact: true })).toHaveValue(
-      "2020-01-02",
-    );
+    await page.getByLabel("시작일", { exact: true }).fill(PAST_START);
     // 실행 전: 저장한 전략의 첫 결과라 새 시도로 센다(US-SM-16).
     await expect(impact).toHaveText(
       "결과가 나오면 새 시도로 셉니다. 계열 시도 수 0회 → 1회. 시도가 늘면 같은 결과의 시도 횟수 보정 통계(DSR)가 낮아질 수 있어요.",
     );
     await toggle.click();
+
+    // 거절 없이 실행이 시작되고 끝난다.
     await expect(backtest(page)).toBeEnabled();
     await backtest(page).click();
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
@@ -88,6 +68,9 @@ test(
     // 같은 설정으로 돌아오면 이미 센 시도의 재확인이라 시도 수가 그대로다(US-SM-16).
     await openEditor(page, strategyUrl);
     await toggle.click();
+    await expect(page.getByLabel("시작일", { exact: true })).toHaveValue(
+      PAST_START,
+    );
     await expect(impact).toHaveText(
       "이미 센 시도의 재확인이라 시도 수가 늘지 않습니다. 계열 시도 수 1회 그대로.",
     );

@@ -696,7 +696,6 @@ RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
 # 코드인지는 실행 유스케이스의 `rejection_code` 가 정한다.
 AdmissionRejectionCode = Literal[
     "backtest.run.environment_required",
-    "backtest.run.research_window_violation",
     "backtest.run.parameter_invalid",
     "backtest.run.invalid",
     "backtest.strategy.not_found",

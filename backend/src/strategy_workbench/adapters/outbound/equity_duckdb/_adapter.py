@@ -690,9 +690,10 @@ class EquityDuckdbAdapter:
     def _open_boot_catalog(self) -> duckdb.DuckDBPyConnection:
         """부팅 때 읽은 그 카탈로그 파일을 연다. 그 뒤 파일이 바뀌었으면 읽지 않고 멈춘다.
 
-        먼저 열고 나서 표식을 본다 — 연 뒤에 바뀌면 POSIX 는 연 쪽이 옛 파일을 계속 보고 Windows 는
-        열린 파일을 바꾸지 못한다. 바뀐 카탈로그의 매크로는 새 판본 경로를 물어 이 프로세스가 부팅 때
-        고정한 표·`snapshot_id` 와 섞이므로(silent corrupt) 앱 반영(새 컨테이너)을 기다리게 한다.
+        먼저 열고 나서 표식을 본다 — 연 뒤에 바뀌면 POSIX 는 연 쪽이 옛 파일을 계속 보고 Windows
+        는 열린 파일을 바꾸지 못한다. 바뀐 카탈로그의 매크로는 새 판본 경로를 물어 이 프로세스가
+        부팅 때 고정한 표·`snapshot_id` 와 섞이므로(silent corrupt) 앱 반영(새 컨테이너)을
+        기다리게 한다.
         """
         con = _open_catalog(self._catalog.path)
         if _file_stamp(self._catalog.path) == self._catalog_stamp:

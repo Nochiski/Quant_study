@@ -63,6 +63,14 @@ def test_content_date_column은_선언_컬럼이어야_한다() -> None:
         _table(content_date_column="date")
 
 
+def test_cell_key는_grain_안의_열이어야_한다() -> None:
+    cols = {"k": "BIGINT", "src": "VARCHAR", "available_date": "DATE", "available_basis": "VARCHAR"}
+    assert _table(grain=("k", "src"), columns=cols, cell_key=("k",)).cell_key == ("k",)
+    assert _table().cell_key == ()                      # 미선언이면 grain 으로 대조한다
+    with pytest.raises(ValueError, match="cell_key outside grain"):
+        _table(grain=("k", "src"), columns=cols, cell_key=("available_date",))
+
+
 def test_input_columns는_선언한_입력만_가리킨다() -> None:
     assert _table(input_columns={"stg_x": ("k",)}).declared_columns("stg_x") == ("k",)
     assert _table().declared_columns("stg_x") == ()

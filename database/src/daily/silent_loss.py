@@ -13,7 +13,8 @@
 한 곳) 대 직전 거래일(판정 달력 `daily.calendar`) 아침 인계 이력의 판. 판이 MANIFEST 나 디스크에서 사라졌으면(GC —
 stage keep 3 · equity keep 10) 그 표는 판정 불가다(P1 — 조용히 통과시키지 않는다).
 
-비교 단위(grain) — equity 는 선언 grain. stage 는 키가 유일하면(`key_unique`) 자연키, 판본 표면 자연키 + observed_date
+비교 단위(grain) — equity 는 선언 grain(격자 표는 선언 셀 축 `cell_key` — flow_daily 는 (date, ticker) 라 수집 전 셀
+(src NULL)의 채움이 행 삭제 + 추가가 아니라 src · 값 칸의 NULL→값이다, 11-03 · 11-04 오경보). stage 는 키가 유일하면(`key_unique`) 자연키, 판본 표면 자연키 + observed_date
 (G6 이 유일성을 보장하는 축), 판본 없는 로그(`versioned=False`)는 선언 열 전부 + observed_date(그 로그는 같은 키가
 여러 번이라 payload 열까지 묶어야 행이 갈린다). grain 의 NULL 은 허용하고 중복만 판정 불가로 본다(조인이 NULL 안전 —
 equity 격자의 not_collected 셀은 src 가 NULL 이 설계다). 같은 판 id 면 읽지 않고(같은 판),
@@ -219,15 +220,16 @@ class Spec:
 
 
 def spec_of(layer: str, table: str) -> Spec:
-    """선언에서 비교 축을 읽는다. 날짜 열은 date_axis 표의 날짜형 grain(키) 열 중 첫째다."""
+    """선언에서 비교 축을 읽는다. 날짜 열은 date_axis 표의 날짜형 비교 키 열 중 첫째다."""
     if layer == EQUITY:
         rules = _ed().load_equity_rules()
         if table not in rules:
             raise LookupError(f"equity 선언에 없는 표 — {table}")
         r = rules[table]
-        win = (next((c for c in r.grain if str(r.columns.get(c, "")).upper() == "DATE"), None)
+        key = tuple(r.cell_key or r.grain)
+        win = (next((c for c in key if str(r.columns.get(c, "")).upper() == "DATE"), None)
                if r.partition_class == "date_axis" else None)
-        return Spec(tuple(r.grain), win, frozenset(r.columns))
+        return Spec(key, win, frozenset(r.columns))
     from stage.model import DATE_FORMATS
     from stage.rules import RULES as STAGE_RULES
 

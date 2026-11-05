@@ -6,9 +6,9 @@ import { t, tOptional, type MessageKey } from "../../../shared/config";
  * 결과 조회 실패(`getBacktestResult` 404·409·410)가 같은 번역을 쓰고, 추적 실패도 추적 고유 코드가 아니면 이
  * 번역으로 간다 — 실행 설정 거절은 두 경로가 같은 코드다(#351). 코드 전수는 `backtest-error-contract.test.ts`·
  * `trace-error-message.test.ts`가 `openapi.json`과 대조한다(#260, #330). 거절이 짚은 칸의 이름을 알면
- * `backtest.error.<code>.named`의 `{field}` 자리에 넣는다. 날짜처럼 owner 가 backend 인 값은 번역에 적지 않고
- * `{이름}` 자리표시자로 두어 detail 이 실은 `values` 로 채운다(검증 랩 V1-01, 연구 구간 잠금). 번역이 없으면
- * null이고, 일반 문장은 부르는 쪽이 고른다. 서버 원문은 여기서 쓰지 않는다 — 접힌 진단 상세로 간다
+ * `backtest.error.<code>.named`의 `{field}` 자리에 넣는다. owner 가 backend 인 값은 번역에 적지 않고
+ * `{이름}` 자리표시자로 두어 detail 이 실은 `values` 로 채운다(예: `parameter_invalid` 의 `{parameter_id}`).
+ * 번역이 없으면 null이고, 일반 문장은 부르는 쪽이 고른다. 서버 원문은 여기서 쓰지 않는다 — 접힌 진단 상세로 간다
  * (`.claude/rules/frontend-api-state.md`).
  */
 export const backtestErrorSentence = (

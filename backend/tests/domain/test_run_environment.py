@@ -181,6 +181,13 @@ def test_schema_bounds_come_from_the_same_rows_the_model_validates_with() -> Non
     )
 
 
+def test_a_pre_2020_environment_passes_the_gate_unchanged() -> None:
+    """앱은 측정 구간을 날짜로 막지 않는다(2026-11-05 #679). 하한이 되살아나면 여기서 깨진다."""
+    early = replace(_environment(), start=date(2015, 1, 2))
+
+    assert require_environment(early, requested_by="test") is early
+
+
 def test_missing_environment_is_refused_with_a_coded_diagnostic() -> None:
     """P2-03: 1.2 문서에는 기간·유니버스가 없다. 기본값을 지어내면 사용자가 지정한 적 없는
     구간으로 백테스트가 돌고 매니페스트가 그 값을 사실로 기록한다."""

@@ -6,7 +6,7 @@
 
 사용자 로컬 실험(저장소 밖)에서 "코스피200 ETF 하나를 지수 추세·변동성으로 0~100% 들고 빼는" 규칙(T9 = 200일선 ±2% 밴드 × 조건부 변동성 조절)이
 낙폭을 크게 줄였다. 그 계산은 엔진이 아니라 별도 스크립트였다 — 지금 엔진은 이 전략을 표현하지 못한다. 사용자 결정(2026-11-04): 제품 기능으로 채우고 같은 규칙을
-엔진으로 다시 확인한다. 엔진 확인은 연구 하한(2020-01-02) 이후 구간에서만 한다(§9).
+엔진으로 다시 확인한다. 엔진 확인 구간은 §9가 정한다.
 
 | # | 필요한 것 | 지금 |
 |---|---|---|
@@ -43,7 +43,7 @@
   정규화하고(같은 묶음은 같은 값), 중복·형식 위반은 `InvalidRunFieldError("tickers", values=…)` → `backtest.run.field_invalid`. duckdb `_TICKER_RE` 는 id 해석 가드라고
   주석으로 가른다(입력 형식 규칙이 아니다). 대장에 "티커 형식" 행을 둔다.
 - **신원(해시)**: 새 칸은 기본값일 때 신원 payload 에서 뺀다. 그 규칙을 `domain/backtest/_canonical.py` 의 한 함수(`canonical_environment_payload`)에 두고 실행 지문 ·
-  `environment_hash` · 모의 홀드아웃 결합 해시(`_holdout_registration.py`)가 모두 그것을 쓴다 → 옛 run·기록의 신원이 그대로다(V6-01 저장 기록도 읽힌다).
+  `environment_hash` 가 모두 그것을 쓴다 → 옛 run·기록의 신원이 그대로다.
   시도 키는 `_trial_key._environment_key` 가 이미 기본값을 빼므로 `TRIAL_KEY_ROLES["tickers"] = KEY` 한 줄과 `test_run_environment_ownership.py` 분류만 더한다.
   (손절 브랜치의 `drop_inactive_stop_loss` 와 같은 꼴 — 병합 때 한 함수로 합친다.)
 
@@ -194,7 +194,7 @@
 
 ## 9. 확인 실험 — T9 엔진판(IT-09)
 
-- 구간: **2020-01-02 ~ 2026-08-31**(연구 하한 이후, 봉인 관문 예외 없음). 스크립트 대조도 같은 구간·같은 정의로 다시 계산한다.
+- 구간: **2020-01-02 ~ 2026-08-31**(앱 날짜 관문은 2026-11-05 #679로 없어졌고, 이 구간은 처음 정한 대로 둔다). 스크립트 대조도 같은 구간·같은 정의로 다시 계산한다.
 - 실행 설정: 유니버스 `krx.all` + `tickers=[069500]`, 매일 리밸런싱(`every_n_sessions` 1), 수수료 5bp + 슬리피지 5bp(편도 10bp), `sell_tax: none`(ETF), 최소 거래 비중 0.
 - 전략(정본 YAML `backend/tests/fixtures/strategy_documents/ideas/index_timing.yaml`): 알파 없음, `max_name_weight 1.0`, 투자 비중 팩터 =
   - px = `index.kospi200.close`, ratio = px / mean(px, 200), trend = state.band(ratio, 1.02, 0.98, state_window 252)

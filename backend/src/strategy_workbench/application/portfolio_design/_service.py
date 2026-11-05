@@ -596,7 +596,7 @@ class PortfolioDesignService:
 
         실행 설정 확정도 여기서 한다: 문서 검증이 먼저고(코드화된 진단의 owner 는 validator),
         엔진 능력 판정은 `environment.participation_rate` 를, 플랜 컴파일은 `environment.missing`
-        을 인자로 받아야 한다(P2-02·P2-03). 실행 설정이 없거나 연구 구간 밖이면 domain 오류를 그대로
+        을 인자로 받아야 한다(P2-02·P2-03). 실행 설정이 없으면 domain 오류를 그대로
         올린다 — 백테스트 시작과 같은 접수 거절 코드로 나간다(#351).
         """
 

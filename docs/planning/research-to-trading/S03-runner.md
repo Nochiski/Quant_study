@@ -52,7 +52,7 @@ S01 검증 규칙을 복제하거나 완화하지 않는다. 나중에 코드를
 
 ### 신호와 미래 결과 분리
 
-신호 창은 RunEnvironment의 start/end, 평가 cutoff은 별도의 `evaluation_as_of`, 만기를 찾을 달력 끝은 `label_calendar_through`다. `start <= end <= evaluation_as_of <= label_calendar_through`를 요구한다. 연구 하한은 기존 `require_environment`·`require_research_window`가 지킨다.
+신호 창은 RunEnvironment의 start/end, 평가 cutoff은 별도의 `evaluation_as_of`, 만기를 찾을 달력 끝은 `label_calendar_through`다. `start <= end <= evaluation_as_of <= label_calendar_through`를 요구한다. 연구 하한(`require_research_window`)은 2026-11-05 #679에서 폐기했다.
 
 기존 파이프라인을 먼저 실행하고 그 결과의 `PortfolioObservation`을 고정한다. 라벨은 그 뒤 별도 조회한다. 기존 팩터 평가의 기본 파라미터 해소 규칙을 그대로 사용하며, 이번 CLI는 별도 파라미터 override 기능을 제공하지 않는다. 결과의 request에 전체 전략과 기본 파라미터 정의를 함께 남긴다.
 

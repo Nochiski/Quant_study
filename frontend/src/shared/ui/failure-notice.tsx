@@ -10,7 +10,7 @@ type FailureNoticeProps = {
   /** 접힌 "서버 사유"에 둘 원문(`failureReason`). 없으면 상세를 그리지 않는다. */
   reason: string | null;
   className?: string;
-  /** 본문 아래에 둘 교정 동작(예: 연구 구간 거절의 "시작일을 …로" 버튼). */
+  /** 본문 아래에 둘 교정 동작(예: "다시 조회" 버튼). */
   children?: ReactNode;
   /**
    * 경고 알림(`role="alert"`)으로 읽힌다(기본). 목록 줄마다 붙은 지난 실패처럼 화면을 열 때 이미 있던 실패는

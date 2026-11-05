@@ -183,6 +183,18 @@ def test_trace_without_an_environment_is_refused_like_preview() -> None:
         )
 
 
+def test_a_run_starting_in_the_old_sealed_window_is_admitted(tmp_path: Path) -> None:
+    """옛 봉인 구간(2016~2019) 시작일도 접수 판정을 지난다(2026-11-05 #679 관문 제거)."""
+    runs = _runs(_portfolio(), tmp_path, "pre-2020-run")
+    early = replace(_environment(), start=date(2019, 12, 31))
+
+    admission = runs.admit(
+        BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=early)
+    )
+
+    assert admission.resolved.environment.start == date(2019, 12, 31)
+
+
 def test_run_without_an_environment_is_refused_before_it_is_queued(tmp_path: Path) -> None:
     runs = _runs(_portfolio(), tmp_path, "no-environment-run")
 

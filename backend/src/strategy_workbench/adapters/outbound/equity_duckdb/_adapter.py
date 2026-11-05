@@ -496,6 +496,15 @@ def _open_catalog(path: Path) -> duckdb.DuckDBPyConnection:
         ) from error
 
 
+def _file_stamp(path: Path) -> tuple[int, int] | None:
+    """파일 교체를 알아보는 표식(수정 시각 ns, 크기). 파일이 없으면 None."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
 def _keys_param(keys: Sequence[str]) -> str:
     """`_KEYS_SQL` 자리에 넘길 파라미터 — 종목·법인 목록의 JSON 배열 문자열."""
     return json.dumps(list(keys))
@@ -626,6 +635,9 @@ class EquityDuckdbAdapter:
         self._catalog: CatalogState = self._checked_catalog(
             read_catalog(self._root, ledger_snapshot_id)
         )
+        # 부팅 때 읽은 카탈로그 파일의 표식. sync 가 파일을 바꾸면 매크로 본문이 새 `v=` 경로를
+        # 물어, 부팅 때 고정한 표 판본과 섞인다 — 질의가 카탈로그를 열 때마다 대조한다.
+        self._catalog_stamp = _file_stamp(self._catalog.path) if self._catalog.usable else None
         self._event_feed_reason = self._unfolded_event_unavailable_reason()
         self._sessions: tuple[date, ...] = self._load_sessions()
         self._session_index = {session: index for index, session in enumerate(self._sessions)}
@@ -673,7 +685,23 @@ class EquityDuckdbAdapter:
         코드화한다(#318).
         """
         macro = self._catalog.usable and any(source.is_macro for source in sources)
-        return _open_catalog(self._catalog.path) if macro else _open(None)
+        return self._open_boot_catalog() if macro else _open(None)
+
+    def _open_boot_catalog(self) -> duckdb.DuckDBPyConnection:
+        """부팅 때 읽은 그 카탈로그 파일을 연다. 그 뒤 파일이 바뀌었으면 읽지 않고 멈춘다.
+
+        먼저 열고 나서 표식을 본다 — 연 뒤에 바뀌면 POSIX 는 연 쪽이 옛 파일을 계속 보고 Windows 는
+        열린 파일을 바꾸지 못한다. 바뀐 카탈로그의 매크로는 새 판본 경로를 물어 이 프로세스가 부팅 때
+        고정한 표·`snapshot_id` 와 섞이므로(silent corrupt) 앱 반영(새 컨테이너)을 기다리게 한다.
+        """
+        con = _open_catalog(self._catalog.path)
+        if _file_stamp(self._catalog.path) == self._catalog_stamp:
+            return con
+        con.close()
+        raise BacktestDataNotReadyError(
+            "원장 카탈로그가 이 서버가 시작할 때 읽은 판과 달라졌다 — 새로 받은 데이터를 앱에 "
+            "반영(DB 새로고침 완료 또는 서버 재시작)한 뒤 다시 실행한다 (catalog_changed)"
+        )
 
     def _checked_catalog(self, catalog: CatalogState) -> CatalogState:
         """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 매크로 본문을 읽는다(#247·#235).
@@ -1523,7 +1551,7 @@ class EquityDuckdbAdapter:
         warmup = query.history_sessions_before_start
         first = max(bisect_left(self._sessions, query.start) - warmup, 0)
         read_from = min(query.start, self._sessions[first]) if warmup else query.start
-        con = _open_catalog(self._catalog.path)  # 층 이동 사건을 카탈로그 뷰로 읽는다(#369)
+        con = self._open_boot_catalog()  # 층 이동 사건을 카탈로그 뷰로 읽는다(#369)
         try:
             price_columns = {
                 str(row[0])

@@ -121,6 +121,9 @@ def test_manifest_level_sees_remote_advance_and_stale_catalog(synced) -> None:
     assert "catalog snapshot_id" in details["_catalog_meta"]
     # 서버가 앞선 표만 따로 센다 — 카탈로그 차이는 로컬의 일이다
     assert report.remote_ahead == {"security"}
+    ahead = {f.table: f.remote_ahead for f in report.findings}
+    assert ahead == {"security": True, "_catalog_meta": False}
+    assert not report.local_ok
     fresh = snapshot_id({t: ts.build_id for t, ts in state.tables.items()})
     (root / "_catalog_meta.json").write_text(json.dumps({"snapshot_id": fresh}), encoding="utf-8")
     report = VerifyReport()
@@ -161,6 +164,21 @@ def test_files_level_flags_manifest_byte_drift_and_missing_disk_file(synced) -> 
     details = [f.detail for f in report.findings]
     assert any("MANIFEST bytes differ" in d for d in details)
     assert any("file missing on disk" in d for d in details)
+
+
+def test_a_remote_advance_is_told_apart_from_a_local_defect(synced) -> None:
+    # 서버가 security 를 새 판으로 올렸고, 로컬 price_daily 파일 하나가 사라졌다
+    remote, root, _ = synced
+    remote.put_table(REMOTE, "security", "b2", {"": {"part0.parquet": b"new"}}, {"": "1:1"})
+    (root / "price_daily" / "v=b1" / "year=2010" / "part0.parquet").unlink()
+    state = load_state(root, "equity")
+    report = VerifyReport()
+    verify_manifest(remote, REMOTE, root, state, report)
+    verify_files(remote, REMOTE, root, state, report)
+    marks = {(f.table, f.remote_ahead) for f in report.findings}
+    assert ("security", True) in marks and ("security", False) not in marks
+    assert ("price_daily", False) in marks  # 로컬 손상은 앞섬으로 가리지 않는다
+    assert not report.local_ok
 
 
 def test_nothing_to_verify_is_a_finding_not_a_pass(tmp_path: Path) -> None:

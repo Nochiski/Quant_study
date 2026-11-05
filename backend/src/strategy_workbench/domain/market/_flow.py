@@ -80,10 +80,6 @@ INVESTOR_GROUPS: Mapping[Investor, InvestorGroup] = {
 }
 
 
-def investor_group(investor: Investor) -> InvestorGroup:
-    return INVESTOR_GROUPS[investor]
-
-
 class FlowMarket(StrEnum):
     KOSPI = "KOSPI"
     KOSDAQ = "KOSDAQ"

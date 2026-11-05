@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,6 +27,7 @@ from strategy_workbench.application.ledger_refresh.facade.refresh import (
     SyncFailureKind,
     SyncStage,
     UnavailableReason,
+    classify,
 )
 from tests.equity_fixture import import_ledger_module
 
@@ -135,12 +137,12 @@ def test_the_command_targets_the_app_root_without_resyncing_the_app_environment(
                 "verify": {
                     "ok": False,
                     "remote_ahead": ["price_daily"],
-                    "findings": [{"level": "manifest", "table": "price_daily", "detail": "x"}],
+                    "findings": [{"table": "price_daily", "detail": "x", "remote_ahead": True}],
                 },
             },
             (None, 0, True, False, False, True),
         ),
-        # 서버가 앞선 표 밖의 차이(로컬 손상)는 여전히 불일치다
+        # 서버가 앞선 차이와 로컬 손상이 함께 있으면 불일치다(앞섬이 손상을 가리지 않는다)
         (
             {
                 "exit_code": 4,
@@ -150,12 +152,12 @@ def test_the_command_targets_the_app_root_without_resyncing_the_app_environment(
                     "ok": False,
                     "remote_ahead": ["price_daily"],
                     "findings": [
-                        {"level": "manifest", "table": "price_daily", "detail": "x"},
-                        {"level": "manifest", "table": "_state", "detail": "y"},
+                        {"table": "price_daily", "detail": "x", "remote_ahead": True},
+                        {"table": "price_daily", "detail": "file missing", "remote_ahead": False},
                     ],
                 },
             },
-            (None, 0, True, False, True, True),
+            (None, 0, True, False, True, False),
         ),
         # 모르는 실패 갈래·종료 코드는 예상 밖으로 접는다
         (
@@ -359,3 +361,55 @@ def test_a_sync_past_its_deadline_is_killed_and_its_own_lock_removed(
     assert outcome is not None and outcome.failure is SyncFailureKind.UNEXPECTED
     assert spawned[0].poll() is not None  # 끊었다
     assert not lock.exists()  # 끊긴 도구가 풀지 못한 이번 실행의 잠금을 치웠다
+
+
+@pytest.mark.parametrize(
+    ("verify", "applied"),
+    [
+        ({"ok": False, "findings": [{"table": "t", "remote_ahead": True}]}, True),
+        (
+            {
+                "ok": False,
+                "findings": [
+                    {"table": "t", "remote_ahead": True},
+                    {"table": "_state", "remote_ahead": False},
+                ],
+            },
+            False,
+        ),
+        # 옛 도구(차이마다 표시가 없다)의 차이는 불일치로 본다
+        ({"ok": False, "findings": [{"table": "t"}]}, False),
+    ],
+)
+def test_a_record_reaches_the_apply_decision_end_to_end(
+    verify: dict[str, object], applied: bool
+) -> None:
+    payload = {"exit_code": 4, "pull": {"results": []}, "catalog_rc": 0, "verify": verify}
+    assert (classify(outcome_from_last_run(payload, 4)) is None) is applied
+
+
+def test_a_cancel_from_another_thread_still_clears_its_own_lock(tmp_path: Path) -> None:
+    # 서버 종료(stop)가 다른 스레드에서 끊는 사이 받기 스레드의 wait 가 진행 파일을 치운다
+    lock = tmp_path / "data" / "equity" / SYNC_DIR / LOCK_NAME
+
+    def spawn(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
+        progress = command[command.index("--progress-file") + 1]
+        return subprocess.Popen(
+            [sys.executable, "-c", _HUNG_SYNC, str(lock), progress],
+            stdin=subprocess.DEVNULL,
+            start_new_session=sys.platform != "win32",
+        )
+
+    job = _adapter(
+        tmp_path, spawn=spawn, now=lambda: datetime.now(UTC) - timedelta(seconds=1)
+    ).start()
+    deadline = time.monotonic() + 10
+    while job.progress() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    outcomes: list[object] = []
+    waiter = threading.Thread(target=lambda: outcomes.append(job.wait(30)))
+    waiter.start()
+    job.cancel()
+    waiter.join(30)
+    assert outcomes and outcomes[0] is not None
+    assert not lock.exists()

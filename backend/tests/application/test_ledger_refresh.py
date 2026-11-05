@@ -33,8 +33,8 @@ from strategy_workbench.application.ledger_refresh.facade.refresh import (
 NOW = datetime(2026, 11, 5, 3, 0, tzinfo=UTC)
 # (failure, tables_failed, catalog_rebuilt, catalog_failed, verify_mismatch, drifted)
 OK = SyncOutcome(None, 0, True, False, False, False)
-# 받는 도중 서버 판이 바뀌면 확인하기가 그 차이를 본다
-DRIFTED = SyncOutcome(None, 0, True, False, True, True)
+# 받는 도중 서버 판이 바뀌었다 — 그 차이(서버가 앞섬)는 어댑터가 불일치에서 뺀다
+DRIFTED = SyncOutcome(None, 0, True, False, False, True)
 
 
 @dataclass
@@ -162,15 +162,17 @@ def test_active_work_blocks_the_start_and_names_what_is_running() -> None:
     assert sync.started == 0
 
 
-def test_another_sync_holding_the_lock_blocks_the_start_unless_the_lock_is_stale() -> None:
+def test_another_sync_holding_the_lock_blocks_the_start_even_when_stale() -> None:
     service, sync, _ = _service(sync=FakeSync(held=SyncLock(started_at=NOW, stale=False)))
     status = service.status()
     assert (status.code, status.can_start) == (RefreshCode.LOCKED, False)
     with pytest.raises(RefreshRejectedError):
         service.start()
-    # 멈춘 실행이 남긴 낡은 잠금은 도구가 받기를 시작할 때 치운다 — 막지 않는다
+    # 낡은 잠금도 막는다(도구는 살아 있는 실행의 낡은 잠금도 치워 두 받기가 겹칠 수 있다)
     sync.held = SyncLock(started_at=NOW, stale=True)
-    assert service.status().can_start
+    stale = service.status()
+    assert (stale.code, stale.can_start) == (RefreshCode.LOCKED, False)
+    assert "데이터 받기" in stale.message
 
 
 def test_a_clean_sync_blocks_new_work_then_applies_and_reports_up_to_date() -> None:
@@ -340,6 +342,9 @@ def test_a_partial_result_stays_partial_after_new_work_starts() -> None:
         RefreshOutcome.PARTIAL,
         RefreshFailure.TABLES_FAILED,
     )
+    # 결과 문장(다시 시작하지 말라는 경고)도 지금 상태 문장과 따로 남는다
+    assert status.outcome_message is not None and "다시 시작하지 마세요" in status.outcome_message
+    assert "다시 시작하지 마세요" not in status.message
 
 
 @dataclass
@@ -379,3 +384,9 @@ def test_a_stop_while_the_tool_is_starting_cancels_it_right_after() -> None:
     sync.start = start_after_stop  # pyright: ignore[reportAttributeAccessIssue]  # reason: 띄우는 순간을 붙잡는다
     service.start()
     assert job.cancelled.is_set()
+
+
+def test_local_mismatch_is_never_applied_even_when_the_server_also_moved_on() -> None:
+    # 어댑터가 서버가 앞선 차이를 뺀 뒤에도 남은 불일치는 drift 와 함께 와도 반영하지 않는다
+    outcome = SyncOutcome(None, 0, True, False, True, True)
+    assert classify(outcome) is RefreshFailure.MISMATCH

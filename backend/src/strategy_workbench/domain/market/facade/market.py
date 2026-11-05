@@ -1,5 +1,6 @@
 from strategy_workbench.domain.market._flow import (
     FLOW_SESSIONS,
+    INVESTOR_GROUPS,
     FlowDay,
     FlowMarket,
     FlowPeriod,
@@ -7,7 +8,6 @@ from strategy_workbench.domain.market._flow import (
     InvestorGroup,
     MarketFlow,
     flow_summary,
-    investor_group,
     summarize_flow,
 )
 from strategy_workbench.domain.market._index import (
@@ -29,6 +29,7 @@ from strategy_workbench.domain.market._won import won_words
 __all__ = [
     "FLOW_SESSIONS",
     "INDEX_HISTORY_SESSIONS",
+    "INVESTOR_GROUPS",
     "FlowDay",
     "FlowMarket",
     "FlowPeriod",
@@ -43,7 +44,6 @@ __all__ = [
     "SecurityMove",
     "build_sector_map",
     "flow_summary",
-    "investor_group",
     "sector_securities",
     "summarize_flow",
     "summarize_index",

@@ -27,6 +27,7 @@ from strategy_workbench.application.market_overview.facade.overview import (
     UnknownSectorError,
 )
 from strategy_workbench.domain.market.facade.market import (
+    INVESTOR_GROUPS,
     FlowDay,
     FlowMarket,
     FlowPeriod,
@@ -34,7 +35,6 @@ from strategy_workbench.domain.market.facade.market import (
     InvestorGroup,
     SectorGroup,
     SectorMap,
-    investor_group,
 )
 
 MARKET_OVERVIEW_PATH = "/api/v1/market/overview"
@@ -207,7 +207,7 @@ def _issue_body(issue: CardIssue | None) -> CardIssueBody | None:
 
 def _amounts(amounts: Mapping[Investor, int]) -> list[InvestorAmountBody]:
     return [
-        InvestorAmountBody(investor, amounts.get(investor, 0), investor_group(investor))
+        InvestorAmountBody(investor, amounts.get(investor, 0), INVESTOR_GROUPS[investor])
         for investor in Investor
     ]
 

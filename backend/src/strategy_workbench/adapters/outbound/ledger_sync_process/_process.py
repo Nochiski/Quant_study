@@ -137,16 +137,13 @@ def outcome_from_last_run(payload: Mapping[str, object] | None, return_code: int
     raw_verify = payload.get("verify")
     verify: Mapping[str, object] = raw_verify if isinstance(raw_verify, dict) else {}
     findings = verify.get("findings")
-    ahead = verify.get("remote_ahead")
-    ahead_tables = {str(table) for table in ahead} if isinstance(ahead, list) else set()
-    found_tables = (
-        {str(row.get("table")) for row in findings if isinstance(row, dict)}
-        if isinstance(findings, list)
-        else set()
+    rows_found = (
+        [row for row in findings if isinstance(row, dict)] if isinstance(findings, list) else []
     )
-    # 확인하기의 차이가 모두 서버가 앞선 표(받는 도중·정리하기 동안 새 판을 올림)라면 로컬 판은
-    # 맞다 — 받는 도중 판이 바뀐 것(drifted)과 같다.
-    only_ahead = bool(ahead_tables) and found_tables <= ahead_tables
+    # 확인하기의 차이가 모두 서버가 앞서서 난 것(받는 도중·정리하기 동안 새 판, 표 은퇴)이면
+    # 로컬 판은 맞다 — 받는 도중 판이 바뀐 것(drifted)과 같다. 차이마다 도구가 표시한다
+    # (`remote_ahead`).
+    only_ahead = bool(rows_found) and all(row.get("remote_ahead") is True for row in rows_found)
     differs = exit_code == EXIT_MISMATCH or verify.get("ok") is False
     return SyncOutcome(
         failure=failure,
@@ -154,7 +151,7 @@ def outcome_from_last_run(payload: Mapping[str, object] | None, return_code: int
         catalog_rebuilt=catalog_rc == EXIT_OK,
         catalog_failed=catalog_rc not in (None, EXIT_OK),
         verify_mismatch=differs and not only_ahead,
-        drifted=(isinstance(pull, dict) and bool(pull.get("drifted"))) or bool(ahead_tables),
+        drifted=(isinstance(pull, dict) and bool(pull.get("drifted"))) or (differs and only_ahead),
     )
 
 
@@ -244,10 +241,12 @@ class _ProcessJob:
         않게)."""
         if self._process.poll() is not None:
             return
+        # 진행 파일은 도구가 잠금을 잡은 뒤에 쓴다 — 없으면 그 잠금은 늦게 시작한 남의 것일 수 있다.
+        # 끊기 전에 본다: 끊는 사이 받기 스레드의 `wait` 가 진행 파일을 치울 수 있다.
+        started = self._progress_path.exists()
         _kill_tree(self._process)
         lock = self._sync_dir / LOCK_NAME
-        # 진행 파일은 도구가 잠금을 잡은 뒤에 쓴다 — 없으면 그 잠금은 늦게 시작한 남의 것일 수 있다.
-        if self._progress_path.exists() and self._ours(_read_json(lock)):
+        if started and self._ours(_read_json(lock)):
             try:
                 lock.unlink(missing_ok=True)
             except OSError:

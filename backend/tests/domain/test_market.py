@@ -9,11 +9,12 @@ from pathlib import Path
 import pytest
 
 from strategy_workbench.domain.market._flow import (
+    INSTITUTION_PARTS,
     INVESTOR_GROUPS,
+    MAIN_INVESTORS,
     MARKET_LABELS,
     SUMMARY_LABELS,
     InvestorGroup,
-    investor_group,
 )
 from strategy_workbench.domain.market.facade.market import (
     INDEX_HISTORY_SESSIONS,
@@ -215,6 +216,7 @@ def test_summary_sentence_names_match_the_screen_row_names() -> None:
 def test_every_investor_has_exactly_one_group() -> None:
     # 주체를 더하고 묶음을 정하지 않으면 조용히 각주로 가지 않고 여기서 멈춘다
     assert set(INVESTOR_GROUPS) == set(Investor)
-    assert [i for i in Investor if investor_group(i) is InvestorGroup.FOOTNOTE] == [
+    assert not set(MAIN_INVESTORS) & set(INSTITUTION_PARTS)  # 묶음이 겹쳐 조용히 덮이지 않는다
+    assert [i for i in Investor if INVESTOR_GROUPS[i] is InvestorGroup.FOOTNOTE] == [
         Investor.RESIDENT_FOREIGN
     ]

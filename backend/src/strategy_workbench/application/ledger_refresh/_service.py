@@ -122,7 +122,7 @@ FAILURE_MESSAGES: dict[RefreshFailure, str] = {
     RefreshFailure.MISMATCH: (
         "받은 파일이 서버와 달라 앱에 반영하지 않았어요. 다시 받아 주세요. 다시 받기 전까지 "
         "재무·수정주가처럼 정리된 데이터를 읽는 계산은 멈춰요. 다시 받아도 그대로면 사용 설명서 "
-        "'데이터 받기'의 확인 절차를 따라 주세요."
+        "'데이터 받기'를 따라 주세요."
     ),
     RefreshFailure.UNVERIFIED: (
         "받기는 끝났지만 확인하기를 마치지 못해 앱에 반영하지 않았어요. 다시 받아 주세요. "
@@ -149,6 +149,10 @@ ADMITTING_MESSAGE = "계산을 시작하는 요청을 처리하는 중이에요.
 _BUSY = frozenset({RefreshCode.RUNNING, RefreshCode.APPLYING})
 APPLYING_MESSAGE = "받은 데이터로 앱을 다시 세우는 중이에요. 잠시 뒤 저절로 다시 연결돼요."
 SUCCEEDED_MESSAGE = "새 데이터를 앱에 반영했어요."
+STALE_LOCK_NOTE = (
+    " 그 작업이 오래 끝나지 않아 멈춘 것 같으면 사용 설명서 '데이터 받기'를 따라 잠금을 "
+    "풀어 주세요."
+)
 DRIFTED_NOTE = " 받는 동안 서버가 데이터를 또 만들어 일부는 다음 받기에서 맞춰져요."
 BUILD_WINDOW_NOTE = (
     "서버가 지금 데이터를 만드는 중일 수 있어요. 받는 도중 바뀌면 일부는 다음 받기에서 맞춰져요."
@@ -176,8 +180,10 @@ class RefreshStatus:
     can_start: bool
     # 받거나 반영하는 중인가 — 이 동안 계산 시작은 409 `data.refreshing` 으로 돌아간다.
     refreshing: bool
-    # 마지막으로 끝난 받기의 결과(`finished_at` 과 짝). 받는 중이거나 아직 받은 적이 없으면 None.
+    # 마지막으로 끝난 받기의 결과(`finished_at` 과 짝)와 그 결과 문장. 받는 중이거나 아직 받은 적이
+    # 없으면 None. 지금 상태(`code`·`message`)가 바뀌어도(계산 시작·잠금) 그대로다.
     last_outcome: RefreshOutcome | None
+    outcome_message: str | None
     reason: UnavailableReason | None
     failure: RefreshFailure | None
     remote: RemoteCheck
@@ -210,15 +216,16 @@ def classify(outcome: SyncOutcome) -> RefreshFailure | None:
     """끝난 sync 하나를 반영할지 가른다. None 이면 반영한다.
 
     카탈로그를 다시 만들었으면(받을 새 판이 없었어도 다시 만든다) 반영한다. 다만 확인하기를 마치지
-    못했거나 받은 파일이 서버와 다르면 반영하지 않는다 — 확인하지 않은 판으로 앱을 다시 세우지
-    않는다. 받는 도중 서버 판이 바뀐 차이(drifted)는 판이 틀린 것이 아니라 반영한다. 다시 받지 않는
-    것은 그 받기가 옛 앱이 고정한 판을 지울 수 있어서다(`ledger_sync` gc). 카탈로그를 다시 만들기
-    전에 멈췄으면 표 일부만 바뀌었거나(`partial`) 그 실패 갈래 그대로다.
+    못했거나 로컬 판이 어긋나면(`verify_mismatch`) 반영하지 않는다 — 확인하지 않은 판으로 앱을 다시
+    세우지 않는다. 서버가 앞서서 난 차이(받는 도중·정리하기 동안 새 판, drifted)는 어댑터가
+    `verify_mismatch` 에서 이미 뺐다. 다시 받지 않는 것은 그 받기가 옛 앱이 고정한 판을 지울 수
+    있어서다(`ledger_sync` gc). 카탈로그를 다시 만들기 전에 멈췄으면 표 일부만 바뀌었거나
+    (`partial`) 그 실패 갈래 그대로다.
     """
     if outcome.catalog_rebuilt:
         if outcome.failure is not None:
             return RefreshFailure.UNVERIFIED
-        if outcome.verify_mismatch and not outcome.drifted:
+        if outcome.verify_mismatch:
             return RefreshFailure.MISMATCH
         return None
     if outcome.tables_failed:
@@ -342,8 +349,6 @@ class LedgerRefreshService:
         # 세기나 스레드 띄우기가 실패해도 RUNNING 에 갇히지 않게 되돌린다.
         try:
             busy = self._active_work.active().any
-            if not busy:
-                self._background(self._run)
         except BaseException:
             with self._lock:
                 self._state = previous
@@ -352,6 +357,12 @@ class LedgerRefreshService:
             with self._lock:
                 self._state = previous
             raise RefreshRejectedError(self.status())
+        try:
+            self._background(self._run)
+        except BaseException:  # 받기 스레드를 띄우지 못했다
+            with self._lock:
+                self._state = previous
+            raise
         return self.status()
 
     def stop(self) -> None:
@@ -444,6 +455,7 @@ class LedgerRefreshService:
             can_start=False,
             refreshing=state.code in _BUSY,
             last_outcome=state.outcome,
+            outcome_message=_outcome_message(state),
             reason=self._unavailable,
             failure=state.failure,
             remote=state.remote,
@@ -461,25 +473,31 @@ class LedgerRefreshService:
         if state.code is RefreshCode.APPLYING:
             return replace(base, message=APPLYING_MESSAGE)
         lock = self._sync.lock()
-        # 낡은(멈춘 실행이 남긴) 잠금은 도구가 받기를 시작할 때 스스로 치운다 — 막지 않는다.
-        if lock is not None and not lock.stale:
-            return replace(
-                base, code=RefreshCode.LOCKED, message=FAILURE_MESSAGES[RefreshFailure.LOCKED]
+        if lock is not None:
+            # 낡은 잠금도 막는다 — 도구는 낡은 잠금을 그 실행이 살아 있어도 치우므로, 앱이 열면 두
+            # 받기가 겹쳐 state 를 서로 덮을 수 있다.
+            message = FAILURE_MESSAGES[RefreshFailure.LOCKED] + (
+                STALE_LOCK_NOTE if lock.stale else ""
             )
+            return replace(base, code=RefreshCode.LOCKED, message=message)
         work = self._active_work.active()
         settled = replace(base, active_work=work, needs_check=stale)
         if work.any:
             # 마지막 결과(failure·finished_at)는 그대로 실어 화면이 따로 알릴 수 있다.
             return replace(settled, code=RefreshCode.BUSY_WORK, message=_busy_message(work))
-        if state.code is RefreshCode.SUCCEEDED:
-            message = SUCCEEDED_MESSAGE + (DRIFTED_NOTE if state.drifted else "")
-        elif state.failure is not None:
-            message = FAILURE_MESSAGES[state.failure]
+        if state.outcome is not None:
+            message = _outcome_message(state) or ""
         else:
             message = REMOTE_MESSAGES[state.remote.state]
             if state.remote.in_build_window:
                 message += " " + BUILD_WINDOW_NOTE
         return replace(settled, message=message, can_start=True)
+
+
+def _outcome_message(state: _State) -> str | None:
+    if state.outcome is RefreshOutcome.SUCCEEDED:
+        return SUCCEEDED_MESSAGE + (DRIFTED_NOTE if state.drifted else "")
+    return None if state.failure is None else FAILURE_MESSAGES[state.failure]
 
 
 def _busy_message(work: ActiveWork) -> str:

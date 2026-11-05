@@ -44,6 +44,8 @@ class Finding:
     level: Level
     table: str
     detail: str
+    # 서버가 앞서서(새 판·은퇴) 난 차이인가. 거짓이면 로컬 쪽 차이다(빠진 파일·크기·state 어긋남).
+    remote_ahead: bool = False
 
 
 @dataclass
@@ -59,8 +61,13 @@ class VerifyReport:
     def ok(self) -> bool:
         return not self.findings
 
-    def add(self, level: Level, table: str, detail: str) -> None:
-        self.findings.append(Finding(level, table, detail))
+    def add(self, level: Level, table: str, detail: str, *, remote_ahead: bool = False) -> None:
+        self.findings.append(Finding(level, table, detail, remote_ahead))
+
+    @property
+    def local_ok(self) -> bool:
+        """로컬 판이 자기 state·MANIFEST·디스크와 맞는가(서버가 앞선 차이만 있거나 없다)."""
+        return all(finding.remote_ahead for finding in self.findings)
 
     def count(self, level: Level, n: int = 1) -> None:
         self.checked[level.value] = self.checked.get(level.value, 0) + n
@@ -131,7 +138,7 @@ def verify_manifest(remote: RemoteFS, remote_root: str, layer_root: Path, state:
             report.remote_ahead.add(table)
             report.add(Level.MANIFEST, table,
                        f"current_build differs — remote={view.current_build} "
-                       f"local={local.build_id}")
+                       f"local={local.build_id}", remote_ahead=True)
         local_view = read_local_manifest(layer_root, table)
         if local_view is None or local_view.current_build != local.build_id:
             report.add(Level.MANIFEST, table,
@@ -143,7 +150,8 @@ def verify_manifest(remote: RemoteFS, remote_root: str, layer_root: Path, state:
             continue
         if table not in seen:
             report.remote_ahead.add(table)
-            report.add(Level.MANIFEST, table, "table synced locally but absent on remote")
+            report.add(Level.MANIFEST, table, "table synced locally but absent on remote",
+                       remote_ahead=True)
     if wanted is None:
         _verify_disk_matches_state(layer_root, state, report)
         _verify_catalog_snapshot(layer_root, report)
@@ -189,6 +197,8 @@ def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: Sy
         if wanted is not None and table not in wanted:
             continue
         table_root = layer_root / table
+        # 서버가 앞선 표(manifest 층위가 먼저 센다)는 원격과 견준 차이가 곧 그 앞섬이다
+        ahead = table in report.remote_ahead
         local_view = read_local_manifest(layer_root, table)
         build = local_view.builds.get(local.build_id) if local_view else None
         if local_view is None or build is None:
@@ -197,17 +207,19 @@ def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: Sy
         try:
             remote_manifest = remote.read_bytes(f"{remote_root}/{table}/{MANIFEST_NAME}")
         except FileNotFoundError:
-            report.add(Level.FILES, table, "remote MANIFEST missing")
+            report.add(Level.FILES, table, "remote MANIFEST missing", remote_ahead=ahead)
             continue
         if remote_manifest != local_view.raw:
-            report.add(Level.FILES, table, "MANIFEST bytes differ from remote")
+            report.add(Level.FILES, table, "MANIFEST bytes differ from remote",
+                       remote_ahead=ahead)
         for partition in build.partitions:
             remote_dir = f"{remote_root}/{table}/{partition.path}"
             try:
                 entries = {e.name: e for e in remote.listdir(remote_dir) if not e.is_dir}
             except FileNotFoundError:
                 report.add(Level.FILES, table,
-                           f"partition gone on remote (GC?) — path={partition.path}")
+                           f"partition gone on remote (GC?) — path={partition.path}",
+                           remote_ahead=ahead)
                 continue
             local_files = local.partition_files(partition.path)
             local_names = {rel.rsplit("/", 1)[-1] for rel in local_files}
@@ -220,7 +232,8 @@ def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: Sy
             if missing or extra or stray:
                 report.add(Level.FILES, table,
                            f"file set differs — path={partition.path} missing={missing} "
-                           f"extra={extra} stray_on_disk={stray}")
+                           f"extra={extra} stray_on_disk={stray}",
+                           remote_ahead=ahead and not stray)
             for rel, rec in local_files.items():
                 name = rel.rsplit("/", 1)[-1]
                 path = table_root / rel
@@ -238,7 +251,7 @@ def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: Sy
                         and entry.size != size_on_disk:
                     report.add(Level.FILES, table,
                                f"size differs from remote — {rel} remote={entry.size} "
-                               f"local={size_on_disk}")
+                               f"local={size_on_disk}", remote_ahead=ahead)
 
 
 def verify_hash(layer_root: Path, state: SyncState, report: VerifyReport, *,

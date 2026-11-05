@@ -95,6 +95,10 @@ class LedgerRefreshBody:
             description="마지막으로 끝난 받기의 결과(finished_at 과 짝). 지금 code 와 다를 수 있다."
         ),
     ]
+    outcome_message: Annotated[
+        str | None,
+        Field(description="그 결과의 문장(한글). 지금 상태 문장 message 와 다를 수 있다."),
+    ]
     reason: UnavailableReason | None
     failure: RefreshFailure | None
     needs_check: Annotated[bool, Field(description="서버 판 확인이 오래돼 다시 확인할 때다.")]
@@ -124,6 +128,7 @@ def _body(status: RefreshStatus) -> LedgerRefreshBody:
         can_start=status.can_start,
         refreshing=status.refreshing,
         last_outcome=status.last_outcome,
+        outcome_message=status.outcome_message,
         reason=status.reason,
         failure=status.failure,
         needs_check=status.needs_check,

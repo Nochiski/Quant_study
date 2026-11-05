@@ -94,11 +94,11 @@ class SyncJob(Protocol):
         ...
 
     def wait(self, timeout_s: float) -> SyncOutcome | None:
-        """끝나면 결과, `timeout_s` 안에 끝나지 않으면 None."""
+        """끝나면 결과, `timeout_s` 안에 끝나지 않으면 None. 상한을 넘기면 끊고 실패로 끝낸다."""
         ...
 
     def cancel(self) -> None:
-        """받기 단계에서만 의미가 있다. 이미 받은 표는 새 판으로 남는다."""
+        """도구를 끊는다(서버 종료). 이미 받은 표는 새 판으로 남는다."""
         ...
 
 

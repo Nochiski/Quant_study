@@ -110,9 +110,7 @@ class MockEquityDataAdapter:
         for field_id in field_ids:
             profile = profile_by_id.get(field_id)
             if profile is not None:
-                fields.append(
-                    field_metadata(profile, ADJUSTED_FIELD_BY_RAW.get(field_id))
-                )
+                fields.append(field_metadata(profile, ADJUSTED_FIELD_BY_RAW.get(field_id)))
         return FactorMetadataSnapshot(
             data_snapshot_id=self._snapshot.snapshot_id,
             fields=tuple(fields),
@@ -159,9 +157,7 @@ class MockEquityDataAdapter:
         고른다고 잘못 말한다.
         """
         return tuple(
-            replace(
-                describe_universe(universe_id, market), description=_MOCK_UNIVERSE_DESCRIPTION
-            )
+            replace(describe_universe(universe_id, market), description=_MOCK_UNIVERSE_DESCRIPTION)
             for market, universe_id in sorted(_MOCK_UNIVERSES, key=lambda key: key[1])
         )
 
@@ -246,7 +242,6 @@ class MockEquityDataAdapter:
             warnings=tuple(sorted(warnings)),
             detail=None if cells else f"no mock panel cells — query={query}",
         )
-
 
     def load_raw_observations(
         self,
@@ -506,8 +501,6 @@ class MockEquityDataAdapter:
             key=lambda observation: (observation.effective_date, observation.available_date),
             default=None,
         )
-
-
 
 
 def _sessions_with_history(

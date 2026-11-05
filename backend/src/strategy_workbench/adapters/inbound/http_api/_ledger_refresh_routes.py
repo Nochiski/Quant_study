@@ -8,7 +8,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import asyncio
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal
@@ -139,7 +140,11 @@ def _body(status: RefreshStatus) -> LedgerRefreshBody:
     )
 
 
-def register_ledger_refresh_routes(app: FastAPI, service: LedgerRefreshService) -> None:
+def register_ledger_refresh_routes(
+    app: FastAPI, service: LedgerRefreshService
+) -> Callable[[], Awaitable[None]]:
+    """라우트를 달고 서버 종료 때 부를 정리(받는 중인 도구 끊기)를 돌려준다."""
+
     @app.get(LEDGER_REFRESH_PATH, operation_id="getLedgerRefresh")
     def get_status() -> LedgerRefreshBody:
         return _body(service.status())
@@ -163,3 +168,8 @@ def register_ledger_refresh_routes(app: FastAPI, service: LedgerRefreshService) 
                 409,
                 detail={"code": "ledger_refresh.rejected", "message": error.status.message},
             ) from error
+
+    async def stop() -> None:
+        await asyncio.to_thread(service.stop)
+
+    return stop

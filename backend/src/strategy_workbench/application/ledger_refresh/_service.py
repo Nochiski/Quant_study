@@ -32,6 +32,7 @@ from strategy_workbench.application.ledger_refresh.ports.outgoing.ledger_sync im
     ApplyDataPort,
     LedgerSyncPort,
     SyncFailureKind,
+    SyncJob,
     SyncOutcome,
     SyncProgress,
 )
@@ -262,6 +263,7 @@ class LedgerRefreshService:
         self._lock = threading.Lock()
         self._state = _State()
         self._admitting = 0  # 처리 중인 계산 시작 요청 수
+        self._job: SyncJob | None = None
 
     # ── 조회 ──────────────────────────────────────────────────────────────────
 
@@ -339,8 +341,20 @@ class LedgerRefreshService:
             with self._lock:
                 self._state = previous
             raise RefreshRejectedError(self.status())
-        self._background(self._run)
+        try:
+            self._background(self._run)
+        except BaseException:
+            with self._lock:
+                self._state = previous
+            raise
         return self.status()
+
+    def stop(self) -> None:
+        """서버가 끝난다 — 받는 중이면 동기화 도구를 끊는다(앱을 끄면 받기도 멈춘다)."""
+        with self._lock:
+            job = self._job
+        if job is not None:
+            job.cancel()
 
     # ── 실행 ──────────────────────────────────────────────────────────────────
 
@@ -360,9 +374,11 @@ class LedgerRefreshService:
                 self._state.code = RefreshCode.APPLYING
             applying = True
             self._apply.apply()
-        except Exception:
+        except BaseException as error:
             logger.exception("ledger refresh stopped — applying=%s", applying)
             self._finish(RefreshFailure.APPLY if applying else RefreshFailure.UNEXPECTED)
+            if not isinstance(error, Exception):
+                raise
             return
         now = self._now()
         with self._lock:
@@ -377,14 +393,20 @@ class LedgerRefreshService:
 
     def _sync_once(self, sync: LedgerSyncPort) -> SyncOutcome:
         job = sync.start()
-        while True:
-            outcome = job.wait(_POLL_S)
-            progress = job.progress()
-            if progress is not None:
-                with self._lock:
-                    self._state.progress = progress
-            if outcome is not None:
-                return outcome
+        with self._lock:
+            self._job = job
+        try:
+            while True:
+                outcome = job.wait(_POLL_S)
+                progress = job.progress()
+                if progress is not None:
+                    with self._lock:
+                        self._state.progress = progress
+                if outcome is not None:
+                    return outcome
+        finally:
+            with self._lock:
+                self._job = None
 
     def _finish(self, failure: RefreshFailure) -> None:
         logger.warning("ledger refresh ended without applying — failure=%s", failure.value)

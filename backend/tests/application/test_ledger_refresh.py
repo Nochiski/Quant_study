@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -272,3 +274,44 @@ def test_work_admitted_before_the_start_blocks_it_and_work_after_it_is_refused()
     assert held == [True] and service.status().code is RefreshCode.SUCCEEDED
     with service.admit_work():  # 끝나면 다시 받는다
         pass
+
+
+@dataclass
+class HeldJob:
+    """`cancel` 이 오기 전까지 끝나지 않는 받기."""
+
+    cancelled: threading.Event = field(default_factory=threading.Event)
+
+    def progress(self) -> SyncProgress | None:
+        return None
+
+    def wait(self, timeout_s: float) -> SyncOutcome | None:
+        if not self.cancelled.wait(timeout_s):
+            return None
+        return SyncOutcome(SyncFailureKind.UNEXPECTED, 0, False, False, False, False)
+
+    def cancel(self) -> None:
+        self.cancelled.set()
+
+
+def test_stopping_the_server_cancels_the_running_sync() -> None:
+    job = HeldJob()
+    sync = FakeSync()
+    sync.start = lambda: job  # pyright: ignore[reportAttributeAccessIssue]  # reason: 이 테스트만 멈추는 받기를 꽂는다
+    threads: list[threading.Thread] = []
+
+    def background(run: Callable[[], None]) -> None:
+        threads.append(threading.Thread(target=run))
+        threads[0].start()
+
+    service = LedgerRefreshService(
+        sync, FakeWork(), FakeApply(), now=Clock(), background=background
+    )
+    service.start()
+    deadline = time.monotonic() + 10
+    while service._job is None and time.monotonic() < deadline:  # noqa: SLF001  # reason: 받기가 도구를 띄운 순간을 기다린다
+        time.sleep(0.01)
+    service.stop()
+    threads[0].join(10)
+    assert job.cancelled.is_set()
+    assert service.status().failure is RefreshFailure.UNEXPECTED  # 반영하지 않고 끝났다

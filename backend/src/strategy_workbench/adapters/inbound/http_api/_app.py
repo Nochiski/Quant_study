@@ -563,7 +563,7 @@ def create_app(
     # 계산을 시작하는 라우트의 `STARTS_WORK` 가 읽는다.
     app.state.ledger_refresh = ledger_refresh
     if ledger_refresh is not None:
-        register_ledger_refresh_routes(app, ledger_refresh)
+        closers.append(register_ledger_refresh_routes(app, ledger_refresh))
 
     strategy_not_found: dict[int | str, dict[str, Any]] = {
         404: {"model": StrategyNotFoundResponse, "description": "The strategy does not exist"}

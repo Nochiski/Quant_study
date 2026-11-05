@@ -17,6 +17,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -60,6 +61,9 @@ PARAMIKO = "paramiko>=3.4,<4"
 KEEP_BUILDS = 3
 # last_run.json 이 이번 실행의 것인가 — 시작 시각보다 이 이상 앞이면 지난 실행의 기록이다.
 _CLOCK_SLACK = timedelta(seconds=5)
+# 한 번의 sync 상한. 도구가 이보다 오래된 잠금을 비정상으로 보는 것(`LOCK_STALE_S`)과 같다 — 넘으면
+# 멈춘 것으로 보고 끊는다.
+SYNC_DEADLINE_S = LOCK_STALE_S
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 Spawner = Callable[..., subprocess.Popen[bytes]]
@@ -142,18 +146,40 @@ def outcome_from_last_run(payload: Mapping[str, object] | None, return_code: int
     )
 
 
+def _kill_tree(process: subprocess.Popen[bytes]) -> None:
+    """도구와 그 하위 프로세스(`uv` 아래 python, 카탈로그 빌드)를 함께 끝낸다."""
+    if process.poll() is not None:
+        return
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+        else:
+            os.killpg(process.pid, 9)  # 띄울 때 세션을 나눴다(`start_new_session`)
+    except (OSError, subprocess.TimeoutExpired):
+        logger.warning("ledger sync process tree kill failed — pid=%s", process.pid, exc_info=True)
+    if process.poll() is None:
+        process.kill()
+    process.wait()
+
+
 class _ProcessJob:
     def __init__(
         self,
         process: subprocess.Popen[bytes],
         progress_path: Path,
-        last_run: Path,
+        sync_dir: Path,
         started: datetime,
     ) -> None:
         self._process = process
         self._progress_path = progress_path
-        self._last_run = last_run
+        self._sync_dir = sync_dir
         self._started = started
+        self._deadline = time.monotonic() + SYNC_DEADLINE_S
 
     def progress(self) -> SyncProgress | None:
         document = _read_json(self._progress_path)
@@ -172,18 +198,27 @@ class _ProcessJob:
             bytes_done=_int(document.get("bytes_done")) or 0,
         )
 
+    def _ours(self, payload: Mapping[str, object] | None) -> bool:
+        """기록(`last_run.json`·`lock`)이 이번 실행의 것인가."""
+        started = _parse_time(payload.get("started_at_utc")) if payload else None
+        return started is not None and started >= self._started - _CLOCK_SLACK
+
     def wait(self, timeout_s: float) -> SyncOutcome | None:
         try:
             return_code = self._process.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
-            return None
-        payload = _read_json(self._last_run)
-        started = _parse_time(payload.get("started_at_utc")) if payload else None
-        if started is None or started < self._started - _CLOCK_SLACK:
+            if time.monotonic() < self._deadline:
+                return None
+            logger.warning("ledger sync passed its deadline — killing pid=%s", self._process.pid)
+            self.cancel()
+            return_code = self._process.wait()
+        last_run = self._sync_dir / LAST_RUN_NAME
+        payload = _read_json(last_run)
+        if not self._ours(payload):
             logger.warning(
                 "ledger sync left no record of this run — return_code=%s last_run=%s",
                 return_code,
-                self._last_run,
+                last_run,
             )
             payload = None
         try:
@@ -193,8 +228,17 @@ class _ProcessJob:
         return outcome_from_last_run(payload, return_code)
 
     def cancel(self) -> None:
-        if self._process.poll() is None:
-            self._process.terminate()
+        """도구를 끊는다. 끊긴 도구가 풀지 못한 이번 실행의 잠금은 치운다(다음 받기가 막히지
+        않게)."""
+        if self._process.poll() is not None:
+            return
+        _kill_tree(self._process)
+        lock = self._sync_dir / LOCK_NAME
+        if self._ours(_read_json(lock)):
+            try:
+                lock.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("could not remove the killed sync's lock — path=%s", lock)
 
 
 class LedgerSyncProcess:
@@ -291,9 +335,11 @@ class LedgerSyncProcess:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            # 끊을 때 하위 프로세스까지 한 번에 끝내려고 세션을 나눈다(POSIX).
+            start_new_session=sys.platform != "win32",
         )
         logger.info("ledger sync started — pid=%s root=%s", process.pid, self._equity_root)
-        return _ProcessJob(process, progress_path, self._sync_dir() / LAST_RUN_NAME, started)
+        return _ProcessJob(process, progress_path, self._sync_dir(), started)
 
 
 def discover_ledger_sync(

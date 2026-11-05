@@ -279,3 +279,42 @@ def test_discovery_receives_only_the_equity_root_the_app_reads(tmp_path: Path) -
     assert discover(root, uv=None) is UnavailableReason.SYNC_TOOL_MISSING
     (root / "_research_snapshot.pending").write_text("", encoding="utf-8")
     assert discover(root) is UnavailableReason.ROOT_MISMATCH  # 연구 보존본을 덮지 않는다
+
+
+_HUNG_SYNC = """
+import json, sys, time
+from datetime import datetime, timezone
+now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+open(sys.argv[1], "w", encoding="utf-8").write(json.dumps({"pid": 1, "started_at_utc": now}))
+time.sleep(120)
+"""
+
+
+def test_a_sync_past_its_deadline_is_killed_and_its_own_lock_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "data" / "equity" / SYNC_DIR / LOCK_NAME
+    spawned: list[subprocess.Popen[bytes]] = []
+
+    def spawn(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
+        process = subprocess.Popen(  # 잠금을 잡고 멈춘 도구
+            [sys.executable, "-c", _HUNG_SYNC, str(lock)],
+            stdin=subprocess.DEVNULL,
+            start_new_session=sys.platform != "win32",
+        )
+        spawned.append(process)
+        return process
+
+    monkeypatch.setattr(_process, "SYNC_DEADLINE_S", 1.0)
+    job = _adapter(
+        tmp_path, spawn=spawn, now=lambda: datetime.now(UTC) - timedelta(seconds=1)
+    ).start()
+    deadline = time.monotonic() + 10
+    while not lock.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    outcome = None
+    while outcome is None and time.monotonic() < deadline:
+        outcome = job.wait(0.2)
+    assert outcome is not None and outcome.failure is SyncFailureKind.UNEXPECTED
+    assert spawned[0].poll() is not None  # 끊었다
+    assert not lock.exists()  # 끊긴 도구가 풀지 못한 이번 실행의 잠금을 치웠다

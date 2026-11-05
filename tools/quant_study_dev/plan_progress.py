@@ -123,7 +123,6 @@ PROFILES: dict[str, PlanProfile] = {
                 "Validation statistics: PSR, DSR, plateau, capacity, factor regression",
             ),
             ("V5", "Screens (after lang2 merge signal)"),
-            ("V6", "Holdout one-time opening"),
         ),
         "V\\d+-\\d{2}",
         False,

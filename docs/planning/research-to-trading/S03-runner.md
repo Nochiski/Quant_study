@@ -127,7 +127,7 @@ uv run --no-sync --project backend python -m strategy_workbench.bootstrap.signal
 검증은 다음 파일이 소유한다.
 
 - `backend/tests/integration/test_signal_research_runner.py`: 실제 S01 create→verify→DuckDB→기존 factor pipeline→CLI JSON, 미보존/변조 root 차단, 쿼리 끝과 실제 span 구분, coverage_gap/data_gap/delisted, 중간 MASKED, 정지 기준가 제외, 조정종가 원천 부재, 한글·공백 경로.
-- `backend/tests/application/test_signal_research_service.py`: 원천/필드/TargetTape snapshot 불일치, 검증 근거 변경, 실패 값, 결과 불가능 조합, 빈 유니버스, 연구 하한·cutoff·잘못된 팩터·달력 입력 차단.
+- `backend/tests/application/test_signal_research_service.py`: 원천/필드/TargetTape snapshot 불일치, 검증 근거 변경, 실패 값, 결과 불가능 조합, 빈 유니버스, cutoff·잘못된 팩터·달력 입력 차단(연구 하한 차단은 2026-11-05 #679에서 관문과 함께 지웠다).
 
 CLI 손계산 예제의 2024-01-02 삼성전자 합성 값 72,000과 다음 세션 72,500은 가격수익 `72,500/72,000−1`로 비교된다. 같은 날짜 두 종목에서는 큰 가격의 비율 상승이 작아 원값 순위와 가격수익 순위 상관이 −1이다. 이 값은 합성 입력의 계산 정답이며 실데이터 예측력이 아니다.
 

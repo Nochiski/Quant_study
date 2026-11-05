@@ -497,11 +497,16 @@ def fg6_prelim(ctx: GateContext) -> GateResult:
     pre_max = _scalar(con, f"SELECT max(period) FROM {shown}")
     new_q = pre_max if pre_max is not None and (conf_max is None or str(pre_max) > str(conf_max)) else None
     n_new_q = 0 if new_q is None else _count(con, f"SELECT count(*) FROM {shown} AND period = '{new_q}'")
+    # WISE 종목 중 WISE 확정보다 뒤 DART 분기를 쓴 종목 수(N-64 Q1 — 기록, 분기보고서 시즌 실전 확인용)
+    n_wise_dart = _count(
+        con, f"SELECT count(DISTINCT d.ticker) FROM {fin} d JOIN {fin} w ON w.ticker = d.ticker "
+             "AND w.period_type = 'quarter' AND w.fs_basis LIKE 'WISE:%' "
+             "WHERE d.period_type = 'quarter' AND d.fs_basis LIKE 'DART:%'")
     warn = bool(withheld)
     metrics: dict[str, object] = {
         "n_rows_by_unit_check": by_check, "fin_prelim_by_status": by_status,
         "confirmed_quarter_max": conf_max, "prelim_quarter_max": pre_max,
-        "new_quarter": new_q, "n_tickers_new_quarter": n_new_q,
+        "new_quarter": new_q, "n_tickers_new_quarter": n_new_q, "n_wise_tickers_dart_quarter": n_wise_dart,
         "n_withheld": len(withheld), "withheld": withheld[:PRELIM_WITHHELD_LIST_MAX], "warn": warn}
     warn_note = (f" · warn: 단위 의심 잠정 {len(withheld)}행 엑셀에 안 냄 "
                  f"({', '.join(withheld[:PRELIM_WITHHELD_LIST_MAX])})" if warn else "")

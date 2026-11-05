@@ -388,7 +388,7 @@ uv run server
 | `pr-review.md`                | 전체                                 | PR 본문 양식, 결함 보고 4요소                                      |
 | `collaboration-language.md`   | 전체                                 | 코드 주석·Issue·PR 한글 작성 규칙의 단일 정본                      |
 | `backend-package-boundary.md` | `backend/**/*.py`                    | 헥사고날 방향, facade, `DEPENDS_ON`, mock adapter 경계             |
-| `strategy-workbench-sot.md`   | `backend/`, `frontend/`, `database/src/equity/`, 관련 spec·기획 패키지 | 전략·팩터·지표·상태의 단일 owner |
+| `strategy-workbench-sot.md`   | `backend/`, `frontend/`, `database/src/equity/`, 관련 spec·기획 패키지 | 사실은 한 곳만 소유하고 owner는 코드(docstring·import)로 드러냄, 금지 목록 |
 | `user-story-harness.md`       | `backend/`, `frontend/`, `docs/{product/user-stories,planning,manual}/` | 사용자 동작을 바꾸는 PR은 관련 유저 스토리와 e2e 태그를 같은 PR에서 갱신 |
 | `frontend-fsd.md`             | `frontend/src/`                      | FSD 단방향, slice 격리, public API                                 |
 | `frontend-api-state.md`       | frontend API/state                   | 생성 SDK, 서버·draft·UI 상태 소유권                                |

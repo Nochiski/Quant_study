@@ -16,7 +16,6 @@ from strategy_workbench.application.backtest_run.facade.runs import InvalidRunFi
 from ._execution_error_contract import (
     BacktestEnvironmentRequiredDetail,
     BacktestParameterInvalidDetail,
-    BacktestResearchWindowViolationDetail,
     BacktestRunFieldInvalidDetail,
     PortfolioStrategyInvalidDetail,
 )
@@ -41,7 +40,6 @@ BacktestUnprocessableDetail: TypeAlias = Annotated[
     BacktestRunInvalidDetail
     | BacktestRunFieldInvalidDetail
     | BacktestEnvironmentRequiredDetail
-    | BacktestResearchWindowViolationDetail
     | BacktestParameterInvalidDetail
     | BacktestStrategyRequiresUpgradeDetail
     | PortfolioStrategyInvalidDetail,

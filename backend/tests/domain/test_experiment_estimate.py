@@ -56,7 +56,7 @@ def _entry(
 
 
 def _ledger(*entries: TrialLedgerEntry) -> TrialLedger:
-    return summarize_trial_ledger("s1", (), entries, ())
+    return summarize_trial_ledger("s1", (), entries)
 
 
 def test_a_longer_run_scales_up_and_a_shorter_one_does_not_scale_down() -> None:

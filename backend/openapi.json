@@ -898,44 +898,6 @@
         "title": "BacktestRequestRetiredResponse",
         "type": "object"
       },
-      "BacktestResearchWindowViolationDetail": {
-        "description": "측정 시작일이 연구 구간 밖이다(spec D1).\n\n화면 문장은 frontend 가 `code` 로 번역하되 날짜는 자리표시자로 두고 이 detail 의 값으로 채운다 —\n날짜 owner 는 `domain/backtest/_research_window.py` 하나다.",
-        "properties": {
-          "code": {
-            "const": "backtest.run.research_window_violation",
-            "title": "Code",
-            "type": "string"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "research_start": {
-            "format": "date",
-            "title": "Research Start",
-            "type": "string"
-          },
-          "sealed_end": {
-            "format": "date",
-            "title": "Sealed End",
-            "type": "string"
-          },
-          "sealed_start": {
-            "format": "date",
-            "title": "Sealed Start",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message",
-          "sealed_start",
-          "sealed_end",
-          "research_start"
-        ],
-        "title": "BacktestResearchWindowViolationDetail",
-        "type": "object"
-      },
       "BacktestResult": {
         "properties": {
           "artifacts": {
@@ -1631,7 +1593,6 @@
                 "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
                 "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
                 "backtest.run.parameter_invalid": "#/components/schemas/BacktestParameterInvalidDetail",
-                "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "backtest.strategy.requires_upgrade": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
               },
@@ -1646,9 +1607,6 @@
               },
               {
                 "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
-              },
-              {
-                "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
               },
               {
                 "$ref": "#/components/schemas/BacktestParameterInvalidDetail"
@@ -1711,49 +1669,6 @@
         ],
         "title": "BinaryOperator",
         "type": "string"
-      },
-      "BlockedTrialAttempt": {
-        "description": "봉인 겹침으로 거절한 실행 요청(봉인 원장의 \"차단한 시도\"). 결과가 없어 N 에 들지 않는다.",
-        "properties": {
-          "blocked_at": {
-            "format": "date-time",
-            "title": "Blocked At",
-            "type": "string"
-          },
-          "lineage_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lineage Id"
-          },
-          "spec_hash": {
-            "title": "Spec Hash",
-            "type": "string"
-          },
-          "start": {
-            "format": "date",
-            "title": "Start",
-            "type": "string"
-          },
-          "trial_key": {
-            "title": "Trial Key",
-            "type": "string"
-          }
-        },
-        "required": [
-          "blocked_at",
-          "lineage_id",
-          "trial_key",
-          "spec_hash",
-          "start"
-        ],
-        "title": "BlockedTrialAttempt",
-        "type": "object"
       },
       "BrokerErrorDetail": {
         "properties": {
@@ -4189,7 +4104,6 @@
                     "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
                     "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
                     "backtest.run.parameter_invalid": "#/components/schemas/BacktestParameterInvalidDetail",
-                    "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                     "backtest.strategy.requires_upgrade": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail",
                     "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
                   },
@@ -4204,9 +4118,6 @@
                   },
                   {
                     "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
-                  },
-                  {
-                    "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
                   },
                   {
                     "$ref": "#/components/schemas/BacktestParameterInvalidDetail"
@@ -8279,7 +8190,6 @@
                 "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
                 "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
                 "backtest.run.parameter_invalid": "#/components/schemas/BacktestParameterInvalidDetail",
-                "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
                 "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
@@ -8304,9 +8214,6 @@
               },
               {
                 "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
-              },
-              {
-                "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
               }
             ],
             "title": "Detail"
@@ -13509,7 +13416,6 @@
                 "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
                 "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
                 "backtest.run.parameter_invalid": "#/components/schemas/BacktestParameterInvalidDetail",
-                "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
                 "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail",
@@ -13550,9 +13456,6 @@
               },
               {
                 "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
-              },
-              {
-                "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
               }
             ],
             "title": "Detail"
@@ -13638,7 +13541,6 @@
               {
                 "enum": [
                   "backtest.run.environment_required",
-                  "backtest.run.research_window_violation",
                   "backtest.run.parameter_invalid",
                   "backtest.run.invalid",
                   "backtest.strategy.not_found",
@@ -13741,13 +13643,6 @@
       "TrialLedger": {
         "description": "계열 하나의 원장.\n\n`lineage_id` 는 합친 뒤 남은 계열이고 `merged_lineage_ids` 는 거기 합쳐진 계열이다.",
         "properties": {
-          "blocked": {
-            "items": {
-              "$ref": "#/components/schemas/BlockedTrialAttempt"
-            },
-            "title": "Blocked",
-            "type": "array"
-          },
           "lineage_id": {
             "title": "Lineage Id",
             "type": "string"
@@ -13775,8 +13670,7 @@
           "lineage_id",
           "merged_lineage_ids",
           "trial_count",
-          "trials",
-          "blocked"
+          "trials"
         ],
         "title": "TrialLedger",
         "type": "object"
@@ -14829,7 +14723,6 @@
               {
                 "enum": [
                   "backtest.run.environment_required",
-                  "backtest.run.research_window_violation",
                   "backtest.run.parameter_invalid",
                   "backtest.run.invalid",
                   "backtest.strategy.not_found",

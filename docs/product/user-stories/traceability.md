@@ -20,10 +20,10 @@ PR은 GitHub 번호(`#123`)로 적는다.
 
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
-| 김철수 | 13 | 0 | 1 | 0 | 14 |
+| 김철수 | 13 | 0 | 0 | 1 | 14 |
 | 정동민 | 16 | 0 | 0 | 0 | 16 |
 | 한상목 | 17 | 0 | 0 | 1 | 18 |
-| 합계 | 46 | 0 | 1 | 1 | 48 |
+| 합계 | 46 | 0 | 0 | 2 | 48 |
 
 ### 스토리별 추적
 
@@ -41,7 +41,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-CS-10 | 김철수 | 파라미터 지도에서 고원을 확인하고 후보를 고른다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.candidate-map.spec.ts` :: US-CS-10 좁고 낮은 다크 화면에서 키보드로 후보를 기록하고 결과 근거를 읽는다<br>`frontend/e2e/stories/cs.candidate-map.spec.ts` :: US-CS-10 지도에서 설정을 비교하고 이유와 후보를 기록한 뒤 결과 검증 카드로 이동한다 |
 | US-CS-11 | 김철수 | 비용을 현실적으로 잡고 운용 금액별 용량을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.validation-reports.spec.ts` :: US-CS-11 용량 확인은 시도 수를 늘리지 않고 금액별 비용과 한계 사유를 보인다 |
 | US-CS-12 | 김철수 | 팩터 회귀로 진짜 알파가 남는지 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.validation-reports.spec.ts` :: US-CS-12 실제 mock의 관측 부족과 별도 합성 회귀 숫자·근거를 구별해 읽는다 |
-| US-CS-13 | 김철수 | 기준을 먼저 적고 홀드아웃을 한 번만 연다 | `예정` | V6-01, V6-02 | V6-02 | — |
+| US-CS-13 | 김철수 | 기준을 먼저 적고 홀드아웃을 한 번만 연다 | `미계획` | — | — | — |
 | US-CS-14 | 김철수 | 빈 칸을 정한 값으로 채워 결측 규칙을 팩터 안에 적는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.fill-node.spec.ts` :: US-CS-14 빈 칸은 채운 값으로, 원장이 가린 칸은 채우지 않은 채로 추적에서 본다 |
 | US-DM-01 | 정동민 | AI 공급자를 한 번 연결해 둔다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 설정에서 공급자를 등록하면 활성이 되고 키는 꼬리 4자리만 남는다 |
 | US-DM-02 | 정동민 | 모르는 말을 전략 화면에서 바로 묻는다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 사이드바 질문에 답이 스트리밍되고 새로고침해도 이력과 진행 중 턴이 이어진다 |
@@ -70,11 +70,11 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-SM-09 | 한상목 | 모르는 금융 개념을 편집 흐름 안에서 설명받는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.finance-terms.spec.ts` :: US-SM-09 편집 중에 AI와 계약 패널로 금융 개념의 뜻을 확인한다 |
 | US-SM-10 | 한상목 | 실행 설정 항목 옆에서 용어 뜻을 바로 본다 | `미계획` | — | — | — |
 | US-SM-11 | 한상목 | 백테스트를 다시 눌러도 같은 계산이 겹쳐 돌지 않는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.experiments.spec.ts` :: US-SM-11 실험이 도는 실행을 같은 요청으로 다시 시작하면 같은 실행으로 가고, 내 취소는 내 몫만 빼 실험을 취소해야 멈춘다 |
-| US-SM-12 | 한상목 | 시도 수가 자동으로 쌓이고 지울 수 없다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.ide-research.spec.ts` :: US-SM-12 좁고 낮은 편집기에서 레시피와 미저장 안내를 읽고 실험을 준비한다<br>`frontend/e2e/stories/sm.ide-research.spec.ts` :: US-SM-12 편집기의 계열과 선택값을 확인하고 현재 환경으로 실험을 준비한다<br>`frontend/e2e/stories/sm.trial-ledger.spec.ts` :: US-SM-12 시도 원장은 설정을 바꾼 실행만 새 시도로 세고 재확인·결과 없는 요청을 따로 보이며 합치기만 있다 |
-| US-SM-13 | 한상목 | 봉인 구간과 겹치는 실행이 이유와 교정 버튼과 함께 막힌다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.research-window.spec.ts` :: US-SM-13 봉인 구간과 겹치는 시작일은 이유와 교정 버튼과 함께 막히고, 실행 전에 시도 수 영향을 알려 준다 |
+| US-SM-12 | 한상목 | 시도 수가 자동으로 쌓이고 지울 수 없다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.ide-research.spec.ts` :: US-SM-12 좁고 낮은 편집기에서 레시피와 미저장 안내를 읽고 실험을 준비한다<br>`frontend/e2e/stories/sm.ide-research.spec.ts` :: US-SM-12 편집기의 계열과 선택값을 확인하고 현재 환경으로 실험을 준비한다<br>`frontend/e2e/stories/sm.trial-ledger.spec.ts` :: US-SM-12 시도 원장은 설정을 바꾼 실행만 새 시도로 세고 재확인을 묶어 보이며 합치기만 있다 |
+| US-SM-13 | 한상목 | 과거 어느 구간이든 백테스트할 수 있다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.run-window.spec.ts` :: US-SM-13 2020년 이전 시작일도 막히지 않고 실행되며, 실행 전에 시도 수 영향을 알려 준다 |
 | US-SM-14 | 한상목 | 실험 설정을 표로 보고 같은 실험을 다시 만든다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.experiments.spec.ts` :: US-SM-14 US-SM-15 실험을 표로 보고 같은 설정으로 다시 만들며, 대기열의 두 실험을 조작하고 완료 알림으로 후보를 연다 |
 | US-SM-15 | 한상목 | 여러 실험을 대기열에 넣고 창을 닫아도 계속 돈다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.experiments.spec.ts` :: US-SM-14 US-SM-15 실험을 표로 보고 같은 설정으로 다시 만들며, 대기열의 두 실험을 조작하고 완료 알림으로 후보를 연다 |
-| US-SM-16 | 한상목 | 실행 전에 이 실행이 시도 수를 늘리는지 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.research-window.spec.ts` :: US-SM-13 봉인 구간과 겹치는 시작일은 이유와 교정 버튼과 함께 막히고, 실행 전에 시도 수 영향을 알려 준다 |
+| US-SM-16 | 한상목 | 실행 전에 이 실행이 시도 수를 늘리는지 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.run-window.spec.ts` :: US-SM-13 2020년 이전 시작일도 막히지 않고 실행되며, 실행 전에 시도 수 영향을 알려 준다 |
 | US-SM-17 | 한상목 | 전략 하나의 버전·백테스트·실험을 세션 화면에서 한 흐름으로 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.strategy-session.spec.ts` :: US-SM-17 세션 화면은 버전마다 그 버전으로 돌린 백테스트를 묶고 의도·시도 원장·버전 지문을 함께 보인다 |
 | US-SM-18 | 한상목 | 내 PC에서 내 키움 모의 계좌를 연결하고 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.kiwoom-mock-connection.spec.ts` :: US-SM-18 설정에서 키움 모의 키를 저장하면 계좌 끝 4자리만 보이고 연결 확인이 계좌 대조 결과를 말한다 |
 <!-- USER-STORY-TRACE:END -->

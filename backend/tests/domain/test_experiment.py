@@ -10,7 +10,6 @@ from itertools import product
 import pytest
 
 from strategy_workbench.domain.analytics.facade.metrics import EquityCurvePoint
-from strategy_workbench.domain.backtest.facade.environment import RESEARCH_START
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunState,
     RunFailureCode,
@@ -55,6 +54,8 @@ from strategy_workbench.domain.strategy.facade.specification import (
     ParameterDefinition,
     ParameterValue,
 )
+
+RESEARCH_START = date(2020, 1, 2)
 
 LOOKBACK = IntegerParameter(
     parameter_id="lookback", default=20, minimum=10, maximum=30, kind="integer", step=10

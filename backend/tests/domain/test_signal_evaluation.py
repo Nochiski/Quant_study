@@ -8,7 +8,6 @@ from datetime import date, timedelta
 
 import pytest
 
-from strategy_workbench.domain.backtest.facade.environment import ResearchWindowViolationError
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioFactorValue,
     PortfolioObservation,
@@ -227,11 +226,6 @@ def test_nonmembers_are_excluded_before_pairing_without_using_future_survival() 
 def test_invalid_label_spec_is_rejected(spec: Callable[[], PriceLabelSpec]) -> None:
     with pytest.raises(ValueError):
         spec()
-
-
-def test_sealed_research_window_cannot_be_measured_through_the_new_entrypoint() -> None:
-    with pytest.raises(ResearchWindowViolationError):
-        _evaluate((_signal("a", 1.0, session=date(2019, 12, 30)),), ())
 
 
 def test_structural_snapshot_calendar_and_numeric_errors_are_rejected() -> None:

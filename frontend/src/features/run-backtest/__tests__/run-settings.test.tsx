@@ -25,7 +25,7 @@ import {
   vi,
 } from "vitest";
 
-import { ApiRequestError, type BacktestRunSpec, type RunEnvironment } from "../../../shared/api";
+import type { BacktestRunSpec, RunEnvironment } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
   initialRunEnvironmentValues,
@@ -1276,26 +1276,7 @@ describe("run environment panel", () => {
     },
   );
 
-  // 교정은 연구 구간 거절이 연구 하한을 실었을 때만 있다 — 다른 거절이나 날짜 없는 detail 에 버튼을 만들지 않는다.
-  it("offers the start date fix only for a research window rejection that carries the research start", async () => {
-    const { result } = renderHook(() => useBacktestRunSettings("strategy-1"), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={new QueryClient()}>
-          {children}
-        </QueryClientProvider>
-      ),
-    });
-    const rejection = (code: string, values: Record<string, string>) =>
-      new ApiRequestError("startBacktest", 422, code, "rejected", null, null, undefined, undefined, values);
-    const researchStart = { research_start: "2020-01-02" };
-    expect(result.current.rejectionFix(rejection("backtest.run.research_window_violation", researchStart))?.label)
-      .toBe("시작일을 2020-01-02로");
-    expect(result.current.rejectionFix(rejection("backtest.strategy.requires_upgrade", researchStart))).toBeNull();
-    expect(result.current.rejectionFix(rejection("backtest.run.research_window_violation", {}))).toBeNull();
-    expect(result.current.rejectionFix(new Error("network"))).toBeNull();
-  });
-
-  // 봉인 겹침처럼 미리 계산이 거절되면 줄을 그리지 않는다 — 같은 거절은 실행 버튼이 이유·교정과 함께 보인다.
+  // 미리 계산이 거절되면 줄을 그리지 않는다 — 같은 거절은 실행 버튼이 이유와 함께 보인다.
   it("leaves the reserved trial line empty when the preview is rejected", async () => {
     let asked = 0;
     server.use(
@@ -1304,11 +1285,9 @@ describe("run environment panel", () => {
         return HttpResponse.json(
           {
             detail: {
-              code: "backtest.run.research_window_violation",
-              message: "측정 시작일이 연구 구간 밖이라 실행할 수 없다",
-              sealed_start: "2016-01-01",
-              sealed_end: "2019-12-31",
-              research_start: "2020-01-02",
+              code: "backtest.run.parameter_invalid",
+              message: "parameter value is invalid — parameter_id=lookback",
+              parameter_id: "lookback",
             },
           },
           { status: 422 },
@@ -1645,46 +1624,6 @@ describe("backtest run actions", () => {
     expect(reason).toHaveTextContent("서버 사유");
     expect(reason).toHaveTextContent("field=environment.fee_bps");
     expect(reason).not.toHaveAttribute("open");
-  });
-
-  // 검증 랩 V1-01: 연구 구간 거절 문장의 날짜는 번역에 적지 않고 detail 값으로 채운다(날짜 owner 는 backend).
-  it("fills the research window dates from the rejection detail", async () => {
-    server.use(
-      http.post(`${API}/api/v1/backtests`, () =>
-        HttpResponse.json(
-          {
-            detail: {
-              code: "backtest.run.research_window_violation",
-              message:
-                "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
-              sealed_start: "2016-01-01",
-              sealed_end: "2019-12-31",
-              research_start: "2020-01-02",
-            },
-          },
-          { status: 422 },
-        ),
-      ),
-    );
-    renderWithQuery(
-      <BacktestRunActions
-        runId="old-run"
-        status="completed"
-        request={acceptedRequest}
-        onReplayed={vi.fn()}
-      />,
-    );
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "동일 설정 재실행" }));
-
-    const alert = await screen.findByRole("alert");
-    await waitFor(() =>
-      expect(alert).toHaveTextContent(
-        "시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 실행하세요.",
-      ),
-    );
-    expect(alert).not.toHaveTextContent("{");
   });
 
   // #304: 결과 화면에는 실행 설정 패널이 없다 — 칸을 짚지 않은 거절도 고칠 곳(전략 편집기)을 말한다.

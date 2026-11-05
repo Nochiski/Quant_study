@@ -69,8 +69,7 @@ class SourceRun:
 
 class TrialRunPort(Protocol):
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
-        """실행 시작과 같은 판정(preflight 포함)으로 검사하되 접수하지 않는다. 실행 요청이 아니므로
-        봉인 원장에 남기지 않는다.
+        """실행 시작과 같은 판정(preflight 포함)으로 검사하되 접수하지 않는다.
 
         Raises:
             TrialRunRejectedError: 실행 서비스가 요청을 접수하지 않는다.

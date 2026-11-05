@@ -27,8 +27,9 @@ Shape (JSON Schema 2020-12):
 - field metadata `stage` 는 `x-stage`(`AppliedStage` 값, 그래프 표현의 단계)로 싣는다(P4-01).
   `StrategySpec` 섹션과, 적용 단계가 섹션과 다르고 제약 행이 없는 필드에만 선언한다.
   한 필드에 `x-stage`와 제약 행의 `x-applied-stage`를 함께 두지 않는다
-  (`tests/domain/test_strategy_schema.py`가 고정). 필드의 단계를 읽는 규칙은 frontend
-  `features/edit-strategy/model/pipeline-projection.ts`가 소유한다.
+  (`tests/domain/test_strategy_schema.py`가 고정). 이 모듈이 필드의 단계를 읽는 wire 계약의
+  owner다: 필드의 단계는 자기 `x-stage`, 없으면 자기 제약 행의 적용 시점 `x-applied-stage`,
+  둘 다 없으면 가장 가까운 조상의 `x-stage`다. 문서 머리와 `parameters`는 단계가 없다.
 """
 
 from __future__ import annotations

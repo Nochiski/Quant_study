@@ -48,8 +48,8 @@ export type SchemaFacts = {
   valueLabelKeys: Readonly<Record<string, string>> | null;
   appliedStage: string | null;
   /**
-   * `x-stage`: 그래프 표현(파이프라인)의 단계(P4-01). 필드의 단계를 읽는 규칙은 `pipeline-projection.ts`가
-   * 소유한다.
+   * `x-stage`: 그래프 표현(파이프라인)의 단계(P4-01). 필드의 단계를 읽는 규칙은 backend
+   * `domain/strategy/_schema.py`가 정하고, `pipeline-projection.ts`가 그 의미를 적용한다.
    */
   stage: string | null;
   catalog: string | null;

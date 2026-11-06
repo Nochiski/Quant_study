@@ -13,9 +13,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from strategy_workbench.domain.chart_analysis._geometry import (
-    DEFAULT_FIB_LEVELS,
     ChannelGeometry,
     RetracementGeometry,
+    levels_or_default,
 )
 from strategy_workbench.domain.chart_analysis._line_record import LineKind
 from strategy_workbench.domain.chart_analysis._series import ChartSeries
@@ -62,22 +62,27 @@ def bands_of(
     series: ChartSeries,
     line: ChannelGeometry | RetracementGeometry | HorizontalZone | tuple[float, float] | float,
     ref: str,
-    levels: Sequence[float] = DEFAULT_FIB_LEVELS,
+    levels: Sequence[float] | None = None,
 ) -> tuple[PriceBand, ...]:
     """선 하나를 중첩 입력으로 바꾼다. `series`는 그 선을 만든 주기의 계열이고, 기준 봉은 그 마지막
     완성 봉이다. `line`이 실수면 수평선 가격이고, (low, high) 쌍이면 저장된 수평 띠(자동 수평
-    구간을 기준점 두 개로 저장한 선)다. `levels`는 채널·되돌림에만 쓴다.
+    구간을 기준점 두 개로 저장한 선)다. `levels`는 채널·되돌림에만 쓰고, None이면 종류별 기본
+    (`levels_or_default`)이다.
 
     레벨 가격이 0 이하인 레벨(가파른 하락 채널의 아래 레벨 등)과 되돌림 레벨 0·1은 넣지 않는다.
     """
     end = len(series.candles) - 1
     spans: list[tuple[LineKind, float, float, float | None]]
     if isinstance(line, ChannelGeometry):
-        spans = [(LineKind.FIB_CHANNEL, p, p, r) for r in levels for p in [line.price_at(end, r)]]
+        spans = [
+            (LineKind.FIB_CHANNEL, p, p, r)
+            for r in levels_or_default(LineKind.FIB_CHANNEL, levels)
+            for p in [line.price_at(end, r)]
+        ]
     elif isinstance(line, RetracementGeometry):
         spans = [
             (LineKind.FIB_RETRACEMENT, p, p, r)
-            for r in levels
+            for r in levels_or_default(LineKind.FIB_RETRACEMENT, levels)
             if r not in _RETRACEMENT_ANCHOR_LEVELS
             for p in [line.price_at(r)]
         ]

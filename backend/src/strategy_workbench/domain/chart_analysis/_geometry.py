@@ -7,13 +7,27 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+
+from strategy_workbench.domain.chart_analysis._line_record import LineKind
 
 # 되돌림·채널의 기본 레벨. 선마다 저장된 레벨이 있으면 그것이 우선이다.
 DEFAULT_FIB_LEVELS: tuple[float, ...] = (0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
 # 채널의 기본 레벨 — 되돌림 레벨에 바깥 확장 1.618을 더한다(설계 문서 6장 채널 표시). 2.618은
 # 사용자가 고르는 선택 레벨이라 기본에 넣지 않는다.
 DEFAULT_CHANNEL_LEVELS: tuple[float, ...] = (*DEFAULT_FIB_LEVELS, 1.618)
+
+
+def levels_or_default(kind: LineKind, levels: Sequence[float] | None) -> tuple[float, ...]:
+    """선의 레벨 — 저장·요청한 레벨이 있으면 그것, 없으면 종류별 기본(채널은 1.618 확장 포함).
+
+    종류별 기본 레벨 선택의 owner다. 그리기(`application/stock_chart`의 레벨 선 두 점)와 중첩
+    (`bands_of`)이 이것으로 같은 레벨을 고른다. 수평선은 레벨이 없어 무엇을 돌려도 쓰지 않는다.
+    """
+    if levels is not None:
+        return tuple(levels)
+    return DEFAULT_CHANNEL_LEVELS if kind is LineKind.FIB_CHANNEL else DEFAULT_FIB_LEVELS
 
 
 @dataclass(frozen=True)

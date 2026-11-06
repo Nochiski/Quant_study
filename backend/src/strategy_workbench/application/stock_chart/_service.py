@@ -28,7 +28,6 @@ from strategy_workbench.application.stock_chart._lines import (
     check_levels,
     check_shape,
     geometry,
-    levels_or_default,
     paths,
     resolve,
 )
@@ -98,7 +97,7 @@ from strategy_workbench.domain.chart_analysis.facade.confluence import (
     bands_of,
     find_confluences,
 )
-from strategy_workbench.domain.chart_analysis.facade.geometry import Anchor
+from strategy_workbench.domain.chart_analysis.facade.geometry import Anchor, levels_or_default
 from strategy_workbench.domain.chart_analysis.facade.levels import (
     AnchorIssue,
     ChannelSearch,
@@ -443,7 +442,7 @@ class StockChartService:
                 frame.series,
                 shape,
                 line.line_id,
-                levels_or_default(line.kind, line.content.levels),
+                line.content.levels,
             )
         for inline in lines:
             if inline.ref in saved_ids:
@@ -452,9 +451,7 @@ class StockChartService:
             shape, _, _ = self._shape(
                 loaded, frame, inline.kind, inline.anchors, inline.levels, inline.ref
             )
-            bands += bands_of(
-                frame.series, shape, inline.ref, levels_or_default(inline.kind, inline.levels)
-            )
+            bands += bands_of(frame.series, shape, inline.ref, inline.levels)
         found = _domain_call(lambda: find_confluences(bands, tolerance))
         scale = loaded.scale
         return ConfluenceView(

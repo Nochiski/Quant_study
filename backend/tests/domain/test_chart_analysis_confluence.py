@@ -57,6 +57,17 @@ def test_channel_bands_use_last_completed_bar_and_drop_non_positive_levels() -> 
     ]
 
 
+def test_channel_bands_default_to_channel_levels_with_extension() -> None:
+    # 수평 기준선 100, 폭 기준점(봉 5, 110)으로 d = −10 → C_r = 100 + 10·r.
+    # 레벨을 비우면 채널 기본(되돌림 기본 + 1.618)이라 확장 레벨도 중첩에 들어간다
+    channel = ChannelGeometry(TrendLine(Anchor(0, 100), Anchor(10, 100)), Anchor(5, 110))
+
+    bands = bands_of(SERIES, channel, ref="c")
+
+    assert [b.level for b in bands][-1] == 1.618
+    assert bands[-1].low == pytest.approx(116.18)
+
+
 def test_retracement_bands_leave_out_anchor_levels_zero_and_one() -> None:
     swing = RetracementGeometry(Anchor(2, 120.0), Anchor(8, 100.0))
 

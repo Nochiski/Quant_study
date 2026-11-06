@@ -7,8 +7,12 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import TYPE_CHECKING
 
-from strategy_workbench.domain.chart_analysis._channel import TrendDirection
+if TYPE_CHECKING:
+    # 주석에만 쓴다 — 런타임 import는 `_geometry` → `_line_record` → `_channel` → `_geometry`
+    # 순환이 된다
+    from strategy_workbench.domain.chart_analysis._channel import TrendDirection
 
 # 자동 선의 `algorithm@version` 칸에 그대로 저장하는 값. 판정 규칙·B*·피벗·채널·수평 구간·중첩
 # 규칙(기본 파라미터 포함)을 바꾸면 올린다. tests/domain/test_chart_analysis_version.py가 규칙

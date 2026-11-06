@@ -271,6 +271,7 @@ def build_http_app(
         factor_library=container.factor_library,
         broker_connections=container.broker_connections,
         market_overview=container.market_overview,
+        stock_chart=container.stock_chart,
         ledger_refresh=ledger_refresh,
         assistant_profiles=container.assistant_profiles,
         assistant_chat=container.assistant_chat,

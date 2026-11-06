@@ -73,6 +73,8 @@ def test_horizontal_line_and_zone_bands() -> None:
 
     assert bands_of(SERIES, 100.0, ref="h") == (PriceBand(HL, 100.0, 100.0, "h"),)
     assert bands_of(SERIES, zone, ref="z") == (PriceBand(HL, 99.0, 101.0, "z"),)
+    # 저장된 띠(기준점 둘)는 순서와 무관하게 [낮은 값, 높은 값]이다
+    assert bands_of(SERIES, (101.0, 99.0), ref="b") == (PriceBand(HL, 99.0, 101.0, "b"),)
 
 
 # --- 중첩 찾기 --------------------------------------------------------------------------------

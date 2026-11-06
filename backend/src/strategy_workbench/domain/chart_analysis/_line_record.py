@@ -20,6 +20,16 @@ class LineKind(Enum):
     FIB_CHANNEL = "fib_channel"
 
 
+class LineSource(Enum):
+    """선의 출처: 손으로 그었으면 manual, 자동 후보를 그대로 저장했으면 auto, 자동 후보를 내 선으로
+    옮겨 고칠 수 있게 했으면 auto_copied다. auto·auto_copied는 자동 기록(알고리즘 버전·파라미터·판정
+    구간)을 함께 저장한다."""
+
+    MANUAL = "manual"
+    AUTO = "auto"
+    AUTO_COPIED = "auto_copied"
+
+
 class WindowSource(Enum):
     """판정 구간의 출처. 자동 제안 칩 길이 그대로면 preset, 테두리를 끌거나 날짜를 고치면 user다."""
 

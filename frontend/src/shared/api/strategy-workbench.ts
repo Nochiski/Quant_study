@@ -74,6 +74,17 @@ import {
   streamExperimentEvents,
   traceStrategy as postStrategyTrace,
   upgradeStrategyDocument,
+  createChartLine,
+  deleteChartLine,
+  findChartConfluence,
+  getChartCandles,
+  getChartChannels,
+  getChartRegime,
+  getChartRetracement,
+  getChartZones,
+  listChartLines,
+  searchChartInstruments,
+  updateChartLine,
 } from "./generated/sdk.gen";
 import type {
   RunFactorRegression,
@@ -177,6 +188,57 @@ import type {
   ExperimentSelectionRequest,
   CellVerdict,
   SearchAxis,
+  ChartCandlesBody,
+  ChartChannelsBody,
+  ChartConfluenceBody,
+  ChartConfluenceRequestBody,
+  ChartInstrumentSearchBody,
+  ChartLineBody,
+  ChartLineEditBody,
+  ChartLinesBody,
+  ChartRegimeBody,
+  ChartRetracementBody,
+  ChartZonesBody,
+  CreateChartLineBody,
+  GetChartCandlesData,
+  GetChartChannelsData,
+  GetChartRegimeData,
+  GetChartRetracementData,
+  GetChartZonesData,
+  InstrumentKind,
+} from "./generated/types.gen";
+
+// 개별종목차트 응답의 부품 타입(생성 SDK 그대로). 가격은 모두 화면 가격이고 레벨 선은 backend 가
+// 준 두 점을 잇기만 한다 — frontend 는 가격·레벨을 계산하지 않는다.
+export type {
+  AnchorIssue,
+  ChartAutoRecordBody,
+  ChartCandleBody,
+  ChartChannelCandidateBody,
+  ChartConfluenceGroupBody,
+  ChartConfluenceLineBody,
+  ChartConfluenceMemberBody,
+  ChartContextBody,
+  ChartDrawingBody,
+  ChartErrorDetail,
+  ChartInstrumentBody,
+  ChartLevelPathBody,
+  ChartPivotBody,
+  ChartPointBody,
+  ChartWindowBody,
+  ChartWindowSuggestionBody,
+  ChartZoneBody,
+  ChosenBy,
+  LineKind,
+  LineSource,
+  RegimeReason,
+  RegimeVerdict,
+  Structure,
+  SwingChoice,
+  Timeframe,
+  TrendDirection,
+  WindowSource,
+  ZoneSide,
 } from "./generated/types.gen";
 
 // 홈 시장 블록·DB 새로고침 응답의 부품 타입(생성 SDK 그대로).
@@ -769,6 +831,80 @@ export const strategyWorkbenchApi = {
     );
   },
 
+  /** 개별종목차트 종목·지수 검색. 연습용 원천이면 `practice_data`와 안내 문장이 실린다. */
+  async searchChartInstruments(
+    query: string,
+    limit?: number,
+  ): Promise<ChartInstrumentSearchBody> {
+    return unwrap(
+      await searchChartInstruments({ query: { query, limit } }),
+      "searchChartInstruments",
+    );
+  },
+
+  /** 화면 가격 캔들. 마지막 봉은 진행 중(`in_progress`, 표시만)일 수 있다. */
+  async getChartCandles(query: ChartCandlesQuery): Promise<ChartCandlesBody> {
+    return unwrap(await getChartCandles({ query }), "getChartCandles");
+  },
+
+  /** 판정 구간의 국면 판정(판정 문장·제안 구간 칩 포함). 구간을 주지 않으면 기본 구간이다. */
+  async getChartRegime(query: ChartRegimeQuery): Promise<ChartRegimeBody> {
+    return unwrap(await getChartRegime({ query }), "getChartRegime");
+  },
+
+  async getChartChannels(query: ChartChannelsQuery): Promise<ChartChannelsBody> {
+    return unwrap(await getChartChannels({ query }), "getChartChannels");
+  },
+
+  async getChartRetracement(
+    query: ChartRetracementQuery,
+  ): Promise<ChartRetracementBody> {
+    return unwrap(await getChartRetracement({ query }), "getChartRetracement");
+  },
+
+  async getChartZones(query: ChartZonesQuery): Promise<ChartZonesBody> {
+    return unwrap(await getChartZones({ query }), "getChartZones");
+  },
+
+  /** 보이는 저장 선은 서버가 넣는다. `lines` 에는 저장하지 않은 보이는 선(자동 후보)만 싣는다. */
+  async findChartConfluence(
+    body: ChartConfluenceRequestBody,
+  ): Promise<ChartConfluenceBody> {
+    return unwrap(await findChartConfluence({ body }), "findChartConfluence");
+  },
+
+  /** 그 종목·지수의 선 전부(주기와 무관, 만든 순). */
+  async listChartLines(
+    kind: InstrumentKind,
+    code: string,
+  ): Promise<ChartLinesBody> {
+    return unwrap(
+      await listChartLines({ query: { kind, code } }),
+      "listChartLines",
+    );
+  },
+
+  /** 기준점은 화면 좌표(봉 날짜, 화면 가격)로 보낸다 — 저장 좌표 변환은 backend 가 한다. */
+  async createChartLine(body: CreateChartLineBody): Promise<ChartLineBody> {
+    return unwrap(await createChartLine({ body }), "createChartLine");
+  },
+
+  async updateChartLine(
+    lineId: string,
+    body: ChartLineEditBody,
+  ): Promise<ChartLineBody> {
+    return unwrap(
+      await updateChartLine({ path: { line_id: lineId }, body }),
+      "updateChartLine",
+    );
+  },
+
+  async deleteChartLine(lineId: string): Promise<void> {
+    const response = await deleteChartLine({ path: { line_id: lineId } });
+    if (response.error !== undefined)
+      throw requestError(response, "deleteChartLine", lineId);
+  },
+
   async getLedgerRefresh(): Promise<LedgerRefreshBody> {
     return unwrap(await getLedgerRefresh(), "getLedgerRefresh");
   },
@@ -1114,9 +1250,27 @@ export const strategyWorkbenchApi = {
 };
 
 export type EquityCatalogQuery = NonNullable<GetEquityCatalogData["query"]>;
+export type ChartCandlesQuery = GetChartCandlesData["query"];
+export type ChartRegimeQuery = GetChartRegimeData["query"];
+export type ChartChannelsQuery = GetChartChannelsData["query"];
+export type ChartRetracementQuery = GetChartRetracementData["query"];
+export type ChartZonesQuery = GetChartZonesData["query"];
 export type FactorCatalogQuery = NonNullable<GetFactorCatalogData["query"]>;
 
 export type {
+  ChartCandlesBody,
+  ChartChannelsBody,
+  ChartConfluenceBody,
+  ChartConfluenceRequestBody,
+  ChartInstrumentSearchBody,
+  ChartLineBody,
+  ChartLineEditBody,
+  ChartLinesBody,
+  ChartRegimeBody,
+  ChartRetracementBody,
+  ChartZonesBody,
+  CreateChartLineBody,
+  InstrumentKind,
   LedgerRefreshBody,
   MarketOverviewBody,
   MarketSectorBody,

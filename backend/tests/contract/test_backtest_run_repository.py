@@ -375,14 +375,14 @@ def test_a_file_owned_by_someone_else_is_refused(prepare: str, match: str, tmp_p
 @pytest.mark.parametrize(
     ("tamper", "match"),
     [
-        ("PRAGMA user_version = 12", "newer than this server"),
-        ("CREATE TABLE stray (x)", "does not match version 11"),
-        ("DROP TABLE experiment_controls", "does not match version 11"),
-        ("DROP TABLE experiment_window_picks", "does not match version 11"),
-        ("DROP TABLE backtest_run_starts", "does not match version 11"),
-        ("DROP TABLE experiment_control_changes", "does not match version 11"),
-        ("DROP TABLE experiment_sources", "does not match version 11"),
-        ("DROP TABLE backtest_run_headlines", "does not match version 11"),
+        ("PRAGMA user_version = 13", "newer than this server"),
+        ("CREATE TABLE stray (x)", "does not match version 12"),
+        ("DROP TABLE experiment_controls", "does not match version 12"),
+        ("DROP TABLE experiment_window_picks", "does not match version 12"),
+        ("DROP TABLE backtest_run_starts", "does not match version 12"),
+        ("DROP TABLE experiment_control_changes", "does not match version 12"),
+        ("DROP TABLE experiment_sources", "does not match version 12"),
+        ("DROP TABLE backtest_run_headlines", "does not match version 12"),
     ],
 )
 def test_a_future_or_edited_schema_is_refused(tamper: str, match: str, tmp_path: Path) -> None:

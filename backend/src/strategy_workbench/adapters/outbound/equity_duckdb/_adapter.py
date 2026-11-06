@@ -103,6 +103,11 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     RawObservationSet,
     RawPanel,
 )
+from strategy_workbench.application.stock_chart.facade.ports import (
+    ChartHistory,
+    ChartInstrument,
+    InstrumentRef,
+)
 from strategy_workbench.domain.backtest.facade.runs import DataWarning, WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
     CellKind,
@@ -651,6 +656,8 @@ class EquityDuckdbAdapter:
         self._profile: dict[str, tuple[int, str] | None] = self._load_profile()
         self._warn_lag_fallback()
         self._coverage_cache: dict[str, tuple[float, date]] | None = None
+        # 개별종목차트 목록 — 부팅 때 고정한 표 판본에서 처음 물을 때 한 번 읽는다.
+        self._chart_instruments: tuple[ChartInstrument, ...] | None = None
         self._snapshot_id = field_contract_snapshot_id(ledger_snapshot_id, self._field_contract())
 
     # ── 구성 ──────────────────────────────────────────────────────────────────
@@ -1481,6 +1488,16 @@ class EquityDuckdbAdapter:
 
     def sector_members(self, session: date) -> SectorSnapshot | None:
         return _market.sector_members(self, session)
+
+    # ── ChartPricePort(개별종목차트) ── `latest_session` 은 위 홈 시장 블록과 같다 ──────
+
+    def chart_instruments(self) -> tuple[ChartInstrument, ...]:
+        if self._chart_instruments is None:
+            self._chart_instruments = _chart.chart_instruments(self)
+        return self._chart_instruments
+
+    def chart_history(self, instrument: InstrumentRef, end: date) -> ChartHistory | None:
+        return _chart.chart_history(self, instrument, end)
 
     # ── MarketIndexPort ───────────────────────────────────────────────────────
 
@@ -2369,5 +2386,9 @@ class EquityDuckdbAdapter:
 # 불러오면 순환 import 라 정의가 모두 끝난 여기서 모듈을 불러온다(이름이 아니라 모듈이라 어느 쪽을
 # 먼저 불러도 된다). 호출 때 불러오지 않는다 — run worker 는 판본 대조 뒤 처음 import 되는 프로젝트
 # 모듈을 거절한다(run-worker spec D7, #591 2차 리뷰 P3-1).
-# `_market`(홈 시장 블록 행)도 같은 이유로 여기서 불러온다.
-from . import _market, _raw_panel  # noqa: E402  # reason: 위 순환 import 를 모듈 끝에서 푼다
+# `_market`(홈 시장 블록 행)·`_chart`(개별종목차트 행)도 같은 이유로 여기서 불러온다.
+from . import (  # noqa: E402  # reason: 위 순환 import 를 모듈 끝에서 푼다
+    _chart,
+    _market,
+    _raw_panel,
+)

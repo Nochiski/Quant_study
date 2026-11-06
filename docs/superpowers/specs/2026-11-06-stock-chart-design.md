@@ -184,11 +184,12 @@
 
 ### 4.7 저장 구조 (RSI·국면 분류 연계용)
 선 하나 = `kind(hline|fib_retracement|fib_channel) · timeframe(day|week|month) · source(manual|auto|auto_copied) ·
-anchors[(bar_date, price)] · levels · extend_right · memo · locked`, 자동이면 추가로 `algorithm@version · params ·
+anchors[(bar_date, price)] · levels · extend_right · memo · locked · visible`, 자동이면 추가로 `algorithm@version · params ·
 regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_override) · window_source(preset|user)`.
-레벨 가격·중첩 같은 파생값은 저장하지 않는다(기준점에서 다시 계산).
+레벨 가격·중첩 같은 파생값은 저장하지 않는다(기준점에서 다시 계산). 저장은 연구 DB 판 12의 `chart_drawing` 표
+(`research_sqlite/_schema.py`)이고 JSON 칸은 기준점·레벨·자동 파라미터 셋뿐이다.
 
-- `kind`·`window_source`·`chosen_by` 어휘와 `algorithm@version` 값의 owner는 domain `_line_record`(facade
+- `kind`·`source`(`LineSource`)·`window_source`·`chosen_by` 어휘와 `algorithm@version` 값의 owner는 domain `_line_record`(facade
   `line_record`)다. `algorithm@version`에는 `ALGORITHM_VERSION`(지금 `chart_analysis@1`)을 그대로 저장하고, 판정 규칙·B\*·
   피벗·채널·수평 구간·중첩 규칙(기본 파라미터 포함)을 바꾸면 올린다. `test_chart_analysis_version.py`가 규칙 상수를 이
   값과 함께 고정해, 상수를 바꾸고 버전을 그대로 두면 깨진다.
@@ -208,11 +209,25 @@ regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_
 - `domain/chart_analysis`(새, `DEPENDS_ON=()`, numpy만): 4장 전부 + 3장 묶기·배율.
 - `application/stock_chart`(새): 자기 outgoing 포트 `ChartPricePort`(검색·일봉), `ChartDrawingStore`(선 CRUD). 새
   application→application 화살표 없음.
-- `adapters/outbound/equity_duckdb/_chart.py`: 검색·일봉 읽기. mock 원천에서는 포트 없이 "연습용 데이터" 안내.
+- `adapters/outbound/equity_duckdb/_chart.py`: 목록·일봉 읽기(검색 순위는 application의 `rank_instruments` 하나가 정한다 —
+  지수명 정확 → 티커 정확 → 이름 정확 → 이름 포함). 지수 코드는 `<index_class>:<index_name>`이다(같은 이름의 업종
+  지수가 코스피·코스닥에 하나씩 있다). 원장이 옛 구간에서 0으로 싣는 지수 시가·고가·저가는 값 없음으로 보고 봉에서 뺀다.
+- mock 원천: 홈 시장과 달리 포트를 막지 않는다. `adapters/outbound/equity_mock/_chart.py`가 고정 seed 합성 일봉(지수
+  하나·종목 둘, 2023-01-02 ~ 목요일 2025-10-30)을 주고 응답마다 `practice_data`·안내 문장을 싣는다 — 차트 흐름 e2e(PR3·4)가
+  mock으로 돌기 때문이다. 005930은 분할을 흉내 내 k = 0.2다.
 - 저장: 연구 DB(`research_sqlite`)에 표 추가(판 올림) — 새 DB 파일·환경 변수를 만들지 않는다.
-- HTTP(`_chart_routes.py`): 종목 검색, 캔들, 국면 판정, 채널 후보, 되돌림 스윙, 수평 구간, 중첩(POST 선 목록), 선 CRUD.
+- HTTP(`_chart_routes.py`, `/api/v1/stock-chart/*`): 종목 검색, 캔들, 국면 판정, 채널 후보, 되돌림 스윙, 수평 구간,
+  중첩(POST), 선 CRUD. 요청·응답 가격은 모두 화면 가격이고 서버가 ÷k·×k 한다. 중첩의 저장 선은 서버가 `visible`인 것만
+  고르고(보이기는 저장 칸이다), 요청에는 저장하지 않은 보이는 선(자동 후보)만 싣는다. 저장 띠(자동 수평 구간)는 기준점
+  둘인 수평선(`hline`)이다. 거절은 404·422 `{code, message}`이고 요청 칸 검증 실패도 `chart.request_invalid`다.
 
 ## 6. 프런트 구조
+
+**레벨 선을 그릴 점 계약**: 저장 선·자동 후보 응답은 레벨마다 두 점을 싣는다 — `start` = (기준 봉 날짜, 화면 가격),
+`end` = (선을 만든 주기의 마지막 완성 봉 날짜, 화면 가격)이고 `end.price`가 그 봉의 레벨 가격(오른쪽 배지 값)이다. 기준
+봉은 채널·되돌림은 첫 기준점, 수평선·띠는 그 기준점이다. frontend는 두 점을 날짜 축 위에서 잇고 `extend_right`이면
+같은 기울기로 오른쪽에 연장만 하며, 레벨 가격·채널 기울기·÷k를 계산하지 않는다. 선을 저장할 때는 응답의 기준점
+(`drawing.anchors`, 화면 좌표)과 자동 기록(`record`)을 그대로 보낸다.
 
 `pages/research-stock-chart` · `widgets/stock-chart`(차트 그리기·레이어 칸 조합) · `features/draw-chart-line`(수동 그리기·
 마그넷·저장) · `features/find-chart-levels`(자동 생성 패널) · `entities/chart`(쿼리·좌표 변환 표시 모델). 서버 상태는

@@ -32,6 +32,7 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
     EquityDuckdbAdapter,
 )
+from strategy_workbench.adapters.outbound.equity_mock.facade.chart import MockChartPrices
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
@@ -42,6 +43,7 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.probe import (
 )
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
+    SQLiteChartDrawingStore,
     SQLiteExperimentRepository,
 )
 from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
@@ -119,6 +121,7 @@ from strategy_workbench.application.market_overview.facade.overview import (
 )
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
 from strategy_workbench.application.portfolio_design.facade.trace import StrategyTraceService
+from strategy_workbench.application.stock_chart.facade.chart import StockChartService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompileRequest,
     StrategyAuthoringService,
@@ -172,6 +175,7 @@ class BackendContainer:
     factor_library: FactorLibraryService
     broker_connections: BrokerConnectionService
     market_overview: MarketOverviewService
+    stock_chart: StockChartService
     assistant_profiles: ProviderProfileService
     assistant_chat: AssistantChatService
     assistant_turns: AssistantTurnRunner
@@ -370,6 +374,15 @@ def build_container(
         # 연습용(mock) 원천에는 시장 데이터 포트를 주지 않는다 — 시장 숫자를 지어내지 않는다.
         market_overview=MarketOverviewService(
             equity_data if isinstance(equity_data, EquityDuckdbAdapter) else None
+        ),
+        # 차트는 연습용 원천에서도 화면 흐름(e2e)을 돌려야 해서 합성 일봉을 주고, 응답마다 연습용
+        # 표시를 싣는다. 선은 실행 기록과 같은 연구 DB 파일에 둔다(새 DB 파일·환경 변수 없음).
+        stock_chart=StockChartService(
+            equity_data if isinstance(equity_data, EquityDuckdbAdapter) else MockChartPrices(),
+            SQLiteChartDrawingStore(research_db_path),
+            practice_data=not isinstance(equity_data, EquityDuckdbAdapter),
+            new_id=lambda: str(uuid4()),
+            now=lambda: datetime.now(UTC),
         ),
         assistant_profiles=assistant_services.profiles,
         assistant_chat=assistant_services.chat,

@@ -60,12 +60,13 @@ class Confluence:
 
 def bands_of(
     series: ChartSeries,
-    line: ChannelGeometry | RetracementGeometry | HorizontalZone | float,
+    line: ChannelGeometry | RetracementGeometry | HorizontalZone | tuple[float, float] | float,
     ref: str,
     levels: Sequence[float] = DEFAULT_FIB_LEVELS,
 ) -> tuple[PriceBand, ...]:
     """선 하나를 중첩 입력으로 바꾼다. `series`는 그 선을 만든 주기의 계열이고, 기준 봉은 그 마지막
-    완성 봉이다. `line`이 실수면 수평선 가격이다. `levels`는 채널·되돌림에만 쓴다.
+    완성 봉이다. `line`이 실수면 수평선 가격이고, (low, high) 쌍이면 저장된 수평 띠(자동 수평
+    구간을 기준점 두 개로 저장한 선)다. `levels`는 채널·되돌림에만 쓴다.
 
     레벨 가격이 0 이하인 레벨(가파른 하락 채널의 아래 레벨 등)과 되돌림 레벨 0·1은 넣지 않는다.
     """
@@ -82,6 +83,8 @@ def bands_of(
         ]
     elif isinstance(line, HorizontalZone):
         spans = [(LineKind.HLINE, line.low, line.high, None)]
+    elif isinstance(line, tuple):
+        spans = [(LineKind.HLINE, min(line), max(line), None)]
     else:
         spans = [(LineKind.HLINE, line, line, None)]
     return tuple(PriceBand(kind, lo, hi, ref, r) for kind, lo, hi, r in spans if lo > 0)

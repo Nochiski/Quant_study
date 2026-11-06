@@ -18,6 +18,7 @@
 | 9 | 합성 사전등록·모의 claim·관측 결과(실제 개봉 권위 없음) |
 | 10 | 완료 run 의 머리 지표(목록 응답, 재설계 결정 1): `backtest_run_headlines` |
 | 11 | 앱 홀드아웃 관문·V6 폐기(2026-11-05): v9 모의 표·`sealed_window_blocks` 를 지운다 |
+| 12 | 개별종목차트의 선(#691): `chart_drawing` |
 
 v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다. v5 에서 올린
 파일의 기존 run 은 시작 시각이 없어 시간 추정의 근거가 되지 않는다. v9 에서 올린 파일의 기존 완료
@@ -37,7 +38,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -479,6 +480,59 @@ V11_SCHEMA_OBJECTS = tuple(
     if not item[1].startswith(("holdout_simulation_", "sealed_window_blocks"))
 )
 
+# 개별종목차트의 선 하나 = 한 줄(설계 문서 4.7). 조회 키는 대상(종목·지수)이고 주기와 무관하게
+# 그 대상의 선을 만든 순서로 읽는다. 기준점·레벨·자동 파라미터만 JSON 칸이고, 레벨 가격·중첩
+# 같은 파생값은 싣지 않는다(기준점에서 다시 계산). 어휘(종류·출처·주기·판정)는 domain 이 소유하고
+# 읽을 때 검사한다. 자동 기록 칸은 자동 선(source <> 'manual')에만 있다.
+_V12_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "chart_drawing",
+        """
+        CREATE TABLE chart_drawing (
+            drawing_order INTEGER PRIMARY KEY,
+            line_id TEXT NOT NULL COLLATE BINARY CHECK (length(trim(line_id)) >= 1),
+            instrument_kind TEXT NOT NULL,
+            instrument_code TEXT NOT NULL COLLATE BINARY,
+            timeframe TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            source TEXT NOT NULL,
+            anchors_json TEXT NOT NULL,
+            levels_json TEXT,
+            extend_right INTEGER NOT NULL CHECK (extend_right IN (0, 1)),
+            memo TEXT NOT NULL,
+            locked INTEGER NOT NULL CHECK (locked IN (0, 1)),
+            visible INTEGER NOT NULL CHECK (visible IN (0, 1)),
+            algorithm_version TEXT,
+            params_json TEXT,
+            regime_window_start TEXT,
+            regime_window_end TEXT,
+            regime_verdict TEXT,
+            regime_strength REAL,
+            regime_structure TEXT,
+            chosen_by TEXT,
+            window_source TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK ((source = 'manual') = (algorithm_version IS NULL))
+        )
+        """,
+    ),
+    (
+        "index",
+        "chart_drawing_line_id",
+        "CREATE UNIQUE INDEX chart_drawing_line_id ON chart_drawing (line_id)",
+    ),
+    (
+        "index",
+        "chart_drawing_by_instrument",
+        "CREATE INDEX chart_drawing_by_instrument "
+        "ON chart_drawing (instrument_kind, instrument_code, drawing_order)",
+    ),
+)
+
+V12_SCHEMA_OBJECTS = V11_SCHEMA_OBJECTS + _V12_ADDED_OBJECTS
+
 
 def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Connection], None]:
     def apply(connection: sqlite3.Connection) -> None:
@@ -500,7 +554,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V11_SCHEMA_OBJECTS,
+            objects=V12_SCHEMA_OBJECTS,
             error=ResearchStorageError,
             upgrades=(
                 SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _added(_V2_ADDED_OBJECTS)),
@@ -513,6 +567,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
                 SchemaUpgrade(8, V8_SCHEMA_OBJECTS, _added(_V9_ADDED_OBJECTS)),
                 SchemaUpgrade(9, V9_SCHEMA_OBJECTS, _added(_V10_ADDED_OBJECTS)),
                 SchemaUpgrade(10, V10_SCHEMA_OBJECTS, _upgrade_v10_to_v11),
+                SchemaUpgrade(11, V11_SCHEMA_OBJECTS, _added(_V12_ADDED_OBJECTS)),
             ),
         ),
     )

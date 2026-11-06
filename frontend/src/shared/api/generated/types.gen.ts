@@ -165,6 +165,11 @@ export type AddLibraryVersionBody = {
 };
 
 /**
+ * AnchorIssue
+ */
+export type AnchorIssue = "outside_window" | "not_a_pivot";
+
+/**
  * ApplicableCondition
  */
 export type ApplicableCondition = {
@@ -1353,6 +1358,744 @@ export type CellVerdict =
   "recommended" | "peak" | "failed" | "unscored" | "scored";
 
 /**
+ * ChartAutoRecordBody
+ *
+ * 자동 선의 기록. 후보 응답의 `record`를 선 저장 요청에 그대로 싣는다.
+ */
+export type ChartAutoRecordBody = {
+  /**
+   * Algorithm Version
+   */
+  algorithm_version: string;
+  chosen_by?: ChosenBy | null;
+  /**
+   * Params
+   */
+  params: {
+    [key: string]: string | number | number | boolean | null;
+  };
+  regime?: ChartRegimeRecordBody | null;
+  /**
+   * Regime Window End
+   */
+  regime_window_end?: string | null;
+  /**
+   * Regime Window Start
+   */
+  regime_window_start?: string | null;
+  window_source?: WindowSource | null;
+};
+
+/**
+ * ChartCandleBody
+ */
+export type ChartCandleBody = {
+  /**
+   * Close
+   */
+  close: number;
+  /**
+   * End
+   *
+   * 기간의 마지막 거래일.
+   */
+  end: string;
+  /**
+   * High
+   */
+  high: number;
+  /**
+   * In Progress
+   *
+   * 기준일이 기간 중간이라 아직 끝나지 않은 봉. 표시만 한다.
+   */
+  in_progress: boolean;
+  /**
+   * Low
+   */
+  low: number;
+  /**
+   * Open
+   */
+  open: number;
+  /**
+   * Start
+   *
+   * 기간의 첫 거래일(봉 날짜).
+   */
+  start: string;
+};
+
+/**
+ * ChartCandlesBody
+ */
+export type ChartCandlesBody = {
+  /**
+   * Candles
+   */
+  candles: Array<ChartCandleBody>;
+  context: ChartContextBody;
+  /**
+   * Last Completed
+   *
+   * 마지막 완성 봉의 날짜.
+   */
+  last_completed: string | null;
+  timeframe: Timeframe;
+};
+
+/**
+ * ChartChannelCandidateBody
+ */
+export type ChartChannelCandidateBody = {
+  /**
+   * Created
+   *
+   * 세 기준점이 모두 확정된 봉의 날짜. 그 앞은 옅게 그린다.
+   */
+  created: string;
+  drawing: ChartDrawingBody;
+  /**
+   * Outside Ratio
+   *
+   * 기준점~구간 끝 종가 중 채널 밖 비율(0~1).
+   */
+  outside_ratio: number;
+  /**
+   * Span Bars
+   */
+  span_bars: number;
+  /**
+   * Width Atr
+   *
+   * 채널 폭 ÷ 구간 끝 ATR.
+   */
+  width_atr: number;
+};
+
+/**
+ * ChartChannelsBody
+ */
+export type ChartChannelsBody = {
+  anchor_issue: AnchorIssue | null;
+  /**
+   * Anchor Issue Message
+   */
+  anchor_issue_message: string | null;
+  /**
+   * Candidates
+   *
+   * 순위순 앞 10개까지.
+   */
+  candidates: Array<ChartChannelCandidateBody>;
+  context: ChartContextBody;
+  direction: TrendDirection;
+  recommended_direction: TrendDirection | null;
+  record: ChartAutoRecordBody;
+  timeframe: Timeframe;
+  /**
+   * Total Candidates
+   */
+  total_candidates: number;
+  window: ChartWindowBody;
+};
+
+/**
+ * ChartConfluenceBody
+ */
+export type ChartConfluenceBody = {
+  /**
+   * Caution
+   */
+  caution: string;
+  context: ChartContextBody;
+  /**
+   * Groups
+   *
+   * 낮은 가격부터.
+   */
+  groups: Array<ChartConfluenceGroupBody>;
+  /**
+   * Skipped Line Ids
+   *
+   * 기준점이 지금 계열 밖이라 넣지 못한 저장 선.
+   */
+  skipped_line_ids: Array<string>;
+  /**
+   * Tolerance
+   */
+  tolerance: number;
+};
+
+/**
+ * ChartConfluenceGroupBody
+ */
+export type ChartConfluenceGroupBody = {
+  /**
+   * High
+   */
+  high: number;
+  /**
+   * Kinds
+   */
+  kinds: Array<LineKind>;
+  /**
+   * Low
+   *
+   * 넓힌 좌표의 중첩 구간 하단(화면 가격).
+   */
+  low: number;
+  /**
+   * Members
+   */
+  members: Array<ChartConfluenceMemberBody>;
+};
+
+/**
+ * ChartConfluenceLineBody
+ */
+export type ChartConfluenceLineBody = {
+  /**
+   * Anchors
+   */
+  anchors: Array<ChartPointBody>;
+  kind: LineKind;
+  /**
+   * Levels
+   */
+  levels?: Array<number> | null;
+  /**
+   * Ref
+   */
+  ref: string;
+  timeframe: Timeframe;
+};
+
+/**
+ * ChartConfluenceMemberBody
+ */
+export type ChartConfluenceMemberBody = {
+  /**
+   * High
+   */
+  high: number;
+  kind: LineKind;
+  /**
+   * Level
+   */
+  level: number | null;
+  /**
+   * Low
+   */
+  low: number;
+  /**
+   * Ref
+   *
+   * 저장 선이면 line_id, 요청에 실은 선이면 그 ref.
+   */
+  ref: string;
+};
+
+/**
+ * ChartConfluenceRequestBody
+ *
+ * 저장 선 중 보이는 것은 서버가 넣는다. `lines`에는 저장하지 않은 보이는 선(자동 후보)을
+ * 싣는다.
+ */
+export type ChartConfluenceRequestBody = {
+  /**
+   * Instrument Code
+   */
+  instrument_code: string;
+  instrument_kind: InstrumentKind;
+  /**
+   * Lines
+   */
+  lines: Array<ChartConfluenceLineBody>;
+  /**
+   * Tolerance
+   */
+  tolerance?: number;
+};
+
+/**
+ * ChartContextBody
+ *
+ * 응답 공통 머리. `notice`는 연습용 데이터 안내 문장이다(실데이터면 null).
+ */
+export type ChartContextBody = {
+  /**
+   * As Of
+   *
+   * 원장의 최신 거래일(진행 중 봉 판정의 기준일).
+   */
+  as_of: string;
+  instrument: ChartInstrumentBody;
+  /**
+   * Notice
+   */
+  notice: string | null;
+  /**
+   * Practice Data
+   */
+  practice_data: boolean;
+};
+
+/**
+ * ChartDrawingBody
+ */
+export type ChartDrawingBody = {
+  /**
+   * Anchors
+   *
+   * 선을 저장할 때 그대로 보내는 기준점(채널은 a·b·폭 기준점 순).
+   */
+  anchors: Array<ChartPointBody>;
+  /**
+   * Paths
+   */
+  paths: Array<ChartLevelPathBody>;
+};
+
+/**
+ * ChartErrorDetail
+ */
+export type ChartErrorDetail = {
+  /**
+   * Code
+   */
+  code:
+    | "chart.series.no_completed_bars"
+    | "chart.window.incomplete"
+    | "chart.window.outside_series"
+    | "chart.window.reversed"
+    | "chart.params.invalid"
+    | "chart.line.anchor_count"
+    | "chart.line.price_invalid"
+    | "chart.line.levels_invalid"
+    | "chart.line.anchor_outside_series"
+    | "chart.line.anchor_order"
+    | "chart.line.auto_record"
+    | "chart.confluence.duplicate_ref"
+    | "chart.request_invalid"
+    | "chart.instrument.not_found"
+    | "chart.line.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * ChartErrorResponse
+ */
+export type ChartErrorResponse = {
+  detail: ChartErrorDetail;
+};
+
+/**
+ * ChartInstrumentBody
+ */
+export type ChartInstrumentBody = {
+  /**
+   * Code
+   *
+   * 종목은 티커, 지수는 `<index_class>:<index_name>`(예: KOSPI:코스피).
+   */
+  code: string;
+  /**
+   * Group
+   *
+   * 종목은 증권 종류(common·preferred·etf …), 지수는 시장 구분(KOSPI …).
+   */
+  group: string | null;
+  kind: InstrumentKind;
+  /**
+   * Name
+   */
+  name: string;
+};
+
+/**
+ * ChartInstrumentSearchBody
+ */
+export type ChartInstrumentSearchBody = {
+  /**
+   * Instruments
+   */
+  instruments: Array<ChartInstrumentBody>;
+  /**
+   * Notice
+   */
+  notice: string | null;
+  /**
+   * Practice Data
+   */
+  practice_data: boolean;
+};
+
+/**
+ * ChartLevelPathBody
+ */
+export type ChartLevelPathBody = {
+  /**
+   * 마지막 완성 봉의 점. `end.price`가 마지막 완성 봉의 레벨 가격이다.
+   */
+  end: ChartPointBody;
+  /**
+   * Level
+   *
+   * 되돌림·채널 레벨 r. 수평선·띠는 null.
+   */
+  level: number | null;
+  /**
+   * 기준 봉(첫 기준점)의 점.
+   */
+  start: ChartPointBody;
+};
+
+/**
+ * ChartLineBody
+ */
+export type ChartLineBody = {
+  /**
+   * Anchors
+   */
+  anchors: Array<ChartPointBody>;
+  auto: ChartAutoRecordBody | null;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Extend Right
+   */
+  extend_right: boolean;
+  /**
+   * Instrument Code
+   */
+  instrument_code: string;
+  instrument_kind: InstrumentKind;
+  /**
+   * Issue
+   *
+   * 기준점이 지금 계열 밖이라 그릴 수 없다(paths가 빈다).
+   */
+  issue: "anchor_outside_series" | null;
+  kind: LineKind;
+  /**
+   * Levels
+   *
+   * null이면 기본 레벨.
+   */
+  levels: Array<number> | null;
+  /**
+   * Line Id
+   */
+  line_id: string;
+  /**
+   * Locked
+   */
+  locked: boolean;
+  /**
+   * Memo
+   */
+  memo: string;
+  /**
+   * Paths
+   */
+  paths: Array<ChartLevelPathBody>;
+  source: LineSource;
+  /**
+   * 선을 만든 주기. 기하는 이 주기로 계산한다.
+   */
+  timeframe: Timeframe;
+  /**
+   * Updated At
+   */
+  updated_at: string;
+  /**
+   * Visible
+   */
+  visible: boolean;
+};
+
+/**
+ * ChartLineEditBody
+ */
+export type ChartLineEditBody = {
+  /**
+   * Anchors
+   *
+   * 화면 좌표 기준점. 수평선 1~2개(2개는 띠), 되돌림 2개, 채널 3개.
+   */
+  anchors: Array<ChartPointBody>;
+  /**
+   * Extend Right
+   */
+  extend_right: boolean;
+  /**
+   * Levels
+   */
+  levels?: Array<number> | null;
+  /**
+   * Locked
+   */
+  locked: boolean;
+  /**
+   * Memo
+   */
+  memo: string;
+  /**
+   * Visible
+   */
+  visible: boolean;
+};
+
+/**
+ * ChartLinesBody
+ */
+export type ChartLinesBody = {
+  context: ChartContextBody;
+  /**
+   * Lines
+   */
+  lines: Array<ChartLineBody>;
+};
+
+/**
+ * ChartPivotBody
+ */
+export type ChartPivotBody = {
+  /**
+   * Bar Date
+   */
+  bar_date: string;
+  /**
+   * Confirmed Date
+   *
+   * 이 피벗이 확정된 봉의 날짜.
+   */
+  confirmed_date: string;
+  kind: PivotKind;
+  /**
+   * Price
+   */
+  price: number;
+};
+
+/**
+ * ChartPointBody
+ */
+export type ChartPointBody = {
+  /**
+   * Bar Date
+   *
+   * 그 주기 봉의 시작일.
+   */
+  bar_date: string;
+  /**
+   * Price
+   *
+   * 화면 가격(저장 좌표 × k).
+   */
+  price: number;
+};
+
+/**
+ * ChartRegimeBody
+ */
+export type ChartRegimeBody = {
+  /**
+   * Box Ratio
+   *
+   * 박스 비율 B. 판정 불가면 null.
+   */
+  box_ratio: number | null;
+  /**
+   * 추천 채널 방향. 상승·하락 판정만 있다.
+   */
+  channel_direction: TrendDirection | null;
+  context: ChartContextBody;
+  /**
+   * Ends Near Extreme
+   */
+  ends_near_extreme: boolean;
+  reason: RegimeReason | null;
+  /**
+   * Sentence
+   *
+   * 판정 한 문장(backend가 완성).
+   */
+  sentence: string;
+  /**
+   * Starts Near Extreme
+   */
+  starts_near_extreme: boolean;
+  /**
+   * Strength
+   *
+   * 강도 S. 판정 불가면 null.
+   */
+  strength: number | null;
+  structure: Structure;
+  /**
+   * Structure Highs
+   */
+  structure_highs: Array<ChartPivotBody>;
+  /**
+   * Structure Lows
+   */
+  structure_lows: Array<ChartPivotBody>;
+  /**
+   * Suggestions
+   *
+   * 자동 제안 구간 칩(짧은·기본·긴 순).
+   */
+  suggestions: Array<ChartWindowSuggestionBody>;
+  timeframe: Timeframe;
+  verdict: RegimeVerdict;
+  /**
+   * Warnings
+   */
+  warnings: Array<string>;
+  window: ChartWindowBody;
+};
+
+/**
+ * ChartRegimeRecordBody
+ */
+export type ChartRegimeRecordBody = {
+  /**
+   * Strength
+   */
+  strength: number | null;
+  structure: Structure;
+  verdict: RegimeVerdict;
+};
+
+/**
+ * ChartRetracementBody
+ */
+export type ChartRetracementBody = {
+  context: ChartContextBody;
+  /**
+   * 기준점은 먼저 점(레벨 1)·나중 점(레벨 0) 순. 고를 스윙이 없으면 null.
+   */
+  drawing: ChartDrawingBody | null;
+  /**
+   * Message
+   */
+  message: string | null;
+  record: ChartAutoRecordBody;
+  swing: SwingChoice;
+  timeframe: Timeframe;
+  window: ChartWindowBody;
+};
+
+/**
+ * ChartWindowBody
+ */
+export type ChartWindowBody = {
+  /**
+   * Bars
+   */
+  bars: number;
+  /**
+   * End
+   */
+  end: string;
+  source: WindowSource;
+  /**
+   * Start
+   */
+  start: string;
+};
+
+/**
+ * ChartWindowSuggestionBody
+ */
+export type ChartWindowSuggestionBody = {
+  /**
+   * Bars
+   */
+  bars: number;
+  /**
+   * Default
+   */
+  default: boolean;
+  /**
+   * End
+   */
+  end: string;
+  /**
+   * Start
+   */
+  start: string;
+};
+
+/**
+ * ChartZoneBody
+ */
+export type ChartZoneBody = {
+  /**
+   * Broken
+   */
+  broken: number;
+  /**
+   * 수평 띠 선(기준점 둘: 하단·상단, 기준 봉 = 가장 이른 구성 피벗).
+   */
+  drawing: ChartDrawingBody;
+  /**
+   * Formed
+   *
+   * 구간이 생긴 봉의 날짜. 그 앞은 옅게 그린다.
+   */
+  formed: string;
+  /**
+   * Held
+   */
+  held: number;
+  /**
+   * High
+   */
+  high: number;
+  /**
+   * Low
+   */
+  low: number;
+  /**
+   * Members
+   */
+  members: Array<ChartPivotBody>;
+  side: ZoneSide;
+  /**
+   * Touches
+   */
+  touches: number;
+};
+
+/**
+ * ChartZonesBody
+ */
+export type ChartZonesBody = {
+  /**
+   * Basis
+   */
+  basis: string;
+  context: ChartContextBody;
+  record: ChartAutoRecordBody;
+  timeframe: Timeframe;
+  window: ChartWindowBody;
+  /**
+   * Zones
+   *
+   * 위쪽 구간(상단 내림차순)부터.
+   */
+  zones: Array<ChartZoneBody>;
+};
+
+/**
  * ChatMessageView
  *
  * 대화 메시지 하나. `turn_id`는 이 메시지를 만든 턴이다(C-03).
@@ -1402,6 +2145,13 @@ export type ChoiceParameter = {
    */
   parameter_id: string;
 };
+
+/**
+ * ChosenBy
+ *
+ * 채널 방향을 누가 정했나: 국면 판정 추천을 따랐으면 recommendation, 바꿨으면 user_override.
+ */
+export type ChosenBy = "recommendation" | "user_override";
 
 /**
  * ClosedHolding
@@ -1927,6 +2677,45 @@ export type ContinuousScheduleProvenance = {
    * Transitions
    */
   transitions: Array<SelectionTransition>;
+};
+
+/**
+ * CreateChartLineBody
+ */
+export type CreateChartLineBody = {
+  /**
+   * Anchors
+   */
+  anchors: Array<ChartPointBody>;
+  auto?: ChartAutoRecordBody | null;
+  /**
+   * Extend Right
+   */
+  extend_right?: boolean;
+  /**
+   * Instrument Code
+   */
+  instrument_code: string;
+  instrument_kind: InstrumentKind;
+  kind: LineKind;
+  /**
+   * Levels
+   */
+  levels?: Array<number> | null;
+  /**
+   * Locked
+   */
+  locked?: boolean;
+  /**
+   * Memo
+   */
+  memo?: string;
+  source: LineSource;
+  timeframe: Timeframe;
+  /**
+   * Visible
+   */
+  visible?: boolean;
 };
 
 /**
@@ -4177,6 +4966,11 @@ export type InlineDraft = {
 };
 
 /**
+ * InstrumentKind
+ */
+export type InstrumentKind = "stock" | "index";
+
+/**
  * IntegerParameter
  */
 export type IntegerParameter = {
@@ -4584,6 +5378,20 @@ export type LibraryVisibilityBody = {
    */
   hidden: boolean;
 };
+
+/**
+ * LineKind
+ */
+export type LineKind = "hline" | "fib_retracement" | "fib_channel";
+
+/**
+ * LineSource
+ *
+ * 선의 출처: 손으로 그었으면 manual, 자동 후보를 그대로 저장했으면 auto, 자동 후보를 내 선으로
+ * 옮겨 고칠 수 있게 했으면 auto_copied다. auto·auto_copied는 자동 기록(알고리즘 버전·파라미터·판정
+ * 구간)을 함께 저장한다.
+ */
+export type LineSource = "manual" | "auto" | "auto_copied";
 
 /**
  * Market
@@ -5157,6 +5965,11 @@ export type ParameterNode = {
  * 쪽이라, 옛 실행 설정과 견주는 선택지로만 남기고 결과에 경고를 붙인다.
  */
 export type ParticipationBasis = "session_volume" | "adv20";
+
+/**
+ * PivotKind
+ */
+export type PivotKind = "high" | "low";
 
 /**
  * PortfolioCandidateTrace
@@ -6040,6 +6853,20 @@ export type RefreshFailure =
  * 끝난 받기의 결과. 지금 상태(`code`)가 바뀌어도(계산 시작·잠금) 그대로 남는다.
  */
 export type RefreshOutcome = "succeeded" | "failed" | "partial";
+
+/**
+ * RegimeReason
+ *
+ * 판정 불가·보류의 사유.
+ */
+export type RegimeReason =
+  "too_few_bars" | "degenerate" | "weak_strength" | "structure_mismatch";
+
+/**
+ * RegimeVerdict
+ */
+export type RegimeVerdict =
+  "up" | "down" | "box" | "unclear" | "hold" | "undecidable";
 
 /**
  * RemoteCheckBody
@@ -8524,6 +9351,17 @@ export type StrategyValidation = {
 };
 
 /**
+ * Structure
+ */
+export type Structure = "up" | "down" | "mixed" | "insufficient";
+
+/**
+ * SwingChoice
+ */
+export type SwingChoice =
+  "range_extremes" | "latest_major" | "latest_confirmed";
+
+/**
  * SyncProgressBody
  */
 export type SyncProgressBody = {
@@ -8740,6 +9578,11 @@ export type TimeSeriesNode = {
  */
 export type TimeSeriesOperator =
   "mean" | "std" | "momentum" | "delta" | "min" | "max";
+
+/**
+ * Timeframe
+ */
+export type Timeframe = "day" | "week" | "month";
 
 /**
  * TokenTotalsView
@@ -9019,6 +9862,11 @@ export type TradeSessionSummary = {
    */
   session: string;
 };
+
+/**
+ * TrendDirection
+ */
+export type TrendDirection = "up" | "down";
 
 /**
  * TrialAttempt
@@ -9848,6 +10696,18 @@ export type WindowSelection = {
  */
 export type WindowSelectionRule =
   "train_sharpe_max" | "neighbor_mean_sharpe_max";
+
+/**
+ * WindowSource
+ *
+ * 판정 구간의 출처. 자동 제안 칩 길이 그대로면 preset, 테두리를 끌거나 날짜를 고치면 user다.
+ */
+export type WindowSource = "preset" | "user";
+
+/**
+ * ZoneSide
+ */
+export type ZoneSide = "resistance" | "support" | "straddle";
 
 /**
  * CreateProviderProfileRequest
@@ -12669,6 +13529,560 @@ export type GetCredentialsFileResponses = {
 
 export type GetCredentialsFileResponse =
   GetCredentialsFileResponses[keyof GetCredentialsFileResponses];
+
+export type GetChartCandlesData = {
+  body?: never;
+  path?: never;
+  query: {
+    /**
+     * stock 또는 index.
+     */
+    kind: InstrumentKind;
+    /**
+     * Code
+     *
+     * 종목 티커 또는 지수 코드.
+     */
+    code: string;
+    timeframe: Timeframe;
+    /**
+     * Start
+     */
+    start?: string | null;
+    /**
+     * End
+     */
+    end?: string | null;
+  };
+  url: "/api/v1/stock-chart/candles";
+};
+
+export type GetChartCandlesErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type GetChartCandlesError =
+  GetChartCandlesErrors[keyof GetChartCandlesErrors];
+
+export type GetChartCandlesResponses = {
+  /**
+   * Successful Response
+   */
+  200: ChartCandlesBody;
+};
+
+export type GetChartCandlesResponse =
+  GetChartCandlesResponses[keyof GetChartCandlesResponses];
+
+export type GetChartChannelsData = {
+  body?: never;
+  path?: never;
+  query: {
+    /**
+     * stock 또는 index.
+     */
+    kind: InstrumentKind;
+    /**
+     * Code
+     *
+     * 종목 티커 또는 지수 코드.
+     */
+    code: string;
+    timeframe: Timeframe;
+    direction: TrendDirection;
+    /**
+     * First Anchor
+     *
+     * 첫 점(기준점 a) 봉 날짜. 없으면 모든 쌍을 찾는다.
+     */
+    first_anchor?: string | null;
+    /**
+     * Window Start
+     *
+     * 판정·분석 구간 시작 봉 날짜.
+     */
+    window_start?: string | null;
+    /**
+     * Window End
+     *
+     * 판정·분석 구간 끝 봉 날짜.
+     */
+    window_end?: string | null;
+    /**
+     * Candidate Sensitivity
+     *
+     * 피벗 민감도 k(× ATR).
+     */
+    candidate_sensitivity?: number | null;
+    /**
+     * Structure Sensitivity
+     *
+     * 피벗 민감도 k(× ATR).
+     */
+    structure_sensitivity?: number | null;
+  };
+  url: "/api/v1/stock-chart/channels";
+};
+
+export type GetChartChannelsErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type GetChartChannelsError =
+  GetChartChannelsErrors[keyof GetChartChannelsErrors];
+
+export type GetChartChannelsResponses = {
+  /**
+   * Successful Response
+   */
+  200: ChartChannelsBody;
+};
+
+export type GetChartChannelsResponse =
+  GetChartChannelsResponses[keyof GetChartChannelsResponses];
+
+export type FindChartConfluenceData = {
+  body: ChartConfluenceRequestBody;
+  path?: never;
+  query?: never;
+  url: "/api/v1/stock-chart/confluence";
+};
+
+export type FindChartConfluenceErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type FindChartConfluenceError =
+  FindChartConfluenceErrors[keyof FindChartConfluenceErrors];
+
+export type FindChartConfluenceResponses = {
+  /**
+   * Successful Response
+   */
+  200: ChartConfluenceBody;
+};
+
+export type FindChartConfluenceResponse =
+  FindChartConfluenceResponses[keyof FindChartConfluenceResponses];
+
+export type SearchChartInstrumentsData = {
+  body?: never;
+  path?: never;
+  query: {
+    /**
+     * Query
+     *
+     * 이름·티커·지수명(포함 검색).
+     */
+    query: string;
+    /**
+     * Limit
+     */
+    limit?: number;
+  };
+  url: "/api/v1/stock-chart/instruments";
+};
+
+export type SearchChartInstrumentsErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type SearchChartInstrumentsError =
+  SearchChartInstrumentsErrors[keyof SearchChartInstrumentsErrors];
+
+export type SearchChartInstrumentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: ChartInstrumentSearchBody;
+};
+
+export type SearchChartInstrumentsResponse =
+  SearchChartInstrumentsResponses[keyof SearchChartInstrumentsResponses];
+
+export type ListChartLinesData = {
+  body?: never;
+  path?: never;
+  query: {
+    /**
+     * stock 또는 index.
+     */
+    kind: InstrumentKind;
+    /**
+     * Code
+     *
+     * 종목 티커 또는 지수 코드.
+     */
+    code: string;
+  };
+  url: "/api/v1/stock-chart/lines";
+};
+
+export type ListChartLinesErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type ListChartLinesError =
+  ListChartLinesErrors[keyof ListChartLinesErrors];
+
+export type ListChartLinesResponses = {
+  /**
+   * Successful Response
+   */
+  200: ChartLinesBody;
+};
+
+export type ListChartLinesResponse =
+  ListChartLinesResponses[keyof ListChartLinesResponses];
+
+export type CreateChartLineData = {
+  body: CreateChartLineBody;
+  path?: never;
+  query?: never;
+  url: "/api/v1/stock-chart/lines";
+};
+
+export type CreateChartLineErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type CreateChartLineError =
+  CreateChartLineErrors[keyof CreateChartLineErrors];
+
+export type CreateChartLineResponses = {
+  /**
+   * Successful Response
+   */
+  201: ChartLineBody;
+};
+
+export type CreateChartLineResponse =
+  CreateChartLineResponses[keyof CreateChartLineResponses];
+
+export type DeleteChartLineData = {
+  body?: never;
+  path: {
+    /**
+     * Line Id
+     */
+    line_id: string;
+  };
+  query?: never;
+  url: "/api/v1/stock-chart/lines/{line_id}";
+};
+
+export type DeleteChartLineErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type DeleteChartLineError =
+  DeleteChartLineErrors[keyof DeleteChartLineErrors];
+
+export type DeleteChartLineResponses = {
+  /**
+   * Successful Response
+   */
+  204: void;
+};
+
+export type DeleteChartLineResponse =
+  DeleteChartLineResponses[keyof DeleteChartLineResponses];
+
+export type UpdateChartLineData = {
+  body: ChartLineEditBody;
+  path: {
+    /**
+     * Line Id
+     */
+    line_id: string;
+  };
+  query?: never;
+  url: "/api/v1/stock-chart/lines/{line_id}";
+};
+
+export type UpdateChartLineErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type UpdateChartLineError =
+  UpdateChartLineErrors[keyof UpdateChartLineErrors];
+
+export type UpdateChartLineResponses = {
+  /**
+   * Successful Response
+   */
+  200: ChartLineBody;
+};
+
+export type UpdateChartLineResponse =
+  UpdateChartLineResponses[keyof UpdateChartLineResponses];
+
+export type GetChartRegimeData = {
+  body?: never;
+  path?: never;
+  query: {
+    /**
+     * stock 또는 index.
+     */
+    kind: InstrumentKind;
+    /**
+     * Code
+     *
+     * 종목 티커 또는 지수 코드.
+     */
+    code: string;
+    timeframe: Timeframe;
+    /**
+     * Window Start
+     *
+     * 판정·분석 구간 시작 봉 날짜.
+     */
+    window_start?: string | null;
+    /**
+     * Window End
+     *
+     * 판정·분석 구간 끝 봉 날짜.
+     */
+    window_end?: string | null;
+    /**
+     * Candidate Sensitivity
+     *
+     * 피벗 민감도 k(× ATR).
+     */
+    candidate_sensitivity?: number | null;
+    /**
+     * Structure Sensitivity
+     *
+     * 피벗 민감도 k(× ATR).
+     */
+    structure_sensitivity?: number | null;
+  };
+  url: "/api/v1/stock-chart/regime";
+};
+
+export type GetChartRegimeErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type GetChartRegimeError =
+  GetChartRegimeErrors[keyof GetChartRegimeErrors];
+
+export type GetChartRegimeResponses = {
+  /**
+   * Successful Response
+   */
+  200: ChartRegimeBody;
+};
+
+export type GetChartRegimeResponse =
+  GetChartRegimeResponses[keyof GetChartRegimeResponses];
+
+export type GetChartRetracementData = {
+  body?: never;
+  path?: never;
+  query: {
+    /**
+     * stock 또는 index.
+     */
+    kind: InstrumentKind;
+    /**
+     * Code
+     *
+     * 종목 티커 또는 지수 코드.
+     */
+    code: string;
+    timeframe: Timeframe;
+    swing: SwingChoice;
+    /**
+     * Window Start
+     *
+     * 판정·분석 구간 시작 봉 날짜.
+     */
+    window_start?: string | null;
+    /**
+     * Window End
+     *
+     * 판정·분석 구간 끝 봉 날짜.
+     */
+    window_end?: string | null;
+    /**
+     * Candidate Sensitivity
+     *
+     * 피벗 민감도 k(× ATR).
+     */
+    candidate_sensitivity?: number | null;
+    /**
+     * Structure Sensitivity
+     *
+     * 피벗 민감도 k(× ATR).
+     */
+    structure_sensitivity?: number | null;
+  };
+  url: "/api/v1/stock-chart/retracement";
+};
+
+export type GetChartRetracementErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type GetChartRetracementError =
+  GetChartRetracementErrors[keyof GetChartRetracementErrors];
+
+export type GetChartRetracementResponses = {
+  /**
+   * Successful Response
+   */
+  200: ChartRetracementBody;
+};
+
+export type GetChartRetracementResponse =
+  GetChartRetracementResponses[keyof GetChartRetracementResponses];
+
+export type GetChartZonesData = {
+  body?: never;
+  path?: never;
+  query: {
+    /**
+     * stock 또는 index.
+     */
+    kind: InstrumentKind;
+    /**
+     * Code
+     *
+     * 종목 티커 또는 지수 코드.
+     */
+    code: string;
+    timeframe: Timeframe;
+    /**
+     * Window Start
+     *
+     * 판정·분석 구간 시작 봉 날짜.
+     */
+    window_start?: string | null;
+    /**
+     * Window End
+     *
+     * 판정·분석 구간 끝 봉 날짜.
+     */
+    window_end?: string | null;
+    /**
+     * Width Atr
+     *
+     * 묶는 폭 k_z(tol = k_z·ATR/종가).
+     */
+    width_atr?: number | null;
+    /**
+     * Min Touches
+     */
+    min_touches?: number | null;
+    /**
+     * Candidate Sensitivity
+     *
+     * 피벗 민감도 k(× ATR).
+     */
+    candidate_sensitivity?: number | null;
+    /**
+     * Structure Sensitivity
+     *
+     * 피벗 민감도 k(× ATR).
+     */
+    structure_sensitivity?: number | null;
+  };
+  url: "/api/v1/stock-chart/zones";
+};
+
+export type GetChartZonesErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type GetChartZonesError = GetChartZonesErrors[keyof GetChartZonesErrors];
+
+export type GetChartZonesResponses = {
+  /**
+   * Successful Response
+   */
+  200: ChartZonesBody;
+};
+
+export type GetChartZonesResponse =
+  GetChartZonesResponses[keyof GetChartZonesResponses];
 
 export type ListStrategiesData = {
   body?: never;

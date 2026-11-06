@@ -1,7 +1,9 @@
-"""박스 비율 임계 B*의 근거: 무작위 보행에서 봉 수 N이 달라도 박스권 비율이 비슷하다(설계 문서 4.2).
+"""박스 비율 임계 B*의 근거: 무작위 보행의 박스권 비율이 N과 관계없이 목표 범위에 든다(문서 4.2).
 
-봉 하나는 16단계 가우스 경로(시가 = 직전 종가, 갭 없음)이고, ATR이 자리 잡도록 앞에 60봉을 더 둔다.
-문서의 표는 같은 모형의 20,000 경로 결과다. 여기서는 판정 함수 자체로 경로 수를 줄여 다시 확인한다.
+봉 하나는 `STEPS_PER_BAR`단계 가우스 경로(시가 = 직전 종가, 갭 없음, 봉 σ 1%)이고, ATR이 자리 잡도록
+앞에 `WARMUP_BARS`봉을 더 둔다. 문서 4.2의 표는 이 파일을 스크립트로 돌린 결과다
+(`uv run python tests/domain/test_chart_analysis_regime_simulation.py`, N마다 20,000 경로).
+테스트는 같은 모형을 경로 수만 줄여 판정 함수로 다시 확인한다.
 """
 
 from __future__ import annotations
@@ -13,17 +15,21 @@ import numpy as np
 
 from strategy_workbench.domain.chart_analysis.facade.bars import Candle
 from strategy_workbench.domain.chart_analysis.facade.regime import (
+    BOX_RATIO_MAX,
+    RegimeJudgement,
     RegimeVerdict,
     judge_regime,
 )
-from strategy_workbench.domain.chart_analysis.facade.swings import Window, build_series
+from strategy_workbench.domain.chart_analysis.facade.series import Window, build_series
 
-STEPS_PER_BAR, WARMUP_BARS, PATHS = 16, 60, 1500
+STEPS_PER_BAR, WARMUP_BARS, SEED = 256, 60, 20261106
+WINDOW_BARS = (20, 52, 104)
 D0 = date(2000, 1, 3)
 
 
 def _random_walk_candles(rng: np.random.Generator, bars: int) -> list[Candle]:
-    path = np.cumsum(rng.normal(0, 0.01 / math.sqrt(STEPS_PER_BAR), (bars, STEPS_PER_BAR)), axis=1)
+    step = 0.01 / math.sqrt(STEPS_PER_BAR)
+    path = np.cumsum(rng.normal(0, step, (bars, STEPS_PER_BAR)), axis=1)
     close_log = np.cumsum(path[:, -1])
     open_log = np.concatenate(([0.0], close_log[:-1]))
     high = 100 * np.exp(open_log + np.maximum(path.max(axis=1), 0))
@@ -36,17 +42,39 @@ def _random_walk_candles(rng: np.random.Generator, bars: int) -> list[Candle]:
     ]
 
 
-def test_box_share_of_random_walks_is_similar_across_window_lengths() -> None:
-    rng = np.random.default_rng(20261106)
-    shares = {}
-    for bars in (20, 52, 104):
-        boxes = 0
-        for _ in range(PATHS):
-            series = build_series(_random_walk_candles(rng, WARMUP_BARS + bars))
-            end = len(series.candles) - 1
-            boxes += judge_regime(series, Window.ending_at(end, bars)).verdict is RegimeVerdict.BOX
-        shares[bars] = boxes / PATHS
+def _judgements(paths: int, window_bars: int, rng: np.random.Generator) -> list[RegimeJudgement]:
+    out = []
+    for _ in range(paths):
+        series = build_series(_random_walk_candles(rng, WARMUP_BARS + window_bars))
+        out.append(judge_regime(series, Window.ending_at(len(series.candles) - 1, window_bars)))
+    return out
 
-    # 20,000 경로 표: N=20·52·104 모두 약 12%. 1,500 경로의 표본 오차(약 0.9%p) 안에서 같은지 본다
-    assert max(shares.values()) - min(shares.values()) <= 0.04, shares
-    assert all(0.09 <= share <= 0.16 for share in shares.values()), shares
+
+def test_box_share_of_random_walks_stays_in_target_band_for_every_window_length() -> None:
+    rng = np.random.default_rng(SEED)
+    shares = {}
+    for bars in WINDOW_BARS:
+        judged = _judgements(500, bars, rng)
+        shares[bars] = sum(j.verdict is RegimeVerdict.BOX for j in judged) / len(judged)
+
+    # 20,000 경로 표의 B* 행은 N마다 12~15%. 500 경로의 표본 오차(약 1.5%p)를 더한 띠 안인지 본다
+    assert max(shares.values()) - min(shares.values()) <= 0.05, shares
+    assert all(0.09 <= share <= 0.18 for share in shares.values()), shares
+
+
+if __name__ == "__main__":
+    grid = [0.6, 0.65, 0.7, 0.71, 0.72, 0.73, 0.74, 0.75, 0.8, 0.9, 1.0]
+    rows = {}
+    for bars in WINDOW_BARS:
+        judged = _judgements(20_000, bars, np.random.default_rng(SEED + bars))
+        s = np.array([j.strength for j in judged])
+        b = np.array([j.box_ratio for j in judged])
+        flat = np.abs(s) < 1
+        rows[bars] = [float(np.mean(flat & (b <= g))) for g in grid]
+        print(
+            f"N={bars} P(|S|<1)={flat.mean():.3f} P(|S|>=2)={np.mean(np.abs(s) >= 2):.3f} "
+            f"B|flat q10/25/50={np.quantile(b[flat], [0.1, 0.25, 0.5]).round(3)}"
+        )
+    print(f"B* now {BOX_RATIO_MAX}")
+    for i, g in enumerate(grid):
+        print(f"B*={g:.2f} " + " ".join(f"{rows[n][i]:.3f}" for n in WINDOW_BARS))

@@ -1,19 +1,23 @@
-"""분석 입력 계열·ATR(Wilder)·확정 피벗의 owner(설계 문서 4.1).
+"""분석 입력 계열·판정 창·ATR(Wilder)·확정 피벗의 owner(설계 문서 4.1·4.7).
 
 모든 값은 봉 t까지의 정보로만 정한다. 피벗은 원장 전체 계열에서 한 번 계산하고 판정 구간으로 자른다.
+index는 한 주기(일·주·월) 계열의 완성 봉 index이고, 저장 날짜는 그 봉의 `Candle.start`다(좌표 계약).
 """
 
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 
 import numpy as np
 import numpy.typing as npt
 
 from strategy_workbench.domain.chart_analysis._bars import Candle
+from strategy_workbench.domain.chart_analysis._geometry import Anchor
 
 FloatArray = npt.NDArray[np.float64]
 
@@ -55,10 +59,24 @@ class Pivot:
     price: float
     confirmed_index: int
 
+    @property
+    def anchor(self) -> Anchor:
+        return Anchor(self.index, self.price)
+
+
+class WindowSource(Enum):
+    """판정 구간의 출처.
+
+    자동 제안 길이 그대로면 preset, 사용자가 테두리를 끌거나 날짜를 고치면 user다.
+    """
+
+    PRESET = "preset"
+    USER = "user"
+
 
 @dataclass(frozen=True)
 class Window:
-    """완성 봉 index의 닫힌 구간 [start, end]. `end`가 기준일 봉이다."""
+    """완성 봉 index의 닫힌 구간 [start, end]. `end`는 기준 봉(보통 계열의 마지막 완성 봉)이다."""
 
     start: int
     end: int
@@ -73,13 +91,13 @@ class Window:
 
     @classmethod
     def ending_at(cls, end: int, bars: int) -> Window:
-        """기준일 봉 `end`에서 끝나는 `bars`봉 구간(계열 앞에서 잘리면 짧아진다)."""
+        """기준 봉 `end`에서 끝나는 `bars`봉 구간(계열 앞에서 잘리면 짧아진다)."""
         return cls(max(0, end - bars + 1), end)
 
 
 @dataclass(frozen=True, eq=False)
 class ChartSeries:
-    """완성 봉(진행 중 봉 제외)의 배열과 ATR·피벗. `build_series`로만 만든다."""
+    """한 주기의 완성 봉(진행 중 봉 제외) 배열과 ATR·피벗. 배열은 읽기 전용이다."""
 
     candles: tuple[Candle, ...]
     high: FloatArray
@@ -89,6 +107,26 @@ class ChartSeries:
     params: SwingParams
     pivots: tuple[Pivot, ...]
     major_pivots: tuple[Pivot, ...]
+
+    def __post_init__(self) -> None:
+        for values in (self.high, self.low, self.close, self.atr):
+            values.flags.writeable = False
+
+    def bar_date(self, index: int) -> date:
+        """완성 봉 `index`의 저장 날짜(`Candle.start`)."""
+        if not 0 <= index < len(self.candles):
+            raise ValueError(f"bar index out of range — index={index} bars={len(self.candles)}")
+        return self.candles[index].start
+
+    def index_of(self, day: date) -> int | None:
+        """`day`가 든 완성 봉 index. 봉 사이 휴장일·주 중간 날짜는 그 앞 봉(그 기간의 봉)이다.
+
+        첫 봉 시작 전이거나 마지막 완성 봉의 끝 거래일 뒤(진행 중 봉 기간·미래 포함)면 None이다.
+        """
+        i = bisect_right(self.candles, day, key=lambda c: c.start) - 1
+        if i < 0 or (i == len(self.candles) - 1 and day > self.candles[i].end):
+            return None
+        return i
 
     def confirmed_in(self, window: Window, *, major: bool = False) -> tuple[Pivot, ...]:
         """극값이 구간 안에 있고 구간 끝까지 확정된 피벗(후보용 또는 구조 판정용)."""
@@ -121,7 +159,10 @@ def _find_pivots(
 ) -> tuple[Pivot, ...]:
     """ATR 스윙 피벗. 고점 후보 i는 더 높은 고가가 나오면 바뀌고, `t ≥ i+R` 이고
     `H_i − min(L_(i,t]) ≥ k·ATR_t` 인 첫 봉 t에서 확정된다(저점은 대칭). 확정 뒤에는 반대 방향
-    추적을 (i, t]의 극값에서 다시 시작한다. 방향이 정해지기 전에는 고점을 먼저 본다."""
+    추적을 (i, t]의 극값에서 다시 시작한다. 방향이 정해지기 전에는 고점을 먼저 본다.
+
+    한 봉에서는 피벗이 많아야 하나 확정된다. ATR_t = 0인 봉(가격이 한 번도 움직이지 않은 계열)에서는
+    확정하지 않는다."""
     out: list[Pivot] = []
     direction = 0
     hi_i, hi_p, lo_i, lo_p = 0, high[0], 0, low[0]
@@ -138,6 +179,8 @@ def _find_pivots(
             else:
                 run_hi = max(run_hi, high[t])
         threshold = sensitivity * atr[t]
+        if threshold <= 0:
+            continue
         if direction >= 0 and t >= hi_i + r and hi_p - run_lo >= threshold:
             out.append(Pivot(PivotKind.HIGH, hi_i, hi_p, t))
             direction = -1

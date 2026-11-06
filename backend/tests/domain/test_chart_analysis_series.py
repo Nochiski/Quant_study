@@ -1,28 +1,31 @@
-"""ATR(Wilder)·확정 피벗·국면 판정과 룩어헤드 성질(설계 문서 4.1·4.2)."""
+"""계열 좌표·ATR(Wilder)·확정 피벗·국면 판정과 룩어헤드 성질(설계 문서 4.1·4.2·4.7)."""
 
 from __future__ import annotations
 
 import math
-import statistics
-from collections.abc import Sequence
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date
 
 import numpy as np
 import pytest
 
-from strategy_workbench.domain.chart_analysis._regime import _structure
 from strategy_workbench.domain.chart_analysis._series import _find_pivots
 from strategy_workbench.domain.chart_analysis.facade.bars import Candle
-from strategy_workbench.domain.chart_analysis.facade.levels import find_zones
+from strategy_workbench.domain.chart_analysis.facade.levels import (
+    SwingChoice,
+    TrendDirection,
+    find_channels,
+    find_zones,
+    retracement_swing,
+)
 from strategy_workbench.domain.chart_analysis.facade.regime import (
     BOX_RATIO_MAX,
-    HoldReason,
+    RegimeReason,
     RegimeVerdict,
     Structure,
     judge_regime,
 )
-from strategy_workbench.domain.chart_analysis.facade.swings import (
+from strategy_workbench.domain.chart_analysis.facade.series import (
     Pivot,
     PivotKind,
     SwingParams,
@@ -30,74 +33,82 @@ from strategy_workbench.domain.chart_analysis.facade.swings import (
     build_series,
 )
 
+from ._chart_analysis_fixtures import candles, candles_from_closes, series_with
+
 H, L = PivotKind.HIGH, PivotKind.LOW
-D0 = date(2020, 1, 1)
 
 
-def _candles(rows: Sequence[tuple[float, float, float, float]]) -> list[Candle]:
-    """(시가, 고가, 저가, 종가) 행을 날짜만 하루씩 늘린 봉으로 만든다."""
-    return [
-        Candle(D0 + timedelta(days=i), D0 + timedelta(days=i), o, h, low, c)
-        for i, (o, h, low, c) in enumerate(rows)
-    ]
-
-
-def _from_closes(closes: Sequence[float], width: float) -> list[Candle]:
-    """고가 = max(직전 종가, 종가), 저가 = 고가 − width.
-
-    직전 종가가 늘 봉 안이라 TR = ATR = width다.
-    """
-    rows = []
-    for i, c in enumerate(closes):
-        prev = closes[i - 1] if i else c
-        if abs(c - prev) > width:
-            raise AssertionError(f"step larger than width at {i}")
-        high = max(prev, c)
-        rows.append((prev, high, high - width, c))
-    return _candles(rows)
-
-
-def _from_log_returns(signs: str, step: float, width: float = 2.0) -> list[Candle]:
+def _from_log_returns(signs: str, step: float, width: float) -> list[Candle]:
     closes = [100.0]
     for s in signs:
         closes.append(closes[-1] * math.exp(step if s == "+" else -step))
-    return _from_closes(closes, width)
+    return candles_from_closes(closes, width)
+
+
+# --- 계열 좌표 ---------------------------------------------------------------------------------
+
+
+def test_index_of_maps_dates_inside_a_completed_bar_period_and_bar_date_is_its_start() -> None:
+    weekly = [
+        Candle(date(2026, 11, 2), date(2026, 11, 6), 10, 11, 9, 10),
+        Candle(date(2026, 11, 9), date(2026, 11, 13), 10, 11, 9, 10),
+        Candle(date(2026, 11, 16), date(2026, 11, 17), 10, 11, 9, 10, in_progress=True),
+    ]
+    series = build_series(weekly)
+
+    assert [series.index_of(date(2026, 11, d)) for d in (1, 2, 4, 7, 9, 13, 14, 16)] == [
+        None,  # 첫 봉 전
+        0,
+        0,  # 주 중간
+        0,  # 봉 사이 주말은 앞 봉
+        1,
+        1,
+        None,  # 마지막 완성 봉의 끝 거래일 뒤
+        None,  # 진행 중 봉
+    ]
+    assert series.bar_date(1) == date(2026, 11, 9)
+    with pytest.raises(ValueError):
+        series.bar_date(2)
 
 
 # --- ATR -------------------------------------------------------------------------------------
 
 
 def test_atr_uses_gaps_in_true_range_and_wilder_after_simple_head() -> None:
-    candles = _candles(
-        [
-            (10, 11, 9, 10),  # TR = 2
-            (10, 12, 10, 11),  # TR = max(2, |12−10|, |10−10|) = 2
-            (14, 15, 13, 14),  # 갭: TR = max(2, |15−11|, |13−11|) = 4
-            (14, 14, 8, 9),  # TR = max(6, 0, |8−14|) = 6
-            (9, 10, 9, 9.5),  # TR = max(1, |10−9|, 0) = 1
-        ]
-    )
+    rows = [
+        (10, 11, 9, 10),  # TR = 2
+        (10, 12, 10, 11),  # TR = max(2, |12−10|, |10−10|) = 2
+        (14, 15, 13, 14),  # 갭: TR = max(2, |15−11|, |13−11|) = 4
+        (14, 14, 8, 9),  # TR = max(6, 0, |8−14|) = 6
+        (9, 10, 9, 9.5),  # TR = max(1, |10−9|, 0) = 1
+    ]
 
-    atr = build_series(candles, SwingParams(atr_period=3)).atr
+    atr = build_series(candles(rows), SwingParams(atr_period=3)).atr
 
     # 처음 3봉은 단순 평균(2, 2, 8/3), 그 뒤는 (ATR·2 + TR)/3
     assert atr.tolist() == pytest.approx([2, 2, 8 / 3, 34 / 9, 77 / 27])
 
 
-def test_build_series_drops_in_progress_candle_and_rejects_inconsistent_prices() -> None:
-    candles = _from_closes([100, 101, 102], width=2)
-    last = candles[-1]
-    candles[-1] = Candle(last.start, last.end, last.open, last.high, last.low, last.close, True)
+def test_build_series_drops_in_progress_candle_keeps_arrays_read_only_and_rejects_bad_prices() -> (
+    None
+):
+    bars = candles_from_closes([100, 101, 102], width=2)
+    bars[-1] = replace(bars[-1], in_progress=True)
 
-    assert len(build_series(candles).candles) == 2
+    series = build_series(bars)
+
+    assert len(series.candles) == 2
+    with pytest.raises(ValueError):
+        series.close[0] = 0.0
     with pytest.raises(ValueError, match="index=1"):
-        build_series(_candles([(10, 11, 9, 10), (10, 11, 10.5, 10)]))  # 저가 > 종가
+        build_series(candles([(10, 11, 9, 10), (10, 11, 10.5, 10)]))  # 저가 > 종가
 
 
 # --- 피벗 ------------------------------------------------------------------------------------
 
 
 def _pivots(highs: list[float], lows: list[float]) -> tuple[Pivot, ...]:
+    # 문턱을 손으로 맞추려고 ATR을 1로 고정한다(build_series를 거치면 ATR이 봉마다 달라진다)
     return _find_pivots(highs, lows, [1.0] * len(highs), sensitivity=1.0, r=2)
 
 
@@ -126,6 +137,19 @@ def test_new_extreme_replaces_candidate_and_restarts_r_count() -> None:
     assert pivots[2:] == (Pivot(L, 5, 9.8, 7),)
 
 
+def test_flat_series_has_no_pivots_and_is_degenerate() -> None:
+    # ATR이 0이면 문턱도 0이라 막지 않으면 봉 2에서 "0 ≥ 0"으로 피벗이 생긴다
+    series = build_series(candles([(100, 100, 100, 100)] * 25))
+
+    assert (series.pivots, series.major_pivots) == ((), ())
+    regime = judge_regime(series, Window(0, 24))
+    assert (regime.verdict, regime.reason, regime.strength) == (
+        RegimeVerdict.UNDECIDABLE,
+        RegimeReason.DEGENERATE,
+        None,
+    )
+
+
 # --- 국면 판정 -------------------------------------------------------------------------------
 
 # 직선 ±2 걸음, ATR 2: 큰 스윙(2×ATR = 4) 피벗이 L0·H5·L7·H12·L14로 확정된다(손계산, 문서 4.1)
@@ -134,14 +158,9 @@ UP_CLOSES += [114, 116, 118, 120, 122]
 DOWN_CLOSES = [200 - c for c in UP_CLOSES]
 
 
-def _expected_strength(closes: Sequence[float]) -> float:
-    returns = [math.log(b / a) for a, b in zip(closes, closes[1:], strict=False)]
-    return math.log(closes[-1] / closes[0]) / (statistics.stdev(returns) * math.sqrt(len(returns)))
-
-
-def test_major_pivots_and_structure_up_and_down() -> None:
-    up = build_series(_from_closes(UP_CLOSES, width=2))
-    down = build_series(_from_closes(DOWN_CLOSES, width=2))
+def test_major_pivots_and_structure_up_and_down_recommend_channel_direction() -> None:
+    up = build_series(candles_from_closes(UP_CLOSES, width=2))
+    down = build_series(candles_from_closes(DOWN_CLOSES, width=2))
 
     assert [(p.kind, p.index, p.price, p.confirmed_index) for p in up.major_pivots] == [
         (L, 0, 98, 2),
@@ -163,8 +182,10 @@ def test_major_pivots_and_structure_up_and_down() -> None:
     assert [p.index for p in up_regime.structure_highs] == [5, 12]
     assert [p.index for p in up_regime.structure_lows] == [7, 14]
     assert (down_regime.verdict, down_regime.structure) == (RegimeVerdict.DOWN, Structure.DOWN)
-    assert up_regime.strength == pytest.approx(_expected_strength(UP_CLOSES))
-    assert down_regime.strength == pytest.approx(_expected_strength(DOWN_CLOSES))
+    assert (up_regime.channel_direction, down_regime.channel_direction) == (
+        TrendDirection.UP,
+        TrendDirection.DOWN,
+    )
 
 
 def _p(kind: PivotKind, index: int, price: float) -> Pivot:
@@ -184,66 +205,109 @@ def _p(kind: PivotKind, index: int, price: float) -> Pivot:
 def test_structure_classification(
     highs: tuple[float, ...], lows: tuple[float, ...], expected: Structure
 ) -> None:
-    hs = tuple(_p(H, 10 * i, v) for i, v in enumerate(highs))
-    ls = tuple(_p(L, 10 * i + 5, v) for i, v in enumerate(lows))
+    major = [_p(H, 1 + 6 * i, v) for i, v in enumerate(highs)]
+    major += [_p(L, 4 + 6 * i, v) for i, v in enumerate(lows)]
+    series = series_with(
+        [100.0, 101.0] * 10, [1.0] * 20, major=sorted(major, key=lambda p: p.index)
+    )
 
-    assert _structure(hs, ls) is expected
+    assert judge_regime(series, Window(0, 19)).structure is expected
+
+
+# 끝 봉만 저가를 4 낮춰 TR 12 → ATR_끝 = (8·13 + 12)/14. 나머지 봉은 TR = ATR = 8
+ATR_END = (8 * 13 + 12) / 14
 
 
 @pytest.mark.parametrize(
-    ("signs", "step", "verdict", "hold", "strength"),
+    ("signs", "step", "verdict", "reason", "strength", "box"),
     [
         # 부호 개수만으로 S가 정해진다: +p·−q 이면 S = (p−q)/√m ÷ 표본표준편차/step
-        ("+-" * 9 + "+", 0.01, RegimeVerdict.BOX, None, 1 / math.sqrt(20)),
-        ("+" * 10 + "-" * 9, 0.03, RegimeVerdict.UNCLEAR, None, 1 / math.sqrt(20)),
+        # 고저폭: 최고 = 최고 종가, 최저 = 첫 봉 저가 92 또는 끝 봉 저가(직전 고가 − 12)
+        ("+-" * 9 + "+", 0.01, RegimeVerdict.BOX, None, 1 / math.sqrt(20), 12.0),
+        (
+            "+" * 10 + "-" * 9,
+            0.03,
+            RegimeVerdict.UNCLEAR,
+            None,
+            1 / math.sqrt(20),
+            100 * math.exp(0.3) - 92,
+        ),
         (
             "+-+" * 6 + "+",
             0.01,
             RegimeVerdict.HOLD,
-            HoldReason.WEAK_STRENGTH,
+            RegimeReason.WEAK_STRENGTH,
             7 * math.sqrt(3 / 52),
+            100 * math.exp(0.07) - 92,
         ),
     ],
 )
-def test_flat_and_weak_strength_branches_with_hand_computed_s(
-    signs: str, step: float, verdict: RegimeVerdict, hold: HoldReason | None, strength: float
+def test_flat_and_weak_strength_branches_with_hand_computed_s_and_box_ratio(
+    signs: str,
+    step: float,
+    verdict: RegimeVerdict,
+    reason: RegimeReason | None,
+    strength: float,
+    box: float,
 ) -> None:
-    candles = _from_log_returns(signs, step, width=8.0)
-    candles[-1] = replace(candles[-1], low=candles[-1].low - 4)  # 끝 ATR을 시작 ATR과 다르게
-    series = build_series(candles)
+    bars = _from_log_returns(signs, step, width=8.0)
+    bars[-1] = replace(bars[-1], low=bars[-1].low - 4)
+
+    regime = judge_regime(build_series(bars), Window(0, 19))
+
+    assert regime.strength == pytest.approx(strength)
+    assert regime.box_ratio == pytest.approx(box / (ATR_END * math.sqrt(20)))
+    assert (regime.verdict, regime.reason, regime.channel_direction) == (verdict, reason, None)
+
+
+@pytest.mark.parametrize(
+    ("top", "verdict"),
+    [
+        (5 * BOX_RATIO_MAX, RegimeVerdict.BOX),  # B = 5·B*/(1·√25) = B* 경계는 박스권
+        (math.nextafter(5 * BOX_RATIO_MAX, math.inf), RegimeVerdict.UNCLEAR),
+    ],
+)
+def test_box_ratio_threshold_is_inclusive(top: float, verdict: RegimeVerdict) -> None:
+    close = [101.0, 102.0] * 12 + [101.0]  # S = 0
+    high = [1.0] * 25
+    high[5] = top
+    series = series_with(close, [1.0] * 25, high=high, low=[0.0] * 25)
+
+    assert judge_regime(series, Window(0, 24)).verdict is verdict
+
+
+def test_zero_atr_at_window_end_is_degenerate() -> None:
+    series = series_with([101.0, 102.0] * 10, [1.0] * 19 + [0.0])
 
     regime = judge_regime(series, Window(0, 19))
 
-    assert regime.strength == pytest.approx(strength)
-    assert (regime.verdict, regime.hold_reason) == (verdict, hold)
-    expected_box = (series.high.max() - series.low.min()) / (series.atr[19] * math.sqrt(20))
-    assert regime.box_ratio == pytest.approx(expected_box)
-    if abs(strength) < 1:
-        assert bool(expected_box <= BOX_RATIO_MAX) is (verdict is RegimeVerdict.BOX)
+    assert (regime.verdict, regime.reason, regime.box_ratio) == (
+        RegimeVerdict.UNDECIDABLE,
+        RegimeReason.DEGENERATE,
+        None,
+    )
 
 
 def test_strong_strength_without_confirmed_structure_is_hold() -> None:
-    series = build_series(_from_closes([100 + 2 * i for i in range(20)], width=2))
+    series = build_series(candles_from_closes([100 + 2 * i for i in range(20)], width=2))
 
     regime = judge_regime(series, Window(0, 19))
 
     assert regime.strength is not None and regime.strength >= 2
     assert regime.structure is Structure.INSUFFICIENT
-    assert (regime.verdict, regime.hold_reason) == (
-        RegimeVerdict.HOLD,
-        HoldReason.STRUCTURE_MISMATCH,
-    )
+    assert (regime.verdict, regime.reason) == (RegimeVerdict.HOLD, RegimeReason.STRUCTURE_MISMATCH)
 
 
 def test_fewer_than_20_bars_is_undecidable_and_default_window_clamps_to_series_start() -> None:
-    series = build_series(_from_closes([100 + 2 * i for i in range(20)], width=2))
+    series = build_series(candles_from_closes([100 + 2 * i for i in range(20)], width=2))
 
     short = judge_regime(series, Window.ending_at(18, 120))
     exactly_20 = judge_regime(series, Window.ending_at(19, 20))
 
     assert short.window == Window(0, 18)
-    assert (short.verdict, short.strength, short.box_ratio) == (
+    assert (short.verdict, short.reason, short.strength, short.box_ratio) == (
         RegimeVerdict.UNDECIDABLE,
+        RegimeReason.TOO_FEW_BARS,
         None,
         None,
     )
@@ -251,12 +315,12 @@ def test_fewer_than_20_bars_is_undecidable_and_default_window_clamps_to_series_s
 
 
 def test_extreme_warning_uses_pivots_within_r_bars_confirmed_by_window_end() -> None:
-    rising = build_series(_from_closes([100 + 2 * i for i in range(25)], width=2))  # 피벗 L0 하나
-    swings = build_series(_from_closes(UP_CLOSES, width=2))  # 후보 피벗 0·5·7·12·14
+    rising = build_series(candles_from_closes([100 + 2 * i for i in range(25)], width=2))  # L0만
+    swings = build_series(candles_from_closes(UP_CLOSES, width=2))  # 후보 피벗 0·5·7·12·14
 
     assert judge_regime(rising, Window(2, 24)).starts_near_extreme is True  # |2 − 0| = R
     assert judge_regime(rising, Window(3, 24)).starts_near_extreme is False
-    # 저점 14는 봉 16에서 확정된다: 끝 15에서는 아직 모르는 극값이다
+    # 저점 14는 봉 16에 확정된다: 끝 15에서는 아직 모르는 극값이다
     assert judge_regime(swings, Window(0, 16)).ends_near_extreme is True
     assert judge_regime(swings, Window(0, 15)).ends_near_extreme is False
 
@@ -272,17 +336,22 @@ def _random_candles(seed: int, n: int) -> list[Candle]:
         o = closes[i - 1] if i else c
         spread = abs(rng.normal(0, 0.01, 2)) * c
         rows.append((o, max(o, c) + spread[0], min(o, c) - spread[1], c))
-    return _candles(rows)
+    return candles(rows)
 
 
-def test_pivots_and_zones_at_t_equal_results_from_input_cut_at_t() -> None:
-    candles = _random_candles(seed=7, n=160)
-    full = build_series(candles)
+@pytest.mark.parametrize("seed", [7, 11, 23])
+def test_results_at_t_equal_results_from_input_cut_at_t(seed: int) -> None:
+    bars = _random_candles(seed, n=160)
+    full = build_series(bars)
 
-    for t in range(30, 160, 3):
-        cut = build_series(candles[: t + 1])
+    for t in range(30, 160, 4):
+        cut = build_series(bars[: t + 1])
         assert cut.pivots == tuple(p for p in full.pivots if p.confirmed_index <= t)
         assert cut.major_pivots == tuple(p for p in full.major_pivots if p.confirmed_index <= t)
         window = Window(max(0, t - 120), t)
         assert find_zones(cut, window) == find_zones(full, window)
         assert judge_regime(cut, window) == judge_regime(full, window)
+        for direction in TrendDirection:
+            assert find_channels(cut, window, direction) == find_channels(full, window, direction)
+        for choice in SwingChoice:
+            assert retracement_swing(cut, window, choice) == retracement_swing(full, window, choice)

@@ -14,7 +14,7 @@ HL, RT, CH = LineKind.HLINE, LineKind.FIB_RETRACEMENT, LineKind.FIB_CHANNEL
 
 
 def _band(
-    kind: LineKind, low: float, high: float | None = None, level: float | None = None
+    kind: LineKind, low: float, high: float | None = None, level: float | None = 0.5
 ) -> PriceBand:
     return PriceBand(
         kind, low, low if high is None else high, ref=f"{kind.value}@{low}", level=level
@@ -57,6 +57,20 @@ def test_touching_covered_pieces_merge_into_one_confluence() -> None:
     assert _summary(bands, tolerance=0.0) == [
         (102, 105, {HL, RT, CH}, ["hline@100", "fib_retracement@102", "fib_channel@103"])
     ]
+
+
+def test_members_need_positive_length_overlap_with_the_confluence() -> None:
+    # 채널 [102, 103]은 중첩 [101, 102]에 102 한 점에서만 닿는다
+    bands = [_band(HL, 100, 102), _band(RT, 101, 102), _band(CH, 102, 103)]
+
+    assert _summary(bands, tolerance=0.0) == [
+        (101, 102, {HL, RT}, ["hline@100", "fib_retracement@101"])
+    ]
+
+
+def test_retracement_band_requires_its_level() -> None:
+    with pytest.raises(ValueError):
+        PriceBand(RT, 100, 100, ref="r", level=None)
 
 
 def test_same_kind_overlap_is_not_confluence() -> None:

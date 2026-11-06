@@ -32,9 +32,9 @@ class ZoneParams:
 
 
 class ZoneSide(Enum):
-    RESISTANCE = "resistance"  # lo > 현재가
-    SUPPORT = "support"  # hi < 현재가
-    STRADDLE = "straddle"  # 그 밖(현재가가 구간 안)
+    RESISTANCE = "resistance"
+    SUPPORT = "support"
+    STRADDLE = "straddle"
 
 
 @dataclass(frozen=True)
@@ -47,6 +47,15 @@ class HorizontalZone:
     held: int
     broken: int
     side: ZoneSide
+
+
+def _side(price: float, lo: float, hi: float) -> int:
+    """가격이 구간 위면 1, 아래면 −1, 구간 안(경계 포함)이면 0."""
+    return 1 if price > hi else -1 if price < lo else 0
+
+
+# 현재가가 구간 아래(−1)면 그 구간은 저항, 위(1)면 지지, 안이면 걸침이다.
+_ZONE_SIDES = {-1: ZoneSide.RESISTANCE, 1: ZoneSide.SUPPORT, 0: ZoneSide.STRADDLE}
 
 
 def _touches(members: list[Pivot]) -> int:
@@ -69,9 +78,6 @@ def find_zones(
 
     def tolerance(t: int) -> float:
         return params.width_atr * float(series.atr[t]) / float(close[t])
-
-    def side(price: float, lo: float, hi: float) -> int:
-        return 1 if price > hi else -1 if price < lo else 0
 
     groups: list[list[Pivot]] = []
     for p in sorted(series.confirmed_in(window), key=lambda p: (p.price, p.index)):
@@ -98,13 +104,14 @@ def find_zones(
             e = t
             while e + 1 <= end and low[e + 1] <= hi and high[e + 1] >= lo:
                 e += 1
-            before = side(float(close[t - 1]), lo, hi)
-            if e + 1 <= end and before != 0:
-                after = side(float(close[e + 1]), lo, hi)
+            if e + 1 <= end:
+                # 묶음 다음 봉은 구간에 닿지 않아 after는 ±1이다.
+                # 직전 종가가 구간 안(0)이면 지킴도 뚫림도 아니다.
+                before = _side(float(close[t - 1]), lo, hi)
+                after = _side(float(close[e + 1]), lo, hi)
                 held += after == before
                 broken += after == -before
             t = e + 2
-        current = float(close[end])
         zones.append(
             HorizontalZone(
                 members=tuple(group),
@@ -114,11 +121,7 @@ def find_zones(
                 formed_index=formed,
                 held=held,
                 broken=broken,
-                side=ZoneSide.RESISTANCE
-                if lo > current
-                else ZoneSide.SUPPORT
-                if hi < current
-                else ZoneSide.STRADDLE,
+                side=_ZONE_SIDES[_side(float(close[end]), lo, hi)],
             )
         )
     zones.sort(key=lambda z: -z.high)

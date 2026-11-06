@@ -1,6 +1,7 @@
-"""피보나치 채널 후보 찾기의 owner(설계 문서 4.3).
+"""피보나치 채널 후보 찾기와 채널 방향 어휘의 owner(설계 문서 4.3).
 
-기준선 `L(t) = p_a + m(t − i_a)`, 레벨 r의 가격 `C_r(t) = L(t) − r·d`.
+기하(기준선·폭·레벨 가격)는 `ChannelGeometry` 하나가 정한다. 여기서는 어떤 피벗 셋을 후보로
+둘지와 순위만 정한다.
 """
 
 from __future__ import annotations
@@ -8,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from strategy_workbench.domain.chart_analysis._geometry import ChannelGeometry
 from strategy_workbench.domain.chart_analysis._series import ChartSeries, Pivot, PivotKind, Window
 
 # 뒤의 같은 쪽 확정 피벗이 기준선 너머로 이만큼(× 구간 끝 ATR) 넘게 나가면 버린다.
@@ -21,6 +23,13 @@ class TrendDirection(Enum):
     DOWN = "down"
 
 
+class ChosenBy(Enum):
+    """채널 방향을 누가 정했나: 국면 판정 추천을 따랐으면 recommendation, 바꿨으면 user_override."""
+
+    RECOMMENDATION = "recommendation"
+    USER_OVERRIDE = "user_override"
+
+
 class AnchorIssue(Enum):
     OUTSIDE_WINDOW = "outside_window"
     NOT_A_PIVOT = "not_a_pivot"  # 그 방향의 확정 피벗이 아니다(구간 끝 뒤에 확정된 것 포함)
@@ -32,15 +41,11 @@ class ChannelCandidate:
     first: Pivot
     second: Pivot
     width_pivot: Pivot
-    slope: float
-    depth: float  # d: 상승은 음수라 r이 클수록 위
+    geometry: ChannelGeometry
     outside_closes: int
     span_bars: int
     width_atr: float
     created_index: int  # 세 기준점 확정 봉의 최댓값. 그 앞은 옅게 그린다
-
-    def price_at(self, index: int, level: float) -> float:
-        return self.first.price + self.slope * (index - self.first.index) - level * self.depth
 
 
 @dataclass(frozen=True)
@@ -58,10 +63,11 @@ def find_channels(
     first_anchor: int | None = None,
 ) -> ChannelSearch:
     """구간 안 같은 방향 확정 피벗 2개(up: 높아지는 저점, down: 낮아지는 고점)로 기준선을 잡고,
-    그 뒤 반대쪽 확정 피벗 중 기준선에서 가장 먼 점으로 폭을 정한다.
+    a 이후 반대쪽 확정 피벗 중 기준선에서 가장 먼 점으로 폭을 정한다.
 
-    순위: 20봉 미만 후보는 뒤 → 기준점~구간 끝 종가 중 채널 밖 비율 오름차순 → 폭/ATR 오름차순.
-    `first_anchor`(봉 index)를 주면 그 피벗을 첫 점으로 고정하고 둘째 점·폭만 찾는다.
+    순위: `MIN_CHANNEL_BARS`봉 미만 후보는 뒤 → 기준점~구간 끝 종가 중 채널 밖 비율 오름차순 →
+    폭/ATR 오름차순. `first_anchor`(봉 index)를 주면 그 피벗을 첫 점으로 고정하고 둘째 점·폭만
+    찾는다.
     """
     up = direction is TrendDirection.UP
     pivots = series.confirmed_in(window)
@@ -82,37 +88,34 @@ def find_channels(
             rise = b.price - a.price
             if sign * rise <= 0 or abs(rise) < atr_end:
                 continue
-            slope = rise / (b.index - a.index)
-
-            def line(t: int, a: Pivot = a, slope: float = slope) -> float:
-                return a.price + slope * (t - a.index)
-
+            # 폭 기준점을 a로 두면 d = 0이라 레벨 0 가격이 곧 기준선이다
+            line = ChannelGeometry(a.anchor, b.anchor, a.anchor)
             if any(
-                sign * (line(q.index) - q.price) > OVERSHOOT_ATR * atr_end
+                sign * (line.price_at(q.index, 0.0) - q.price) > OVERSHOOT_ATR * atr_end
                 for q in base
                 if q.index >= a.index
             ):
                 continue
-            far = [(sign * (q.price - line(q.index)), q) for q in opposite if q.index > a.index]
-            far = [item for item in far if item[0] > 0]
+            far = [
+                (gap, q)
+                for q in opposite
+                if q.index > a.index and (gap := sign * (q.price - line.price_at(q.index, 0.0))) > 0
+            ]
             if not far:
                 continue
             gap, w = max(far, key=lambda item: item[0])
-            depth = -sign * gap
-            outside = sum(
-                not min(line(t), line(t) - depth)
-                <= series.close[t]
-                <= max(line(t), line(t) - depth)
-                for t in range(a.index, window.end + 1)
-            )
+            geometry = ChannelGeometry(a.anchor, b.anchor, w.anchor)
+            outside = 0
+            for t in range(a.index, window.end + 1):
+                edges = (geometry.price_at(t, 0.0), geometry.price_at(t, 1.0))
+                outside += not min(edges) <= series.close[t] <= max(edges)
             out.append(
                 ChannelCandidate(
                     direction=direction,
                     first=a,
                     second=b,
                     width_pivot=w,
-                    slope=slope,
-                    depth=depth,
+                    geometry=geometry,
                     outside_closes=outside,
                     span_bars=window.end - a.index + 1,
                     width_atr=gap / atr_end,

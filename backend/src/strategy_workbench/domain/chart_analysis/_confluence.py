@@ -21,6 +21,8 @@ class LineKind(Enum):
 
 # 되돌림 레벨 0·1은 스윙 기준점 자체라 중첩에 넣지 않는다.
 _RETRACEMENT_ANCHOR_LEVELS = (0.0, 1.0)
+# 선마다 가격 구간을 넓히는 비율(±).
+DEFAULT_CONFLUENCE_TOLERANCE = 0.005
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,7 @@ class PriceBand:
     """보이는 선 하나의 가격 구간. 수평 구간은 [lo, hi], 레벨 선은 lo = hi(채널은 기준일 레벨 가격).
 
     `ref`는 호출자가 원래 선·레벨로 되돌아가기 위한 식별자이고, `level`은 되돌림·채널의 레벨 r이다.
+    중첩 가격의 기준 봉은 선을 만든 주기 계열의 마지막 완성 봉이다(설계 문서 4.6).
     """
 
     kind: LineKind
@@ -42,6 +45,8 @@ class PriceBand:
                 f"price band must satisfy 0 < low <= high — ref={self.ref} "
                 f"low={self.low} high={self.high}"
             )
+        if self.kind is LineKind.FIB_RETRACEMENT and self.level is None:
+            raise ValueError(f"retracement band needs its level — ref={self.ref}")
 
 
 @dataclass(frozen=True)
@@ -65,9 +70,9 @@ def _union(intervals: list[tuple[float, float]]) -> list[tuple[float, float]]:
 
 
 def find_confluences(
-    bands: Sequence[PriceBand], tolerance: float = 0.005
+    bands: Sequence[PriceBand], tolerance: float = DEFAULT_CONFLUENCE_TOLERANCE
 ) -> tuple[Confluence, ...]:
-    """각 선을 ±`tolerance`(비율, 기본 0.5%) 넓혀 서로 다른 종류 2개 이상이 덮는 구간을 낮은
+    """각 선을 ±`tolerance`(비율) 넓혀 서로 다른 종류 2개 이상이 덮는 구간을 낮은
     가격부터 돌려준다."""
     if not (math.isfinite(tolerance) and 0 <= tolerance < 1):
         raise ValueError(f"tolerance must be in [0, 1) — tolerance={tolerance}")

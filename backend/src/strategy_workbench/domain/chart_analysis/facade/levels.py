@@ -2,13 +2,11 @@ from strategy_workbench.domain.chart_analysis._channel import (
     AnchorIssue,
     ChannelCandidate,
     ChannelSearch,
+    ChosenBy,
     TrendDirection,
     find_channels,
 )
 from strategy_workbench.domain.chart_analysis._retracement import (
-    DEFAULT_FIB_LEVELS,
-    Anchor,
-    Retracement,
     SwingChoice,
     retracement_swing,
 )
@@ -20,13 +18,11 @@ from strategy_workbench.domain.chart_analysis._zones import (
 )
 
 __all__ = [
-    "DEFAULT_FIB_LEVELS",
-    "Anchor",
     "AnchorIssue",
     "ChannelCandidate",
     "ChannelSearch",
+    "ChosenBy",
     "HorizontalZone",
-    "Retracement",
     "SwingChoice",
     "TrendDirection",
     "ZoneParams",

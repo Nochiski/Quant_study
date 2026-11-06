@@ -37,14 +37,17 @@ def test_weekly_candle_takes_first_open_extremes_last_close_and_flags_unfinished
     )
 
 
-def test_week_is_complete_once_as_of_reaches_friday_even_without_a_friday_bar() -> None:
-    bars = WEEK_BARS[3:]
+def test_week_without_a_friday_session_is_in_progress_while_as_of_is_the_last_session() -> None:
+    # as_of는 원장의 최신 거래일이다(PR2가 넘긴다).
+    # 목요일이 최신이면 금요일이 휴장이든 아직이든 진행 중이다.
+    bars = (*WEEK_BARS[3:], _bar(date(2026, 11, 12), 10, 12, 9, 11))
 
     on_thursday = aggregate_candles(bars, Timeframe.WEEK, as_of=date(2026, 11, 12))
-    on_friday = aggregate_candles(bars, Timeframe.WEEK, as_of=date(2026, 11, 13))
+    # 원장 최신 거래일이 금요일인데 이 종목만 거래가 없었으면(정지) 그 주는 끝났다
+    halted_on_friday = aggregate_candles(bars, Timeframe.WEEK, as_of=date(2026, 11, 13))
 
     assert on_thursday[-1].in_progress is True
-    assert on_friday[-1].in_progress is False
+    assert halted_on_friday[-1].in_progress is False
 
 
 def test_week_key_is_iso_week_so_a_week_spanning_new_year_is_one_candle() -> None:

@@ -71,9 +71,11 @@ def check_shape(
                 f"anchor price must be finite and positive — bar_date={anchor.bar_date} "
                 f"price={anchor.price}",
             )
-    if levels is not None and not all(math.isfinite(level) for level in levels):
+    # 빈 레벨 목록은 그릴 선이 없다 — 기본 레벨은 None(칸 비움)으로 고른다
+    if levels is not None and not (levels and all(math.isfinite(level) for level in levels)):
         raise ChartRequestError(
-            "chart.line.levels_invalid", f"levels must be finite — levels={list(levels)}"
+            "chart.line.levels_invalid",
+            f"levels must be non-empty and finite — levels={list(levels)}",
         )
 
 
@@ -107,6 +109,19 @@ def geometry(kind: LineKind, anchors: Sequence[Anchor]) -> LineGeometry:
     if len(anchors) == 2:
         return (anchors[0].price, anchors[1].price)
     return anchors[0].price
+
+
+def band_anchors(lowest_index: int, low: float, high: float) -> tuple[Anchor, Anchor]:
+    """수평 구간을 띠 선(기준점 둘: 하단·상단)으로 — 기준 봉은 가장 이른 구성 피벗이다."""
+    return Anchor(lowest_index, low), Anchor(lowest_index, high)
+
+
+def same_anchors(left: Sequence[Anchor], right: Sequence[Anchor]) -> bool:
+    """같은 봉·같은 가격(화면 ↔ 저장 왕복의 마지막 자리 차이는 같다고 본다)."""
+    return len(left) == len(right) and all(
+        a.index == b.index and math.isclose(a.price, b.price, rel_tol=1e-9)
+        for a, b in zip(left, right, strict=True)
+    )
 
 
 def paths(

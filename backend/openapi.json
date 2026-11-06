@@ -2608,7 +2608,7 @@
         "type": "object"
       },
       "ChartConfluenceRequestBody": {
-        "description": "저장 선 중 보이는 것은 서버가 넣는다. `lines`에는 저장하지 않은 보이는 선(자동 후보)을\n싣는다.",
+        "description": "저장 선 중 보이는 것은 서버가 넣는다. `lines`에는 저장하지 않은 보이는 선(자동 후보)만\n싣는다 — 저장한 후보를 다시 실으면(ref = line_id) 그 요청 선은 빠진다.",
         "properties": {
           "instrument_code": {
             "minLength": 1,
@@ -2627,8 +2627,6 @@
           },
           "tolerance": {
             "default": 0.005,
-            "exclusiveMaximum": 1.0,
-            "exclusiveMinimum": 0.0,
             "title": "Tolerance",
             "type": "number"
           }
@@ -2718,8 +2716,11 @@
                   "chart.line.price_invalid",
                   "chart.line.levels_invalid",
                   "chart.line.anchor_outside_series",
+                  "chart.line.anchor_in_progress",
                   "chart.line.anchor_order",
                   "chart.line.auto_record",
+                  "chart.line.auto_anchors_fixed",
+                  "chart.line.memo_too_long",
                   "chart.confluence.duplicate_ref"
                 ],
                 "type": "string"
@@ -2878,6 +2879,19 @@
               }
             ]
           },
+          "created": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "자동 선의 생긴 날 — 저장한 판정 구간·파라미터로 다시 계산한다(그 앞은 옅게). 수동 선·기준점을 옮긴 복사본은 null.",
+            "title": "Created"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -2897,15 +2911,13 @@
           "issue": {
             "anyOf": [
               {
-                "const": "anchor_outside_series",
-                "type": "string"
+                "$ref": "#/components/schemas/LineIssue"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "기준점이 지금 계열 밖이라 그릴 수 없다(paths가 빈다).",
-            "title": "Issue"
+            "description": "지금 계열로 그릴 수 없는 사유(그때 paths가 빈다)."
           },
           "kind": {
             "$ref": "#/components/schemas/LineKind"
@@ -2978,7 +2990,8 @@
           "created_at",
           "updated_at",
           "paths",
-          "issue"
+          "issue",
+          "created"
         ],
         "title": "ChartLineBody",
         "type": "object"
@@ -2994,6 +3007,7 @@
             "type": "array"
           },
           "extend_right": {
+            "default": true,
             "title": "Extend Right",
             "type": "boolean"
           },
@@ -3012,27 +3026,74 @@
             "title": "Levels"
           },
           "locked": {
+            "default": false,
             "title": "Locked",
             "type": "boolean"
           },
           "memo": {
-            "maxLength": 500,
+            "default": "",
             "title": "Memo",
             "type": "string"
           },
           "visible": {
+            "default": true,
             "title": "Visible",
             "type": "boolean"
           }
         },
         "required": [
-          "anchors",
-          "extend_right",
-          "memo",
-          "locked",
-          "visible"
+          "anchors"
         ],
         "title": "ChartLineEditBody",
+        "type": "object"
+      },
+      "ChartLinePreviewBody": {
+        "description": "저장 전 미리보기 — 저장 요청과 같은 초안의 기하 칸. 저장하지 않는다.",
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/components/schemas/ChartPointBody"
+            },
+            "title": "Anchors",
+            "type": "array"
+          },
+          "instrument_code": {
+            "minLength": 1,
+            "title": "Instrument Code",
+            "type": "string"
+          },
+          "instrument_kind": {
+            "$ref": "#/components/schemas/InstrumentKind"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/LineKind"
+          },
+          "levels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Levels"
+          },
+          "timeframe": {
+            "$ref": "#/components/schemas/Timeframe"
+          }
+        },
+        "required": [
+          "instrument_kind",
+          "instrument_code",
+          "timeframe",
+          "kind",
+          "anchors"
+        ],
+        "title": "ChartLinePreviewBody",
         "type": "object"
       },
       "ChartLinesBody": {
@@ -3265,6 +3326,19 @@
           "context": {
             "$ref": "#/components/schemas/ChartContextBody"
           },
+          "created": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "두 기준점이 모두 확정된 봉의 날짜. 그 앞은 옅게 그린다.",
+            "title": "Created"
+          },
           "drawing": {
             "anyOf": [
               {
@@ -3306,6 +3380,7 @@
           "window",
           "swing",
           "drawing",
+          "created",
           "message",
           "record"
         ],
@@ -4516,7 +4591,6 @@
           },
           "memo": {
             "default": "",
-            "maxLength": 500,
             "title": "Memo",
             "type": "string"
           },
@@ -8977,6 +9051,16 @@
         ],
         "title": "LibraryVisibilityBody",
         "type": "object"
+      },
+      "LineIssue": {
+        "description": "저장 선을 지금 계열로 그릴 수 없는 사유(그때 `paths`가 빈다).",
+        "enum": [
+          "no_completed_bars",
+          "anchor_outside_series",
+          "anchor_order"
+        ],
+        "title": "LineIssue",
+        "type": "string"
       },
       "LineKind": {
         "enum": [
@@ -22090,40 +22174,38 @@
             }
           },
           {
-            "description": "피벗 민감도 k(× ATR).",
+            "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
             "in": "query",
             "name": "candidate_sensitivity",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "exclusiveMinimum": 0,
                   "type": "number"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "피벗 민감도 k(× ATR).",
+              "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
               "title": "Candidate Sensitivity"
             }
           },
           {
-            "description": "피벗 민감도 k(× ATR).",
+            "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
             "in": "query",
             "name": "structure_sensitivity",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "exclusiveMinimum": 0,
                   "type": "number"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "피벗 민감도 k(× ATR).",
+              "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
               "title": "Structure Sensitivity"
             }
           }
@@ -22227,13 +22309,13 @@
             }
           },
           {
+            "description": "1 ~ 50.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 20,
-              "maximum": 50,
-              "minimum": 1,
+              "description": "1 ~ 50.",
               "title": "Limit",
               "type": "integer"
             }
@@ -22380,6 +22462,55 @@
           }
         },
         "summary": "Create Line"
+      }
+    },
+    "/api/v1/stock-chart/lines/preview": {
+      "post": {
+        "description": "저장 전 미리보기: 저장과 같은 검사·봉 시작일 정규화와 그릴 점. 저장하지 않는다 —\n수동 그리기 중 끄는 동안 frontend가 가격을 계산하지 않고 이것을 부른다.",
+        "operationId": "previewChartLine",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChartLinePreviewBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChartDrawingBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChartErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChartErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Preview Line"
       }
     },
     "/api/v1/stock-chart/lines/{line_id}": {
@@ -22554,40 +22685,38 @@
             }
           },
           {
-            "description": "피벗 민감도 k(× ATR).",
+            "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
             "in": "query",
             "name": "candidate_sensitivity",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "exclusiveMinimum": 0,
                   "type": "number"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "피벗 민감도 k(× ATR).",
+              "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
               "title": "Candidate Sensitivity"
             }
           },
           {
-            "description": "피벗 민감도 k(× ATR).",
+            "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
             "in": "query",
             "name": "structure_sensitivity",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "exclusiveMinimum": 0,
                   "type": "number"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "피벗 민감도 k(× ATR).",
+              "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
               "title": "Structure Sensitivity"
             }
           }
@@ -22708,40 +22837,38 @@
             }
           },
           {
-            "description": "피벗 민감도 k(× ATR).",
+            "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
             "in": "query",
             "name": "candidate_sensitivity",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "exclusiveMinimum": 0,
                   "type": "number"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "피벗 민감도 k(× ATR).",
+              "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
               "title": "Candidate Sensitivity"
             }
           },
           {
-            "description": "피벗 민감도 k(× ATR).",
+            "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
             "in": "query",
             "name": "structure_sensitivity",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "exclusiveMinimum": 0,
                   "type": "number"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "피벗 민감도 k(× ATR).",
+              "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
               "title": "Structure Sensitivity"
             }
           }
@@ -22861,7 +22988,6 @@
             "schema": {
               "anyOf": [
                 {
-                  "exclusiveMinimum": 0,
                   "type": "number"
                 },
                 {
@@ -22879,7 +23005,6 @@
             "schema": {
               "anyOf": [
                 {
-                  "minimum": 1,
                   "type": "integer"
                 },
                 {
@@ -22890,40 +23015,38 @@
             }
           },
           {
-            "description": "피벗 민감도 k(× ATR).",
+            "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
             "in": "query",
             "name": "candidate_sensitivity",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "exclusiveMinimum": 0,
                   "type": "number"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "피벗 민감도 k(× ATR).",
+              "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
               "title": "Candidate Sensitivity"
             }
           },
           {
-            "description": "피벗 민감도 k(× ATR).",
+            "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
             "in": "query",
             "name": "structure_sensitivity",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "exclusiveMinimum": 0,
                   "type": "number"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "피벗 민감도 k(× ATR).",
+              "description": "피벗 민감도 k(× ATR). 범위는 domain이 검사한다.",
               "title": "Structure Sensitivity"
             }
           }

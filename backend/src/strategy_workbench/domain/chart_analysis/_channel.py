@@ -40,6 +40,11 @@ class ChannelCandidate:
     width_atr: float
     created_index: int  # 세 기준점 확정 봉의 최댓값. 그 앞은 옅게 그린다
 
+    @property
+    def outside_ratio(self) -> float:
+        """기준점~구간 끝 종가 중 채널 밖 비율(순위의 둘째 키)."""
+        return self.outside_closes / self.span_bars
+
 
 @dataclass(frozen=True)
 class ChannelSearch:
@@ -114,7 +119,5 @@ def find_channels(
                     created_index=max(a.confirmed_index, b.confirmed_index, w.confirmed_index),
                 )
             )
-    out.sort(
-        key=lambda c: (c.span_bars < MIN_CHANNEL_BARS, c.outside_closes / c.span_bars, c.width_atr)
-    )
+    out.sort(key=lambda c: (c.span_bars < MIN_CHANNEL_BARS, c.outside_ratio, c.width_atr))
     return ChannelSearch(tuple(out))

@@ -1,9 +1,12 @@
 """`ChartPricePort`(개별종목차트): duckdb 어댑터가 원장 일봉을 그대로 나르는가.
 
 손 원장(2024-01-02 ~ 01-12 평일 9개):
-- 005930: 조정가 = 원주가 × 2. 01-05는 정지일(거래량 0 → 기준가 행), 01-12는 저녁 잠정
-  행이라 빠진다.
-- 000020: 같은 티커를 쓰던 옛 종목이 01-02~01-04에 거래했고 지금 종목은 01-08에 상장했다.
+- 01-12(금)는 모든 종목이 저녁 잠정 행뿐이라 확정 기준일은 01-11(목)이다.
+- 005930: 조정가 = 원주가 × 2. 01-05는 정지일(거래량 0 → 기준가 행)이라 빠진다.
+- 000020: 같은 티커를 쓰던 옛 종목이 01-02~01-04에 거래했고 지금 종목은 01-08에
+  재상장했다(구간 2).
+- 000030: 01-09에 다른 시장으로 이전상장했다 — `security.list_date`는 01-09지만 상장 구간은
+  01-02부터 이어진다.
 - 지수: 코스피(01-03 시가 0, 01-04 고가 비어 빠짐)와 코스피·코스닥에 하나씩 있는 `건설`.
 """
 
@@ -39,6 +42,8 @@ SESSIONS = [date(2024, 1, d) for d in (2, 3, 4, 5, 8, 9, 10, 11, 12)]
 HALT, EVENING, RELISTED = date(2024, 1, 5), date(2024, 1, 12), date(2024, 1, 8)
 SAMSUNG = InstrumentRef(InstrumentKind.STOCK, "005930")
 REUSED = InstrumentRef(InstrumentKind.STOCK, "000020")
+MOVED = InstrumentRef(InstrumentKind.STOCK, "000030")
+CONFIRMED, MOVED_LISTING = date(2024, 1, 11), date(2024, 1, 9)
 KOSPI = InstrumentRef(InstrumentKind.INDEX, "KOSPI:코스피")
 
 
@@ -55,9 +60,9 @@ def _price_rows() -> tuple[list[PriceRow], list[str]]:
             rows.append(("005930", day, close, close, close, close, 0))
         else:
             rows.append(("005930", day, close - 5, close + 20, close - 20, close, 100))
-        basis.append("evening" if day == EVENING else "krx")
         rows.append(("000020", day, 500.0, 510.0, 490.0, 505.0, 100))
-        basis.append("krx")
+        rows.append(("000030", day, 300.0, 310.0, 290.0, 305.0, 100))
+        basis += ["evening" if day == EVENING else "krx"] * 3
     return rows, basis
 
 
@@ -122,6 +127,7 @@ def build_chart_root(root: Path) -> Path:
                 ("005930", 1, SESSIONS[0], SESSIONS[-1], "active"),
                 ("000020", 1, SESSIONS[0], date(2024, 1, 4), "delisted"),
                 ("000020", 2, RELISTED, SESSIONS[-1], "active"),
+                ("000030", 1, SESSIONS[0], SESSIONS[-1], "active"),
             ]
         ),
     )
@@ -134,12 +140,15 @@ def build_chart_root(root: Path) -> Path:
     write_equity_table(root, "universe_policy", policy_table([("krx.all", "all", 1, "TRUE")]))
     write_equity_table(root, "price_daily", price_table(rows, basis=basis), year_column="date")
     security = security_table(
-        [("005930", "common"), ("000020", "common")],
-        names={"005930": "삼성전자보통주", "000020": "새회사"},
+        [("005930", "common"), ("000020", "common"), ("000030", "common")],
+        names={"005930": "삼성전자보통주", "000020": "새회사", "000030": "옮긴회사"},
     )
     security = security.append_column(
-        "name_abbrv_current", pa.array(["삼성전자", None])
-    ).append_column("list_date", pa.array([date(1975, 6, 11), RELISTED], type=pa.date32()))
+        "name_abbrv_current", pa.array(["삼성전자", None, None])
+    ).append_column(
+        "list_date",
+        pa.array([date(1975, 6, 11), RELISTED, MOVED_LISTING], type=pa.date32()),
+    )
     write_equity_table(root, "security", security)
     write_equity_table(root, "price_adj_daily", _adjusted(rows, basis), year_column="date")
     write_equity_table(root, "index_daily", _index(), year_column="date")
@@ -166,7 +175,8 @@ def test_instruments_list_stocks_with_short_names_and_indices_per_market(
 def test_stock_history_is_adjusted_and_skips_reference_and_evening_rows(
     adapter: EquityDuckdbAdapter,
 ) -> None:
-    assert adapter.latest_session() == EVENING
+    # 달력의 마지막 날(01-12)은 잠정 행뿐이라 기준일이 아니다
+    assert (adapter.latest_session(), adapter.confirmed_session()) == (EVENING, CONFIRMED)
     history = adapter.chart_history(SAMSUNG, EVENING)
     assert history is not None
     assert [bar.session for bar in history.bars] == [
@@ -187,11 +197,20 @@ def test_stock_history_is_adjusted_and_skips_reference_and_evening_rows(
     )
 
 
-def test_a_reused_ticker_reads_only_the_current_listing(adapter: EquityDuckdbAdapter) -> None:
-    history = adapter.chart_history(REUSED, EVENING)
-    assert history is not None
-    assert history.bars[0].session == RELISTED
-    assert len(history.bars) == 5
+def test_the_lower_bound_is_the_last_listing_span_not_the_listing_date(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    # 재상장(티커 재사용): 옛 종목(구간 1)의 가격을 섞지 않는다
+    reused = adapter.chart_history(REUSED, CONFIRMED)
+    assert reused is not None
+    assert [bar.session for bar in reused.bars] == [
+        d for d in SESSIONS if RELISTED <= d <= CONFIRMED
+    ]
+    # 이전상장: 구간이 이어지므로 새 시장 상장일(01-09) 앞의 이력도 그 종목이다
+    moved = adapter.chart_history(MOVED, CONFIRMED)
+    assert moved is not None
+    assert moved.bars[0].session == SESSIONS[0] < MOVED_LISTING
+    assert len(moved.bars) == SESSIONS.index(CONFIRMED) + 1
 
 
 def test_index_history_reads_index_ohlc_without_missing_or_zero_prices(

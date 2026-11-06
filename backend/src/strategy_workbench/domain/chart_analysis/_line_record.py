@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from enum import Enum
 
+from strategy_workbench.domain.chart_analysis._channel import TrendDirection
+
 # 자동 선의 `algorithm@version` 칸에 그대로 저장하는 값. 판정 규칙·B*·피벗·채널·수평 구간·중첩
 # 규칙(기본 파라미터 포함)을 바꾸면 올린다. tests/domain/test_chart_analysis_version.py가 규칙
 # 상수와 함께 묶는다.
@@ -42,3 +44,11 @@ class ChosenBy(Enum):
 
     RECOMMENDATION = "recommendation"
     USER_OVERRIDE = "user_override"
+
+
+def chosen_by(recommended: TrendDirection | None, chosen: TrendDirection) -> ChosenBy | None:
+    """고른 채널 방향의 출처. 판정이 방향을 추천하지 않은 국면(박스권·보류 등)에서는 따르거나 바꿀
+    추천이 없으므로 None이다 — 그때 방향은 사용자가 처음부터 고른 것이다."""
+    if recommended is None:
+        return None
+    return ChosenBy.RECOMMENDATION if chosen is recommended else ChosenBy.USER_OVERRIDE

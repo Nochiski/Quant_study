@@ -1,29 +1,64 @@
-"""개별종목차트 유스케이스: 검색·캔들·국면 판정·채널·되돌림·수평 구간·중첩·선 저장.
+"""개별종목차트 유스케이스: 검색·캔들·국면 판정·채널·되돌림·수평 구간·중첩·선 미리보기·저장.
 
 규칙은 `domain.chart_analysis`가 정한다. 여기서는 일봉을 포트로 읽어 묶고
 (`aggregate_candles`), 판정 창 날짜를 봉 index로 옮기고(`ChartSeries.index_of`), 저장
 좌표(전방 조정 공간)와 화면 가격 사이를 배율 k로 오간다(`DisplayScale`). 응답 가격은 모두
-화면 가격이고 저장 가격은 화면 가격 ÷ k다.
+화면 가격이고 저장 가격은 화면 가격 ÷ k다. 묶은 계열은 대상·주기·민감도마다 캐시한다(포트는
+사는 동안 같은 답을 준다) — 수동 그리기 중 미리보기가 원장을 다시 읽지 않는다.
 """
 
 from __future__ import annotations
 
+import math
+from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
+from threading import Lock
+from typing import Generic, TypeVar
 
 from strategy_workbench.application.stock_chart._errors import (
     ChartRequestError,
     InstrumentNotFoundError,
+    LineIssue,
 )
 from strategy_workbench.application.stock_chart._lines import (
     ChartPoint,
-    LevelPath,
     LineGeometry,
+    band_anchors,
     check_shape,
     geometry,
     paths,
     resolve,
+)
+from strategy_workbench.application.stock_chart._provenance import created_index, finite_number
+from strategy_workbench.application.stock_chart._views import (
+    DEFAULT_SWING,
+    DEFAULT_WINDOW,
+    CandleView,
+    ChannelCandidateView,
+    ChannelView,
+    ChartContext,
+    ChartLineDraft,
+    ChartLines,
+    ChartLineView,
+    ConfluenceGroup,
+    ConfluenceLine,
+    ConfluenceMember,
+    ConfluenceView,
+    InstrumentSearch,
+    LineDrawing,
+    LineEdit,
+    LineShape,
+    PivotPoint,
+    RegimeView,
+    RetracementView,
+    SwingSettings,
+    WindowRequest,
+    WindowSuggestion,
+    WindowView,
+    ZonesView,
+    ZoneView,
 )
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_drawings import (
     AutoRecord,
@@ -36,6 +71,7 @@ from strategy_workbench.application.stock_chart.ports.outgoing.chart_drawings im
     RegimeRecord,
 )
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_prices import (
+    PRACTICE_CODE_PREFIX,
     ChartInstrument,
     ChartPricePort,
     InstrumentKind,
@@ -61,10 +97,9 @@ from strategy_workbench.domain.chart_analysis.facade.levels import (
     SwingChoice,
     TrendDirection,
     ZoneParams,
-    ZoneSide,
     find_channels,
     find_zones,
-    retracement_swing,
+    retracement_pivots,
 )
 from strategy_workbench.domain.chart_analysis.facade.line_record import (
     ALGORITHM_VERSION,
@@ -72,18 +107,16 @@ from strategy_workbench.domain.chart_analysis.facade.line_record import (
     LineKind,
     LineSource,
     WindowSource,
+    chosen_by,
 )
 from strategy_workbench.domain.chart_analysis.facade.regime import (
     WINDOW_PRESETS,
-    RegimeReason,
-    RegimeVerdict,
-    Structure,
+    RegimeJudgement,
     judge_regime,
 )
 from strategy_workbench.domain.chart_analysis.facade.series import (
     ChartSeries,
     Pivot,
-    PivotKind,
     SwingParams,
     Window,
     build_series,
@@ -92,252 +125,25 @@ from strategy_workbench.domain.chart_analysis.facade.wording import (
     CONFLUENCE_CAUTION,
     ENDS_NEAR_EXTREME_WARNING,
     NO_SWING_MESSAGE,
-    PRACTICE_DATA_NOTICE,
     STARTS_NEAR_EXTREME_WARNING,
     ZONE_BASIS,
     anchor_issue_message,
     regime_sentence,
 )
 
-# 검색 결과 상한과 채널 후보 상한(순위순 앞에서 자른다).
+# 데이터 원천 안내라 분석 규칙(domain)이 아니라 이 유스케이스가 문장의 owner다.
+PRACTICE_DATA_NOTICE = (
+    "연습용 데이터예요. 실제 시세가 아니라 화면을 익히려고 만든 가격이라 분석 결과를 "
+    "투자 판단에 쓰지 마세요."
+)
+# 검색 결과 상한, 채널 후보 상한(순위순 앞에서 자른다), 메모 글자 수 상한.
 MAX_SEARCH_RESULTS = 50
 MAX_CHANNEL_CANDIDATES = 10
+MAX_MEMO_CHARS = 500
+# 묶은 계열 캐시의 칸 수(대상 × 주기 × 민감도). 넘치면 가장 오래 안 쓴 것부터 버린다.
+SERIES_CACHE_SIZE = 32
 # 이름 포함 검색의 같은 순위 안 순서: 지수 → 보통주 → 우선주 → ETF → 그 밖.
 _GROUP_ORDER = {"common": 0, "preferred": 1, "etf": 2}
-
-
-@dataclass(frozen=True)
-class ChartContext:
-    """응답 공통 머리. `as_of`는 원장 최신 거래일, `notice`는 연습용 데이터 안내다."""
-
-    instrument: ChartInstrument
-    as_of: date
-    practice_data: bool
-    notice: str | None
-
-
-@dataclass(frozen=True)
-class InstrumentSearch:
-    practice_data: bool
-    notice: str | None
-    instruments: tuple[ChartInstrument, ...]
-
-
-@dataclass(frozen=True)
-class CandleView:
-    """화면 가격 캔들. 마지막 봉이 진행 중일 수 있다(`Candle.in_progress`, 표시만)."""
-
-    context: ChartContext
-    timeframe: Timeframe
-    candles: tuple[Candle, ...]
-    last_completed: date | None
-
-
-@dataclass(frozen=True)
-class SwingSettings:
-    """피벗 민감도(후보용·구조 판정용 k). None이면 domain 기본값이다."""
-
-    candidate_sensitivity: float | None = None
-    structure_sensitivity: float | None = None
-
-
-@dataclass(frozen=True)
-class WindowRequest:
-    """판정·분석 구간의 시작·끝 봉 날짜. 둘 다 None이면 주기별 기본 구간(가운데 제안 칩)이다."""
-
-    start: date | None = None
-    end: date | None = None
-
-
-DEFAULT_WINDOW = WindowRequest()
-DEFAULT_SWING = SwingSettings()
-
-
-@dataclass(frozen=True)
-class WindowView:
-    start: date
-    end: date
-    bars: int
-    source: WindowSource
-
-
-@dataclass(frozen=True)
-class WindowSuggestion:
-    bars: int
-    start: date
-    end: date
-    default: bool
-
-
-@dataclass(frozen=True)
-class PivotPoint:
-    kind: PivotKind
-    bar_date: date
-    price: float
-    confirmed_date: date
-
-
-@dataclass(frozen=True)
-class RegimeView:
-    context: ChartContext
-    timeframe: Timeframe
-    window: WindowView
-    suggestions: tuple[WindowSuggestion, ...]
-    verdict: RegimeVerdict
-    reason: RegimeReason | None
-    strength: float | None
-    box_ratio: float | None
-    structure: Structure
-    structure_highs: tuple[PivotPoint, ...]
-    structure_lows: tuple[PivotPoint, ...]
-    sentence: str
-    starts_near_extreme: bool
-    ends_near_extreme: bool
-    warnings: tuple[str, ...]
-    channel_direction: TrendDirection | None
-
-
-@dataclass(frozen=True)
-class LineDrawing:
-    """자동 후보 한 줄: 저장에 그대로 쓸 화면 좌표 기준점과 레벨 선을 그릴 점."""
-
-    anchors: tuple[ChartPoint, ...]
-    paths: tuple[LevelPath, ...]
-
-
-@dataclass(frozen=True)
-class ChannelCandidateView:
-    drawing: LineDrawing
-    outside_ratio: float
-    span_bars: int
-    width_atr: float
-    created: date
-
-
-@dataclass(frozen=True)
-class ChannelView:
-    context: ChartContext
-    timeframe: Timeframe
-    window: WindowView
-    direction: TrendDirection
-    recommended_direction: TrendDirection | None
-    candidates: tuple[ChannelCandidateView, ...]
-    total_candidates: int
-    anchor_issue: AnchorIssue | None
-    anchor_issue_message: str | None
-    record: AutoRecord
-
-
-@dataclass(frozen=True)
-class RetracementView:
-    context: ChartContext
-    timeframe: Timeframe
-    window: WindowView
-    choice: SwingChoice
-    drawing: LineDrawing | None
-    message: str | None
-    record: AutoRecord
-
-
-@dataclass(frozen=True)
-class ZoneView:
-    drawing: LineDrawing
-    low: float
-    high: float
-    touches: int
-    formed: date
-    held: int
-    broken: int
-    side: ZoneSide
-    members: tuple[PivotPoint, ...]
-
-
-@dataclass(frozen=True)
-class ZonesView:
-    context: ChartContext
-    timeframe: Timeframe
-    window: WindowView
-    zones: tuple[ZoneView, ...]
-    basis: str
-    record: AutoRecord
-
-
-@dataclass(frozen=True)
-class LineEdit:
-    """선의 고칠 수 있는 칸. 기준점은 화면 좌표(봉 날짜, 화면 가격)다 — 서비스가 ÷k 해서
-    저장한다."""
-
-    anchors: tuple[ChartPoint, ...]
-    levels: tuple[float, ...] | None = None
-    extend_right: bool = True
-    memo: str = ""
-    locked: bool = False
-    visible: bool = True
-
-
-@dataclass(frozen=True)
-class ChartLineDraft:
-    instrument: InstrumentRef
-    timeframe: Timeframe
-    kind: LineKind
-    source: LineSource
-    edit: LineEdit
-    auto: AutoRecord | None = None
-
-
-@dataclass(frozen=True)
-class ChartLineView:
-    """저장된 선과 화면 좌표. 기준점이 지금 계열 밖으로 나가 그릴 수 없으면 `issue`가 있고
-    그릴 점이 없다."""
-
-    line: ChartLine
-    anchors: tuple[ChartPoint, ...]
-    paths: tuple[LevelPath, ...]
-    issue: str | None
-
-
-@dataclass(frozen=True)
-class ChartLines:
-    context: ChartContext
-    lines: tuple[ChartLineView, ...]
-
-
-@dataclass(frozen=True)
-class ConfluenceLine:
-    """저장하지 않은 보이는 선(자동 후보 등). `ref`는 응답에서 이 선을 가리키는 이름이다."""
-
-    ref: str
-    timeframe: Timeframe
-    kind: LineKind
-    anchors: tuple[ChartPoint, ...]
-    levels: tuple[float, ...] | None = None
-
-
-@dataclass(frozen=True)
-class ConfluenceMember:
-    ref: str
-    kind: LineKind
-    level: float | None
-    low: float
-    high: float
-
-
-@dataclass(frozen=True)
-class ConfluenceGroup:
-    low: float
-    high: float
-    kinds: tuple[LineKind, ...]
-    members: tuple[ConfluenceMember, ...]
-
-
-@dataclass(frozen=True)
-class ConfluenceView:
-    context: ChartContext
-    tolerance: float
-    groups: tuple[ConfluenceGroup, ...]
-    caution: str
-    # 기준점이 지금 계열 밖이라 넣지 못한 저장 선
-    skipped_line_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True, eq=False)
@@ -347,8 +153,39 @@ class _Loaded:
     scale: DisplayScale
     daily: tuple[PriceBar, ...]
 
-    def candles(self, timeframe: Timeframe) -> tuple[Candle, ...]:
-        return aggregate_candles(self.daily, timeframe, self.context.as_of)
+
+@dataclass(frozen=True, eq=False)
+class _Frame:
+    """한 주기의 분석 계열과, 있으면 진행 중 봉(기준점·판정 창이 될 수 없는 기간)."""
+
+    series: ChartSeries
+    in_progress: Candle | None
+
+
+_K = TypeVar("_K")
+_V = TypeVar("_V")
+_T = TypeVar("_T")
+_P = TypeVar("_P", SwingParams, ZoneParams)
+
+
+class _Lru(Generic[_K, _V]):
+    def __init__(self, size: int) -> None:
+        self._size = size
+        self._items: OrderedDict[_K, _V] = OrderedDict()
+        self._lock = Lock()
+
+    def get(self, key: _K, build: Callable[[], _V]) -> _V:
+        with self._lock:
+            if key in self._items:
+                self._items.move_to_end(key)
+                return self._items[key]
+        value = build()  # 같은 키를 두 스레드가 함께 만들어도 결과가 같다(포트가 같은 답을 준다)
+        with self._lock:
+            self._items[key] = value
+            self._items.move_to_end(key)
+            while len(self._items) > self._size:
+                self._items.popitem(last=False)
+        return value
 
 
 class StockChartService:
@@ -366,13 +203,22 @@ class StockChartService:
         self._practice = practice_data
         self._new_id = new_id
         self._now = now
+        self._loaded: _Lru[InstrumentRef, _Loaded] = _Lru(SERIES_CACHE_SIZE)
+        self._frames: _Lru[tuple[InstrumentRef, Timeframe, SwingParams], _Frame | None] = _Lru(
+            SERIES_CACHE_SIZE
+        )
 
     # ── 검색·캔들 ────────────────────────────────────────────────────────────
 
     def search(self, query: str, limit: int = 20) -> InstrumentSearch:
-        """순위는 `rank_instruments`가 정한다."""
-        found = rank_instruments(self._prices.chart_instruments(), query)
-        return InstrumentSearch(self._practice, self._notice(), found[: max(0, limit)])
+        """순위는 `rank_instruments`가 정한다. `limit`은 1 ~ `MAX_SEARCH_RESULTS`."""
+        if not 1 <= limit <= MAX_SEARCH_RESULTS:
+            raise ChartRequestError(
+                "chart.params.invalid",
+                f"limit out of range — limit={limit} allowed=1..{MAX_SEARCH_RESULTS}",
+            )
+        found = rank_instruments(self._instruments(), query)
+        return InstrumentSearch(self._practice, self._notice(), found[:limit])
 
     def candles(
         self,
@@ -381,8 +227,12 @@ class StockChartService:
         start: date | None = None,
         end: date | None = None,
     ) -> CandleView:
+        if start is not None and end is not None and start > end:
+            raise ChartRequestError(
+                "chart.window.reversed", f"candle range start after end — start={start} end={end}"
+            )
         loaded = self._load(ref)
-        candles = loaded.candles(timeframe)
+        candles = aggregate_candles(loaded.daily, timeframe, loaded.context.as_of)
         completed = [c for c in candles if not c.in_progress]
         shown = tuple(
             _display_candle(loaded.scale, c)
@@ -403,36 +253,27 @@ class StockChartService:
         swing: SwingSettings = DEFAULT_SWING,
     ) -> RegimeView:
         loaded = self._load(ref)
-        series = self._series(loaded, timeframe, swing)
-        span, view = self._window(series, timeframe, window)
+        series = self._required_frame(loaded, timeframe, swing).series
+        span, view = _window(series, timeframe, window)
         judgement = judge_regime(series, span)
-        warnings = tuple(
-            text
-            for flagged, text in (
-                (judgement.starts_near_extreme, STARTS_NEAR_EXTREME_WARNING),
-                (judgement.ends_near_extreme, ENDS_NEAR_EXTREME_WARNING),
-            )
-            if flagged
-        )
         return RegimeView(
             context=loaded.context,
             timeframe=timeframe,
             window=view,
-            suggestions=_suggestions(series, timeframe),
-            verdict=judgement.verdict,
-            reason=judgement.reason,
-            strength=judgement.strength,
-            box_ratio=judgement.box_ratio,
-            structure=judgement.structure,
-            structure_highs=tuple(
-                _pivot(series, loaded.scale, p) for p in judgement.structure_highs
+            suggestions=tuple(
+                WindowSuggestion(
+                    bars,
+                    series.bar_date(w.start),
+                    series.bar_date(w.end),
+                    bars == WINDOW_PRESETS[timeframe].default_bars,
+                )
+                for bars, w in _presets(series, timeframe)
             ),
-            structure_lows=tuple(_pivot(series, loaded.scale, p) for p in judgement.structure_lows),
+            judgement=judgement,
+            structure_highs=_pivots(series, loaded.scale, judgement.structure_highs),
+            structure_lows=_pivots(series, loaded.scale, judgement.structure_lows),
             sentence=regime_sentence(judgement),
-            starts_near_extreme=judgement.starts_near_extreme,
-            ends_near_extreme=judgement.ends_near_extreme,
-            warnings=warnings,
-            channel_direction=judgement.channel_direction,
+            warnings=_warnings(judgement),
         )
 
     def channels(
@@ -445,10 +286,9 @@ class StockChartService:
         swing: SwingSettings = DEFAULT_SWING,
     ) -> ChannelView:
         loaded = self._load(ref)
-        series = self._series(loaded, timeframe, swing)
-        span, view = self._window(series, timeframe, window)
+        series = self._required_frame(loaded, timeframe, swing).series
+        span, view = _window(series, timeframe, window)
         judgement = judge_regime(series, span)
-        recommended = judgement.channel_direction
         if first_anchor is None:
             search = find_channels(series, span, direction)
         elif (anchor_index := series.index_of(first_anchor)) is None:
@@ -456,46 +296,39 @@ class StockChartService:
             search = ChannelSearch((), AnchorIssue.OUTSIDE_WINDOW)
         else:
             search = find_channels(series, span, direction, anchor_index)
-        candidates = tuple(
-            ChannelCandidateView(
-                drawing=_drawing(
-                    series,
-                    loaded.scale,
-                    LineKind.FIB_CHANNEL,
-                    (c.first.anchor, c.second.anchor, c.width_pivot.anchor),
-                ),
-                outside_ratio=c.outside_closes / c.span_bars,
-                span_bars=c.span_bars,
-                width_atr=c.width_atr,
-                created=series.bar_date(c.created_index),
-            )
-            for c in search.candidates[:MAX_CHANNEL_CANDIDATES]
-        )
         issue = search.anchor_issue
         params: dict[str, ParamValue] = {
             "direction": direction.value,
             "first_anchor": None if first_anchor is None else first_anchor.isoformat(),
-            **_swing_params(series.params),
         }
         return ChannelView(
             context=loaded.context,
             timeframe=timeframe,
             window=view,
             direction=direction,
-            recommended_direction=recommended,
-            candidates=candidates,
+            recommended_direction=judgement.channel_direction,
+            candidates=tuple(
+                ChannelCandidateView(
+                    _drawing(
+                        series,
+                        loaded.scale,
+                        LineKind.FIB_CHANNEL,
+                        (c.first.anchor, c.second.anchor, c.width_pivot.anchor),
+                    ),
+                    c,
+                    series.bar_date(c.created_index),
+                )
+                for c in search.candidates[:MAX_CHANNEL_CANDIDATES]
+            ),
             total_candidates=len(search.candidates),
             anchor_issue=issue,
             anchor_issue_message=None if issue is None else anchor_issue_message(issue),
-            record=AutoRecord(
-                algorithm_version=ALGORITHM_VERSION,
-                params=params,
-                regime_window=(view.start, view.end),
+            record=_record(
+                view,
+                series.params,
+                params,
                 regime=RegimeRecord(judgement.verdict, judgement.strength, judgement.structure),
-                chosen_by=(
-                    ChosenBy.RECOMMENDATION if direction is recommended else ChosenBy.USER_OVERRIDE
-                ),
-                window_source=view.source,
+                chosen=chosen_by(judgement.channel_direction, direction),
             ),
         )
 
@@ -508,24 +341,22 @@ class StockChartService:
         swing: SwingSettings = DEFAULT_SWING,
     ) -> RetracementView:
         loaded = self._load(ref)
-        series = self._series(loaded, timeframe, swing)
-        span, view = self._window(series, timeframe, window)
-        found = retracement_swing(series, span, choice)
-        drawing = (
-            None
-            if found is None
-            else _drawing(
-                series, loaded.scale, LineKind.FIB_RETRACEMENT, (found.first, found.second)
-            )
-        )
+        series = self._required_frame(loaded, timeframe, swing).series
+        span, view = _window(series, timeframe, window)
+        pair = retracement_pivots(series, span, choice)
         return RetracementView(
             context=loaded.context,
             timeframe=timeframe,
             window=view,
             choice=choice,
-            drawing=drawing,
-            message=NO_SWING_MESSAGE if found is None else None,
-            record=_record(view, {"swing": choice.value, **_swing_params(series.params)}),
+            drawing=None
+            if pair is None
+            else _drawing(
+                series, loaded.scale, LineKind.FIB_RETRACEMENT, (pair[0].anchor, pair[1].anchor)
+            ),
+            created=None if pair is None else series.bar_date(max(p.confirmed_index for p in pair)),
+            message=NO_SWING_MESSAGE if pair is None else None,
+            record=_record(view, series.params, {"swing": choice.value}),
         )
 
     def zones(
@@ -538,16 +369,9 @@ class StockChartService:
         swing: SwingSettings = DEFAULT_SWING,
     ) -> ZonesView:
         loaded = self._load(ref)
-        series = self._series(loaded, timeframe, swing)
-        span, view = self._window(series, timeframe, window)
-        defaults = ZoneParams()
-        try:
-            params = ZoneParams(
-                defaults.width_atr if width_atr is None else width_atr,
-                defaults.min_touches if min_touches is None else min_touches,
-            )
-        except ValueError as error:
-            raise ChartRequestError("chart.params.invalid", str(error)) from error
+        series = self._required_frame(loaded, timeframe, swing).series
+        span, view = _window(series, timeframe, window)
+        params = _domain_params(ZoneParams(), width_atr=width_atr, min_touches=min_touches)
         scale = loaded.scale
         zones = tuple(
             ZoneView(
@@ -555,16 +379,13 @@ class StockChartService:
                     series,
                     scale,
                     LineKind.HLINE,
-                    _band_anchors(zone.members, zone.low, zone.high),
+                    band_anchors(min(p.index for p in zone.members), zone.low, zone.high),
                 ),
+                zone=zone,
                 low=scale.to_display(zone.low),
                 high=scale.to_display(zone.high),
-                touches=zone.touches,
                 formed=series.bar_date(zone.formed_index),
-                held=zone.held,
-                broken=zone.broken,
-                side=zone.side,
-                members=tuple(_pivot(series, scale, p) for p in zone.members),
+                members=_pivots(series, scale, zone.members),
             )
             for zone in find_zones(series, span, params)
         )
@@ -576,11 +397,8 @@ class StockChartService:
             basis=ZONE_BASIS,
             record=_record(
                 view,
-                {
-                    "width_atr": params.width_atr,
-                    "min_touches": params.min_touches,
-                    **_swing_params(series.params),
-                },
+                series.params,
+                {"width_atr": params.width_atr, "min_touches": params.min_touches},
             ),
         )
 
@@ -592,8 +410,9 @@ class StockChartService:
     ) -> ConfluenceView:
         """보이는 선(저장 선 중 `visible`인 것 + 요청에 실은 저장 안 한 선)의 중첩.
 
-        보이기는 저장 칸이라 저장 선은 서버가 고른다. 계산은 저장 좌표에서 하고(비율 넓히기라 배율과
-        무관하다) 결과를 화면 가격으로 옮긴다.
+        보이기는 저장 칸이라 저장 선은 서버가 고른다. 요청 ref가 저장 선 id와 같으면(저장한 후보를
+        다시 실었다) 그 요청 선은 빼서 두 번 세지 않는다. 계산은 저장 좌표에서 하고(비율 넓히기라
+        배율과 무관하다) 결과를 화면 가격으로 옮긴다.
         """
         refs = [line.ref for line in lines]
         if len(set(refs)) != len(refs):
@@ -601,33 +420,31 @@ class StockChartService:
                 "chart.confluence.duplicate_ref", f"inline line refs must be unique — refs={refs}"
             )
         loaded = self._load(ref)
-        series_by: dict[Timeframe, ChartSeries | None] = {}
+        saved = self._drawings.list_lines(ref)
+        saved_ids = {line.line_id for line in saved}
         bands: list[PriceBand] = []
         skipped: list[str] = []
-        for saved in self._drawings.list_lines(ref):
-            if not saved.content.visible:
+        for line in saved:
+            if not line.content.visible:
                 continue
-            series = self._cached_series(loaded, saved.timeframe, series_by)
-            resolved = None if series is None else _resolved(series, saved)
-            if series is None or resolved is None:
-                skipped.append(saved.line_id)
+            frame = self._frame(loaded, line.timeframe, SwingParams())
+            resolved = (
+                LineIssue.NO_COMPLETED_BARS if frame is None else _resolved(frame.series, line)
+            )
+            if frame is None or isinstance(resolved, LineIssue):
+                skipped.append(line.line_id)
                 continue
             shape, _ = resolved
-            bands += bands_of(series, shape, saved.line_id, _levels(saved.content.levels))
+            bands += bands_of(frame.series, shape, line.line_id, _levels(line.content.levels))
         for inline in lines:
-            series = self._cached_series(loaded, inline.timeframe, series_by)
-            if series is None:
-                raise ChartRequestError(
-                    "chart.series.no_completed_bars",
-                    f"no completed candles — ref={inline.ref} timeframe={inline.timeframe.value}",
-                )
-            anchors = _stored_anchors(loaded.scale, inline.anchors)
-            shape, _ = self._shape(series, inline.kind, anchors, inline.levels, inline.ref)
-            bands += bands_of(series, shape, inline.ref, _levels(inline.levels))
-        try:
-            found = find_confluences(bands, tolerance)
-        except ValueError as error:
-            raise ChartRequestError("chart.params.invalid", str(error)) from error
+            if inline.ref in saved_ids:
+                continue
+            frame = self._required_frame(loaded, inline.timeframe)
+            shape, _, _ = self._shape(
+                loaded, frame, inline.kind, inline.anchors, inline.levels, inline.ref
+            )
+            bands += bands_of(frame.series, shape, inline.ref, _levels(inline.levels))
+        found = _domain_call(lambda: find_confluences(bands, tolerance))
         scale = loaded.scale
         return ConfluenceView(
             context=loaded.context,
@@ -654,23 +471,35 @@ class StockChartService:
             skipped_line_ids=tuple(skipped),
         )
 
-    # ── 선 저장 ───────────────────────────────────────────────────────────────
+    # ── 선 미리보기·저장 ──────────────────────────────────────────────────────
+
+    def preview_line(self, shape: LineShape) -> LineDrawing:
+        """저장 전 미리보기 — 저장과 같은 검사·정규화(봉 시작일)·그릴 점, 저장소는 거치지 않는다.
+
+        수동 그리기 중 끄는 동안 frontend가 가격을 계산하지 않고 이것을 부른다.
+        """
+        loaded = self._load(shape.instrument)
+        frame = self._required_frame(loaded, shape.timeframe)
+        geometry_, stored, indexed = self._shape(
+            loaded, frame, shape.kind, shape.anchors, shape.levels, "preview"
+        )
+        return LineDrawing(
+            _display_points(loaded.scale, stored),
+            paths(frame.series, loaded.scale, geometry_, indexed, shape.levels),
+        )
 
     def lines(self, ref: InstrumentRef) -> ChartLines:
         loaded = self._load(ref)
-        series_by: dict[Timeframe, ChartSeries | None] = {}
         return ChartLines(
             loaded.context,
-            tuple(
-                self._line_view(loaded, line, series_by) for line in self._drawings.list_lines(ref)
-            ),
+            tuple(self._line_view(loaded, line) for line in self._drawings.list_lines(ref)),
         )
 
     def create_line(self, draft: ChartLineDraft) -> ChartLineView:
         _check_record(draft.source, draft.auto)
         loaded = self._load(draft.instrument)
-        series = self._series(loaded, draft.timeframe)
-        content = self._content(loaded, series, draft.kind, draft.edit)
+        frame = self._required_frame(loaded, draft.timeframe)
+        content = self._content(loaded, frame, draft.kind, draft.edit)
         now = self._now()
         line = ChartLine(
             line_id=self._new_id(),
@@ -684,17 +513,27 @@ class StockChartService:
             updated_at=now,
         )
         self._drawings.add_line(line)
-        return self._line_view(loaded, line, {draft.timeframe: series})
+        return self._line_view(loaded, line)
 
     def update_line(self, line_id: str, edit: LineEdit) -> ChartLineView:
+        """`source = auto` 선의 기준점은 바꿀 수 없다 — 기준점이 자동 기록(알고리즘·구간·파라미터)의
+        결과라 옮기면 기록이 거짓이 된다. 옮기려면 `auto_copied`로 새로 저장한다."""
         current = self._drawings.get_line(line_id)
         if current is None:
             raise ChartLineNotFoundError(line_id)
         loaded = self._load(current.instrument)
-        series = self._series(loaded, current.timeframe)
-        content = self._content(loaded, series, current.kind, edit)
+        frame = self._required_frame(loaded, current.timeframe)
+        content = self._content(loaded, frame, current.kind, edit)
+        if current.source is LineSource.AUTO and not _same_stored(
+            content.anchors, current.content.anchors
+        ):
+            raise ChartRequestError(
+                "chart.line.auto_anchors_fixed",
+                f"auto line anchors cannot move — line_id={line_id} "
+                f"stored={[(a.bar_date.isoformat(), a.price) for a in current.content.anchors]}",
+            )
         line = self._drawings.update_content(line_id, content, self._now())
-        return self._line_view(loaded, line, {current.timeframe: series})
+        return self._line_view(loaded, line)
 
     def delete_line(self, line_id: str) -> None:
         self._drawings.delete_line(line_id)
@@ -704,17 +543,26 @@ class StockChartService:
     def _notice(self) -> str | None:
         return PRACTICE_DATA_NOTICE if self._practice else None
 
-    def _load(self, ref: InstrumentRef) -> _Loaded:
-        instrument = next(
-            (item for item in self._prices.chart_instruments() if item.ref == ref), None
+    def _instruments(self) -> tuple[ChartInstrument, ...]:
+        """이 모드의 대상만 — 연습용 접두가 모드와 맞지 않는 대상은 원천이 실어도 보이지 않는다."""
+        return tuple(
+            item
+            for item in self._prices.chart_instruments()
+            if item.ref.code.startswith(PRACTICE_CODE_PREFIX) == self._practice
         )
+
+    def _load(self, ref: InstrumentRef) -> _Loaded:
+        return self._loaded.get(ref, lambda: self._read(ref))
+
+    def _read(self, ref: InstrumentRef) -> _Loaded:
+        instrument = next((item for item in self._instruments() if item.ref == ref), None)
         if instrument is None:
             raise InstrumentNotFoundError(ref)
-        as_of = self._prices.latest_session()
+        as_of = self._prices.confirmed_session()
         if as_of is None:
             raise ChartRequestError(
                 "chart.series.no_completed_bars",
-                f"ledger has no trading session — kind={ref.kind.value} code={ref.code}",
+                f"ledger has no confirmed session — kind={ref.kind.value} code={ref.code}",
             )
         history = self._prices.chart_history(ref, as_of)
         if history is None:
@@ -727,103 +575,81 @@ class StockChartService:
             ChartContext(instrument, as_of, self._practice, self._notice()), ref, scale, bars
         )
 
-    def _series(
+    def _frame(self, loaded: _Loaded, timeframe: Timeframe, params: SwingParams) -> _Frame | None:
+        """완성 봉이 없으면 None."""
+
+        def build() -> _Frame | None:
+            candles = aggregate_candles(loaded.daily, timeframe, loaded.context.as_of)
+            if all(candle.in_progress for candle in candles):
+                return None
+            last = candles[-1]
+            return _Frame(build_series(candles, params), last if last.in_progress else None)
+
+        return self._frames.get((loaded.ref, timeframe, params), build)
+
+    def _required_frame(
         self, loaded: _Loaded, timeframe: Timeframe, swing: SwingSettings = DEFAULT_SWING
-    ) -> ChartSeries:
-        defaults = SwingParams()
-        try:
-            params = SwingParams(
-                candidate_sensitivity=_or(
-                    swing.candidate_sensitivity, defaults.candidate_sensitivity
-                ),
-                structure_sensitivity=_or(
-                    swing.structure_sensitivity, defaults.structure_sensitivity
-                ),
-            )
-        except ValueError as error:
-            raise ChartRequestError("chart.params.invalid", str(error)) from error
-        candles = loaded.candles(timeframe)
-        if not any(not candle.in_progress for candle in candles):
+    ) -> _Frame:
+        params = _domain_params(
+            SwingParams(),
+            candidate_sensitivity=swing.candidate_sensitivity,
+            structure_sensitivity=swing.structure_sensitivity,
+        )
+        frame = self._frame(loaded, timeframe, params)
+        if frame is None:
             raise ChartRequestError(
                 "chart.series.no_completed_bars",
                 f"no completed candles — kind={loaded.ref.kind.value} code={loaded.ref.code} "
-                f"timeframe={timeframe.value} candles={len(candles)}",
+                f"timeframe={timeframe.value}",
             )
-        return build_series(candles, params)
-
-    def _cached_series(
-        self, loaded: _Loaded, timeframe: Timeframe, cache: dict[Timeframe, ChartSeries | None]
-    ) -> ChartSeries | None:
-        if timeframe not in cache:
-            try:
-                cache[timeframe] = self._series(loaded, timeframe)
-            except ChartRequestError:
-                cache[timeframe] = None
-        return cache[timeframe]
-
-    def _window(
-        self, series: ChartSeries, timeframe: Timeframe, request: WindowRequest
-    ) -> tuple[Window, WindowView]:
-        last = len(series.candles) - 1
-        if request.start is None and request.end is None:
-            span = Window.ending_at(last, WINDOW_PRESETS[timeframe].default_bars)
-        elif request.start is None or request.end is None:
-            raise ChartRequestError(
-                "chart.window.incomplete",
-                f"window needs both start and end — start={request.start} end={request.end}",
-            )
-        else:
-            start, end = series.index_of(request.start), series.index_of(request.end)
-            if start is None or end is None:
-                raise ChartRequestError(
-                    "chart.window.outside_series",
-                    f"window date outside completed candles — start={request.start} "
-                    f"end={request.end} first={series.bar_date(0)} last={series.bar_date(last)} "
-                    f"timeframe={timeframe.value}",
-                )
-            if start > end:
-                raise ChartRequestError(
-                    "chart.window.reversed",
-                    f"window start after end — start={request.start} end={request.end}",
-                )
-            span = Window(start, end)
-        presets = {
-            Window.ending_at(last, bars) for bars in WINDOW_PRESETS[timeframe].suggested_bars
-        }
-        source = WindowSource.PRESET if span in presets else WindowSource.USER
-        return span, WindowView(
-            series.bar_date(span.start), series.bar_date(span.end), span.bars, source
-        )
+        return frame
 
     def _shape(
         self,
-        series: ChartSeries,
+        loaded: _Loaded,
+        frame: _Frame,
         kind: LineKind,
-        anchors: tuple[LineAnchor, ...],
+        points: Sequence[ChartPoint],
         levels: tuple[float, ...] | None,
         label: str,
-    ) -> tuple[LineGeometry, tuple[LineAnchor, ...]]:
-        """기준점을 검사해 domain 기하와 봉 시작일로 맞춘 저장 기준점을 돌려준다."""
+    ) -> tuple[LineGeometry, tuple[LineAnchor, ...], tuple[Anchor, ...]]:
+        """화면 좌표 기준점을 검사해 (기하, 봉 시작일로 맞춘 저장 기준점, 봉 index 기준점)으로."""
+        series = frame.series
+        anchors = tuple(LineAnchor(p.bar_date, loaded.scale.to_stored(p.price)) for p in points)
         check_shape(kind, anchors, levels)
-        resolved = resolve(series, anchors)
-        if resolved is None:
+        indexed: list[Anchor] = []
+        for anchor in anchors:
+            index = series.index_of(anchor.bar_date)
+            if index is not None:
+                indexed.append(Anchor(index, anchor.price))
+                continue
+            if frame.in_progress is not None and anchor.bar_date >= frame.in_progress.start:
+                raise ChartRequestError(
+                    "chart.line.anchor_in_progress",
+                    f"anchor date is in the bar still in progress — line={label} "
+                    f"bar_date={anchor.bar_date} in_progress_start={frame.in_progress.start}",
+                )
             raise ChartRequestError(
                 "chart.line.anchor_outside_series",
                 f"anchor date outside completed candles — line={label} "
-                f"anchors={[a.bar_date.isoformat() for a in anchors]} "
-                f"first={series.bar_date(0)} last={series.bar_date(len(series.candles) - 1)}",
+                f"bar_date={anchor.bar_date} first={series.bar_date(0)} "
+                f"last={series.bar_date(len(series.candles) - 1)}",
             )
-        shape = geometry(kind, resolved)
-        normalized = tuple(LineAnchor(series.bar_date(a.index), a.price) for a in resolved)
-        return shape, normalized
+        shape = geometry(kind, indexed)
+        stored = tuple(LineAnchor(series.bar_date(a.index), a.price) for a in indexed)
+        return shape, stored, tuple(indexed)
 
     def _content(
-        self, loaded: _Loaded, series: ChartSeries, kind: LineKind, edit: LineEdit
+        self, loaded: _Loaded, frame: _Frame, kind: LineKind, edit: LineEdit
     ) -> ChartLineContent:
-        anchors = _stored_anchors(loaded.scale, edit.anchors)
-        _, normalized = self._shape(series, kind, anchors, edit.levels, "draft")
+        if len(edit.memo) > MAX_MEMO_CHARS:
+            raise ChartRequestError(
+                "chart.line.memo_too_long",
+                f"memo too long — chars={len(edit.memo)} max={MAX_MEMO_CHARS}",
+            )
+        _, stored, _ = self._shape(loaded, frame, kind, edit.anchors, edit.levels, "draft")
         return ChartLineContent(
-            anchors=normalized,
+            anchors=stored,
             levels=edit.levels,
             extend_right=edit.extend_right,
             memo=edit.memo,
@@ -831,21 +657,48 @@ class StockChartService:
             visible=edit.visible,
         )
 
-    def _line_view(
-        self, loaded: _Loaded, line: ChartLine, cache: dict[Timeframe, ChartSeries | None]
-    ) -> ChartLineView:
+    def _line_view(self, loaded: _Loaded, line: ChartLine) -> ChartLineView:
         scale = loaded.scale
-        anchors = tuple(
-            ChartPoint(a.bar_date, scale.to_display(a.price)) for a in line.content.anchors
-        )
-        series = self._cached_series(loaded, line.timeframe, cache)
-        resolved = None if series is None else _resolved(series, line)
-        if series is None or resolved is None:
-            return ChartLineView(line, anchors, (), "anchor_outside_series")
+        anchors = _display_points(scale, line.content.anchors)
+        frame = self._frame(loaded, line.timeframe, SwingParams())
+        if frame is None:
+            return ChartLineView(line, anchors, (), LineIssue.NO_COMPLETED_BARS, None)
+        resolved = _resolved(frame.series, line)
+        if isinstance(resolved, LineIssue):
+            return ChartLineView(line, anchors, (), resolved, None)
         shape, indexed = resolved
         return ChartLineView(
-            line, anchors, paths(series, scale, shape, indexed, line.content.levels), None
+            line,
+            anchors,
+            paths(frame.series, scale, shape, indexed, line.content.levels),
+            None,
+            self._created(loaded, line, indexed),
         )
+
+    def _created(
+        self, loaded: _Loaded, line: ChartLine, indexed: tuple[Anchor, ...]
+    ) -> date | None:
+        """자동 선의 생긴 날 — 저장한 민감도·판정 구간으로 다시 찾아 같은 후보의 확정 봉."""
+        auto = line.auto
+        if auto is None or auto.regime_window is None:
+            return None
+        try:
+            params = _domain_params(
+                SwingParams(),
+                candidate_sensitivity=finite_number(auto.params.get("candidate_sensitivity")),
+                structure_sensitivity=finite_number(auto.params.get("structure_sensitivity")),
+            )
+        except ChartRequestError:
+            return None
+        frame = self._frame(loaded, line.timeframe, params)
+        if frame is None:
+            return None
+        series = frame.series
+        start, end = (series.index_of(day) for day in auto.regime_window)
+        if start is None or end is None or start > end:
+            return None
+        found = created_index(series, Window(start, end), line.kind, indexed, auto.params)
+        return None if found is None else series.bar_date(found)
 
 
 def rank_instruments(
@@ -862,7 +715,8 @@ def rank_instruments(
     def tier(item: ChartInstrument) -> int | None:
         if item.ref.kind is InstrumentKind.INDEX and item.name.casefold() == needle:
             return 0
-        if item.ref.kind is InstrumentKind.STOCK and item.ref.code.casefold() == needle:
+        code = item.ref.code.removeprefix(PRACTICE_CODE_PREFIX)
+        if item.ref.kind is InstrumentKind.STOCK and code.casefold() == needle:
             return 1
         if needle in names(item):
             return 2
@@ -883,37 +737,109 @@ def rank_instruments(
     return tuple(item for _, item in ranked[:MAX_SEARCH_RESULTS])
 
 
-def _display_candle(scale: DisplayScale, candle: Candle) -> Candle:
-    return Candle(
-        candle.start,
-        candle.end,
-        scale.to_display(candle.open),
-        scale.to_display(candle.high),
-        scale.to_display(candle.low),
-        scale.to_display(candle.close),
-        candle.in_progress,
+def _domain_params(defaults: _P, **values: float | int | None) -> _P:
+    """None이 아닌 값만 domain 기본값 위에 얹는다. 범위 검사는 domain 값 타입 하나가 한다."""
+    return _domain_call(
+        lambda: replace(defaults, **{k: v for k, v in values.items() if v is not None})
     )
 
 
-def _or(value: float | None, default: float) -> float:
-    return default if value is None else value
+def _domain_call(call: Callable[[], _T]) -> _T:
+    """domain 파라미터 범위 위반(`ValueError`)을 `chart.params.invalid`로."""
+    try:
+        return call()
+    except ValueError as error:
+        raise ChartRequestError("chart.params.invalid", str(error)) from error
 
 
-def _stored_anchors(scale: DisplayScale, points: Sequence[ChartPoint]) -> tuple[LineAnchor, ...]:
-    return tuple(LineAnchor(point.bar_date, scale.to_stored(point.price)) for point in points)
+def _presets(series: ChartSeries, timeframe: Timeframe) -> tuple[tuple[int, Window], ...]:
+    """주기별 제안 칩 길이와 마지막 완성 봉에서 끝나는 그 구간."""
+    last = len(series.candles) - 1
+    return tuple(
+        (bars, Window.ending_at(last, bars)) for bars in WINDOW_PRESETS[timeframe].suggested_bars
+    )
+
+
+def _window(
+    series: ChartSeries, timeframe: Timeframe, request: WindowRequest
+) -> tuple[Window, WindowView]:
+    """구간 날짜 → 봉 index. 한쪽만 오면 거절한다(조용히 기본 구간으로 바꾸지 않는다)."""
+    last = len(series.candles) - 1
+    if request.start is None and request.end is None:
+        span = Window.ending_at(last, WINDOW_PRESETS[timeframe].default_bars)
+    elif request.start is None or request.end is None:
+        raise ChartRequestError(
+            "chart.window.incomplete",
+            f"window needs both start and end — start={request.start} end={request.end}",
+        )
+    else:
+        start, end = series.index_of(request.start), series.index_of(request.end)
+        if start is None or end is None:
+            raise ChartRequestError(
+                "chart.window.outside_series",
+                f"window date outside completed candles — start={request.start} "
+                f"end={request.end} first={series.bar_date(0)} last={series.bar_date(last)} "
+                f"timeframe={timeframe.value}",
+            )
+        if start > end:
+            raise ChartRequestError(
+                "chart.window.reversed",
+                f"window start after end — start={request.start} end={request.end}",
+            )
+        span = Window(start, end)
+    source = (
+        WindowSource.PRESET
+        if any(span == w for _, w in _presets(series, timeframe))
+        else WindowSource.USER
+    )
+    return span, WindowView(
+        series.bar_date(span.start), series.bar_date(span.end), span.bars, source
+    )
+
+
+def _warnings(judgement: RegimeJudgement) -> tuple[str, ...]:
+    return tuple(
+        text
+        for flagged, text in (
+            (judgement.starts_near_extreme, STARTS_NEAR_EXTREME_WARNING),
+            (judgement.ends_near_extreme, ENDS_NEAR_EXTREME_WARNING),
+        )
+        if flagged
+    )
+
+
+def _display_candle(scale: DisplayScale, candle: Candle) -> Candle:
+    return replace(
+        candle,
+        open=scale.to_display(candle.open),
+        high=scale.to_display(candle.high),
+        low=scale.to_display(candle.low),
+        close=scale.to_display(candle.close),
+    )
+
+
+def _display_points(scale: DisplayScale, anchors: Sequence[LineAnchor]) -> tuple[ChartPoint, ...]:
+    return tuple(ChartPoint(a.bar_date, scale.to_display(a.price)) for a in anchors)
+
+
+def _same_stored(left: Sequence[LineAnchor], right: Sequence[LineAnchor]) -> bool:
+    return len(left) == len(right) and all(
+        a.bar_date == b.bar_date and math.isclose(a.price, b.price, rel_tol=1e-9)
+        for a, b in zip(left, right, strict=True)
+    )
 
 
 def _resolved(
     series: ChartSeries, line: ChartLine
-) -> tuple[LineGeometry, tuple[Anchor, ...]] | None:
+) -> tuple[LineGeometry, tuple[Anchor, ...]] | LineIssue:
     indexed = resolve(series, line.content.anchors)
     if indexed is None:
-        return None
+        return LineIssue.ANCHOR_OUTSIDE_SERIES
     try:
         return geometry(line.kind, indexed), indexed
     except ChartRequestError:
-        # 저장 뒤 봉 묶음이 바뀌어 두 기준점이 같은 봉이 됐다 — 그릴 수 없다.
-        return None
+        # 저장 뒤 봉 묶음이 바뀌어 두 기준점이 같은 봉·역순이 됐다 — 그릴 수 없다.
+        return LineIssue.ANCHOR_ORDER
 
 
 def _levels(levels: tuple[float, ...] | None) -> tuple[float, ...]:
@@ -930,55 +856,65 @@ def _drawing(
     )
 
 
-def _band_anchors(members: Sequence[Pivot], low: float, high: float) -> tuple[Anchor, Anchor]:
-    """수평 구간을 띠 선(기준점 둘)으로 — 기준 봉은 가장 이른 구성 피벗이다."""
-    start = min(p.index for p in members)
-    return Anchor(start, low), Anchor(start, high)
-
-
-def _pivot(series: ChartSeries, scale: DisplayScale, pivot: Pivot) -> PivotPoint:
-    return PivotPoint(
-        pivot.kind,
-        series.bar_date(pivot.index),
-        scale.to_display(pivot.price),
-        series.bar_date(pivot.confirmed_index),
-    )
-
-
-def _suggestions(series: ChartSeries, timeframe: Timeframe) -> tuple[WindowSuggestion, ...]:
-    last = len(series.candles) - 1
-    preset = WINDOW_PRESETS[timeframe]
+def _pivots(
+    series: ChartSeries, scale: DisplayScale, pivots: Sequence[Pivot]
+) -> tuple[PivotPoint, ...]:
     return tuple(
-        WindowSuggestion(
-            bars,
-            series.bar_date((span := Window.ending_at(last, bars)).start),
-            series.bar_date(span.end),
-            bars == preset.default_bars,
+        PivotPoint(
+            p.kind,
+            series.bar_date(p.index),
+            scale.to_display(p.price),
+            series.bar_date(p.confirmed_index),
         )
-        for bars in preset.suggested_bars
+        for p in pivots
     )
 
 
-def _swing_params(params: SwingParams) -> dict[str, ParamValue]:
-    return {
-        "candidate_sensitivity": params.candidate_sensitivity,
-        "structure_sensitivity": params.structure_sensitivity,
-    }
-
-
-def _record(view: WindowView, params: Mapping[str, ParamValue]) -> AutoRecord:
+def _record(
+    view: WindowView,
+    swing: SwingParams,
+    params: Mapping[str, ParamValue],
+    *,
+    regime: RegimeRecord | None = None,
+    chosen: ChosenBy | None = None,
+) -> AutoRecord:
+    """자동 후보의 기록 — 판정 구간·민감도·도구별 파라미터(저장 요청에 그대로 싣는다)."""
     return AutoRecord(
         algorithm_version=ALGORITHM_VERSION,
-        params=dict(params),
+        params={
+            **params,
+            "candidate_sensitivity": swing.candidate_sensitivity,
+            "structure_sensitivity": swing.structure_sensitivity,
+        },
         regime_window=(view.start, view.end),
+        regime=regime,
+        chosen_by=chosen,
         window_source=view.source,
     )
 
 
 def _check_record(source: LineSource, auto: AutoRecord | None) -> None:
+    """자동 기록은 자동 선에만 있고, 수치 칸은 유한해야 한다(NaN·inf는 저장·JSON이 받지 못한다)."""
     if (source is LineSource.MANUAL) != (auto is None):
         raise ChartRequestError(
             "chart.line.auto_record",
             f"auto record must be present exactly for auto lines — source={source.value} "
             f"auto={'present' if auto is not None else 'missing'}",
+        )
+    if auto is None:
+        return
+    bad = [
+        key
+        for key, value in auto.params.items()
+        if isinstance(value, float) and not math.isfinite(value)
+    ]
+    strength = None if auto.regime is None else auto.regime.strength
+    if bad or (strength is not None and not math.isfinite(strength)):
+        raise ChartRequestError(
+            "chart.line.auto_record",
+            f"auto record numbers must be finite — params={bad} regime_strength={strength}",
+        )
+    if auto.regime_window is not None and auto.regime_window[0] > auto.regime_window[1]:
+        raise ChartRequestError(
+            "chart.line.auto_record", f"regime window reversed — window={auto.regime_window}"
         )

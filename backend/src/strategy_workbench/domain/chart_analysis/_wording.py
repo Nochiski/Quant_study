@@ -19,10 +19,6 @@ from strategy_workbench.domain.chart_analysis._regime import (
     Structure,
 )
 
-PRACTICE_DATA_NOTICE = (
-    "연습용 데이터예요. 실제 시세가 아니라 화면을 익히려고 만든 가격이라 분석 결과를 "
-    "투자 판단에 쓰지 마세요."
-)
 STARTS_NEAR_EXTREME_WARNING = (
     "판정 구간이 확정된 고점·저점 근처에서 시작해요. 극값에서 재면 강도가 한쪽으로 치우치니 시작을 "
     "조금 옮겨 보세요."

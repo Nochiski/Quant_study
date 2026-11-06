@@ -18,6 +18,8 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query, status
 from pydantic import Field
 
 from strategy_workbench.application.stock_chart.facade.chart import (
+    MAX_CHANNEL_CANDIDATES,
+    MAX_SEARCH_RESULTS,
     CandleView,
     ChannelView,
     ChartContext,
@@ -34,6 +36,8 @@ from strategy_workbench.application.stock_chart.facade.chart import (
     LevelPath,
     LineDrawing,
     LineEdit,
+    LineIssue,
+    LineShape,
     PivotPoint,
     RegimeView,
     RetracementView,
@@ -80,7 +84,6 @@ from ._backtest_contract import CodedBodyValidationRoute
 _T = TypeVar("_T")
 
 STOCK_CHART_PATH = "/api/v1/stock-chart"
-MAX_MEMO_CHARS = 500
 
 ChartHttpErrorCode = (
     ChartErrorCode
@@ -187,7 +190,7 @@ class ChartAutoRecordBody:
     """자동 선의 기록. 후보 응답의 `record`를 선 저장 요청에 그대로 싣는다."""
 
     algorithm_version: str
-    params: dict[str, str | float | int | bool | None]
+    params: dict[str, ParamValue]
     regime_window_start: date | None = None
     regime_window_end: date | None = None
     regime: ChartRegimeRecordBody | None = None
@@ -268,7 +271,10 @@ class ChartChannelsBody:
     window: ChartWindowBody
     direction: TrendDirection
     recommended_direction: TrendDirection | None
-    candidates: Annotated[list[ChartChannelCandidateBody], Field(description="순위순 앞 10개까지.")]
+    candidates: Annotated[
+        list[ChartChannelCandidateBody],
+        Field(description=f"순위순 앞 {MAX_CHANNEL_CANDIDATES}개까지."),
+    ]
     total_candidates: int
     anchor_issue: AnchorIssue | None
     anchor_issue_message: str | None
@@ -284,6 +290,9 @@ class ChartRetracementBody:
     drawing: Annotated[
         ChartDrawingBody | None,
         Field(description="기준점은 먼저 점(레벨 1)·나중 점(레벨 0) 순. 고를 스윙이 없으면 null."),
+    ]
+    created: Annotated[
+        date | None, Field(description="두 기준점이 모두 확정된 봉의 날짜. 그 앞은 옅게 그린다.")
     ]
     message: str | None
     record: ChartAutoRecordBody
@@ -362,8 +371,14 @@ class ChartLineBody:
     updated_at: datetime
     paths: list[ChartLevelPathBody]
     issue: Annotated[
-        Literal["anchor_outside_series"] | None,
-        Field(description="기준점이 지금 계열 밖이라 그릴 수 없다(paths가 빈다)."),
+        LineIssue | None, Field(description="지금 계열로 그릴 수 없는 사유(그때 paths가 빈다).")
+    ]
+    created: Annotated[
+        date | None,
+        Field(
+            description="자동 선의 생긴 날 — 저장한 판정 구간·파라미터로 다시 계산한다(그 앞은 "
+            "옅게). 수동 선·기준점을 옮긴 복사본은 null."
+        ),
     ]
 
 
@@ -382,10 +397,22 @@ class ChartLineEditBody:
         list[ChartPointBody],
         Field(description="화면 좌표 기준점. 수평선 1~2개(2개는 띠), 되돌림 2개, 채널 3개."),
     ]
-    extend_right: bool
-    memo: Annotated[str, Field(max_length=MAX_MEMO_CHARS)]
-    locked: bool
-    visible: bool
+    extend_right: bool = True
+    memo: str = ""
+    locked: bool = False
+    visible: bool = True
+    levels: list[float] | None = None
+
+
+@dataclass(frozen=True)
+class ChartLinePreviewBody:
+    """저장 전 미리보기 — 저장 요청과 같은 초안의 기하 칸. 저장하지 않는다."""
+
+    instrument_kind: InstrumentKind
+    instrument_code: Annotated[str, Field(min_length=1)]
+    timeframe: Timeframe
+    kind: LineKind
+    anchors: list[ChartPointBody]
     levels: list[float] | None = None
 
 
@@ -398,7 +425,7 @@ class CreateChartLineBody:
     source: LineSource
     anchors: list[ChartPointBody]
     extend_right: bool = True
-    memo: Annotated[str, Field(max_length=MAX_MEMO_CHARS)] = ""
+    memo: str = ""
     locked: bool = False
     visible: bool = True
     levels: list[float] | None = None
@@ -416,13 +443,13 @@ class ChartConfluenceLineBody:
 
 @dataclass(frozen=True)
 class ChartConfluenceRequestBody:
-    """저장 선 중 보이는 것은 서버가 넣는다. `lines`에는 저장하지 않은 보이는 선(자동 후보)을
-    싣는다."""
+    """저장 선 중 보이는 것은 서버가 넣는다. `lines`에는 저장하지 않은 보이는 선(자동 후보)만
+    싣는다 — 저장한 후보를 다시 실으면(ref = line_id) 그 요청 선은 빠진다."""
 
     instrument_kind: InstrumentKind
     instrument_code: Annotated[str, Field(min_length=1)]
     lines: list[ChartConfluenceLineBody]
-    tolerance: Annotated[float, Field(gt=0, lt=1)] = DEFAULT_CONFLUENCE_TOLERANCE
+    tolerance: float = DEFAULT_CONFLUENCE_TOLERANCE
 
 
 # ── 변환 ─────────────────────────────────────────────────────────────────────
@@ -513,7 +540,8 @@ def _line(view: ChartLineView) -> ChartLineBody:
         created_at=line.created_at,
         updated_at=line.updated_at,
         paths=_paths(view.paths),
-        issue="anchor_outside_series" if view.issue is not None else None,
+        issue=view.issue,
+        created=view.created,
     )
 
 
@@ -543,18 +571,18 @@ def _regime(view: RegimeView) -> ChartRegimeBody:
         suggestions=[
             ChartWindowSuggestionBody(s.bars, s.start, s.end, s.default) for s in view.suggestions
         ],
-        verdict=view.verdict,
-        reason=view.reason,
-        strength=view.strength,
-        box_ratio=view.box_ratio,
-        structure=view.structure,
+        verdict=view.judgement.verdict,
+        reason=view.judgement.reason,
+        strength=view.judgement.strength,
+        box_ratio=view.judgement.box_ratio,
+        structure=view.judgement.structure,
         structure_highs=[_pivot(p) for p in view.structure_highs],
         structure_lows=[_pivot(p) for p in view.structure_lows],
         sentence=view.sentence,
-        starts_near_extreme=view.starts_near_extreme,
-        ends_near_extreme=view.ends_near_extreme,
+        starts_near_extreme=view.judgement.starts_near_extreme,
+        ends_near_extreme=view.judgement.ends_near_extreme,
         warnings=list(view.warnings),
-        channel_direction=view.channel_direction,
+        channel_direction=view.judgement.channel_direction,
     )
 
 
@@ -567,7 +595,11 @@ def _channels(view: ChannelView) -> ChartChannelsBody:
         recommended_direction=view.recommended_direction,
         candidates=[
             ChartChannelCandidateBody(
-                _drawing(c.drawing), c.outside_ratio, c.span_bars, c.width_atr, c.created
+                _drawing(c.drawing),
+                c.candidate.outside_ratio,
+                c.candidate.span_bars,
+                c.candidate.width_atr,
+                c.created,
             )
             for c in view.candidates
         ],
@@ -585,6 +617,7 @@ def _retracement(view: RetracementView) -> ChartRetracementBody:
         window=_window(view.window),
         swing=view.choice,
         drawing=None if view.drawing is None else _drawing(view.drawing),
+        created=view.created,
         message=view.message,
         record=_record_body(view.record),
     )
@@ -600,11 +633,11 @@ def _zones(view: ZonesView) -> ChartZonesBody:
                 drawing=_drawing(z.drawing),
                 low=z.low,
                 high=z.high,
-                touches=z.touches,
+                touches=z.zone.touches,
                 formed=z.formed,
-                held=z.held,
-                broken=z.broken,
-                side=z.side,
+                held=z.zone.held,
+                broken=z.zone.broken,
+                side=z.zone.side,
                 members=[_pivot(p) for p in z.members],
             )
             for z in view.zones
@@ -682,7 +715,9 @@ InstrumentKindQuery = Annotated[InstrumentKind, Query(description="stock 또는 
 CodeQuery = Annotated[str, Query(min_length=1, description="종목 티커 또는 지수 코드.")]
 WindowStartQuery = Annotated[date | None, Query(description="판정·분석 구간 시작 봉 날짜.")]
 WindowEndQuery = Annotated[date | None, Query(description="판정·분석 구간 끝 봉 날짜.")]
-SensitivityQuery = Annotated[float | None, Query(gt=0, description="피벗 민감도 k(× ATR).")]
+SensitivityQuery = Annotated[
+    float | None, Query(description="피벗 민감도 k(× ATR). 범위는 domain이 검사한다.")
+]
 
 
 def register_chart_routes(app: FastAPI, service: StockChartService) -> None:
@@ -705,9 +740,9 @@ def register_chart_routes(app: FastAPI, service: StockChartService) -> None:
     @router.get("/instruments", operation_id="searchChartInstruments", responses=responses)
     def search_instruments(
         query: Annotated[str, Query(description="이름·티커·지수명(포함 검색).")],
-        limit: Annotated[int, Query(ge=1, le=50)] = 20,
+        limit: Annotated[int, Query(description=f"1 ~ {MAX_SEARCH_RESULTS}.")] = 20,
     ) -> ChartInstrumentSearchBody:
-        return _search(service.search(query, limit))
+        return _search(guarded(lambda: service.search(query, limit)))
 
     @router.get("/candles", operation_id="getChartCandles", responses=responses)
     def get_candles(
@@ -784,9 +819,9 @@ def register_chart_routes(app: FastAPI, service: StockChartService) -> None:
         window_start: WindowStartQuery = None,
         window_end: WindowEndQuery = None,
         width_atr: Annotated[
-            float | None, Query(gt=0, description="묶는 폭 k_z(tol = k_z·ATR/종가).")
+            float | None, Query(description="묶는 폭 k_z(tol = k_z·ATR/종가).")
         ] = None,
-        min_touches: Annotated[int | None, Query(ge=1)] = None,
+        min_touches: int | None = None,
         candidate_sensitivity: SensitivityQuery = None,
         structure_sensitivity: SensitivityQuery = None,
     ) -> ChartZonesBody:
@@ -811,6 +846,19 @@ def register_chart_routes(app: FastAPI, service: StockChartService) -> None:
             for line in body.lines
         )
         return _confluence(guarded(lambda: service.confluence(ref, lines, body.tolerance)))
+
+    @router.post("/lines/preview", operation_id="previewChartLine", responses=responses)
+    def preview_line(body: ChartLinePreviewBody) -> ChartDrawingBody:
+        """저장 전 미리보기: 저장과 같은 검사·봉 시작일 정규화와 그릴 점. 저장하지 않는다 —
+        수동 그리기 중 끄는 동안 frontend가 가격을 계산하지 않고 이것을 부른다."""
+        shape = LineShape(
+            InstrumentRef(body.instrument_kind, body.instrument_code),
+            body.timeframe,
+            body.kind,
+            _points(body.anchors),
+            None if body.levels is None else tuple(body.levels),
+        )
+        return _drawing(guarded(lambda: service.preview_line(shape)))
 
     @router.get("/lines", operation_id="listChartLines", responses=responses)
     def list_lines(kind: InstrumentKindQuery, code: CodeQuery) -> ChartLinesBody:

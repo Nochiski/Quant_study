@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
@@ -19,7 +20,9 @@ from strategy_workbench.application.stock_chart.facade.chart import (
     ConfluenceLine,
     InstrumentNotFoundError,
     LineEdit,
+    LineShape,
     StockChartService,
+    SwingSettings,
     WindowRequest,
 )
 from strategy_workbench.application.stock_chart.facade.ports import (
@@ -31,9 +34,10 @@ from strategy_workbench.application.stock_chart.facade.ports import (
     ChartLineNotFoundError,
     InstrumentKind,
     InstrumentRef,
+    RegimeRecord,
 )
 from strategy_workbench.domain.chart_analysis.facade.bars import PriceBar, Timeframe
-from strategy_workbench.domain.chart_analysis.facade.levels import TrendDirection
+from strategy_workbench.domain.chart_analysis.facade.levels import SwingChoice, TrendDirection
 from strategy_workbench.domain.chart_analysis.facade.line_record import (
     ALGORITHM_VERSION,
     ChosenBy,
@@ -41,7 +45,11 @@ from strategy_workbench.domain.chart_analysis.facade.line_record import (
     LineSource,
     WindowSource,
 )
-from strategy_workbench.domain.chart_analysis.facade.regime import RegimeReason, RegimeVerdict
+from strategy_workbench.domain.chart_analysis.facade.regime import (
+    RegimeReason,
+    RegimeVerdict,
+    Structure,
+)
 
 STOCK = InstrumentRef(InstrumentKind.STOCK, "005930")
 UPTREND = InstrumentRef(InstrumentKind.STOCK, "000660")
@@ -77,7 +85,7 @@ class FakePrices:
             UPTREND: ChartHistory(_bars(_zigzag()), _zigzag()[-1]),
         }
 
-    def latest_session(self) -> date | None:
+    def confirmed_session(self) -> date | None:
         return AS_OF
 
     def chart_instruments(self) -> tuple[ChartInstrument, ...]:
@@ -124,12 +132,17 @@ class FakeDrawings:
             raise ChartLineNotFoundError(line_id)
 
 
-def _service(drawings: FakeDrawings | None = None) -> StockChartService:
+def _service(
+    drawings: FakeDrawings | None = None,
+    prices: FakePrices | None = None,
+    *,
+    practice: bool = False,
+) -> StockChartService:
     ids = iter(f"line-{n}" for n in range(1, 100))
     return StockChartService(
-        FakePrices(),
+        prices or FakePrices(),
         drawings or FakeDrawings(),
-        practice_data=False,
+        practice_data=practice,
         new_id=lambda: next(ids),
         now=lambda: datetime(2025, 10, 31, tzinfo=UTC),
     )
@@ -180,7 +193,8 @@ def test_the_week_in_progress_is_shown_but_not_analysed() -> None:
         8,
     )
     assert regime.window.source is WindowSource.PRESET
-    assert (regime.verdict, regime.reason, regime.strength) == (
+    judgement = regime.judgement
+    assert (judgement.verdict, judgement.reason, judgement.strength) == (
         RegimeVerdict.UNDECIDABLE,
         RegimeReason.TOO_FEW_BARS,
         None,
@@ -220,7 +234,7 @@ def test_window_dates_map_to_the_bar_that_holds_them() -> None:
 
 def test_channel_direction_records_whether_the_user_followed_the_recommendation() -> None:
     service = _service()
-    assert service.regime(UPTREND, Timeframe.DAY).channel_direction is TrendDirection.UP
+    assert service.regime(UPTREND, Timeframe.DAY).judgement.channel_direction is TrendDirection.UP
 
     followed = service.channels(UPTREND, Timeframe.DAY, TrendDirection.UP)
     overridden = service.channels(UPTREND, Timeframe.DAY, TrendDirection.DOWN)
@@ -303,6 +317,53 @@ def test_line_round_trip_normalizes_anchor_dates_and_keeps_editable_fields() -> 
             "chart.line.auto_record",
         ),
         (replace(_hline(60.0), source=LineSource.AUTO), "chart.line.auto_record"),
+        # 레벨을 비운 선은 그릴 것이 없다(기본 레벨은 칸을 비워 고른다)
+        (
+            ChartLineDraft(
+                STOCK,
+                Timeframe.DAY,
+                LineKind.FIB_RETRACEMENT,
+                LineSource.MANUAL,
+                LineEdit(
+                    (ChartPoint(date(2025, 9, 3), 50.0), ChartPoint(date(2025, 10, 1), 70.0)),
+                    levels=(),
+                ),
+            ),
+            "chart.line.levels_invalid",
+        ),
+        # NaN·inf는 저장·JSON이 받지 못한다 — 저장소까지 가지 않고 422
+        (
+            replace(
+                _hline(60.0),
+                source=LineSource.AUTO,
+                auto=AutoRecord(ALGORITHM_VERSION, {"width_atr": math.nan}),
+            ),
+            "chart.line.auto_record",
+        ),
+        (
+            replace(
+                _hline(60.0),
+                source=LineSource.AUTO,
+                auto=AutoRecord(
+                    ALGORITHM_VERSION,
+                    {},
+                    regime=RegimeRecord(RegimeVerdict.UP, math.inf, Structure.UP),
+                ),
+            ),
+            "chart.line.auto_record",
+        ),
+        # 진행 중인 주(10-27~)의 날짜는 계열 밖과 따로 알린다
+        (
+            replace(_hline(60.0, date(2025, 10, 28)), timeframe=Timeframe.WEEK),
+            "chart.line.anchor_in_progress",
+        ),
+        (
+            replace(
+                _hline(60.0),
+                edit=LineEdit((ChartPoint(date(2025, 9, 3), 60.0),), memo="가" * 501),
+            ),
+            "chart.line.memo_too_long",
+        ),
     ],
 )
 def test_lines_that_cannot_be_drawn_are_rejected(draft: ChartLineDraft, code: str) -> None:
@@ -336,6 +397,8 @@ def test_confluence_reads_visible_saved_lines_and_inline_candidates() -> None:
     with pytest.raises(ChartRequestError) as error:
         service.confluence(STOCK, (candidate, candidate))
     assert error.value.code == "chart.confluence.duplicate_ref"
+    # 저장한 후보를 다시 실으면(ref = line_id) 두 번 세지 않는다 — 혼자 남은 수평선은 중첩이 없다
+    assert service.confluence(STOCK, (replace(candidate, ref=shown),)).groups == ()
 
 
 def test_search_ranks_index_name_then_ticker_then_exact_name_then_contains() -> None:
@@ -357,3 +420,104 @@ def test_search_ranks_index_name_then_ticker_then_exact_name_then_contains() -> 
 def test_unknown_instrument_is_not_found() -> None:
     with pytest.raises(InstrumentNotFoundError):
         _service().candles(InstrumentRef(InstrumentKind.STOCK, "999999"), Timeframe.DAY)
+
+
+def test_preview_checks_and_normalizes_like_saving_but_stores_nothing() -> None:
+    drawings = FakeDrawings()
+    service = _service(drawings)
+    points = (ChartPoint(date(2025, 9, 3), 50.0), ChartPoint(date(2025, 10, 8), 70.0))
+    shape = LineShape(STOCK, Timeframe.WEEK, LineKind.FIB_RETRACEMENT, points)
+
+    preview = service.preview_line(shape)
+    assert drawings.lines == {}
+    saved = service.create_line(
+        ChartLineDraft(
+            STOCK, Timeframe.WEEK, LineKind.FIB_RETRACEMENT, LineSource.MANUAL, LineEdit(points)
+        )
+    )
+    # 끄는 날짜는 그 주 봉의 시작일로 붙고, 그릴 점은 저장한 선과 같다
+    assert [a.bar_date for a in preview.anchors] == [date(2025, 9, 1), date(2025, 10, 6)]
+    assert (preview.anchors, preview.paths) == (saved.anchors, saved.paths)
+    in_progress = (points[0], ChartPoint(date(2025, 10, 28), 70.0))
+    with pytest.raises(ChartRequestError) as error:
+        service.preview_line(replace(shape, anchors=in_progress))
+    assert error.value.code == "chart.line.anchor_in_progress"
+
+
+def test_auto_lines_keep_their_anchors_and_report_when_they_formed() -> None:
+    service = _service()
+    swing = service.retracement(UPTREND, Timeframe.DAY, SwingChoice.LATEST_CONFIRMED)
+    channels = service.channels(UPTREND, Timeframe.DAY, TrendDirection.UP)
+    channel = channels.candidates[0]
+    assert swing.drawing is not None and swing.created is not None
+
+    def save(kind: LineKind, anchors: tuple[ChartPoint, ...], record: AutoRecord) -> str:
+        draft = ChartLineDraft(
+            UPTREND, Timeframe.DAY, kind, LineSource.AUTO, LineEdit(anchors), record
+        )
+        return service.create_line(draft).line.line_id
+
+    swing_id = save(LineKind.FIB_RETRACEMENT, swing.drawing.anchors, swing.record)
+    channel_id = save(LineKind.FIB_CHANNEL, channel.drawing.anchors, channels.record)
+    created = {view.line.line_id: view.created for view in service.lines(UPTREND).lines}
+    # 생긴 날은 저장하지 않고 저장한 구간·파라미터로 다시 찾아 낸다 — 후보 응답과 같다
+    assert created == {swing_id: swing.created, channel_id: channel.created}
+
+    # 메모는 고칠 수 있지만 자동 선의 기준점은 옮길 수 없다
+    kept = service.update_line(swing_id, LineEdit(swing.drawing.anchors, memo="확인"))
+    assert kept.line.content.memo == "확인"
+    moved = (swing.drawing.anchors[0], replace(swing.drawing.anchors[1], price=1.0))
+    with pytest.raises(ChartRequestError) as error:
+        service.update_line(swing_id, LineEdit(moved))
+    assert error.value.code == "chart.line.auto_anchors_fixed"
+    # 고칠 수 있는 복사본은 옮긴 뒤 생긴 날이 없다(더는 자동 기록의 결과가 아니다)
+    copy = service.create_line(
+        ChartLineDraft(
+            UPTREND,
+            Timeframe.DAY,
+            LineKind.FIB_RETRACEMENT,
+            LineSource.AUTO_COPIED,
+            LineEdit(swing.drawing.anchors),
+            swing.record,
+        )
+    )
+    assert copy.created == swing.created
+    assert service.update_line(copy.line.line_id, LineEdit(moved)).created is None
+
+
+def test_analysis_parameter_ranges_are_checked_by_the_domain() -> None:
+    service = _service()
+    calls = (
+        lambda: service.regime(STOCK, Timeframe.DAY, swing=SwingSettings(0.0)),
+        lambda: service.regime(STOCK, Timeframe.DAY, swing=SwingSettings(math.nan)),
+        lambda: service.zones(STOCK, Timeframe.DAY, min_touches=0),
+        lambda: service.confluence(STOCK, (), tolerance=0.0),
+        lambda: service.search("삼성", limit=0),
+    )
+    for call in calls:
+        with pytest.raises(ChartRequestError) as error:
+            call()
+        assert error.value.code == "chart.params.invalid"
+    with pytest.raises(ChartRequestError) as reversed_range:
+        service.candles(STOCK, Timeframe.DAY, date(2025, 10, 1), date(2025, 9, 1))
+    assert reversed_range.value.code == "chart.window.reversed"
+
+
+class _MixedPrices(FakePrices):
+    """연습용 접두가 붙은 대상을 하나 더 싣는 원천."""
+
+    def chart_instruments(self) -> tuple[ChartInstrument, ...]:
+        practice = InstrumentRef(InstrumentKind.STOCK, "practice:005930")
+        self.history[practice] = self.history[STOCK]
+        return (*super().chart_instruments(), ChartInstrument(practice, "삼성전자", "common"))
+
+
+def test_practice_and_real_instruments_never_cross_modes() -> None:
+    real = _service(prices=_MixedPrices())
+    practice = _service(prices=_MixedPrices(), practice=True)
+    assert [i.ref.code for i in real.search("삼성전자").instruments] == ["005930", "005935"]
+    assert [i.ref.code for i in practice.search("삼성전자").instruments] == ["practice:005930"]
+    with pytest.raises(InstrumentNotFoundError):
+        real.candles(InstrumentRef(InstrumentKind.STOCK, "practice:005930"), Timeframe.DAY)
+    with pytest.raises(InstrumentNotFoundError):
+        practice.candles(STOCK, Timeframe.DAY)

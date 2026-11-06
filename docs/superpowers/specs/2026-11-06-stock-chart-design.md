@@ -49,8 +49,10 @@
 
 ## 3. 데이터 (원장 → 캔들)
 
-- 종목: `price_adj_daily`의 전방 조정 OHLC(`adj_*`)를 `security`의 최신 상장일(`max(list_date)`) 이후로 읽는다. 기준가·정지일은
-  `price_daily.price_kind == "reference"`로 걸러낸다(조인). 전방 조정이라 새 기업행위가 생겨도 과거 값이 바뀌지 않는다.
+- 종목: `price_adj_daily`의 전방 조정 OHLC(`adj_*`)를 그 티커의 마지막 상장 구간(`security_span`의 마지막 `span_seq`)
+  첫날 이후로 읽는다 — 재상장(티커 재사용)은 새 구간이라 옛 종목 가격이 빠지고, 이전상장(코스닥→코스피 등)은 구간이
+  이어져 `security.list_date`(새 시장 상장일)보다 앞 이력도 남는다. 구간이 없는 종목(ETF 등)은 하한 없이 읽는다.
+  기준가·정지일은 `price_daily.price_kind == "reference"`로, 저녁 잠정 행은 `basis <> 'krx'`로 걸러낸다(조인). 전방 조정이라 새 기업행위가 생겨도 과거 값이 바뀌지 않는다.
 - 지수: `index_daily`의 `open_idx/high_idx/low_idx/close_idx`.
 - **표시 배율**: 화면 가격 = 저장 좌표 × `k`, `k = 마지막 실제 종가 ÷ 마지막 전방 조정 종가`(지수는 1). 선의 가격 좌표는
   전방 조정 공간에 저장하므로 새 분할이 생겨도 선과 캔들이 함께 움직인다. 사용자가 입력한 가격은 ÷k 해서 저장한다.
@@ -61,7 +63,8 @@
     금요일, 월 = 그 달 마지막 평일)보다 앞이면 진행 중이다. 그 평일이 휴장이면 다음 기간 봉이 생길 때까지 진행 중으로
     남는다(달력만 보는 보수 판정). 일봉은 진행 중이 없다. 일봉이 오름차순·중복 없음이 아니거나 기준일 뒤 일봉이 있으면
     거절한다(룩어헤드).
-  - 기준일 `as_of` = **원장의 최신 거래일**(달력 날짜가 아니다). PR2가 원장에서 읽어 넘긴다. 그래서 금요일 데이터가 아직
+  - 기준일 `as_of` = **원장의 최신 확정 거래일**(달력 날짜도, 저녁 잠정 행만 있는 날도 아니다 — `price_daily`에
+    `basis = 'krx'` 행이 있는 마지막 장, 종목·지수 공통). PR2가 원장에서 읽어 넘긴다. 그래서 금요일 데이터가 아직
     없는(목요일이 최신) 주는 진행 중이고, 시장은 금요일에 열렸는데 이 종목만 거래가 없었으면(정지) 그 주는 끝난 봉이다.
 - 묶기·배율 규칙은 domain 순수 함수가 소유하고 어댑터는 일봉 행만 나른다.
 
@@ -133,8 +136,8 @@
 
 ### 4.3 피보나치 채널 후보
 - 방향 d∈{up, down}(판정 추천 또는 사용자가 직접 고름 — `chosen_by`: 추천을 따랐으면 `recommendation`, 바꿨으면
-  `user_override`, domain `ChosenBy`). 기준선 = 같은 방향 확정 피벗 2개 (up: 높아지는 저점, down: 낮아지는 고점)
-  `L(t) = p_a + m(t − i_a)`.
+  `user_override`, 판정이 방향을 추천하지 않은 국면이면 null — domain `chosen_by()`·`ChosenBy`).
+  기준선 = 같은 방향 확정 피벗 2개 (up: 높아지는 저점, down: 낮아지는 고점) `L(t) = p_a + m(t − i_a)`.
 - 기하의 owner는 `ChannelGeometry`(기준선 `TrendLine(a, b)` + 폭 기준점 w → `price_at(index, level)`)다. 자동 후보와 수동으로 그은 채널이 같은 것을
   쓰고, 순위의 채널 밖 종가도 이 `price_at`의 레벨 0과 1 사이로 센다.
 - 버림: 두 점 사이 가격 변화 `|m|·(i_b − i_a) < ATR_r`(사실상 수평), 뒤의 같은 쪽 확정 피벗이 기준선 너머로 0.25·ATR_r
@@ -185,9 +188,14 @@
 ### 4.7 저장 구조 (RSI·국면 분류 연계용)
 선 하나 = `kind(hline|fib_retracement|fib_channel) · timeframe(day|week|month) · source(manual|auto|auto_copied) ·
 anchors[(bar_date, price)] · levels · extend_right · memo · locked · visible`, 자동이면 추가로 `algorithm@version · params ·
-regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_override) · window_source(preset|user)`.
+regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_override|null) · window_source(preset|user)`.
 레벨 가격·중첩 같은 파생값은 저장하지 않는다(기준점에서 다시 계산). 저장은 연구 DB 판 12의 `chart_drawing` 표
 (`research_sqlite/_schema.py`)이고 JSON 칸은 기준점·레벨·자동 파라미터 셋뿐이다.
+
+- `source = auto` 선의 기준점은 옮길 수 없다(`chart.line.auto_anchors_fixed`) — 기준점이 자동 기록의 결과라 옮기면
+  기록이 거짓이 된다. 고쳐 쓰려면 `auto_copied`로 저장한다. 메모·레벨·보이기·잠금·연장은 고칠 수 있다.
+- 자동 선의 생긴 날(`created`)도 파생값이다. 저장한 판정 구간·민감도·도구 파라미터로 같은 찾기를 다시 돌려 기준점이
+  같은 후보의 확정 봉을 응답에 싣는다(`application/stock_chart/_provenance.py`). 기준점을 옮긴 복사본은 null이다.
 
 - `kind`·`source`(`LineSource`)·`window_source`·`chosen_by` 어휘와 `algorithm@version` 값의 owner는 domain `_line_record`(facade
   `line_record`)다. `algorithm@version`에는 `ALGORITHM_VERSION`(지금 `chart_analysis@1`)을 그대로 저장하고, 판정 규칙·B\*·
@@ -212,13 +220,16 @@ regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_
 - `adapters/outbound/equity_duckdb/_chart.py`: 목록·일봉 읽기(검색 순위는 application의 `rank_instruments` 하나가 정한다 —
   지수명 정확 → 티커 정확 → 이름 정확 → 이름 포함). 지수 코드는 `<index_class>:<index_name>`이다(같은 이름의 업종
   지수가 코스피·코스닥에 하나씩 있다). 원장이 옛 구간에서 0으로 싣는 지수 시가·고가·저가는 값 없음으로 보고 봉에서 뺀다.
-- mock 원천: 홈 시장과 달리 포트를 막지 않는다. `adapters/outbound/equity_mock/_chart.py`가 고정 seed 합성 일봉(지수
+- mock 원천: 홈 시장과 달리 포트를 막지 않는다. 대상 코드는 모두 `practice:` 접두(`PRACTICE_CODE_PREFIX`)라 같은 연구
+  DB에 저장한 연습 선이 실데이터 차트·중첩에 섞이지 않고, 서비스는 모드와 접두가 맞지 않는 대상을 모르는 대상으로 본다. `adapters/outbound/equity_mock/_chart.py`가 고정 seed 합성 일봉(지수
   하나·종목 둘, 2023-01-02 ~ 목요일 2025-10-30)을 주고 응답마다 `practice_data`·안내 문장을 싣는다 — 차트 흐름 e2e(PR3·4)가
   mock으로 돌기 때문이다. 005930은 분할을 흉내 내 k = 0.2다.
 - 저장: 연구 DB(`research_sqlite`)에 표 추가(판 올림) — 새 DB 파일·환경 변수를 만들지 않는다.
 - HTTP(`_chart_routes.py`, `/api/v1/stock-chart/*`): 종목 검색, 캔들, 국면 판정, 채널 후보, 되돌림 스윙, 수평 구간,
   중첩(POST), 선 CRUD. 요청·응답 가격은 모두 화면 가격이고 서버가 ÷k·×k 한다. 중첩의 저장 선은 서버가 `visible`인 것만
-  고르고(보이기는 저장 칸이다), 요청에는 저장하지 않은 보이는 선(자동 후보)만 싣는다. 저장 띠(자동 수평 구간)는 기준점
+  고르고(보이기는 저장 칸이다), 요청에는 저장하지 않은 보이는 선(자동 후보)만 싣는다 — 저장한 후보는 요청에 다시 싣지
+  않는다(실어도 ref = line_id인 요청 선은 빠진다). 분석 파라미터 범위는 domain 값 타입 하나가 검사해 `chart.params.invalid`로
+  거절한다(HTTP 스키마에 같은 범위를 두지 않는다). 저장 띠(자동 수평 구간)는 기준점
   둘인 수평선(`hline`)이다. 거절은 404·422 `{code, message}`이고 요청 칸 검증 실패도 `chart.request_invalid`다.
 
 ## 6. 프런트 구조
@@ -228,6 +239,13 @@ regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_
 봉은 채널·되돌림은 첫 기준점, 수평선·띠는 그 기준점이다. frontend는 두 점을 날짜 축 위에서 잇고 `extend_right`이면
 같은 기울기로 오른쪽에 연장만 하며, 레벨 가격·채널 기울기·÷k를 계산하지 않는다. 선을 저장할 때는 응답의 기준점
 (`drawing.anchors`, 화면 좌표)과 자동 기록(`record`)을 그대로 보낸다.
+
+그리는 동안도 frontend는 가격을 계산하지 않는다. 수동 그리기(끌기·마그넷 뒤 좌표)는 저장 전에 상태 없는
+`POST /api/v1/stock-chart/lines/preview`(`previewChartLine`)를 부른다 — 요청은 저장 요청과 같은 초안(종목·주기·종류·화면
+좌표 기준점·레벨), 응답은 봉 시작일로 맞춘 기준점과 `paths`이고 저장과 같은 규칙으로 거절한다(진행 중 봉
+`chart.line.anchor_in_progress`, 계열 밖 `chart.line.anchor_outside_series`). 끄는 동안의 호출은 rAF/디바운스로 묶는다.
+서버는 묶은 계열을 캐시해 미리보기가 원장을 다시 읽지 않는다. ×k로 낸 화면 가격은 마지막 자리(1ulp) 꼬리가 있을 수
+있으니 화면은 호가 단위로 반올림해 표시한다(PR3 메모).
 
 `pages/research-stock-chart` · `widgets/stock-chart`(차트 그리기·레이어 칸 조합) · `features/draw-chart-line`(수동 그리기·
 마그넷·저장) · `features/find-chart-levels`(자동 생성 패널) · `entities/chart`(쿼리·좌표 변환 표시 모델). 서버 상태는

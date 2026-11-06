@@ -7,10 +7,11 @@
   지수명). 같은 이름의 업종 지수가 코스피·코스닥에 하나씩 있어 지수 코드는
   `<index_class>:<index_name>` 이다. `price_adj_daily`가 없으면 종목은 목록에 없다(그릴 가격이
   없다).
-- 종목 일봉: `price_adj_daily`의 전방 조정 OHLC를 `security.list_date`(지금 상장일) 이후로 읽는다 —
-  같은 티커를 쓰던 옛 종목의 가격을 섞지 않는다. `price_daily.price_kind =
+- 종목 일봉: `price_adj_daily`의 전방 조정 OHLC를 그 티커의 마지막 `security_span` 첫날 이후로
+  읽는다 — 같은 티커를 쓰던 옛 종목의 가격을 섞지 않는다. `price_daily.price_kind =
   'reference'`(기준가·정지일)와 `basis <> 'krx'`(저녁 잠정) 행, 가격이 빈 행은 봉이 없는 날이라
   싣지 않는다. 같은 행의 `price_daily.close`(원주가)가 마지막 실제 종가다.
+- 기준일: `price_daily`의 마지막 확정(`basis = 'krx'`) 장. 지수도 이날까지만 읽는다.
 - 지수 일봉: `index_daily`의 `open_idx/high_idx/low_idx/close_idx`. 원장은 옛 구간에서 시가·고가·
   저가를 비우거나 0으로 싣는다 — 둘 다 그날 값이 없다는 뜻이라 봉으로 싣지 않는다.
 """
@@ -131,38 +132,51 @@ def _index_history(adapter: EquityDuckdbAdapter, code: str, end: date) -> ChartH
 
 
 def _stock_history(adapter: EquityDuckdbAdapter, ticker: str, end: date) -> ChartHistory | None:
-    tables = adapter._tables  # noqa: SLF001
-    if SECURITY_TABLE not in tables or ADJ_TABLE not in tables:
+    if InstrumentRef(InstrumentKind.STOCK, ticker) not in {
+        item.ref for item in adapter.chart_instruments()
+    }:
         return None
-    security = _columns(adapter, SECURITY_TABLE)
+    # 지금 종목의 하한 = 그 티커의 마지막 상장 구간(`security_span`)의 첫날. 이전상장은 구간이
+    # 이어져 `security.list_date`(새 시장 상장일)보다 이르고, 재상장(티커 재사용)은 새 구간이다.
+    # 구간이 없는 종목(ETF 등 KRX 상장 축 밖)은 하한 없이 읽는다.
+    spans = adapter._spans([ticker])  # noqa: SLF001  # reason: 같은 노드의 구간 정본 조회
+    since = spans[-1].first_date if spans else None
     basis = "a.basis" if "basis" in _columns(adapter, ADJ_TABLE) else f"'{CONFIRMED_BASIS}'"
-    listed = "list_date" if "list_date" in security else "NULL::DATE"
     con = _open(None)
     try:
-        found = con.execute(
-            f"SELECT {listed} FROM {adapter._source(SECURITY_TABLE)} WHERE ticker = ?",  # noqa: SLF001
-            [ticker],
-        ).fetchall()
-        if not found:
-            return None
         rows = con.execute(
             "SELECT a.date, a.adj_open, a.adj_high, a.adj_low, a.adj_close, p.close "
             f"FROM {adapter._source(ADJ_TABLE)} a "  # noqa: SLF001
             f"JOIN {adapter._source(PRICE_TABLE)} p "  # noqa: SLF001
             "  ON p.ticker = a.ticker AND p.date = a.date "
-            "WHERE a.ticker = ? AND a.date <= ? AND (? IS NULL OR a.date >= ?) "
+            "WHERE a.ticker = ? AND a.date <= ? AND (?::DATE IS NULL OR a.date >= ?::DATE) "
             f"  AND p.price_kind IS DISTINCT FROM '{REFERENCE_KIND}' "
             f"  AND {basis} = '{CONFIRMED_BASIS}' "
             "  AND a.adj_open IS NOT NULL AND a.adj_high IS NOT NULL "
             "  AND a.adj_low IS NOT NULL AND a.adj_close IS NOT NULL AND p.close IS NOT NULL "
             "ORDER BY a.date",
-            [ticker, end, found[0][0], found[0][0]],
+            [ticker, end, since, since],
         ).fetchall()
     finally:
         con.close()
     bars = tuple(_bar(row, ADJ_TABLE) for row in rows)
     last_close = _number(rows[-1][5], "price_daily.close") if rows else None
     return ChartHistory(bars, last_close)
+
+
+def confirmed_session(adapter: EquityDuckdbAdapter) -> date | None:
+    """가격이 확정된(`basis = 'krx'`) 마지막 장. `basis` 칸이 없는 옛 판은 전 행이 확정이다."""
+    basis = (
+        f"WHERE basis = '{CONFIRMED_BASIS}'" if "basis" in _columns(adapter, PRICE_TABLE) else ""
+    )
+    con = _open(None)
+    try:
+        row = con.execute(
+            f"SELECT max(date) FROM {adapter._source(PRICE_TABLE)} {basis}"  # noqa: SLF001
+        ).fetchone()
+    finally:
+        con.close()
+    return None if row is None or row[0] is None else _as_date(row[0], "price_daily.date")
 
 
 def _bar(row: tuple[object, ...], table: str) -> PriceBar:

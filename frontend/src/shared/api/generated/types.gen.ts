@@ -1599,8 +1599,8 @@ export type ChartConfluenceMemberBody = {
 /**
  * ChartConfluenceRequestBody
  *
- * 저장 선 중 보이는 것은 서버가 넣는다. `lines`에는 저장하지 않은 보이는 선(자동 후보)을
- * 싣는다.
+ * 저장 선 중 보이는 것은 서버가 넣는다. `lines`에는 저장하지 않은 보이는 선(자동 후보)만
+ * 싣는다 — 저장한 후보를 다시 실으면(ref = line_id) 그 요청 선은 빠진다.
  */
 export type ChartConfluenceRequestBody = {
   /**
@@ -1674,8 +1674,11 @@ export type ChartErrorDetail = {
     | "chart.line.price_invalid"
     | "chart.line.levels_invalid"
     | "chart.line.anchor_outside_series"
+    | "chart.line.anchor_in_progress"
     | "chart.line.anchor_order"
     | "chart.line.auto_record"
+    | "chart.line.auto_anchors_fixed"
+    | "chart.line.memo_too_long"
     | "chart.confluence.duplicate_ref"
     | "chart.request_invalid"
     | "chart.instrument.not_found"
@@ -1764,6 +1767,12 @@ export type ChartLineBody = {
   anchors: Array<ChartPointBody>;
   auto: ChartAutoRecordBody | null;
   /**
+   * Created
+   *
+   * 자동 선의 생긴 날 — 저장한 판정 구간·파라미터로 다시 계산한다(그 앞은 옅게). 수동 선·기준점을 옮긴 복사본은 null.
+   */
+  created: string | null;
+  /**
    * Created At
    */
   created_at: string;
@@ -1777,11 +1786,9 @@ export type ChartLineBody = {
   instrument_code: string;
   instrument_kind: InstrumentKind;
   /**
-   * Issue
-   *
-   * 기준점이 지금 계열 밖이라 그릴 수 없다(paths가 빈다).
+   * 지금 계열로 그릴 수 없는 사유(그때 paths가 빈다).
    */
-  issue: "anchor_outside_series" | null;
+  issue: LineIssue | null;
   kind: LineKind;
   /**
    * Levels
@@ -1833,7 +1840,7 @@ export type ChartLineEditBody = {
   /**
    * Extend Right
    */
-  extend_right: boolean;
+  extend_right?: boolean;
   /**
    * Levels
    */
@@ -1841,15 +1848,38 @@ export type ChartLineEditBody = {
   /**
    * Locked
    */
-  locked: boolean;
+  locked?: boolean;
   /**
    * Memo
    */
-  memo: string;
+  memo?: string;
   /**
    * Visible
    */
-  visible: boolean;
+  visible?: boolean;
+};
+
+/**
+ * ChartLinePreviewBody
+ *
+ * 저장 전 미리보기 — 저장 요청과 같은 초안의 기하 칸. 저장하지 않는다.
+ */
+export type ChartLinePreviewBody = {
+  /**
+   * Anchors
+   */
+  anchors: Array<ChartPointBody>;
+  /**
+   * Instrument Code
+   */
+  instrument_code: string;
+  instrument_kind: InstrumentKind;
+  kind: LineKind;
+  /**
+   * Levels
+   */
+  levels?: Array<number> | null;
+  timeframe: Timeframe;
 };
 
 /**
@@ -1979,6 +2009,12 @@ export type ChartRegimeRecordBody = {
  */
 export type ChartRetracementBody = {
   context: ChartContextBody;
+  /**
+   * Created
+   *
+   * 두 기준점이 모두 확정된 봉의 날짜. 그 앞은 옅게 그린다.
+   */
+  created: string | null;
   /**
    * 기준점은 먼저 점(레벨 1)·나중 점(레벨 0) 순. 고를 스윙이 없으면 null.
    */
@@ -5378,6 +5414,14 @@ export type LibraryVisibilityBody = {
    */
   hidden: boolean;
 };
+
+/**
+ * LineIssue
+ *
+ * 저장 선을 지금 계열로 그릴 수 없는 사유(그때 `paths`가 빈다).
+ */
+export type LineIssue =
+  "no_completed_bars" | "anchor_outside_series" | "anchor_order";
 
 /**
  * LineKind
@@ -13618,13 +13662,13 @@ export type GetChartChannelsData = {
     /**
      * Candidate Sensitivity
      *
-     * 피벗 민감도 k(× ATR).
+     * 피벗 민감도 k(× ATR). 범위는 domain이 검사한다.
      */
     candidate_sensitivity?: number | null;
     /**
      * Structure Sensitivity
      *
-     * 피벗 민감도 k(× ATR).
+     * 피벗 민감도 k(× ATR). 범위는 domain이 검사한다.
      */
     structure_sensitivity?: number | null;
   };
@@ -13698,6 +13742,8 @@ export type SearchChartInstrumentsData = {
     query: string;
     /**
      * Limit
+     *
+     * 1 ~ 50.
      */
     limit?: number;
   };
@@ -13801,6 +13847,37 @@ export type CreateChartLineResponses = {
 export type CreateChartLineResponse =
   CreateChartLineResponses[keyof CreateChartLineResponses];
 
+export type PreviewChartLineData = {
+  body: ChartLinePreviewBody;
+  path?: never;
+  query?: never;
+  url: "/api/v1/stock-chart/lines/preview";
+};
+
+export type PreviewChartLineErrors = {
+  /**
+   * Not Found
+   */
+  404: ChartErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ChartErrorResponse;
+};
+
+export type PreviewChartLineError =
+  PreviewChartLineErrors[keyof PreviewChartLineErrors];
+
+export type PreviewChartLineResponses = {
+  /**
+   * Successful Response
+   */
+  200: ChartDrawingBody;
+};
+
+export type PreviewChartLineResponse =
+  PreviewChartLineResponses[keyof PreviewChartLineResponses];
+
 export type DeleteChartLineData = {
   body?: never;
   path: {
@@ -13903,13 +13980,13 @@ export type GetChartRegimeData = {
     /**
      * Candidate Sensitivity
      *
-     * 피벗 민감도 k(× ATR).
+     * 피벗 민감도 k(× ATR). 범위는 domain이 검사한다.
      */
     candidate_sensitivity?: number | null;
     /**
      * Structure Sensitivity
      *
-     * 피벗 민감도 k(× ATR).
+     * 피벗 민감도 k(× ATR). 범위는 domain이 검사한다.
      */
     structure_sensitivity?: number | null;
   };
@@ -13971,13 +14048,13 @@ export type GetChartRetracementData = {
     /**
      * Candidate Sensitivity
      *
-     * 피벗 민감도 k(× ATR).
+     * 피벗 민감도 k(× ATR). 범위는 domain이 검사한다.
      */
     candidate_sensitivity?: number | null;
     /**
      * Structure Sensitivity
      *
-     * 피벗 민감도 k(× ATR).
+     * 피벗 민감도 k(× ATR). 범위는 domain이 검사한다.
      */
     structure_sensitivity?: number | null;
   };
@@ -14048,13 +14125,13 @@ export type GetChartZonesData = {
     /**
      * Candidate Sensitivity
      *
-     * 피벗 민감도 k(× ATR).
+     * 피벗 민감도 k(× ATR). 범위는 domain이 검사한다.
      */
     candidate_sensitivity?: number | null;
     /**
      * Structure Sensitivity
      *
-     * 피벗 민감도 k(× ATR).
+     * 피벗 민감도 k(× ATR). 범위는 domain이 검사한다.
      */
     structure_sensitivity?: number | null;
   };

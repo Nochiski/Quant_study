@@ -7,6 +7,7 @@ from strategy_workbench.domain.chart_analysis._line_record import (
     LineKind,
     LineSource,
     WindowSource,
+    chosen_by,
 )
 
-__all__ = ["ALGORITHM_VERSION", "ChosenBy", "LineKind", "LineSource", "WindowSource"]
+__all__ = ["ALGORITHM_VERSION", "ChosenBy", "LineKind", "LineSource", "WindowSource", "chosen_by"]

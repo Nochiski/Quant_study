@@ -656,8 +656,9 @@ class EquityDuckdbAdapter:
         self._profile: dict[str, tuple[int, str] | None] = self._load_profile()
         self._warn_lag_fallback()
         self._coverage_cache: dict[str, tuple[float, date]] | None = None
-        # 개별종목차트 목록 — 부팅 때 고정한 표 판본에서 처음 물을 때 한 번 읽는다.
+        # 개별종목차트 목록·확정 기준일 — 부팅 때 고정한 표 판본에서 처음 물을 때 한 번 읽는다.
         self._chart_instruments: tuple[ChartInstrument, ...] | None = None
+        self._chart_confirmed: tuple[date | None] | None = None
         self._snapshot_id = field_contract_snapshot_id(ledger_snapshot_id, self._field_contract())
 
     # ── 구성 ──────────────────────────────────────────────────────────────────
@@ -1489,7 +1490,12 @@ class EquityDuckdbAdapter:
     def sector_members(self, session: date) -> SectorSnapshot | None:
         return _market.sector_members(self, session)
 
-    # ── ChartPricePort(개별종목차트) ── `latest_session` 은 위 홈 시장 블록과 같다 ──────
+    # ── ChartPricePort(개별종목차트) ──────────────────────────────────────────
+
+    def confirmed_session(self) -> date | None:
+        if self._chart_confirmed is None:
+            self._chart_confirmed = (_chart.confirmed_session(self),)
+        return self._chart_confirmed[0]
 
     def chart_instruments(self) -> tuple[ChartInstrument, ...]:
         if self._chart_instruments is None:

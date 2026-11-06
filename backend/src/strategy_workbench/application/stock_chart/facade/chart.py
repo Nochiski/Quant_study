@@ -2,9 +2,17 @@ from strategy_workbench.application.stock_chart._errors import (
     ChartErrorCode,
     ChartRequestError,
     InstrumentNotFoundError,
+    LineIssue,
 )
 from strategy_workbench.application.stock_chart._lines import ChartPoint, LevelPath
 from strategy_workbench.application.stock_chart._service import (
+    MAX_CHANNEL_CANDIDATES,
+    MAX_MEMO_CHARS,
+    MAX_SEARCH_RESULTS,
+    PRACTICE_DATA_NOTICE,
+    StockChartService,
+)
+from strategy_workbench.application.stock_chart._views import (
     CandleView,
     ChannelCandidateView,
     ChannelView,
@@ -19,10 +27,10 @@ from strategy_workbench.application.stock_chart._service import (
     InstrumentSearch,
     LineDrawing,
     LineEdit,
+    LineShape,
     PivotPoint,
     RegimeView,
     RetracementView,
-    StockChartService,
     SwingSettings,
     WindowRequest,
     WindowSuggestion,
@@ -32,6 +40,10 @@ from strategy_workbench.application.stock_chart._service import (
 )
 
 __all__ = [
+    "MAX_CHANNEL_CANDIDATES",
+    "MAX_MEMO_CHARS",
+    "MAX_SEARCH_RESULTS",
+    "PRACTICE_DATA_NOTICE",
     "CandleView",
     "ChannelCandidateView",
     "ChannelView",
@@ -51,6 +63,8 @@ __all__ = [
     "LevelPath",
     "LineDrawing",
     "LineEdit",
+    "LineIssue",
+    "LineShape",
     "PivotPoint",
     "RegimeView",
     "RetracementView",

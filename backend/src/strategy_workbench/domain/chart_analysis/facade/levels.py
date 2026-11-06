@@ -7,6 +7,7 @@ from strategy_workbench.domain.chart_analysis._channel import (
 )
 from strategy_workbench.domain.chart_analysis._retracement import (
     SwingChoice,
+    retracement_pivots,
     retracement_swing,
 )
 from strategy_workbench.domain.chart_analysis._zones import (
@@ -27,5 +28,6 @@ __all__ = [
     "ZoneSide",
     "find_channels",
     "find_zones",
+    "retracement_pivots",
     "retracement_swing",
 ]

@@ -17,7 +17,8 @@ from fastapi.testclient import TestClient
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 BASE = "/api/v1/stock-chart"
-SAMSUNG = {"kind": "stock", "code": "005930"}
+SAMSUNG = {"kind": "stock", "code": "practice:005930"}
+REAL_SAMSUNG = {"kind": "stock", "code": "005930"}
 
 
 class _Body(Protocol):
@@ -41,7 +42,7 @@ def test_practice_source_runs_the_whole_chart_flow(tmp_path: Path) -> None:
 
     found = _strict(client.get(f"{BASE}/instruments", params={"query": "삼성"}))
     assert found["practice_data"] and found["notice"].startswith("연습용 데이터예요")
-    assert [item["code"] for item in found["instruments"]] == ["005930"]
+    assert [item["code"] for item in found["instruments"]] == ["practice:005930"]
 
     week = _strict(client.get(f"{BASE}/candles", params={**SAMSUNG, "timeframe": "week"}))
     assert week["context"]["practice_data"]
@@ -66,7 +67,7 @@ def test_practice_source_runs_the_whole_chart_flow(tmp_path: Path) -> None:
         f"{BASE}/lines",
         json={
             "instrument_kind": "stock",
-            "instrument_code": "005930",
+            "instrument_code": "practice:005930",
             "timeframe": "day",
             "kind": "fib_channel",
             "source": "auto",
@@ -89,7 +90,7 @@ def test_practice_source_runs_the_whole_chart_flow(tmp_path: Path) -> None:
             f"{BASE}/lines",
             json={
                 "instrument_kind": "stock",
-                "instrument_code": "005930",
+                "instrument_code": "practice:005930",
                 "timeframe": "day",
                 "kind": "hline",
                 "source": "manual",
@@ -115,7 +116,7 @@ def test_practice_source_runs_the_whole_chart_flow(tmp_path: Path) -> None:
         f"{BASE}/confluence",
         json={
             "instrument_kind": "stock",
-            "instrument_code": "005930",
+            "instrument_code": "practice:005930",
             "lines": [
                 {
                     "ref": "auto-1",
@@ -155,6 +156,29 @@ def test_practice_source_runs_the_whole_chart_flow(tmp_path: Path) -> None:
             422,
             "chart.window.outside_series",
         ),
+        (
+            "regime",
+            {**SAMSUNG, "timeframe": "day", "window_start": "2025-09-01"},
+            422,
+            "chart.window.incomplete",
+        ),
+        (
+            "candles",
+            {**SAMSUNG, "timeframe": "day", "start": "2025-10-01", "end": "2025-09-01"},
+            422,
+            "chart.window.reversed",
+        ),
+        # 분석 파라미터 범위는 domain 하나가 검사한다(HTTP 스키마에 같은 범위를 두지 않는다)
+        (
+            "regime",
+            {**SAMSUNG, "timeframe": "day", "candidate_sensitivity": "0"},
+            422,
+            "chart.params.invalid",
+        ),
+        ("zones", {**SAMSUNG, "timeframe": "day", "min_touches": "0"}, 422, "chart.params.invalid"),
+        ("instruments", {"query": "삼성", "limit": "0"}, 422, "chart.params.invalid"),
+        # 연습용 원천은 실데이터 코드를 모른다
+        ("candles", {**REAL_SAMSUNG, "timeframe": "day"}, 404, "chart.instrument.not_found"),
     ],
 )
 def test_rejections_are_coded(path: str, params: dict[str, str], status: int, code: str) -> None:
@@ -169,7 +193,7 @@ def test_a_line_that_cannot_be_drawn_is_rejected_with_its_code() -> None:
         f"{BASE}/lines",
         json={
             "instrument_kind": "stock",
-            "instrument_code": "005930",
+            "instrument_code": "practice:005930",
             "timeframe": "day",
             "kind": "fib_retracement",
             "source": "manual",
@@ -182,13 +206,68 @@ def test_a_line_that_cannot_be_drawn_is_rejected_with_its_code() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "auto",
+    [
+        # 표준 JSON 밖 토큰(NaN·Infinity)도 저장소 오류(500)가 아니라 자동 기록 거절(422)이다
+        {"algorithm_version": "chart_analysis@1", "params": {"width_atr": float("nan")}},
+        {
+            "algorithm_version": "chart_analysis@1",
+            "params": {},
+            "regime": {"verdict": "up", "strength": float("inf"), "structure": "up"},
+        },
+    ],
+)
+def test_non_finite_auto_record_numbers_are_rejected(auto: dict[str, object]) -> None:
+    body = {
+        "instrument_kind": "stock",
+        "instrument_code": "practice:005930",
+        "timeframe": "day",
+        "kind": "hline",
+        "source": "auto",
+        "anchors": [{"bar_date": "2025-09-01", "price": 2_000.0}],
+        "auto": auto,
+    }
+    response = TestClient(build_http_app()).post(
+        f"{BASE}/lines",
+        content=json.dumps(body, allow_nan=True),
+        headers={"content-type": "application/json"},
+    )
+    assert (response.status_code, response.json()["detail"]["code"]) == (
+        422,
+        "chart.line.auto_record",
+    )
+
+
+def test_preview_returns_the_drawing_without_saving(tmp_path: Path) -> None:
+    client = TestClient(build_http_app(research_db_path=tmp_path / "research.sqlite3"))
+    draft = {
+        "instrument_kind": "stock",
+        "instrument_code": "practice:005930",
+        "timeframe": "week",
+        "kind": "hline",
+        # 수요일 날짜는 그 주의 시작일(월)로 붙는다
+        "anchors": [{"bar_date": "2025-09-03", "price": 2_000.0}],
+    }
+    preview = _strict(client.post(f"{BASE}/lines/preview", json=draft))
+    assert preview["anchors"][0]["bar_date"] == "2025-09-01"
+    assert preview["paths"][0]["end"]["price"] == pytest.approx(2_000.0)
+    assert _strict(client.get(f"{BASE}/lines", params=SAMSUNG))["lines"] == []
+    in_progress = {**draft, "anchors": [{"bar_date": "2025-10-28", "price": 2_000.0}]}
+    response = client.post(f"{BASE}/lines/preview", json=in_progress)
+    assert (response.status_code, response.json()["detail"]["code"]) == (
+        422,
+        "chart.line.anchor_in_progress",
+    )
+
+
 def test_real_data_candles_show_actual_prices(tmp_path: Path) -> None:
     pytest.importorskip("duckdb", reason="backend optional extra `equity`")
     from tests.test_adapters_equity_duckdb_chart import _raw, build_chart_root
 
     root = build_chart_root(tmp_path / "root")
     client = TestClient(build_http_app(equity_adapter="duckdb", equity_root=root))
-    body = _strict(client.get(f"{BASE}/candles", params={**SAMSUNG, "timeframe": "day"}))
+    body = _strict(client.get(f"{BASE}/candles", params={**REAL_SAMSUNG, "timeframe": "day"}))
     assert body["context"]["practice_data"] is False and body["context"]["notice"] is None
     # 조정가 = 원주가 × 2, k = 원주가 ÷ 조정가 = 0.5 → 화면 가격은 원주가다
     last = body["candles"][-1]
@@ -198,3 +277,49 @@ def test_real_data_candles_show_actual_prices(tmp_path: Path) -> None:
     )
     index = _strict(client.get(f"{BASE}/instruments", params={"query": "건설"}))["instruments"]
     assert sorted(item["code"] for item in index) == ["KOSDAQ:건설", "KOSPI:건설"]
+    # 금요일(01-12)은 잠정 행뿐이라 기준일은 목요일이고 그 주는 진행 중이다
+    week = _strict(client.get(f"{BASE}/candles", params={**REAL_SAMSUNG, "timeframe": "week"}))
+    assert week["context"]["as_of"] == "2024-01-11"
+    assert (week["candles"][-1]["start"], week["candles"][-1]["in_progress"]) == (
+        "2024-01-08",
+        True,
+    )
+
+
+def test_practice_lines_never_reach_the_real_chart(tmp_path: Path) -> None:
+    """두 원천이 같은 연구 DB 파일을 써도 연습 선은 실데이터 차트·중첩에 나오지 않는다."""
+    pytest.importorskip("duckdb", reason="backend optional extra `equity`")
+    from tests.test_adapters_equity_duckdb_chart import build_chart_root
+
+    db = tmp_path / "research.sqlite3"
+    practice = TestClient(build_http_app(research_db_path=db))
+    saved = practice.post(
+        f"{BASE}/lines",
+        json={
+            "instrument_kind": "stock",
+            "instrument_code": "practice:005930",
+            "timeframe": "day",
+            "kind": "hline",
+            "source": "manual",
+            "anchors": [{"bar_date": "2025-09-01", "price": 2_000.0}],
+        },
+    )
+    assert saved.status_code == 201, saved.text
+
+    real = TestClient(
+        build_http_app(
+            equity_adapter="duckdb",
+            equity_root=build_chart_root(tmp_path / "root"),
+            research_db_path=db,
+        )
+    )
+    assert _strict(real.get(f"{BASE}/lines", params=REAL_SAMSUNG))["lines"] == []
+    confluence = _strict(
+        real.post(
+            f"{BASE}/confluence",
+            json={"instrument_kind": "stock", "instrument_code": "005930", "lines": []},
+        )
+    )
+    assert (confluence["groups"], confluence["skipped_line_ids"]) == ([], [])
+    # 연습 코드로 실데이터 앱에 물어도 모르는 대상이다
+    assert real.get(f"{BASE}/lines", params=SAMSUNG).status_code == 404

@@ -246,6 +246,9 @@ import type {
   PreviewCapacitySweepData,
   PreviewCapacitySweepErrors,
   PreviewCapacitySweepResponses,
+  PreviewChartLineData,
+  PreviewChartLineErrors,
+  PreviewChartLineResponses,
   PreviewEquityDataData,
   PreviewEquityDataErrors,
   PreviewEquityDataResponses,
@@ -1673,6 +1676,28 @@ export const createChartLine = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/api/v1/stock-chart/lines",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Preview Line
+ *
+ * 저장 전 미리보기: 저장과 같은 검사·봉 시작일 정규화와 그릴 점. 저장하지 않는다 —
+ * 수동 그리기 중 끄는 동안 frontend가 가격을 계산하지 않고 이것을 부른다.
+ */
+export const previewChartLine = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewChartLineData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewChartLineResponses,
+    PreviewChartLineErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/stock-chart/lines/preview",
     ...options,
     headers: {
       "Content-Type": "application/json",

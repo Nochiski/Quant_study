@@ -83,6 +83,7 @@ import {
   getChartRetracement,
   getChartZones,
   listChartLines,
+  previewChartLine,
   searchChartInstruments,
   updateChartLine,
 } from "./generated/sdk.gen";
@@ -193,8 +194,10 @@ import type {
   ChartConfluenceBody,
   ChartConfluenceRequestBody,
   ChartInstrumentSearchBody,
+  ChartDrawingBody,
   ChartLineBody,
   ChartLineEditBody,
+  ChartLinePreviewBody,
   ChartLinesBody,
   ChartRegimeBody,
   ChartRetracementBody,
@@ -219,7 +222,6 @@ export type {
   ChartConfluenceLineBody,
   ChartConfluenceMemberBody,
   ChartContextBody,
-  ChartDrawingBody,
   ChartErrorDetail,
   ChartInstrumentBody,
   ChartLevelPathBody,
@@ -229,6 +231,7 @@ export type {
   ChartWindowSuggestionBody,
   ChartZoneBody,
   ChosenBy,
+  LineIssue,
   LineKind,
   LineSource,
   RegimeReason,
@@ -884,6 +887,14 @@ export const strategyWorkbenchApi = {
     );
   },
 
+  /**
+   * 저장 전 미리보기(저장하지 않는다). 수동 그리기 중 끄는 동안 frontend 는 가격을 계산하지 않고
+   * 이것을 부른다 — 호출은 rAF/디바운스로 묶는다. 응답은 봉 시작일로 맞춘 기준점과 그릴 점이다.
+   */
+  async previewChartLine(body: ChartLinePreviewBody): Promise<ChartDrawingBody> {
+    return unwrap(await previewChartLine({ body }), "previewChartLine");
+  },
+
   /** 기준점은 화면 좌표(봉 날짜, 화면 가격)로 보낸다 — 저장 좌표 변환은 backend 가 한다. */
   async createChartLine(body: CreateChartLineBody): Promise<ChartLineBody> {
     return unwrap(await createChartLine({ body }), "createChartLine");
@@ -1264,7 +1275,9 @@ export type {
   ChartConfluenceRequestBody,
   ChartInstrumentSearchBody,
   ChartLineBody,
+  ChartDrawingBody,
   ChartLineEditBody,
+  ChartLinePreviewBody,
   ChartLinesBody,
   ChartRegimeBody,
   ChartRetracementBody,

@@ -345,11 +345,10 @@ class _Loaded:
     context: ChartContext
     ref: InstrumentRef
     scale: DisplayScale
-    bars_as_of: date
     daily: tuple[PriceBar, ...]
 
     def candles(self, timeframe: Timeframe) -> tuple[Candle, ...]:
-        return aggregate_candles(self.daily, timeframe, self.bars_as_of)
+        return aggregate_candles(self.daily, timeframe, self.context.as_of)
 
 
 class StockChartService:
@@ -407,9 +406,14 @@ class StockChartService:
         series = self._series(loaded, timeframe, swing)
         span, view = self._window(series, timeframe, window)
         judgement = judge_regime(series, span)
-        warnings = (STARTS_NEAR_EXTREME_WARNING,) * judgement.starts_near_extreme + (
-            ENDS_NEAR_EXTREME_WARNING,
-        ) * judgement.ends_near_extreme
+        warnings = tuple(
+            text
+            for flagged, text in (
+                (judgement.starts_near_extreme, STARTS_NEAR_EXTREME_WARNING),
+                (judgement.ends_near_extreme, ENDS_NEAR_EXTREME_WARNING),
+            )
+            if flagged
+        )
         return RegimeView(
             context=loaded.context,
             timeframe=timeframe,
@@ -707,15 +711,20 @@ class StockChartService:
         if instrument is None:
             raise InstrumentNotFoundError(ref)
         as_of = self._prices.latest_session()
-        history = None if as_of is None else self._prices.chart_history(ref, as_of)
-        if as_of is None or history is None:
+        if as_of is None:
+            raise ChartRequestError(
+                "chart.series.no_completed_bars",
+                f"ledger has no trading session — kind={ref.kind.value} code={ref.code}",
+            )
+        history = self._prices.chart_history(ref, as_of)
+        if history is None:
             raise InstrumentNotFoundError(ref)
         bars = history.bars
         scale = DisplayScale(1.0)
         if ref.kind is InstrumentKind.STOCK and bars and history.last_actual_close is not None:
             scale = DisplayScale.from_last_close(history.last_actual_close, bars[-1].close)
         return _Loaded(
-            ChartContext(instrument, as_of, self._practice, self._notice()), ref, scale, as_of, bars
+            ChartContext(instrument, as_of, self._practice, self._notice()), ref, scale, bars
         )
 
     def _series(

@@ -1,11 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   useId,
-  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
-  type RefObject,
 } from "react";
 
 import {
@@ -28,6 +26,7 @@ import {
 } from "../../../entities/market";
 import { ApiRequestError } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
+import { useElementWidth } from "../../../shared/lib/react";
 import { Button, SignedValue } from "../../../shared/ui";
 
 /** 카드 폭이 이보다 좁으면 지도 대신 많이 오른·내린 업종 목록을 보인다. */
@@ -53,22 +52,6 @@ const Change = ({ value }: { value: number | null }) =>
   ) : (
     <SignedValue value={value} magnitude={percentMagnitude(value)} />
   );
-
-const useWidth = (ref: RefObject<HTMLElement | null>): number => {
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (element === null) return;
-    setWidth(element.getBoundingClientRect().width);
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) =>
-      setWidth(entry.contentRect.width),
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [ref]);
-  return width;
-};
 
 const tileLabel = (tile: MapTile): string =>
   tile.kind === "others"
@@ -389,7 +372,7 @@ export const SectorCard = ({
 }) => {
   const titleId = useId();
   const box = useRef<HTMLDivElement>(null);
-  const width = useWidth(box);
+  const width = useElementWidth(box);
   const [view, setView] = useState<View>("map");
   const [shownSector, setShownSector] = useState(sector);
   if (shownSector !== sector) {

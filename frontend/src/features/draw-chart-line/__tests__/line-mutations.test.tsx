@@ -203,4 +203,32 @@ describe("useLineRemoval", () => {
     expect(result.current.notice).toBeNull();
     expect(result.current.undo()).toBe(false);
   });
+
+  it("does not stack a line whose delete answers after another instrument opened", async () => {
+    // 지우기 응답 전에 종목을 바꾸면 앞 종목의 선이 새 종목의 되돌리기에 쌓이지 않는다
+    let answered = false;
+    server.use(
+      http.delete(`${API}/lines/:id`, async () => {
+        await delay(30);
+        answered = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.get(`${API}/lines`, () => HttpResponse.json({ lines: [] })),
+    );
+    const { wrapper } = setup([line("a")]);
+    const { result, rerender } = renderHook(({ target }) => useLineRemoval(target), {
+      wrapper,
+      initialProps: { target: KOSPI },
+    });
+
+    act(() => {
+      result.current.removeLine(line("a"), "a");
+    });
+    rerender({ target: { kind: "stock", code: "practice:005930" } });
+    await waitFor(() => expect(answered).toBe(true));
+    await waitFor(() => expect(result.current.removing).toBe(false));
+
+    expect(result.current.canUndo).toBe(false);
+    expect(result.current.notice).toBeNull();
+  });
 });

@@ -1,4 +1,5 @@
 import type { ChartPointBody, LineKind } from "../../../entities/chart";
+import type { MessageKey } from "../../../shared/config";
 
 /**
  * 수동 그리기의 화면 상태(도구·마그넷·찍은 점·고른 선)와 그 상태 바꾸기 규칙의 owner. 서버 데이터(저장 선)는
@@ -21,6 +22,14 @@ export const CLICKS_PER_LINE: Record<LineKind, number> = {
   hline: 1,
   fib_retracement: 2,
   fib_channel: 3,
+};
+
+// 몇 번째 점을 누를 차례인지 알리는 안내 줄. 줄 수는 누르는 횟수(`CLICKS_PER_LINE`)와 같다 — 단위 테스트가 길이를
+// 맞춰 본다.
+export const STEP_HINTS: Record<LineKind, readonly MessageKey[]> = {
+  hline: ["chart.hint.hline"],
+  fib_retracement: ["chart.hint.fib_retracement.0", "chart.hint.fib_retracement.1"],
+  fib_channel: ["chart.hint.fib_channel.0", "chart.hint.fib_channel.1", "chart.hint.fib_channel.2"],
 };
 
 export type DrawingState = {

@@ -2,21 +2,14 @@ import { chartErrorSentence } from "../../../entities/chart";
 import { t, tFill, type MessageKey } from "../../../shared/config";
 import { failureReason } from "../../../shared/api";
 import { Button, FailureNotice } from "../../../shared/ui";
-import type { DrawingState } from "../model/drawing";
+import { STEP_HINTS, type DrawingState } from "../model/drawing";
 import type { ChartDrawing } from "../model/use-chart-drawing";
 import type { useLineRemoval } from "../model/use-line-removal";
-
-const STEP_HINTS: Record<Exclude<DrawingState["tool"], "select" | "hline">, readonly MessageKey[]> = {
-  fib_retracement: ["chart.hint.fib_retracement.0", "chart.hint.fib_retracement.1"],
-  fib_channel: ["chart.hint.fib_channel.0", "chart.hint.fib_channel.1", "chart.hint.fib_channel.2"],
-};
 
 const hintKey = (state: DrawingState): MessageKey =>
   state.tool === "select"
     ? "chart.hint.select"
-    : state.tool === "hline"
-      ? "chart.hint.hline"
-      : STEP_HINTS[state.tool][Math.min(state.points.length, STEP_HINTS[state.tool].length - 1)];
+    : STEP_HINTS[state.tool][Math.min(state.points.length, STEP_HINTS[state.tool].length - 1)];
 
 /**
  * 차트 아래 안내 줄: 지금 도구에서 무엇을 누를지, 마그넷 상태. 미리보기 거절(진행 중 봉·기준점 순서)은 서버 코드의

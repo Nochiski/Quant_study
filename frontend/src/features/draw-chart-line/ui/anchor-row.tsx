@@ -45,9 +45,13 @@ export const AnchorRow = ({
   const id = useId();
   const pick = (change: Partial<Pick<AnchorDraft, "barDate" | "field">>) =>
     onChange(withBar(value, candles, instrumentKind, change), false);
-  const commitOnEnter = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Enter") onChange(value, true);
-  };
+  // Enter는 칸의 지금 값으로 저장한다 — 목록을 연 select에서 Enter로 고르면 바뀐 값(change)이 이 키보다 늦게
+  // 화면에 들어와, 받은 `value`로 저장하면 한 박자 앞 값이 간다
+  const commitOnEnter =
+    (current: (element: HTMLInputElement | HTMLSelectElement) => AnchorDraft) =>
+    (event: KeyboardEvent<HTMLInputElement | HTMLSelectElement>) => {
+      if (event.key === "Enter") onChange(current(event.currentTarget), true);
+    };
   return (
     <div className="anchor-row" role="group" aria-label={name}>
       <span className="anchor-row__name" aria-hidden="true">
@@ -62,7 +66,11 @@ export const AnchorRow = ({
           disabled={disabled}
           onChange={(event) => pick({ barDate: event.target.value })}
           onBlur={() => onChange(value, true)}
-          onKeyDown={commitOnEnter}
+          onKeyDown={commitOnEnter((element) =>
+            element.value === value.barDate
+              ? value
+              : withBar(value, candles, instrumentKind, { barDate: element.value }),
+          )}
         >
           <DateOptions candles={candles} />
         </select>
@@ -76,7 +84,11 @@ export const AnchorRow = ({
           disabled={disabled}
           onChange={(event) => pick({ field: event.target.value as CandleField })}
           onBlur={() => onChange(value, true)}
-          onKeyDown={commitOnEnter}
+          onKeyDown={commitOnEnter((element) =>
+            element.value === value.field
+              ? value
+              : withBar(value, candles, instrumentKind, { field: element.value as CandleField }),
+          )}
         >
           {CANDLE_FIELDS.map((field) => (
             <option key={field} value={field}>
@@ -98,7 +110,7 @@ export const AnchorRow = ({
           disabled={disabled}
           onChange={(event) => onChange({ ...value, price: event.target.value }, false)}
           onBlur={() => onChange(value, true)}
-          onKeyDown={commitOnEnter}
+          onKeyDown={commitOnEnter((element) => ({ ...value, price: element.value }))}
         />
       </div>
     </div>

@@ -43,17 +43,20 @@ export const SelectedLineCard = ({
   levelChoices,
 }: SelectedLineCardProps) => {
   const id = useId();
-  const version = `${line.line_id}|${line.updated_at}`;
-  const [shown, setShown] = useState(version);
+  const [shown, setShown] = useState({ lineId: line.line_id, updatedAt: line.updated_at });
   const [drafts, setDrafts] = useState<AnchorDraft[]>(() =>
     draftsOf(line.anchors, completed, instrumentKind),
   );
   const [memo, setMemo] = useState(line.memo);
-  if (shown !== version) {
-    // 렌더 중 상태 맞추기: 다른 선을 고르거나 저장 응답이 오면 칸을 그 선 값으로 다시 채운다
-    setShown(version);
+  // 메모 칸에 초점이 있는가 — 쓰는 중인 메모를 다른 칸 저장 응답이 덮지 않게 한다
+  const [typingMemo, setTypingMemo] = useState(false);
+  if (shown.lineId !== line.line_id || shown.updatedAt !== line.updated_at) {
+    // 렌더 중 상태 맞추기: 다른 선을 고르거나 저장 응답이 오면 칸을 그 선 값으로 다시 채운다. 같은 선의 응답은
+    // 메모를 쓰는 중이면 메모 칸을 그대로 둔다(잠금을 누른 응답이 입력 중인 메모를 지우지 않는다)
+    const otherLine = shown.lineId !== line.line_id;
+    setShown({ lineId: line.line_id, updatedAt: line.updated_at });
     setDrafts(draftsOf(line.anchors, completed, instrumentKind));
-    setMemo(line.memo);
+    if (otherLine || !typingMemo) setMemo(line.memo);
   }
   const anchorsEditable = isDraggable(line, timeframe);
   const levels = drawnLevels(line);
@@ -133,7 +136,11 @@ export const SelectedLineCard = ({
           type="text"
           value={memo}
           onChange={(event) => setMemo(event.target.value)}
-          onBlur={saveMemo}
+          onFocus={() => setTypingMemo(true)}
+          onBlur={() => {
+            setTypingMemo(false);
+            saveMemo();
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter") saveMemo();
           }}

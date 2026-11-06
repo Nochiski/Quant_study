@@ -23,8 +23,9 @@ export type ChartTarget = { kind: InstrumentKind; code: string };
 
 export const chartKey = () => ["stock-chart"] as const;
 
-/** 선 변이(만들기·고치기·지우기)의 묶음 키. 저장 상태 줄이 진행 중인 변이를 이 키로 센다. */
+/** 선 변이(만들기·고치기·지우기)의 묶음 키. 저장 상태 줄이 진행 중인 변이를 이 키(앞부분 일치)로 센다. */
 export const CHART_LINE_MUTATION_KEY = [...chartKey(), "line-mutation"] as const;
+const UPDATE_LINE_MUTATION_KEY = [...CHART_LINE_MUTATION_KEY, "update"] as const;
 
 /**
  * 선 변이는 한 줄로 차례대로 보낸다(TanStack `scope`). 고치기는 칸 전체를 바꾸는 PUT이라, 겹쳐 보내면 뒤
@@ -164,20 +165,15 @@ export const useUpdateChartLine = () => {
   const pendingInstant = (lineId: string, except: LineEditVariables) =>
     queryClient
       .getMutationCache()
-      .getAll()
-      .filter((mutation) => mutation.state.status === "pending")
+      .findAll({ mutationKey: UPDATE_LINE_MUTATION_KEY, status: "pending" })
       .map((mutation) => mutation.state.variables as LineEditVariables | undefined)
       .filter(
         (variables): variables is LineEditVariables =>
-          variables !== undefined &&
-          variables !== except &&
-          typeof variables === "object" &&
-          "line" in variables &&
-          variables.line.line_id === lineId,
+          variables !== undefined && variables !== except && variables.line.line_id === lineId,
       )
       .reduce<Partial<ChartLineBody>>((fields, variables) => ({ ...fields, ...instantFields(variables.patch) }), {});
   return useMutation({
-    mutationKey: CHART_LINE_MUTATION_KEY,
+    mutationKey: UPDATE_LINE_MUTATION_KEY,
     scope: LINE_MUTATION_SCOPE,
     // 체크 칸·메모처럼 바로 보이는 칸은 누르는 순간 캐시에 얹는다(응답·차례를 기다리는 동안 칸이 그대로면
     // 다시 누르게 된다). 본문은 아래에서 차례가 왔을 때의 최신 선으로 다시 만든다.

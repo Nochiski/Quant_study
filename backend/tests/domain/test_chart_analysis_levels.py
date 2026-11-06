@@ -23,7 +23,7 @@ from strategy_workbench.domain.chart_analysis.facade.levels import (
     ZoneSide,
     find_channels,
     find_zones,
-    retracement_swing,
+    retracement_pivots,
 )
 from strategy_workbench.domain.chart_analysis.facade.series import Pivot, PivotKind, Window
 
@@ -182,21 +182,21 @@ SWING_PIVOTS = (
         ),
     ],
 )
-def test_retracement_swing_choices_use_pivots_confirmed_by_window_end(
+def test_retracement_pivot_choices_use_pivots_confirmed_by_window_end(
     pivots: tuple[Pivot, ...], choice: SwingChoice, expected: tuple[Anchor, Anchor]
 ) -> None:
     series = series_with([100.0] * 20, [1.0] * 20, pivots, major=SWING_PIVOTS[:2])
 
-    swing = retracement_swing(series, Window(0, 15), choice)
+    pair = retracement_pivots(series, Window(0, 15), choice)
 
-    assert swing is not None and (swing.first, swing.second) == expected
+    assert pair is not None and (pair[0].anchor, pair[1].anchor) == expected
 
 
-def test_retracement_swing_is_none_without_two_confirmed_pivots() -> None:
+def test_retracement_pivots_are_none_without_two_confirmed_pivots() -> None:
     series = series_with([100.0] * 20, [1.0] * 20, SWING_PIVOTS, major=SWING_PIVOTS[:2])
 
-    assert retracement_swing(series, Window(6, 15), SwingChoice.LATEST_MAJOR) is None
-    assert retracement_swing(series, Window(9, 15), SwingChoice.RANGE_EXTREMES) is None
+    assert retracement_pivots(series, Window(6, 15), SwingChoice.LATEST_MAJOR) is None
+    assert retracement_pivots(series, Window(9, 15), SwingChoice.RANGE_EXTREMES) is None
 
 
 # --- 수평 구간 --------------------------------------------------------------------------------

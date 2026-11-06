@@ -1,14 +1,13 @@
 """피보나치 되돌림 기준 스윙 고르기의 owner(설계 문서 4.4).
 
-레벨 가격은 `RetracementGeometry`가 정한다.
+레벨 가격은 `RetracementGeometry`가 정한다. 두 점을 직접 지정할 때는 그것을 바로 만든다.
 """
 
 from __future__ import annotations
 
 from enum import Enum
 
-from strategy_workbench.domain.chart_analysis._geometry import RetracementGeometry
-from strategy_workbench.domain.chart_analysis._series import ChartSeries, PivotKind, Window
+from strategy_workbench.domain.chart_analysis._series import ChartSeries, Pivot, PivotKind, Window
 
 
 class SwingChoice(Enum):
@@ -17,13 +16,12 @@ class SwingChoice(Enum):
     LATEST_CONFIRMED = "latest_confirmed"  # 후보용 마지막 피벗 2개
 
 
-def retracement_swing(
+def retracement_pivots(
     series: ChartSeries, window: Window, choice: SwingChoice
-) -> RetracementGeometry | None:
-    """구간 안에서 구간 끝까지 확정된 피벗으로 기준 스윙을 고른다.
+) -> tuple[Pivot, Pivot] | None:
+    """구간 안에서 구간 끝까지 확정된 피벗으로 고른 기준 스윙의 두 피벗(봉 순서, 먼저 점 = 레벨 1).
 
-    고를 피벗이 없으면 None이다(실패 사유는 그 하나뿐이다). 두 점을 직접 지정할 때는
-    `RetracementGeometry`를 바로 만든다.
+    생긴 날은 두 확정 봉의 나중이다. 고를 피벗이 없으면 None이다(실패 사유는 그 하나뿐이다).
     """
     if choice is SwingChoice.RANGE_EXTREMES:
         pivots = series.confirmed_in(window)
@@ -40,4 +38,4 @@ def retracement_swing(
         pair = list(series.confirmed_in(window, major=choice is SwingChoice.LATEST_MAJOR)[-2:])
         if len(pair) < 2:
             return None
-    return RetracementGeometry(pair[0].anchor, pair[1].anchor)
+    return pair[0], pair[1]

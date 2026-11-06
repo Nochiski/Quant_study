@@ -157,6 +157,11 @@ bootstrap ─> application + adapters
   `build_run_versions`로 한 번 계산한 묶음과 worker 의 `ready`를 비교한다(D6). e2e hold 판정은
   `bootstrap`의 `_TrialHold.release` 하나를 스레드 전송(엔진 앞)과 프로세스 전송(`engine_ready` 왕복,
   D11)이 함께 부른다.
+- 개별종목차트(#691)는 `domain/chart_analysis`(묶기·배율·피벗·판정·채널·되돌림·수평 구간·중첩 규칙과 판정 문장,
+  `DEPENDS_ON=()`)와 `application/stock_chart`(자체 outgoing `ChartPricePort`·`ChartDrawingStore`, 날짜 ↔ 봉 index·
+  화면 ↔ 저장 가격 변환과 검색 순위)가 소유한다. `equity_duckdb/_chart.py`·`equity_mock/_chart.py`(연습용 합성 일봉)가
+  가격 포트를, `research_sqlite`의 `chart_drawing` 표가 저장 포트를 구현하고 HTTP는 `_chart_routes.py`로 옮긴다. 새
+  application → application 화살표는 없고 어댑터·frontend는 레벨 가격을 다시 계산하지 않는다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
 - 연속 계좌 평가는 `application/continuous_account`가 자체 실험 출처·파이프라인·실행·이력
   포트를 소유하고, 기존 `application/backtest_run`의 outgoing 데이터 포트만 재사용한다.

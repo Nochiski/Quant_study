@@ -35,6 +35,9 @@ import type {
   CreateCapacitySweepData,
   CreateCapacitySweepErrors,
   CreateCapacitySweepResponses,
+  CreateChartLineData,
+  CreateChartLineErrors,
+  CreateChartLineResponses,
   CreateExperimentData,
   CreateExperimentErrors,
   CreateExperimentResponses,
@@ -50,6 +53,9 @@ import type {
   DeleteAssistantProviderData,
   DeleteAssistantProviderErrors,
   DeleteAssistantProviderResponses,
+  DeleteChartLineData,
+  DeleteChartLineErrors,
+  DeleteChartLineResponses,
   DeleteKiwoomMockConnectionData,
   DeleteKiwoomMockConnectionErrors,
   DeleteKiwoomMockConnectionResponses,
@@ -68,6 +74,9 @@ import type {
   ExplainStrategyData,
   ExplainStrategyErrors,
   ExplainStrategyResponses,
+  FindChartConfluenceData,
+  FindChartConfluenceErrors,
+  FindChartConfluenceResponses,
   GetAssistantSessionData,
   GetAssistantSessionErrors,
   GetAssistantSessionResponses,
@@ -104,6 +113,21 @@ import type {
   GetBacktestValidationReportData,
   GetBacktestValidationReportErrors,
   GetBacktestValidationReportResponses,
+  GetChartCandlesData,
+  GetChartCandlesErrors,
+  GetChartCandlesResponses,
+  GetChartChannelsData,
+  GetChartChannelsErrors,
+  GetChartChannelsResponses,
+  GetChartRegimeData,
+  GetChartRegimeErrors,
+  GetChartRegimeResponses,
+  GetChartRetracementData,
+  GetChartRetracementErrors,
+  GetChartRetracementResponses,
+  GetChartZonesData,
+  GetChartZonesErrors,
+  GetChartZonesResponses,
   GetContinuousAccountData,
   GetContinuousAccountErrors,
   GetContinuousAccountResponses,
@@ -184,6 +208,9 @@ import type {
   ListBacktestsData,
   ListBacktestsErrors,
   ListBacktestsResponses,
+  ListChartLinesData,
+  ListChartLinesErrors,
+  ListChartLinesResponses,
   ListEquityUniversesData,
   ListEquityUniversesResponses,
   ListExperimentsData,
@@ -219,6 +246,9 @@ import type {
   PreviewCapacitySweepData,
   PreviewCapacitySweepErrors,
   PreviewCapacitySweepResponses,
+  PreviewChartLineData,
+  PreviewChartLineErrors,
+  PreviewChartLineResponses,
   PreviewEquityDataData,
   PreviewEquityDataErrors,
   PreviewEquityDataResponses,
@@ -258,6 +288,9 @@ import type {
   SaveStrategyDraftData,
   SaveStrategyDraftErrors,
   SaveStrategyDraftResponses,
+  SearchChartInstrumentsData,
+  SearchChartInstrumentsErrors,
+  SearchChartInstrumentsResponses,
   SelectExperimentTrialData,
   SelectExperimentTrialErrors,
   SelectExperimentTrialResponses,
@@ -289,6 +322,9 @@ import type {
   TraceStrategyData,
   TraceStrategyErrors,
   TraceStrategyResponses,
+  UpdateChartLineData,
+  UpdateChartLineErrors,
+  UpdateChartLineResponses,
   UpgradeStrategyDocumentData,
   UpgradeStrategyDocumentErrors,
   UpgradeStrategyDocumentResponses,
@@ -1560,6 +1596,181 @@ export const getCredentialsFile = <ThrowOnError extends boolean = false>(
     unknown,
     ThrowOnError
   >({ url: "/api/v1/settings/credentials-file", ...options });
+
+/**
+ * Get Candles
+ */
+export const getChartCandles = <ThrowOnError extends boolean = false>(
+  options: Options<GetChartCandlesData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetChartCandlesResponses,
+    GetChartCandlesErrors,
+    ThrowOnError
+  >({ url: "/api/v1/stock-chart/candles", ...options });
+
+/**
+ * Get Channels
+ */
+export const getChartChannels = <ThrowOnError extends boolean = false>(
+  options: Options<GetChartChannelsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetChartChannelsResponses,
+    GetChartChannelsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/stock-chart/channels", ...options });
+
+/**
+ * Find Confluence
+ */
+export const findChartConfluence = <ThrowOnError extends boolean = false>(
+  options: Options<FindChartConfluenceData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    FindChartConfluenceResponses,
+    FindChartConfluenceErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/stock-chart/confluence",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Search Instruments
+ */
+export const searchChartInstruments = <ThrowOnError extends boolean = false>(
+  options: Options<SearchChartInstrumentsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    SearchChartInstrumentsResponses,
+    SearchChartInstrumentsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/stock-chart/instruments", ...options });
+
+/**
+ * List Lines
+ */
+export const listChartLines = <ThrowOnError extends boolean = false>(
+  options: Options<ListChartLinesData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    ListChartLinesResponses,
+    ListChartLinesErrors,
+    ThrowOnError
+  >({ url: "/api/v1/stock-chart/lines", ...options });
+
+/**
+ * Create Line
+ */
+export const createChartLine = <ThrowOnError extends boolean = false>(
+  options: Options<CreateChartLineData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateChartLineResponses,
+    CreateChartLineErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/stock-chart/lines",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Preview Line
+ *
+ * 저장 전 미리보기: 저장과 같은 검사·봉 시작일 정규화와 그릴 점. 저장하지 않는다 —
+ * 수동 그리기 중 끄는 동안 frontend가 가격을 계산하지 않고 이것을 부른다.
+ */
+export const previewChartLine = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewChartLineData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewChartLineResponses,
+    PreviewChartLineErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/stock-chart/lines/preview",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Delete Line
+ */
+export const deleteChartLine = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteChartLineData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<
+    DeleteChartLineResponses,
+    DeleteChartLineErrors,
+    ThrowOnError
+  >({ url: "/api/v1/stock-chart/lines/{line_id}", ...options });
+
+/**
+ * Update Line
+ */
+export const updateChartLine = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateChartLineData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<
+    UpdateChartLineResponses,
+    UpdateChartLineErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/stock-chart/lines/{line_id}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Get Regime
+ */
+export const getChartRegime = <ThrowOnError extends boolean = false>(
+  options: Options<GetChartRegimeData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetChartRegimeResponses,
+    GetChartRegimeErrors,
+    ThrowOnError
+  >({ url: "/api/v1/stock-chart/regime", ...options });
+
+/**
+ * Get Retracement
+ */
+export const getChartRetracement = <ThrowOnError extends boolean = false>(
+  options: Options<GetChartRetracementData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetChartRetracementResponses,
+    GetChartRetracementErrors,
+    ThrowOnError
+  >({ url: "/api/v1/stock-chart/retracement", ...options });
+
+/**
+ * Get Zones
+ */
+export const getChartZones = <ThrowOnError extends boolean = false>(
+  options: Options<GetChartZonesData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetChartZonesResponses,
+    GetChartZonesErrors,
+    ThrowOnError
+  >({ url: "/api/v1/stock-chart/zones", ...options });
 
 /**
  * List Strategies

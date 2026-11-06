@@ -102,6 +102,7 @@ from strategy_workbench.application.portfolio_design.facade.trace import (
     StrategyTraceSourceNotFoundError,
     StrategyTraceSourceRequiresUpgradeError,
 )
+from strategy_workbench.application.stock_chart.facade.chart import StockChartService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
     CompileRequest,
@@ -174,6 +175,7 @@ from ._backtest_contract import (
 )
 from ._backtest_result_contract import BacktestResult, backtest_result
 from ._broker_routes import register_broker_connection_routes
+from ._chart_routes import register_chart_routes
 from ._continuous_account_routes import register_continuous_account_routes
 from ._execution_error_contract import (
     Portfolio422Response,
@@ -393,6 +395,7 @@ def create_app(
     factor_library: FactorLibraryService | None = None,
     broker_connections: BrokerConnectionService | None = None,
     market_overview: MarketOverviewService | None = None,
+    stock_chart: StockChartService | None = None,
     ledger_refresh: LedgerRefreshService | None = None,
     assistant_profiles: ProviderProfileService | None = None,
     assistant_chat: AssistantChatService | None = None,
@@ -558,6 +561,8 @@ def create_app(
         register_broker_connection_routes(app, broker_connections)
     if market_overview is not None:
         register_market_routes(app, market_overview)
+    if stock_chart is not None:
+        register_chart_routes(app, stock_chart)
     # 계산을 시작하는 라우트의 `STARTS_WORK` 가 읽는다.
     app.state.ledger_refresh = ledger_refresh
     if ledger_refresh is not None:

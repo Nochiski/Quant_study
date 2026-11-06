@@ -11,6 +11,9 @@ from dataclasses import dataclass
 
 # 되돌림·채널의 기본 레벨. 선마다 저장된 레벨이 있으면 그것이 우선이다.
 DEFAULT_FIB_LEVELS: tuple[float, ...] = (0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
+# 채널의 기본 레벨 — 되돌림 레벨에 바깥 확장 1.618을 더한다(설계 문서 6장 채널 표시). 2.618은
+# 사용자가 고르는 선택 레벨이라 기본에 넣지 않는다.
+DEFAULT_CHANNEL_LEVELS: tuple[float, ...] = (*DEFAULT_FIB_LEVELS, 1.618)
 
 
 @dataclass(frozen=True)

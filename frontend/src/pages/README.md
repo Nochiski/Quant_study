@@ -9,6 +9,7 @@
 | `research-strategy-new` | 새 전략 초안 |
 | `research-strategy-revision` | 저장된 리비전 편집 |
 | `research-backtests` · `research-backtest` | 실행 이력과 실행 하나. 완료된 실행은 결과 AI 사이드바(`assist-strategy`, `copy="result"`)를 붙인다 |
+| `research-stock-chart` | `/research/chart` 개별종목차트. 종목·주기·표시 기간은 주소(`stockChartSearch`)가 갖는다 |
 | `operations-placeholder` · `route-states` | 아직 기능이 없는 메뉴, 로딩·오류 화면 |
 | `settings` | `/settings` — 지금은 "AI 어시스턴트 공급자" 섹션 하나 |
 

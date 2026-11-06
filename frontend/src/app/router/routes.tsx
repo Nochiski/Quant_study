@@ -11,6 +11,7 @@ import {
 } from "@tanstack/react-router";
 
 import { isRunKind, type RunKind } from "../../entities/backtest";
+import { stockChartSearch } from "../../entities/chart";
 import { strategyDocumentQuery } from "../../entities/strategy";
 import {
   migrateStrategyView,
@@ -127,6 +128,10 @@ const NewExperimentPage = lazyRouteComponent(
 const FactorLibraryPage = lazyRouteComponent(
   () => import("../../pages/research-factors"),
   "FactorLibraryPage",
+);
+const StockChartPage = lazyRouteComponent(
+  () => import("../../pages/research-stock-chart"),
+  "StockChartPage",
 );
 const SettingsPage = lazyRouteComponent(
   () => import("../../pages/settings"),
@@ -270,6 +275,14 @@ const strategyRevisionRoute = createRoute({
   component: StrategyRevisionPage,
 });
 
+// 개별종목차트: 종목·주기·표시 기간을 주소가 갖는다(`stockChartSearch`가 모르는 값은 버린다).
+const stockChartRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/chart",
+  validateSearch: stockChartSearch,
+  component: StockChartPage,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
@@ -362,6 +375,7 @@ const routeTree = rootRoute.addChildren([
   newExperimentRoute,
   experimentRoute,
   factorLibraryRoute,
+  stockChartRoute,
   settingsRoute,
   operationsRoute.addChildren([
     deploymentsRoute,

@@ -1,0 +1,314 @@
+/* 개별종목차트 작업 칸: 조건 줄 → 차트 카드 + 레이어 칸(좁으면 아래로 쌓인다). */
+.stock-chart {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.chart-conditions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4) var(--space-5);
+}
+
+.chart-conditions__field,
+.instrument-search {
+  display: grid;
+  gap: var(--field-gap);
+}
+
+.chart-conditions__label,
+.instrument-search > label {
+  font-size: var(--text-size-label);
+  font-weight: var(--font-weight-label);
+}
+
+.chart-conditions__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.chart-conditions__date .ui-input {
+  width: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-size-label);
+}
+
+.chart-segmented {
+  display: inline-flex;
+  height: var(--control-height);
+  overflow: hidden;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+}
+
+.chart-segmented button {
+  min-width: 2.75rem;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-size-label);
+  cursor: pointer;
+}
+
+.chart-segmented button:last-child {
+  border-right: 0;
+}
+
+.chart-segmented button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: var(--font-weight-label);
+}
+
+.chart-segmented button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* 종목 검색 */
+.instrument-search {
+  position: relative;
+  min-width: min(18rem, 100%);
+}
+
+.instrument-search__popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--layer-popover);
+  width: max(100%, 20rem);
+  max-width: calc(100vw - 2 * var(--page-gutter));
+  max-height: 20rem;
+  margin-top: var(--space-1);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-popover);
+}
+
+.instrument-search__state {
+  margin: 0;
+  padding: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-size-label);
+}
+
+.instrument-search__list {
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+}
+
+.instrument-search__result {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--control-height-compact);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-size-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.instrument-search__result:hover,
+.instrument-search__result:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.instrument-search__result:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+
+.instrument-search__meta {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+/* 차트 카드와 레이어 칸 */
+.stock-chart__workspace {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.stock-chart__card,
+.stock-chart__layers {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-card);
+}
+
+.stock-chart__card {
+  display: grid;
+  flex: 999 1 640px;
+}
+
+.stock-chart__layers {
+  flex: 1 1 340px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-4);
+}
+
+.stock-chart__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  padding: 10px var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.stock-chart__head h2 {
+  margin: 0;
+  font-size: var(--text-size-subsection);
+  font-weight: var(--font-weight-label);
+}
+
+.stock-chart__ohlc {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-chart__practice {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--status-warn-soft);
+  color: var(--text);
+  font-size: var(--text-size-label);
+}
+
+.stock-chart__frame {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.stock-chart__tools {
+  flex: 0 0 48px;
+  box-sizing: border-box;
+  padding: var(--space-2) 0;
+  border-right: 1px solid var(--border);
+}
+
+.stock-chart__plot {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 320px;
+  padding: var(--space-2) var(--space-1) 0 var(--space-2);
+}
+
+.stock-chart__svg {
+  display: block;
+  overflow: visible;
+  touch-action: none;
+  user-select: none;
+}
+
+.stock-chart__state {
+  margin: 0;
+  padding: var(--space-6) var(--space-4);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.stock-chart__foot {
+  display: grid;
+  gap: var(--space-2);
+  padding: 10px var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.stock-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  list-style: none;
+}
+
+.stock-chart__legend li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.stock-chart__swatch {
+  fill: none;
+}
+
+.stock-chart__swatch--mine {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+.stock-chart__swatch--current {
+  stroke: var(--text-muted);
+  stroke-width: 1.2;
+  stroke-dasharray: 2 3;
+}
+
+.stock-chart__swatch--live {
+  fill: var(--surface-panel);
+  stroke: var(--return-up);
+  stroke-dasharray: 2 2;
+}
+
+.stock-chart__card > .undo-notice {
+  margin: 0 var(--space-4) var(--space-3);
+}
+
+/* 페이지 머리의 기준일·저장 상태 */
+.stock-chart__basis {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-label);
+}
+
+.stock-chart__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 6px var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-panel);
+  color: var(--text-muted);
+  font-size: var(--text-size-label);
+}
+
+.stock-chart__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--status-ok);
+}

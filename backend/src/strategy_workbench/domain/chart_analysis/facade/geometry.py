@@ -2,6 +2,7 @@
 때의 기본 레벨(4.4 어휘)이라 PR2가 소비한다."""
 
 from strategy_workbench.domain.chart_analysis._geometry import (
+    DEFAULT_CHANNEL_LEVELS,
     DEFAULT_FIB_LEVELS,
     Anchor,
     ChannelGeometry,
@@ -10,6 +11,7 @@ from strategy_workbench.domain.chart_analysis._geometry import (
 )
 
 __all__ = [
+    "DEFAULT_CHANNEL_LEVELS",
     "DEFAULT_FIB_LEVELS",
     "Anchor",
     "ChannelGeometry",

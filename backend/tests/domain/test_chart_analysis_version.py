@@ -13,7 +13,10 @@ from strategy_workbench.domain.chart_analysis._regime import (
 )
 from strategy_workbench.domain.chart_analysis._zones import TOUCH_GAP_BARS
 from strategy_workbench.domain.chart_analysis.facade.confluence import DEFAULT_CONFLUENCE_TOLERANCE
-from strategy_workbench.domain.chart_analysis.facade.geometry import DEFAULT_FIB_LEVELS
+from strategy_workbench.domain.chart_analysis.facade.geometry import (
+    DEFAULT_CHANNEL_LEVELS,
+    DEFAULT_FIB_LEVELS,
+)
 from strategy_workbench.domain.chart_analysis.facade.levels import ZoneParams
 from strategy_workbench.domain.chart_analysis.facade.line_record import ALGORITHM_VERSION
 from strategy_workbench.domain.chart_analysis.facade.regime import BOX_RATIO_MAX
@@ -28,6 +31,7 @@ def test_rule_constants_are_pinned_to_the_algorithm_version() -> None:
         "zone": (ZoneParams(), TOUCH_GAP_BARS),
         "confluence": DEFAULT_CONFLUENCE_TOLERANCE,
         "fib_levels": DEFAULT_FIB_LEVELS,
+        "channel_levels": DEFAULT_CHANNEL_LEVELS,
     }
 
     assert (ALGORITHM_VERSION, rules) == (
@@ -39,5 +43,6 @@ def test_rule_constants_are_pinned_to_the_algorithm_version() -> None:
             "zone": (ZoneParams(0.5, 2), 2),
             "confluence": 0.005,
             "fib_levels": (0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0),
+            "channel_levels": (0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618),
         },
     )

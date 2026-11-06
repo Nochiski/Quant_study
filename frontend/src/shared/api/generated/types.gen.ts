@@ -1769,7 +1769,7 @@ export type ChartLineBody = {
   /**
    * Created
    *
-   * 자동 선의 생긴 날 — 저장한 판정 구간·파라미터로 다시 계산한다(그 앞은 옅게). 수동 선·기준점을 옮긴 복사본은 null.
+   * 자동 선의 생긴 날 — 저장한 판정 구간·파라미터로 다시 계산한다(그 앞은 옅게). 수동 선·기준점을 옮긴 복사본·지금과 다른 알고리즘 버전의 기록은 null.
    */
   created: string | null;
   /**
@@ -13671,6 +13671,12 @@ export type GetChartChannelsData = {
      * 피벗 민감도 k(× ATR). 범위는 domain이 검사한다.
      */
     structure_sensitivity?: number | null;
+    /**
+     * Levels
+     *
+     * 그릴 레벨 목록(되풀이 칸). 없으면 종류별 기본 — 채널 [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618], 되돌림 [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0].
+     */
+    levels?: Array<number> | null;
   };
   url: "/api/v1/stock-chart/channels";
 };
@@ -14057,6 +14063,12 @@ export type GetChartRetracementData = {
      * 피벗 민감도 k(× ATR). 범위는 domain이 검사한다.
      */
     structure_sensitivity?: number | null;
+    /**
+     * Levels
+     *
+     * 그릴 레벨 목록(되풀이 칸). 없으면 종류별 기본 — 채널 [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618], 되돌림 [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0].
+     */
+    levels?: Array<number> | null;
   };
   url: "/api/v1/stock-chart/retracement";
 };

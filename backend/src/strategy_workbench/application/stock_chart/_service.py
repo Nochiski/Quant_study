@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from collections import OrderedDict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from threading import Lock
@@ -25,13 +25,22 @@ from strategy_workbench.application.stock_chart._errors import (
 from strategy_workbench.application.stock_chart._lines import (
     ChartPoint,
     LineGeometry,
-    band_anchors,
+    check_levels,
     check_shape,
     geometry,
+    levels_or_default,
     paths,
     resolve,
 )
-from strategy_workbench.application.stock_chart._provenance import created_index, finite_number
+from strategy_workbench.application.stock_chart._provenance import (
+    AutoParams,
+    channel_anchors,
+    created_index,
+    retracement_anchors,
+    retracement_created,
+    same,
+    zone_anchors,
+)
 from strategy_workbench.application.stock_chart._views import (
     DEFAULT_SWING,
     DEFAULT_WINDOW,
@@ -67,7 +76,6 @@ from strategy_workbench.application.stock_chart.ports.outgoing.chart_drawings im
     ChartLineContent,
     ChartLineNotFoundError,
     LineAnchor,
-    ParamValue,
     RegimeRecord,
 )
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_prices import (
@@ -90,7 +98,7 @@ from strategy_workbench.domain.chart_analysis.facade.confluence import (
     bands_of,
     find_confluences,
 )
-from strategy_workbench.domain.chart_analysis.facade.geometry import DEFAULT_FIB_LEVELS, Anchor
+from strategy_workbench.domain.chart_analysis.facade.geometry import Anchor
 from strategy_workbench.domain.chart_analysis.facade.levels import (
     AnchorIssue,
     ChannelSearch,
@@ -284,7 +292,9 @@ class StockChartService:
         window: WindowRequest = DEFAULT_WINDOW,
         first_anchor: date | None = None,
         swing: SwingSettings = DEFAULT_SWING,
+        levels: tuple[float, ...] | None = None,
     ) -> ChannelView:
+        check_levels(levels)
         loaded = self._load(ref)
         series = self._required_frame(loaded, timeframe, swing).series
         span, view = _window(series, timeframe, window)
@@ -297,10 +307,6 @@ class StockChartService:
         else:
             search = find_channels(series, span, direction, anchor_index)
         issue = search.anchor_issue
-        params: dict[str, ParamValue] = {
-            "direction": direction.value,
-            "first_anchor": None if first_anchor is None else first_anchor.isoformat(),
-        }
         return ChannelView(
             context=loaded.context,
             timeframe=timeframe,
@@ -310,10 +316,7 @@ class StockChartService:
             candidates=tuple(
                 ChannelCandidateView(
                     _drawing(
-                        series,
-                        loaded.scale,
-                        LineKind.FIB_CHANNEL,
-                        (c.first.anchor, c.second.anchor, c.width_pivot.anchor),
+                        series, loaded.scale, LineKind.FIB_CHANNEL, channel_anchors(c), levels
                     ),
                     c,
                     series.bar_date(c.created_index),
@@ -325,8 +328,9 @@ class StockChartService:
             anchor_issue_message=None if issue is None else anchor_issue_message(issue),
             record=_record(
                 view,
-                series.params,
-                params,
+                replace(
+                    _auto_params(series.params), direction=direction, first_anchor=first_anchor
+                ),
                 regime=RegimeRecord(judgement.verdict, judgement.strength, judgement.structure),
                 chosen=chosen_by(judgement.channel_direction, direction),
             ),
@@ -339,7 +343,9 @@ class StockChartService:
         choice: SwingChoice,
         window: WindowRequest = DEFAULT_WINDOW,
         swing: SwingSettings = DEFAULT_SWING,
+        levels: tuple[float, ...] | None = None,
     ) -> RetracementView:
+        check_levels(levels)
         loaded = self._load(ref)
         series = self._required_frame(loaded, timeframe, swing).series
         span, view = _window(series, timeframe, window)
@@ -352,11 +358,11 @@ class StockChartService:
             drawing=None
             if pair is None
             else _drawing(
-                series, loaded.scale, LineKind.FIB_RETRACEMENT, (pair[0].anchor, pair[1].anchor)
+                series, loaded.scale, LineKind.FIB_RETRACEMENT, retracement_anchors(pair), levels
             ),
-            created=None if pair is None else series.bar_date(max(p.confirmed_index for p in pair)),
+            created=None if pair is None else series.bar_date(retracement_created(pair)),
             message=NO_SWING_MESSAGE if pair is None else None,
-            record=_record(view, series.params, {"swing": choice.value}),
+            record=_record(view, replace(_auto_params(series.params), swing=choice)),
         )
 
     def zones(
@@ -375,12 +381,7 @@ class StockChartService:
         scale = loaded.scale
         zones = tuple(
             ZoneView(
-                drawing=_drawing(
-                    series,
-                    scale,
-                    LineKind.HLINE,
-                    band_anchors(min(p.index for p in zone.members), zone.low, zone.high),
-                ),
+                drawing=_drawing(series, scale, LineKind.HLINE, zone_anchors(zone)),
                 zone=zone,
                 low=scale.to_display(zone.low),
                 high=scale.to_display(zone.high),
@@ -397,8 +398,11 @@ class StockChartService:
             basis=ZONE_BASIS,
             record=_record(
                 view,
-                series.params,
-                {"width_atr": params.width_atr, "min_touches": params.min_touches},
+                replace(
+                    _auto_params(series.params),
+                    width_atr=params.width_atr,
+                    min_touches=params.min_touches,
+                ),
             ),
         )
 
@@ -435,7 +439,12 @@ class StockChartService:
                 skipped.append(line.line_id)
                 continue
             shape, _ = resolved
-            bands += bands_of(frame.series, shape, line.line_id, _levels(line.content.levels))
+            bands += bands_of(
+                frame.series,
+                shape,
+                line.line_id,
+                levels_or_default(line.kind, line.content.levels),
+            )
         for inline in lines:
             if inline.ref in saved_ids:
                 continue
@@ -443,7 +452,9 @@ class StockChartService:
             shape, _, _ = self._shape(
                 loaded, frame, inline.kind, inline.anchors, inline.levels, inline.ref
             )
-            bands += bands_of(frame.series, shape, inline.ref, _levels(inline.levels))
+            bands += bands_of(
+                frame.series, shape, inline.ref, levels_or_default(inline.kind, inline.levels)
+            )
         found = _domain_call(lambda: find_confluences(bands, tolerance))
         scale = loaded.scale
         return ConfluenceView(
@@ -485,7 +496,13 @@ class StockChartService:
         )
         return LineDrawing(
             _display_points(loaded.scale, stored),
-            paths(frame.series, loaded.scale, geometry_, indexed, shape.levels),
+            paths(
+                frame.series,
+                loaded.scale,
+                geometry_,
+                indexed,
+                levels_or_default(shape.kind, shape.levels),
+            ),
         )
 
     def lines(self, ref: InstrumentRef) -> ChartLines:
@@ -496,10 +513,13 @@ class StockChartService:
         )
 
     def create_line(self, draft: ChartLineDraft) -> ChartLineView:
-        _check_record(draft.source, draft.auto)
+        _check_record(draft.kind, draft.source, draft.auto)
         loaded = self._load(draft.instrument)
         frame = self._required_frame(loaded, draft.timeframe)
-        content = self._content(loaded, frame, draft.kind, draft.edit)
+        _, stored, _ = self._shape(
+            loaded, frame, draft.kind, draft.edit.anchors, draft.edit.levels, "draft"
+        )
+        content = self._content(stored, draft.edit)
         now = self._now()
         line = ChartLine(
             line_id=self._new_id(),
@@ -518,25 +538,37 @@ class StockChartService:
     def update_line(self, line_id: str, edit: LineEdit) -> ChartLineView:
         """`source = auto` 선의 기준점은 바꿀 수 없다 — 기준점이 자동 기록(알고리즘·구간·파라미터)의
         결과라 옮기면 기록이 거짓이 된다. 옮기려면 `auto_copied`로 새로 저장한다."""
-        current = self._drawings.get_line(line_id)
-        if current is None:
-            raise ChartLineNotFoundError(line_id)
+        current = self._owned(line_id)
         loaded = self._load(current.instrument)
         frame = self._required_frame(loaded, current.timeframe)
-        content = self._content(loaded, frame, current.kind, edit)
-        if current.source is LineSource.AUTO and not _same_stored(
-            content.anchors, current.content.anchors
-        ):
-            raise ChartRequestError(
-                "chart.line.auto_anchors_fixed",
-                f"auto line anchors cannot move — line_id={line_id} "
-                f"stored={[(a.bar_date.isoformat(), a.price) for a in current.content.anchors]}",
-            )
+        _, stored, indexed = self._shape(
+            loaded, frame, current.kind, edit.anchors, edit.levels, line_id
+        )
+        if current.source is LineSource.AUTO:
+            before = resolve(frame.series, current.content.anchors)
+            if isinstance(before, date) or not same(before, indexed):
+                raise ChartRequestError(
+                    "chart.line.auto_anchors_fixed",
+                    f"auto line anchors cannot move — line_id={line_id} stored="
+                    f"{[(a.bar_date.isoformat(), a.price) for a in current.content.anchors]}",
+                )
+        content = self._content(stored, edit)
         line = self._drawings.update_content(line_id, content, self._now())
         return self._line_view(loaded, line)
 
     def delete_line(self, line_id: str) -> None:
-        self._drawings.delete_line(line_id)
+        self._drawings.delete_line(self._owned(line_id).line_id)
+
+    def _owned(self, line_id: str) -> ChartLine:
+        """이 모드(연습·실데이터)의 선. 다른 모드 대상의 선은 없는 선과 같다 — 보지도 고치지도
+        지우지도 못한다."""
+        line = self._drawings.get_line(line_id)
+        if line is None or not self._mine(line.instrument):
+            raise ChartLineNotFoundError(line_id)
+        return line
+
+    def _mine(self, ref: InstrumentRef) -> bool:
+        return ref.code.startswith(PRACTICE_CODE_PREFIX) == self._practice
 
     # ── 조립 ─────────────────────────────────────────────────────────────────
 
@@ -545,11 +577,7 @@ class StockChartService:
 
     def _instruments(self) -> tuple[ChartInstrument, ...]:
         """이 모드의 대상만 — 연습용 접두가 모드와 맞지 않는 대상은 원천이 실어도 보이지 않는다."""
-        return tuple(
-            item
-            for item in self._prices.chart_instruments()
-            if item.ref.code.startswith(PRACTICE_CODE_PREFIX) == self._practice
-        )
+        return tuple(item for item in self._prices.chart_instruments() if self._mine(item.ref))
 
     def _load(self, ref: InstrumentRef) -> _Loaded:
         return self._loaded.get(ref, lambda: self._read(ref))
@@ -617,37 +645,31 @@ class StockChartService:
         series = frame.series
         anchors = tuple(LineAnchor(p.bar_date, loaded.scale.to_stored(p.price)) for p in points)
         check_shape(kind, anchors, levels)
-        indexed: list[Anchor] = []
-        for anchor in anchors:
-            index = series.index_of(anchor.bar_date)
-            if index is not None:
-                indexed.append(Anchor(index, anchor.price))
-                continue
-            if frame.in_progress is not None and anchor.bar_date >= frame.in_progress.start:
+        indexed = resolve(series, anchors)
+        if isinstance(indexed, date):
+            if frame.in_progress is not None and indexed >= frame.in_progress.period_start:
                 raise ChartRequestError(
                     "chart.line.anchor_in_progress",
                     f"anchor date is in the bar still in progress — line={label} "
-                    f"bar_date={anchor.bar_date} in_progress_start={frame.in_progress.start}",
+                    f"bar_date={indexed} in_progress_start={frame.in_progress.start}",
                 )
             raise ChartRequestError(
                 "chart.line.anchor_outside_series",
                 f"anchor date outside completed candles — line={label} "
-                f"bar_date={anchor.bar_date} first={series.bar_date(0)} "
+                f"bar_date={indexed} first={series.bar_date(0)} "
                 f"last={series.bar_date(len(series.candles) - 1)}",
             )
         shape = geometry(kind, indexed)
         stored = tuple(LineAnchor(series.bar_date(a.index), a.price) for a in indexed)
-        return shape, stored, tuple(indexed)
+        return shape, stored, indexed
 
-    def _content(
-        self, loaded: _Loaded, frame: _Frame, kind: LineKind, edit: LineEdit
-    ) -> ChartLineContent:
+    @staticmethod
+    def _content(stored: tuple[LineAnchor, ...], edit: LineEdit) -> ChartLineContent:
         if len(edit.memo) > MAX_MEMO_CHARS:
             raise ChartRequestError(
                 "chart.line.memo_too_long",
                 f"memo too long — chars={len(edit.memo)} max={MAX_MEMO_CHARS}",
             )
-        _, stored, _ = self._shape(loaded, frame, kind, edit.anchors, edit.levels, "draft")
         return ChartLineContent(
             anchors=stored,
             levels=edit.levels,
@@ -670,7 +692,13 @@ class StockChartService:
         return ChartLineView(
             line,
             anchors,
-            paths(frame.series, scale, shape, indexed, line.content.levels),
+            paths(
+                frame.series,
+                scale,
+                shape,
+                indexed,
+                levels_or_default(line.kind, line.content.levels),
+            ),
             None,
             self._created(loaded, line, indexed),
         )
@@ -680,24 +708,24 @@ class StockChartService:
     ) -> date | None:
         """자동 선의 생긴 날 — 저장한 민감도·판정 구간으로 다시 찾아 같은 후보의 확정 봉."""
         auto = line.auto
-        if auto is None or auto.regime_window is None:
+        # 다른 알고리즘 버전의 기록은 이 판의 규칙으로 다시 찾으면 다른 결과가 나올 수 있다
+        if (
+            auto is None
+            or auto.regime_window is None
+            or auto.algorithm_version != ALGORITHM_VERSION
+        ):
             return None
-        try:
-            params = _domain_params(
-                SwingParams(),
-                candidate_sensitivity=finite_number(auto.params.get("candidate_sensitivity")),
-                structure_sensitivity=finite_number(auto.params.get("structure_sensitivity")),
-            )
-        except ChartRequestError:
+        params = AutoParams.read(auto.params)
+        if params is None:
             return None
-        frame = self._frame(loaded, line.timeframe, params)
+        frame = self._frame(loaded, line.timeframe, params.swing_params)
         if frame is None:
             return None
         series = frame.series
         start, end = (series.index_of(day) for day in auto.regime_window)
         if start is None or end is None or start > end:
             return None
-        found = created_index(series, Window(start, end), line.kind, indexed, auto.params)
+        found = created_index(series, Window(start, end), line.kind, indexed, params)
         return None if found is None else series.bar_date(found)
 
 
@@ -734,7 +762,7 @@ def rank_instruments(
             pair[1].ref.code,
         )
     )
-    return tuple(item for _, item in ranked[:MAX_SEARCH_RESULTS])
+    return tuple(item for _, item in ranked)
 
 
 def _domain_params(defaults: _P, **values: float | int | None) -> _P:
@@ -822,18 +850,11 @@ def _display_points(scale: DisplayScale, anchors: Sequence[LineAnchor]) -> tuple
     return tuple(ChartPoint(a.bar_date, scale.to_display(a.price)) for a in anchors)
 
 
-def _same_stored(left: Sequence[LineAnchor], right: Sequence[LineAnchor]) -> bool:
-    return len(left) == len(right) and all(
-        a.bar_date == b.bar_date and math.isclose(a.price, b.price, rel_tol=1e-9)
-        for a, b in zip(left, right, strict=True)
-    )
-
-
 def _resolved(
     series: ChartSeries, line: ChartLine
 ) -> tuple[LineGeometry, tuple[Anchor, ...]] | LineIssue:
     indexed = resolve(series, line.content.anchors)
-    if indexed is None:
+    if isinstance(indexed, date):
         return LineIssue.ANCHOR_OUTSIDE_SERIES
     try:
         return geometry(line.kind, indexed), indexed
@@ -842,18 +863,22 @@ def _resolved(
         return LineIssue.ANCHOR_ORDER
 
 
-def _levels(levels: tuple[float, ...] | None) -> tuple[float, ...]:
-    return DEFAULT_FIB_LEVELS if levels is None else levels
-
-
 def _drawing(
-    series: ChartSeries, scale: DisplayScale, kind: LineKind, anchors: Sequence[Anchor]
+    series: ChartSeries,
+    scale: DisplayScale,
+    kind: LineKind,
+    anchors: Sequence[Anchor],
+    levels: tuple[float, ...] | None = None,
 ) -> LineDrawing:
-    """자동 후보의 저장용 화면 기준점과 기본 레벨의 그릴 점."""
+    """자동 후보의 저장용 화면 기준점과 요청 레벨(없으면 종류별 기본)의 그릴 점."""
     return LineDrawing(
         tuple(ChartPoint(series.bar_date(a.index), scale.to_display(a.price)) for a in anchors),
-        paths(series, scale, geometry(kind, anchors), anchors, None),
+        paths(series, scale, geometry(kind, anchors), anchors, levels_or_default(kind, levels)),
     )
+
+
+def _auto_params(swing: SwingParams) -> AutoParams:
+    return AutoParams(swing.candidate_sensitivity, swing.structure_sensitivity)
 
 
 def _pivots(
@@ -872,20 +897,15 @@ def _pivots(
 
 def _record(
     view: WindowView,
-    swing: SwingParams,
-    params: Mapping[str, ParamValue],
+    params: AutoParams,
     *,
     regime: RegimeRecord | None = None,
     chosen: ChosenBy | None = None,
 ) -> AutoRecord:
-    """자동 후보의 기록 — 판정 구간·민감도·도구별 파라미터(저장 요청에 그대로 싣는다)."""
+    """자동 후보의 기록 — 판정 구간과 파라미터(저장 요청에 그대로 싣는다)."""
     return AutoRecord(
         algorithm_version=ALGORITHM_VERSION,
-        params={
-            **params,
-            "candidate_sensitivity": swing.candidate_sensitivity,
-            "structure_sensitivity": swing.structure_sensitivity,
-        },
+        params=params.to_params(),
         regime_window=(view.start, view.end),
         regime=regime,
         chosen_by=chosen,
@@ -893,7 +913,7 @@ def _record(
     )
 
 
-def _check_record(source: LineSource, auto: AutoRecord | None) -> None:
+def _check_record(kind: LineKind, source: LineSource, auto: AutoRecord | None) -> None:
     """자동 기록은 자동 선에만 있고, 수치 칸은 유한해야 한다(NaN·inf는 저장·JSON이 받지 못한다)."""
     if (source is LineSource.MANUAL) != (auto is None):
         raise ChartRequestError(
@@ -903,6 +923,18 @@ def _check_record(source: LineSource, auto: AutoRecord | None) -> None:
         )
     if auto is None:
         return
+    if auto.algorithm_version != ALGORITHM_VERSION:
+        raise ChartRequestError(
+            "chart.line.auto_record",
+            f"auto record from another algorithm version — got={auto.algorithm_version!r} "
+            f"current={ALGORITHM_VERSION!r}",
+        )
+    # 판정(국면)과 방향 출처는 채널 추천의 기록이다 — 되돌림·수평 구간에는 없다
+    if kind is not LineKind.FIB_CHANNEL and (auto.regime is not None or auto.chosen_by is not None):
+        raise ChartRequestError(
+            "chart.line.auto_record",
+            f"regime and chosen_by belong to channel records only — kind={kind.value}",
+        )
     bad = [
         key
         for key, value in auto.params.items()

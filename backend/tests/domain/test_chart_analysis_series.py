@@ -11,13 +11,18 @@ import pytest
 
 from strategy_workbench.domain.chart_analysis._regime import _verdict
 from strategy_workbench.domain.chart_analysis._series import _find_pivots
-from strategy_workbench.domain.chart_analysis.facade.bars import Candle
+from strategy_workbench.domain.chart_analysis.facade.bars import (
+    Candle,
+    PriceBar,
+    Timeframe,
+    aggregate_candles,
+)
 from strategy_workbench.domain.chart_analysis.facade.levels import (
     SwingChoice,
     TrendDirection,
     find_channels,
     find_zones,
-    retracement_swing,
+    retracement_pivots,
 )
 from strategy_workbench.domain.chart_analysis.facade.regime import (
     BOX_RATIO_MAX,
@@ -70,6 +75,21 @@ def test_index_of_maps_dates_inside_a_completed_bar_period_and_bar_date_is_its_s
     assert series.bar_date(1) == date(2026, 11, 9)
     with pytest.raises(ValueError):
         series.bar_date(2)
+
+
+def test_a_date_on_a_holiday_first_day_belongs_to_its_own_period() -> None:
+    """월요일이 휴장인 주(2024-02-12, 설 연휴)와 첫날이 휴장인 달(5/1)의 그 날짜는 앞 봉이 아니라
+    그 기간의 봉이다 — 봉의 시작일(첫 거래일)은 화요일·2일이다."""
+    days = [date(2024, 2, d) for d in (5, 6, 7, 8, 13, 14, 15, 16, 19)]
+    days += [date(2024, 4, 30), date(2024, 5, 2), date(2024, 5, 3), date(2024, 6, 3)]
+    bars = [PriceBar(d, 10, 11, 9, 10) for d in days]
+    weekly = build_series(aggregate_candles(bars[:9], Timeframe.WEEK, date(2024, 2, 23)))
+    monthly = build_series(aggregate_candles(bars[9:], Timeframe.MONTH, date(2024, 6, 28)))
+
+    assert weekly.bar_date(1) == date(2024, 2, 13)
+    assert [weekly.index_of(date(2024, 2, d)) for d in (11, 12, 13)] == [0, 1, 1]
+    assert monthly.bar_date(1) == date(2024, 5, 2)
+    assert [monthly.index_of(date(2024, m, d)) for m, d in ((4, 30), (5, 1), (5, 2))] == [0, 1, 1]
 
 
 # --- ATR -------------------------------------------------------------------------------------
@@ -385,4 +405,6 @@ def test_results_at_t_equal_results_from_input_cut_at_t(seed: int) -> None:
         for direction in TrendDirection:
             assert find_channels(cut, window, direction) == find_channels(full, window, direction)
         for choice in SwingChoice:
-            assert retracement_swing(cut, window, choice) == retracement_swing(full, window, choice)
+            assert retracement_pivots(cut, window, choice) == retracement_pivots(
+                full, window, choice
+            )

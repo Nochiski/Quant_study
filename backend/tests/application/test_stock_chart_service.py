@@ -521,3 +521,75 @@ def test_practice_and_real_instruments_never_cross_modes() -> None:
         real.candles(InstrumentRef(InstrumentKind.STOCK, "practice:005930"), Timeframe.DAY)
     with pytest.raises(InstrumentNotFoundError):
         practice.candles(STOCK, Timeframe.DAY)
+
+
+def test_lines_of_the_other_mode_can_be_neither_edited_nor_deleted() -> None:
+    """연습·실데이터 앱이 같은 저장소를 써도 다른 모드의 선은 없는 선이다."""
+    drawings = FakeDrawings()
+    real_id = _service(drawings, _MixedPrices()).create_line(_hline(60.0)).line.line_id
+    practice = _service(drawings, _MixedPrices(), practice=True)
+
+    with pytest.raises(ChartLineNotFoundError):
+        practice.update_line(real_id, LineEdit((ChartPoint(date(2025, 9, 3), 50.0),)))
+    with pytest.raises(ChartLineNotFoundError):
+        practice.delete_line(real_id)
+    assert drawings.lines[real_id].content.anchors[0].price == 120.0
+
+
+def test_auto_records_are_checked_against_the_current_version_and_tool() -> None:
+    drawings = FakeDrawings()
+    service = _service(drawings)
+    swing = service.retracement(UPTREND, Timeframe.DAY, SwingChoice.LATEST_CONFIRMED)
+    assert swing.drawing is not None
+    draft = ChartLineDraft(
+        UPTREND,
+        Timeframe.DAY,
+        LineKind.FIB_RETRACEMENT,
+        LineSource.AUTO,
+        LineEdit(swing.drawing.anchors),
+        swing.record,
+    )
+    rejected = (
+        # 다른 알고리즘 버전의 기록은 지금 규칙의 결과가 아니다
+        replace(swing.record, algorithm_version="chart_analysis@0"),
+        # 국면·방향 출처는 채널 추천의 기록이다
+        replace(swing.record, regime=RegimeRecord(RegimeVerdict.UP, 2.5, Structure.UP)),
+    )
+    for record in rejected:
+        with pytest.raises(ChartRequestError) as error:
+            service.create_line(replace(draft, auto=record))
+        assert error.value.code == "chart.line.auto_record"
+
+    saved = service.create_line(draft)
+    assert saved.created == swing.created
+    # 저장 뒤 규칙 판이 바뀌면(옛 버전 기록) 생긴 날을 다시 계산하지 않는다
+    line_id = saved.line.line_id
+    old = replace(swing.record, algorithm_version="chart_analysis@0")
+    drawings.lines[line_id] = replace(drawings.lines[line_id], auto=old)
+    assert service.lines(UPTREND).lines[0].created is None
+
+
+def test_candidates_draw_the_requested_levels_and_channels_extend_to_1_618_by_default() -> None:
+    service = _service()
+    default = service.channels(UPTREND, Timeframe.DAY, TrendDirection.UP).candidates[0]
+    chosen = service.channels(
+        UPTREND, Timeframe.DAY, TrendDirection.UP, levels=(0.0, 2.618)
+    ).candidates[0]
+    swing = service.retracement(UPTREND, Timeframe.DAY, SwingChoice.LATEST_CONFIRMED)
+
+    assert [p.level for p in default.drawing.paths] == [
+        0.0,
+        0.236,
+        0.382,
+        0.5,
+        0.618,
+        0.786,
+        1.0,
+        1.618,
+    ]
+    assert [p.level for p in chosen.drawing.paths] == [0.0, 2.618]
+    assert swing.drawing is not None
+    assert [p.level for p in swing.drawing.paths][-1] == 1.0
+    with pytest.raises(ChartRequestError) as error:
+        service.channels(UPTREND, Timeframe.DAY, TrendDirection.UP, levels=())
+    assert error.value.code == "chart.line.levels_invalid"

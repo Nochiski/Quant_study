@@ -60,6 +60,10 @@ from strategy_workbench.domain.chart_analysis.facade.bars import Timeframe
 from strategy_workbench.domain.chart_analysis.facade.confluence import (
     DEFAULT_CONFLUENCE_TOLERANCE,
 )
+from strategy_workbench.domain.chart_analysis.facade.geometry import (
+    DEFAULT_CHANNEL_LEVELS,
+    DEFAULT_FIB_LEVELS,
+)
 from strategy_workbench.domain.chart_analysis.facade.levels import (
     AnchorIssue,
     SwingChoice,
@@ -377,7 +381,7 @@ class ChartLineBody:
         date | None,
         Field(
             description="자동 선의 생긴 날 — 저장한 판정 구간·파라미터로 다시 계산한다(그 앞은 "
-            "옅게). 수동 선·기준점을 옮긴 복사본은 null."
+            "옅게). 수동 선·기준점을 옮긴 복사본·지금과 다른 알고리즘 버전의 기록은 null."
         ),
     ]
 
@@ -715,6 +719,13 @@ InstrumentKindQuery = Annotated[InstrumentKind, Query(description="stock 또는 
 CodeQuery = Annotated[str, Query(min_length=1, description="종목 티커 또는 지수 코드.")]
 WindowStartQuery = Annotated[date | None, Query(description="판정·분석 구간 시작 봉 날짜.")]
 WindowEndQuery = Annotated[date | None, Query(description="판정·분석 구간 끝 봉 날짜.")]
+LevelsQuery = Annotated[
+    list[float] | None,
+    Query(
+        description="그릴 레벨 목록(되풀이 칸). 없으면 종류별 기본 — 채널 "
+        f"{list(DEFAULT_CHANNEL_LEVELS)}, 되돌림 {list(DEFAULT_FIB_LEVELS)}."
+    ),
+]
 SensitivityQuery = Annotated[
     float | None, Query(description="피벗 민감도 k(× ATR). 범위는 domain이 검사한다.")
 ]
@@ -783,13 +794,17 @@ def register_chart_routes(app: FastAPI, service: StockChartService) -> None:
         window_end: WindowEndQuery = None,
         candidate_sensitivity: SensitivityQuery = None,
         structure_sensitivity: SensitivityQuery = None,
+        levels: LevelsQuery = None,
     ) -> ChartChannelsBody:
         ref = InstrumentRef(kind, code)
         window = WindowRequest(window_start, window_end)
         swing = SwingSettings(candidate_sensitivity, structure_sensitivity)
+        chosen = None if levels is None else tuple(levels)
         return _channels(
             guarded(
-                lambda: service.channels(ref, timeframe, direction, window, first_anchor, swing)
+                lambda: service.channels(
+                    ref, timeframe, direction, window, first_anchor, swing, chosen
+                )
             )
         )
 
@@ -803,12 +818,14 @@ def register_chart_routes(app: FastAPI, service: StockChartService) -> None:
         window_end: WindowEndQuery = None,
         candidate_sensitivity: SensitivityQuery = None,
         structure_sensitivity: SensitivityQuery = None,
+        levels: LevelsQuery = None,
     ) -> ChartRetracementBody:
         ref = InstrumentRef(kind, code)
         window = WindowRequest(window_start, window_end)
         settings = SwingSettings(candidate_sensitivity, structure_sensitivity)
+        chosen = None if levels is None else tuple(levels)
         return _retracement(
-            guarded(lambda: service.retracement(ref, timeframe, swing, window, settings))
+            guarded(lambda: service.retracement(ref, timeframe, swing, window, settings, chosen))
         )
 
     @router.get("/zones", operation_id="getChartZones", responses=responses)

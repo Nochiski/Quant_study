@@ -109,14 +109,16 @@ class ChartSeries:
         return self.candles[index].start
 
     def index_of(self, day: date) -> int | None:
-        """`day`가 든 완성 봉 index. 봉 사이 휴장일·주 중간 날짜는 그 앞 봉(그 기간의 봉)이다.
+        """`day`가 든 완성 봉 index. 그 날짜가 속한 기간(`Candle.period_start`부터)의 봉이다 — 봉
+        사이 휴장일·주 중간 날짜도, 첫날이 휴장인 주·달(월요일 휴장 주, 1/1·5/1)의 그 날짜도 그
+        기간의 봉이다.
 
         첫 봉 시작 전이거나 마지막 완성 봉의 끝 거래일 뒤(진행 중 봉 기간·미래 포함)면 None이다.
         계열은 주기를 모르므로 마지막 완성 봉만은 끝 거래일까지다 — 정지로 수요일에 끝난 마지막
         주봉의 목·금은 None이다. 저장 날짜는 늘 `Candle.start`라 저장된 기준점 해석에는 영향이
         없다.
         """
-        i = bisect_right(self.candles, day, key=lambda c: c.start) - 1
+        i = bisect_right(self.candles, day, key=lambda c: c.period_start) - 1
         if i < 0 or (i == len(self.candles) - 1 and day > self.candles[i].end):
             return None
         return i

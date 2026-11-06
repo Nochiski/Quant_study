@@ -157,7 +157,8 @@
   `RetracementGeometry`이고, 두 점 직접 지정도 이것을 바로 만든다.
 - 구간 최저↔최고는 후보용(k = 1.0) 피벗에서 고르고(같은 값이면 먼저 나온 피벗), "가장 최근" 두 선택지도 구간 안(극값이 구간
   시작 이후, 구간 끝까지 확정)의 피벗만 본다. 고를 피벗이 모자라면 결과가 없다.
-- 기본 레벨(되돌림·채널 공통): 0 · 0.236 · 0.382 · 0.5 · 0.618 · 0.786 · 1. 선에 저장된 레벨이 있으면 그것을 쓴다.
+- 기본 레벨: 되돌림 0 · 0.236 · 0.382 · 0.5 · 0.618 · 0.786 · 1(`DEFAULT_FIB_LEVELS`), 채널은 여기에 확장 1.618을
+  더한다(`DEFAULT_CHANNEL_LEVELS`, 6장 채널 표시). 선에 저장된 레벨이 있으면 그것을 쓰고, 그리기와 중첩이 같은 레벨을 쓴다.
 
 ### 4.5 수평 지지·저항 구간
 - 분석 구간의 확정 피벗(k=1.0)을 로그 가격 순으로 훑어 **첫 점 대비** `ln(p/p_first) ≤ tol` 인 동안 묶는다(완전 연결 —
@@ -195,7 +196,10 @@ regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_
 - `source = auto` 선의 기준점은 옮길 수 없다(`chart.line.auto_anchors_fixed`) — 기준점이 자동 기록의 결과라 옮기면
   기록이 거짓이 된다. 고쳐 쓰려면 `auto_copied`로 저장한다. 메모·레벨·보이기·잠금·연장은 고칠 수 있다.
 - 자동 선의 생긴 날(`created`)도 파생값이다. 저장한 판정 구간·민감도·도구 파라미터로 같은 찾기를 다시 돌려 기준점이
-  같은 후보의 확정 봉을 응답에 싣는다(`application/stock_chart/_provenance.py`). 기준점을 옮긴 복사본은 null이다.
+  같은 후보의 확정 봉을 응답에 싣는다(`application/stock_chart/_provenance.py`). 기준점을 옮긴 복사본과, 저장한
+  `algorithm@version`이 지금 `ALGORITHM_VERSION`과 다른 기록은 null이다(다른 판의 규칙으로 다시 찾지 않는다). 저장할 때
+  다른 버전의 자동 기록은 `chart.line.auto_record`로 거절하고, 국면(`regime`)·방향 출처(`chosen_by`)는 채널 기록에만 둔다.
+- 선의 수정·삭제도 모드(연습 `practice:` 접두 / 실데이터)를 지킨다 — 다른 모드 대상의 선은 `chart.line.not_found`다.
 
 - `kind`·`source`(`LineSource`)·`window_source`·`chosen_by` 어휘와 `algorithm@version` 값의 owner는 domain `_line_record`(facade
   `line_record`)다. `algorithm@version`에는 `ALGORITHM_VERSION`(지금 `chart_analysis@1`)을 그대로 저장하고, 판정 규칙·B\*·
@@ -205,7 +209,8 @@ regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_
 **좌표 계약**
 - 선은 만든 주기(`timeframe`)를 저장하고, 기하(채널 기울기·레벨 가격·되돌림)는 **그 주기 계열의 완성 봉 index**에서
   계산한다. 저장 날짜 `bar_date` = 그 주기 봉의 시작일(`Candle.start`, `ChartSeries.bar_date(i)`)이다.
-- 저장 날짜 → index는 `ChartSeries.index_of(day)`: 그 날짜가 든 완성 봉(봉 사이 휴장일·주 중간 날짜는 그 기간의 봉),
+- 저장 날짜 → index는 `ChartSeries.index_of(day)`: 그 날짜가 든 완성 봉(봉 사이 휴장일·주 중간 날짜는 그 기간의 봉이고,
+  첫날이 휴장인 주·달 — 2024-02-12 월요일 휴장 주, 1/1·3/1·5/1 — 의 그 날짜도 `Candle.period_start`로 그 기간의 봉),
   첫 봉 전이거나 마지막 완성 봉의 끝 거래일 뒤(진행 중 봉 기간·미래 포함)면 None. 계열은 주기를 모르므로 마지막 완성
   봉만은 끝 거래일까지다 — 정지로 수요일에 끝난 마지막 주봉의 목·금은 None이다(저장 날짜는 늘 `Candle.start`라 저장된
   기준점 해석에는 영향이 없고, 좌표 입력 칸에서만 그 날짜를 고르지 못한다).
@@ -245,7 +250,21 @@ regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_
 좌표 기준점·레벨), 응답은 봉 시작일로 맞춘 기준점과 `paths`이고 저장과 같은 규칙으로 거절한다(진행 중 봉
 `chart.line.anchor_in_progress`, 계열 밖 `chart.line.anchor_outside_series`). 끄는 동안의 호출은 rAF/디바운스로 묶는다.
 서버는 묶은 계열을 캐시해 미리보기가 원장을 다시 읽지 않는다. ×k로 낸 화면 가격은 마지막 자리(1ulp) 꼬리가 있을 수
-있으니 화면은 호가 단위로 반올림해 표시한다(PR3 메모).
+있으니 화면은 호가 단위로 반올림해 표시한다(PR3 메모). 저장된 `source = auto` 선은 기준점을 옮길 수 없으니(4.7) 화면이
+끌기 손잡이를 주지 않는다(PR3) — 옮기려면 `auto_copied`로 복사한다.
+
+**채널 표시 방식(PR4가 따를 계약, 사용자 확인 사항)** — 근거: 디자인보드
+https://claude.ai/artifact/9Bp8mU4PSWvnWLarnccunV 의 보드 "채널 표시".
+- 기본 레벨 = 0 · 0.236 · 0.382 · 0.5 · 0.618 · 0.786 · 1 · 1.618(`DEFAULT_CHANNEL_LEVELS`), 2.618은 사용자가 고르는 선택
+  레벨이다. 사용자가 레벨별로 켜고 끈다 — 켠 레벨 목록을 `GET /channels`·`/retracement`의 `levels`(되풀이 칸)로 보내면
+  서버가 그 레벨들의 두 점을 준다(없으면 종류별 기본). 저장 선은 `levels` 칸에 그 목록을 저장한다.
+- 각 레벨 라벨 "r (가격)"은 첫 기준점 봉 위치(`start`)에, 가격은 그 점의 화면 가격이다.
+- 레벨 사이 음영: 0~1은 진하게, 1~1.618은 옅게.
+- 오른쪽(미래 봉)으로 연장한다(`extend_right`, 끌 수 있다).
+- 오른쪽 축에 이번 주(마지막 완성 봉) 레벨 가격 배지(`end.price`)를 달고, 겹치면 세로로 밀어낸다.
+- 레벨 0은 기준선이라 굵게 그린다. 생긴 날(`created`) 이전 구간은 옅게 그린다.
+- 되돌림도 같은 라벨·음영 규칙(0~1)을 쓴다.
+- 이 값들은 모두 서버 응답(레벨마다 두 점·가격)에서 오고 화면은 잇고 연장만 한다.
 
 `pages/research-stock-chart` · `widgets/stock-chart`(차트 그리기·레이어 칸 조합) · `features/draw-chart-line`(수동 그리기·
 마그넷·저장) · `features/find-chart-levels`(자동 생성 패널) · `entities/chart`(쿼리·좌표 변환 표시 모델). 서버 상태는

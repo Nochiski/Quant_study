@@ -321,5 +321,11 @@ def test_practice_lines_never_reach_the_real_chart(tmp_path: Path) -> None:
         )
     )
     assert (confluence["groups"], confluence["skipped_line_ids"]) == ([], [])
-    # 연습 코드로 실데이터 앱에 물어도 모르는 대상이다
+    # 연습 코드로 실데이터 앱에 물어도 모르는 대상이고, 그 선을 지우지도 못한다
     assert real.get(f"{BASE}/lines", params=SAMSUNG).status_code == 404
+    line_id = saved.json()["line_id"]
+    refused = real.delete(f"{BASE}/lines/{line_id}")
+    assert (refused.status_code, refused.json()["detail"]["code"]) == (404, "chart.line.not_found")
+    assert [
+        line["line_id"] for line in _strict(practice.get(f"{BASE}/lines", params=SAMSUNG))["lines"]
+    ] == [line_id]

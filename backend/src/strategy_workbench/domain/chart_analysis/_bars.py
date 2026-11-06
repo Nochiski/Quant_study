@@ -9,7 +9,7 @@ from __future__ import annotations
 import calendar
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from enum import Enum
 
@@ -36,7 +36,8 @@ class Candle:
     """묶은 봉. `start`는 기간의 첫 거래일, `end`는 마지막 거래일이다.
 
     `in_progress`는 기준일이 기간 중간이라 아직 끝나지 않은 봉이다. 표시만 하고 판정·확인 봉에는
-    쓰지 않는다.
+    쓰지 않는다. `period`는 그 기간의 첫 달력 날(주 = 월요일, 월 = 1일)이 `start`보다 앞일 때만
+    있다 — 기간 첫날이 휴장이어도 그 사이 날짜는 이 봉의 기간이다. 비우면 `start`다.
     """
 
     start: date
@@ -46,6 +47,11 @@ class Candle:
     low: float
     close: float
     in_progress: bool = False
+    period: date | None = None
+
+    @property
+    def period_start(self) -> date:
+        return self.start if self.period is None else self.period
 
 
 def _period_key(session: date, timeframe: Timeframe) -> tuple[int, int, int]:
@@ -55,6 +61,21 @@ def _period_key(session: date, timeframe: Timeframe) -> tuple[int, int, int]:
         iso = session.isocalendar()
         return (iso.year, iso.week, 0)
     return (session.year, session.month, 0)
+
+
+def _period_first_day(session: date, timeframe: Timeframe) -> date:
+    """`session`이 든 기간의 첫 달력 날(일봉은 그날, 주는 월요일, 월은 1일)."""
+    if timeframe is Timeframe.DAY:
+        return session
+    if timeframe is Timeframe.WEEK:
+        return session - timedelta(days=session.weekday())
+    return session.replace(day=1)
+
+
+def _period_start_if_holiday(first_session: date, timeframe: Timeframe) -> date | None:
+    """기간 첫 달력 날이 첫 거래일보다 앞이면(첫날 휴장) 그 날, 아니면 None(= `start`)."""
+    first_day = _period_first_day(first_session, timeframe)
+    return first_day if first_day != first_session else None
 
 
 def _last_weekday(session: date, timeframe: Timeframe) -> date:
@@ -103,12 +124,12 @@ def aggregate_candles(
             high=max(bar.high for bar in group),
             low=min(bar.low for bar in group),
             close=group[-1].close,
+            period=_period_start_if_holiday(group[0].session, timeframe),
         )
         for group in groups
     ]
     if candles and as_of < _last_weekday(candles[-1].start, timeframe):
-        last = candles[-1]
-        candles[-1] = Candle(last.start, last.end, last.open, last.high, last.low, last.close, True)
+        candles[-1] = replace(candles[-1], in_progress=True)
     return tuple(candles)
 
 

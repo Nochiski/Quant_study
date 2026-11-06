@@ -29,7 +29,14 @@ from strategy_workbench.application.stock_chart.facade.ports import (
 )
 from strategy_workbench.domain.chart_analysis.facade.bars import PriceBar
 
-from ._adapter import CONFIRMED_BASIS, REFERENCE_KIND, EquityDuckdbAdapter, _as_date, _open
+from ._adapter import (
+    BASIS_COLUMN,
+    CONFIRMED_BASIS,
+    REFERENCE_KIND,
+    EquityDuckdbAdapter,
+    _as_date,
+    _open,
+)
 from ._specs import ADJ_TABLE, INDEX_TABLE, PRICE_TABLE, SECURITY_TABLE
 
 # 지수 코드 `<index_class>:<index_name>`의 구분자. 시장 구분(KOSPI·KOSDAQ)에는 없는 글자다.
@@ -141,7 +148,7 @@ def _stock_history(adapter: EquityDuckdbAdapter, ticker: str, end: date) -> Char
     # 구간이 없는 종목(ETF 등 KRX 상장 축 밖)은 하한 없이 읽는다.
     spans = adapter._spans([ticker])  # noqa: SLF001  # reason: 같은 노드의 구간 정본 조회
     since = spans[-1].first_date if spans else None
-    basis = "a.basis" if "basis" in _columns(adapter, ADJ_TABLE) else f"'{CONFIRMED_BASIS}'"
+    confirmed = _confirmed_rows(adapter, "p.")
     con = _open(None)
     try:
         rows = con.execute(
@@ -151,7 +158,7 @@ def _stock_history(adapter: EquityDuckdbAdapter, ticker: str, end: date) -> Char
             "  ON p.ticker = a.ticker AND p.date = a.date "
             "WHERE a.ticker = ? AND a.date <= ? AND (?::DATE IS NULL OR a.date >= ?::DATE) "
             f"  AND p.price_kind IS DISTINCT FROM '{REFERENCE_KIND}' "
-            f"  AND {basis} = '{CONFIRMED_BASIS}' "
+            f"  AND {confirmed} "
             "  AND a.adj_open IS NOT NULL AND a.adj_high IS NOT NULL "
             "  AND a.adj_low IS NOT NULL AND a.adj_close IS NOT NULL AND p.close IS NOT NULL "
             "ORDER BY a.date",
@@ -164,11 +171,17 @@ def _stock_history(adapter: EquityDuckdbAdapter, ticker: str, end: date) -> Char
     return ChartHistory(bars, last_close)
 
 
+def _confirmed_rows(adapter: EquityDuckdbAdapter, alias: str) -> str:
+    """`price_daily`의 확정 행 술어 — 종목 일봉과 기준일이 같은 판정을 쓴다. 판 칸이 없는 옛 판은
+    전 행이 확정이다(`load_backtest_dataset`과 같은 규칙)."""
+    if BASIS_COLUMN not in _columns(adapter, PRICE_TABLE):
+        return "TRUE"
+    return f"{alias}{BASIS_COLUMN} = '{CONFIRMED_BASIS}'"
+
+
 def confirmed_session(adapter: EquityDuckdbAdapter) -> date | None:
     """가격이 확정된(`basis = 'krx'`) 마지막 장. `basis` 칸이 없는 옛 판은 전 행이 확정이다."""
-    basis = (
-        f"WHERE basis = '{CONFIRMED_BASIS}'" if "basis" in _columns(adapter, PRICE_TABLE) else ""
-    )
+    basis = f"WHERE {_confirmed_rows(adapter, '')}"
     con = _open(None)
     try:
         row = con.execute(

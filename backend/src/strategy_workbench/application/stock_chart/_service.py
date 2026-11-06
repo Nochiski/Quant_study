@@ -97,7 +97,7 @@ from strategy_workbench.domain.chart_analysis.facade.confluence import (
     bands_of,
     find_confluences,
 )
-from strategy_workbench.domain.chart_analysis.facade.geometry import Anchor, levels_or_default
+from strategy_workbench.domain.chart_analysis.facade.geometry import Anchor
 from strategy_workbench.domain.chart_analysis.facade.levels import (
     AnchorIssue,
     ChannelSearch,
@@ -115,6 +115,7 @@ from strategy_workbench.domain.chart_analysis.facade.line_record import (
     LineSource,
     WindowSource,
     chosen_by,
+    levels_or_default,
 )
 from strategy_workbench.domain.chart_analysis.facade.regime import (
     WINDOW_PRESETS,
@@ -241,13 +242,17 @@ class StockChartService:
         loaded = self._load(ref)
         candles = aggregate_candles(loaded.daily, timeframe, loaded.context.as_of)
         completed = [c for c in candles if not c.in_progress]
-        shown = tuple(
-            _display_candle(loaded.scale, c)
-            for c in candles
+        shown = [
+            index
+            for index, c in enumerate(candles)
             if (start is None or c.end >= start) and (end is None or c.start <= end)
-        )
+        ]
         return CandleView(
-            loaded.context, timeframe, shown, completed[-1].start if completed else None
+            loaded.context,
+            timeframe,
+            tuple(_display_candle(loaded.scale, candles[index]) for index in shown),
+            completed[-1].start if completed else None,
+            tuple(_change_pct(candles, index) for index in shown),
         )
 
     # ── 분석 ─────────────────────────────────────────────────────────────────
@@ -831,6 +836,13 @@ def _warnings(judgement: RegimeJudgement) -> tuple[str, ...]:
         )
         if flagged
     )
+
+
+def _change_pct(candles: Sequence[Candle], index: int) -> float | None:
+    """직전 봉 종가 대비 등락률(%). 배율 k는 비율에서 지워지므로 저장 좌표로 계산한다."""
+    if index == 0 or candles[index - 1].close == 0:
+        return None
+    return (candles[index].close / candles[index - 1].close - 1) * 100
 
 
 def _display_candle(scale: DisplayScale, candle: Candle) -> Candle:

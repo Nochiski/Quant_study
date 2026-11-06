@@ -1391,6 +1391,12 @@ export type ChartAutoRecordBody = {
  */
 export type ChartCandleBody = {
   /**
+   * Change Pct
+   *
+   * 직전 봉 종가 대비 등락률(%). 계열의 첫 봉은 null.
+   */
+  change_pct: number | null;
+  /**
    * Close
    */
   close: number;
@@ -1717,6 +1723,12 @@ export type ChartInstrumentBody = {
    * Name
    */
   name: string;
+  /**
+   * Tick Steps
+   *
+   * 한 호가 표(가격 구간 오름차순). 키보드로 선을 옮길 때 화면이 읽는다.
+   */
+  tick_steps: Array<ChartTickStepBody>;
 };
 
 /**
@@ -1888,6 +1900,12 @@ export type ChartLinePreviewBody = {
 export type ChartLinesBody = {
   context: ChartContextBody;
   /**
+   * Level Choices
+   *
+   * 화면이 켜고 끌 수 있게 보이는 레벨 칸(기본 레벨 + 선택 레벨 2.618).
+   */
+  level_choices: Array<number>;
+  /**
    * Lines
    */
   lines: Array<ChartLineBody>;
@@ -2027,6 +2045,22 @@ export type ChartRetracementBody = {
   swing: SwingChoice;
   timeframe: Timeframe;
   window: ChartWindowBody;
+};
+
+/**
+ * ChartTickStepBody
+ */
+export type ChartTickStepBody = {
+  /**
+   * Below
+   *
+   * 이 화면 가격 미만에 쓰는 호가. null이면 그 위 전부.
+   */
+  below: number | null;
+  /**
+   * Tick
+   */
+  tick: number;
 };
 
 /**

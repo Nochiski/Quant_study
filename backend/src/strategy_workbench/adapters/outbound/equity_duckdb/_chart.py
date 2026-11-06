@@ -28,6 +28,7 @@ from strategy_workbench.application.stock_chart.facade.ports import (
     InstrumentRef,
 )
 from strategy_workbench.domain.chart_analysis.facade.bars import PriceBar
+from strategy_workbench.domain.chart_analysis.facade.price_tick import TickTable
 
 from ._adapter import (
     BASIS_COLUMN,
@@ -41,6 +42,9 @@ from ._specs import ADJ_TABLE, INDEX_TABLE, PRICE_TABLE, SECURITY_TABLE
 
 # 지수 코드 `<index_class>:<index_name>`의 구분자. 시장 구분(KOSPI·KOSDAQ)에는 없는 글자다.
 INDEX_CODE_SEP = ":"
+# 원장 `security.sec_type` 중 상장지수상품 호가표(`TickTable.FUND`)를 쓰는 값. 원장 어휘는
+# 이 어댑터만 읽고, 위로는 호가표 enum으로만 넘긴다.
+FUND_SEC_TYPES = frozenset({"etf", "etn"})
 
 
 def _number(value: object, label: str) -> float:
@@ -82,6 +86,7 @@ def chart_instruments(adapter: EquityDuckdbAdapter) -> tuple[ChartInstrument, ..
                         name,
                         None if sec_type is None else str(sec_type),
                         aliases,
+                        TickTable.FUND if sec_type in FUND_SEC_TYPES else TickTable.STOCK,
                     )
                 )
         if INDEX_TABLE in tables:

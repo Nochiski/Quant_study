@@ -47,6 +47,24 @@ def test_practice_source_runs_the_whole_chart_flow(tmp_path: Path) -> None:
     week = _strict(client.get(f"{BASE}/candles", params={**SAMSUNG, "timeframe": "week"}))
     assert week["context"]["practice_data"]
     assert week["candles"][-1]["in_progress"] and week["last_completed"] < week["context"]["as_of"]
+    # 등락률은 직전 봉 종가 대비이고 첫 봉은 비교할 봉이 없다(화면은 계산하지 않고 읽는다)
+    first, second = week["candles"][:2]
+    assert first["change_pct"] is None
+    assert second["change_pct"] == pytest.approx((second["close"] / first["close"] - 1) * 100)
+    # 표시 구간을 잘라도 첫 봉의 등락률은 계열의 바로 앞 봉 대비다
+    later = _strict(
+        client.get(
+            f"{BASE}/candles",
+            params={**SAMSUNG, "timeframe": "week", "start": week["candles"][2]["start"]},
+        )
+    )
+    assert later["candles"][0]["change_pct"] == pytest.approx(
+        (week["candles"][2]["close"] / second["close"] - 1) * 100
+    )
+    # 한 호가 표는 대상 머리에 실린다(종목 = 주식 호가표)
+    ticks = week["context"]["instrument"]["tick_steps"]
+    assert ticks[0] == {"below": 2000.0, "tick": 1.0}
+    assert ticks[-1] == {"below": None, "tick": 1000.0}
 
     for path, extra in (
         ("regime", {}),
@@ -111,6 +129,7 @@ def test_practice_source_runs_the_whole_chart_flow(tmp_path: Path) -> None:
     assert _strict(edited)["memo"] == "첫 저점"
     listed = _strict(client.get(f"{BASE}/lines", params=SAMSUNG))
     assert [line["line_id"] for line in listed["lines"]] == [saved["line_id"], hline["line_id"]]
+    assert listed["level_choices"] == [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.618, 2.618]
 
     confluence = client.post(
         f"{BASE}/confluence",

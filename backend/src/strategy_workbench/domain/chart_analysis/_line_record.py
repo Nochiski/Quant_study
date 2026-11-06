@@ -6,13 +6,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from enum import Enum
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    # 주석에만 쓴다 — 런타임 import는 `_geometry` → `_line_record` → `_channel` → `_geometry`
-    # 순환이 된다
-    from strategy_workbench.domain.chart_analysis._channel import TrendDirection
+from strategy_workbench.domain.chart_analysis._channel import TrendDirection
+from strategy_workbench.domain.chart_analysis._geometry import (
+    DEFAULT_CHANNEL_LEVELS,
+    DEFAULT_FIB_LEVELS,
+)
 
 # 자동 선의 `algorithm@version` 칸에 그대로 저장하는 값. 판정 규칙·B*·피벗·채널·수평 구간·중첩
 # 규칙(기본 파라미터 포함)을 바꾸면 올린다. tests/domain/test_chart_analysis_version.py가 규칙
@@ -24,6 +25,17 @@ class LineKind(Enum):
     HLINE = "hline"
     FIB_RETRACEMENT = "fib_retracement"
     FIB_CHANNEL = "fib_channel"
+
+
+def levels_or_default(kind: LineKind, levels: Sequence[float] | None) -> tuple[float, ...]:
+    """선의 레벨 — 저장·요청한 레벨이 있으면 그것, 없으면 종류별 기본(채널은 1.618 확장 포함).
+
+    종류별 기본 레벨 선택의 owner다. 그리기(`application/stock_chart`의 레벨 선 두 점)와 중첩
+    (`bands_of`)이 이것으로 같은 레벨을 고른다. 수평선은 레벨이 없어 무엇을 돌려도 쓰지 않는다.
+    """
+    if levels is not None:
+        return tuple(levels)
+    return DEFAULT_CHANNEL_LEVELS if kind is LineKind.FIB_CHANNEL else DEFAULT_FIB_LEVELS
 
 
 class LineSource(Enum):

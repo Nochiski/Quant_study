@@ -2252,6 +2252,18 @@
       },
       "ChartCandleBody": {
         "properties": {
+          "change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "직전 봉 종가 대비 등락률(%). 계열의 첫 봉은 null.",
+            "title": "Change Pct"
+          },
           "close": {
             "title": "Close",
             "type": "number"
@@ -2293,7 +2305,8 @@
           "high",
           "low",
           "close",
-          "in_progress"
+          "in_progress",
+          "change_pct"
         ],
         "title": "ChartCandleBody",
         "type": "object"
@@ -2785,13 +2798,22 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "tick_steps": {
+            "description": "한 호가 표(가격 구간 오름차순). 키보드로 선을 옮길 때 화면이 읽는다.",
+            "items": {
+              "$ref": "#/components/schemas/ChartTickStepBody"
+            },
+            "title": "Tick Steps",
+            "type": "array"
           }
         },
         "required": [
           "kind",
           "code",
           "name",
-          "group"
+          "group",
+          "tick_steps"
         ],
         "title": "ChartInstrumentBody",
         "type": "object"
@@ -3101,6 +3123,14 @@
           "context": {
             "$ref": "#/components/schemas/ChartContextBody"
           },
+          "level_choices": {
+            "description": "화면이 켜고 끌 수 있게 보이는 레벨 칸(기본 레벨 + 선택 레벨 2.618).",
+            "items": {
+              "type": "number"
+            },
+            "title": "Level Choices",
+            "type": "array"
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/ChartLineBody"
@@ -3111,7 +3141,8 @@
         },
         "required": [
           "context",
-          "lines"
+          "lines",
+          "level_choices"
         ],
         "title": "ChartLinesBody",
         "type": "object"
@@ -3385,6 +3416,32 @@
           "record"
         ],
         "title": "ChartRetracementBody",
+        "type": "object"
+      },
+      "ChartTickStepBody": {
+        "properties": {
+          "below": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "이 화면 가격 미만에 쓰는 호가. null이면 그 위 전부.",
+            "title": "Below"
+          },
+          "tick": {
+            "title": "Tick",
+            "type": "number"
+          }
+        },
+        "required": [
+          "below",
+          "tick"
+        ],
+        "title": "ChartTickStepBody",
         "type": "object"
       },
       "ChartWindowBody": {

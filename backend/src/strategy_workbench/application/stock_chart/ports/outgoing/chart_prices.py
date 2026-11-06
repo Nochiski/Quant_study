@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from strategy_workbench.domain.chart_analysis.facade.bars import PriceBar
+from strategy_workbench.domain.chart_analysis.facade.price_tick import TickTable
 
 __all__ = [
     "PRACTICE_CODE_PREFIX",
@@ -49,12 +50,23 @@ class InstrumentRef:
 @dataclass(frozen=True)
 class ChartInstrument:
     """목록의 한 줄. `name`은 화면 이름, `aliases`는 검색에만 쓰는 다른 이름(정식 이름 등),
-    `group`은 종목이면 증권 종류(`common`·`preferred`·`etf` …), 지수면 시장 구분(`KOSPI` …)이다."""
+    `group`은 종목이면 증권 종류(`common`·`preferred`·`etf` …), 지수면 시장 구분(`KOSPI` …)이다.
+    `tick_table`은 어느 호가표를 쓰는지다 — 원천이 증권 종류를 보고 정하고(상장지수상품이면 FUND),
+    None이면 대상 종류의 기본(종목 STOCK, 지수 INDEX)이다. 화면은 이 칸만 읽고 `group` 글자로 호가를
+    정하지 않는다."""
 
     ref: InstrumentRef
     name: str
     group: str | None = None
     aliases: tuple[str, ...] = ()
+    tick_table: TickTable | None = None
+
+    @property
+    def tick(self) -> TickTable:
+        """쓸 호가표. 정하지 않았으면 대상 종류의 기본이다."""
+        if self.tick_table is not None:
+            return self.tick_table
+        return TickTable.INDEX if self.ref.kind is InstrumentKind.INDEX else TickTable.STOCK
 
 
 @dataclass(frozen=True)

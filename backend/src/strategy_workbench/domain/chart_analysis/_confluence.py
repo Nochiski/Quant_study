@@ -12,12 +12,8 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from strategy_workbench.domain.chart_analysis._geometry import (
-    ChannelGeometry,
-    RetracementGeometry,
-    levels_or_default,
-)
-from strategy_workbench.domain.chart_analysis._line_record import LineKind
+from strategy_workbench.domain.chart_analysis._geometry import ChannelGeometry, RetracementGeometry
+from strategy_workbench.domain.chart_analysis._line_record import LineKind, levels_or_default
 from strategy_workbench.domain.chart_analysis._series import ChartSeries
 from strategy_workbench.domain.chart_analysis._zones import HorizontalZone
 

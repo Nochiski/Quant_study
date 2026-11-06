@@ -3,6 +3,7 @@ import { useEffect, useRef, type MouseEvent } from "react";
 import {
   ChartLineShape,
   levelSegments,
+  lineTone,
   roundPrice,
   snapToCandle,
   type ChartCandleBody,
@@ -13,24 +14,19 @@ import {
   type Timeframe,
 } from "../../../entities/chart";
 import { useCommittedRef } from "../../../shared/lib/react";
-import { isDraggable, lineTone } from "../model/line-edit";
+import { isDraggable } from "../model/line-edit";
 import type { ChartDrawing } from "../model/use-chart-drawing";
 
 type DrawingSurfaceProps = {
   drawing: ChartDrawing;
   scale: ChartScale;
   candles: readonly ChartCandleBody[];
+  /** 완성 봉 수(`completedCandles`). 기준점은 그 안에서만 고른다. */
+  completedCount: number;
   instrumentKind: InstrumentKind;
   timeframe: Timeframe;
   /** 보이는 저장 선(`visible`). */
   lines: readonly ChartLineBody[];
-};
-
-/** 기준점을 둘 수 있는 마지막 봉(진행 중 봉은 기준점이 될 수 없다 — 서버도 거절한다). */
-const lastCompleted = (candles: readonly ChartCandleBody[], last: number): number => {
-  let index = last;
-  while (index >= 0 && candles[index].in_progress) index -= 1;
-  return index;
 };
 
 /**
@@ -43,6 +39,7 @@ export const DrawingSurface = ({
   drawing,
   scale,
   candles,
+  completedCount,
   instrumentKind,
   timeframe,
   lines,
@@ -51,7 +48,8 @@ export const DrawingSurface = ({
   const frame = useRef<number | null>(null);
   const pending = useRef<{ x: number; y: number } | null>(null);
   const { plot } = scale;
-  const anchorLimit = lastCompleted(candles, scale.last);
+  // 기준점을 둘 수 있는 마지막 봉(진행 중 봉은 기준점이 될 수 없다 — 서버도 거절한다)
+  const anchorLimit = Math.min(completedCount - 1, scale.last);
 
   const pointAt = (x: number, y: number): ChartPointBody | null => {
     if (anchorLimit < scale.first) return null;
@@ -124,6 +122,11 @@ export const DrawingSurface = ({
       className={`drawing-surface drawing-surface--${state.tool === "select" ? "select" : "draw"}`}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={drawing.abandonDrag}
+      onLostPointerCapture={() => {
+        // 놓기(pointerup)가 먼저 와서 저장 중이면 그대로 둔다 — 놓지 못하고 잃은 끌기만 되돌린다
+        if (drag !== null && !drag.committing) drawing.abandonDrag();
+      }}
       onPointerLeave={() => (state.tool === "select" ? undefined : drawing.setHover(null))}
       onClick={onClick}
     >

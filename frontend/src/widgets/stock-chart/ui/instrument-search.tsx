@@ -14,8 +14,9 @@ import { FailureNotice } from "../../../shared/ui";
 const SEARCH_DELAY_MS = 200;
 
 /**
- * 종목·지수 검색. 검색 칸 아래에 결과 버튼 목록이 열린다 — 버튼은 native 요소라 Tab·Enter가 그대로 되고, 검색
- * 칸에서 ↓로 첫 결과에, 결과 사이는 ↑/↓로 옮긴다. Esc는 목록을 닫고 검색 칸으로 돌아간다. 순위는 서버가 정한다.
+ * 종목·지수 검색. 검색 칸 아래에 결과 버튼 목록이 열린다 — 콤보박스가 아니라 검색 칸 + native 버튼 목록이라
+ * Tab·Enter가 그대로 되고, 검색 칸에서 ↓로 첫 결과에, 결과 사이는 ↑/↓로 옮긴다. Esc는 목록을 닫고 검색 칸으로
+ * 돌아간다. 고르면 위젯이 차트 제목으로 초점을 옮긴다. 순위는 서버가 정한다.
  */
 export const InstrumentSearch = ({ onPick }: { onPick: (instrument: ChartInstrumentBody) => void }) => {
   const id = useId();
@@ -84,8 +85,6 @@ export const InstrumentSearch = ({ onPick }: { onPick: (instrument: ChartInstrum
         autoComplete="off"
         placeholder={t("chart.search.placeholder")}
         aria-describedby={`${id}-hint`}
-        aria-expanded={showing}
-        aria-controls={`${id}-results`}
         value={text}
         onChange={(event) => {
           setText(event.target.value);
@@ -98,7 +97,7 @@ export const InstrumentSearch = ({ onPick }: { onPick: (instrument: ChartInstrum
         {t("chart.search.hint")}
       </span>
       {showing ? (
-        <div className="instrument-search__popup" id={`${id}-results`}>
+        <div className="instrument-search__popup">
           {search.isError ? (
             <FailureNotice
               title={t("chart.error.search")}

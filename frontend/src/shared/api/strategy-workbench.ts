@@ -229,6 +229,7 @@ export type {
   ChartPointBody,
   ChartWindowBody,
   ChartWindowSuggestionBody,
+  ChartTickStepBody,
   ChartZoneBody,
   ChosenBy,
   LineIssue,

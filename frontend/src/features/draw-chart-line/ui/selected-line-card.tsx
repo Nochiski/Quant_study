@@ -14,13 +14,6 @@ import { isDraggable } from "../model/line-edit";
 import type { ChartDrawing } from "../model/use-chart-drawing";
 import { AnchorRow } from "./anchor-row";
 
-/**
- * 레벨 고르기 목록. 선에 그려진 레벨(응답 `paths`의 `level`)이 켜진 칸이고, 기본 레벨 목록 자체는 서버가 정한다
- * (레벨을 비운 선은 서버가 종류별 기본으로 그린다). 여기 값은 고를 수 있는 칸일 뿐이다 — 2.618은 채널의 선택 레벨이다
- * (설계 문서 6장).
- */
-const LEVEL_CHOICES: readonly number[] = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618, 2.618];
-
 const drawnLevels = (line: ChartLineBody): number[] =>
   line.paths.flatMap((path) => (path.level === null ? [] : [path.level]));
 
@@ -30,6 +23,11 @@ type SelectedLineCardProps = {
   completed: readonly ChartCandleBody[];
   instrumentKind: InstrumentKind;
   timeframe: Timeframe;
+  /**
+   * 레벨 칸 목록(저장 선 목록 응답 `level_choices`, owner는 backend domain). 켜진 칸은 선에 그려진 레벨(응답
+   * `paths`의 `level`)이다 — 레벨을 비운 선은 서버가 종류별 기본으로 그린다.
+   */
+  levelChoices: readonly number[];
 };
 
 /**
@@ -42,6 +40,7 @@ export const SelectedLineCard = ({
   completed,
   instrumentKind,
   timeframe,
+  levelChoices,
 }: SelectedLineCardProps) => {
   const id = useId();
   const version = `${line.line_id}|${line.updated_at}`;
@@ -58,18 +57,33 @@ export const SelectedLineCard = ({
   }
   const anchorsEditable = isDraggable(line, timeframe);
   const levels = drawnLevels(line);
-  const choices = [...new Set([...LEVEL_CHOICES, ...levels])].sort((a, b) => a - b);
+  const choices = [...new Set([...levelChoices, ...levels])].sort((a, b) => a - b);
 
   const commitAnchors = (next: AnchorDraft[]) => {
     const anchors = anchorsOf(next);
     if (anchors === null) return;
-    // 보이는 자릿수로 견준다 — 응답 가격의 마지막 자리 꼬리만 다른 것은 고친 것이 아니다
-    const saved = draftsOf(line.anchors, completed, instrumentKind);
-    const changed = next.some(
-      (draft, index) => draft.barDate !== saved[index]?.barDate || draft.price !== saved[index]?.price,
-    );
-    if (changed) drawing.edit(line, { anchors });
+    // 보낼 때의 최신 기준점과 보이는 자릿수로 견준다 — 응답 가격의 마지막 자리 꼬리만 다른 것은 고친 것이
+    // 아니고, 나가기·Enter가 둘 다 와도 한 번만 보낸다
+    void drawing.edit(line, (latest) => {
+      const saved = draftsOf(latest.anchors, completed, instrumentKind);
+      const changed = next.some(
+        (draft, index) => draft.barDate !== saved[index]?.barDate || draft.price !== saved[index]?.price,
+      );
+      return changed ? { anchors } : null;
+    });
   };
+
+  // 메모는 나가기·Enter에서 저장한다. 둘 다 와도(Enter 뒤 나가기) 보낼 때의 최신 메모와 같으면 보내지 않는다.
+  const saveMemo = () =>
+    void drawing.edit(line, (latest) => (latest.memo === memo ? null : { memo }));
+
+  // 레벨 하나 켜고 끄기: 보낼 때의 최신 선에 그려진 레벨에서 그 레벨만 바꾼다(연달아 눌러도 앞 변경이 남는다).
+  const setLevel = (level: number, on: boolean) =>
+    void drawing.edit(line, (latest) => {
+      const current = drawnLevels(latest).filter((value) => value !== level);
+      const next = on ? [...current, level].sort((a, b) => a - b) : current;
+      return next.length === 0 ? null : { levels: next };
+    });
 
   const note = line.source === "auto"
     ? t("chart.card.autoFixed")
@@ -100,9 +114,9 @@ export const SelectedLineCard = ({
           key={index}
           name={anchorName(line.kind, index)}
           value={draft}
-          candles={line.kind === "hline" ? null : completed}
+          candles={completed}
           instrumentKind={instrumentKind}
-          disabled={!anchorsEditable || drawing.editing(line.line_id)}
+          disabled={!anchorsEditable}
           onChange={(next, commit) => {
             const all = drafts.map((item, at) => (at === index ? next : item));
             setDrafts(all);
@@ -119,11 +133,9 @@ export const SelectedLineCard = ({
           type="text"
           value={memo}
           onChange={(event) => setMemo(event.target.value)}
-          onBlur={() => {
-            if (memo !== line.memo) drawing.edit(line, { memo });
-          }}
+          onBlur={saveMemo}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && memo !== line.memo) drawing.edit(line, { memo });
+            if (event.key === "Enter") saveMemo();
           }}
         />
       </div>
@@ -140,13 +152,7 @@ export const SelectedLineCard = ({
                     checked={on}
                     // 마지막 하나는 끌 수 없다 — 빈 레벨 목록은 그릴 선이 없다(서버도 거절한다)
                     disabled={(on && levels.length === 1) || line.issue !== null}
-                    onChange={() =>
-                      drawing.edit(line, {
-                        levels: on
-                          ? levels.filter((value) => value !== level)
-                          : [...levels, level].sort((a, b) => a - b),
-                      })
-                    }
+                    onChange={(event) => setLevel(level, event.target.checked)}
                   />
                   {String(level)}
                 </label>
@@ -162,7 +168,7 @@ export const SelectedLineCard = ({
         <input
           type="checkbox"
           checked={line.extend_right}
-          onChange={() => drawing.edit(line, { extend_right: !line.extend_right })}
+          onChange={(event) => drawing.edit(line, { extend_right: event.target.checked })}
         />
         {t("chart.card.extend")}
       </label>
@@ -170,7 +176,7 @@ export const SelectedLineCard = ({
         <input
           type="checkbox"
           checked={line.locked}
-          onChange={() => drawing.edit(line, { locked: !line.locked })}
+          onChange={(event) => drawing.edit(line, { locked: event.target.checked })}
         />
         {t("chart.card.locked")}
       </label>

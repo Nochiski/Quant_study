@@ -1,9 +1,8 @@
-import type { InstrumentKind, LineKind } from "../../../shared/api";
+import type { InstrumentKind } from "../../../shared/api";
 import { formatPrice } from "../model/chart-price";
+import type { LineTone } from "../model/line-tone";
 import { segmentPath, shadedBands, type LevelSegment } from "../model/line-geometry";
 
-/** 내 선(손으로 그었거나 복사한 선)은 잉크, 저장한 자동 선은 종류 색(점선)이다(설계 문서 2장 색 역할). */
-export type LineTone = "mine" | `auto-${LineKind}`;
 
 type ChartLineShapeProps = {
   segments: readonly LevelSegment[];

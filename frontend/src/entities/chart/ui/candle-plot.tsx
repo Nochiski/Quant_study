@@ -8,6 +8,8 @@ type CandlePlotProps = {
   scale: ChartScale;
   instrumentKind: InstrumentKind;
   height: number;
+  /** 현재가 점선을 그을 봉. 위젯이 한 번 정해 점선·배지·머리에 같은 값을 넘긴다. */
+  current: ChartCandleBody | undefined;
 };
 
 const DATE_TICK_GAP = 64;
@@ -17,7 +19,7 @@ const PRICE_TICK_SPACING = 56;
  * 캔들과 축. 상승(종가 ≥ 시가)은 `--return-up`, 하락은 `--return-down`이고 진행 중 봉(`in_progress`)은 속을
  * 비워 끝나지 않은 봉임을 보인다. 봉은 방향·진행 여부별로 path 하나씩 묶어 그린다(봉 수천 개도 요소 몇 개).
  */
-export const CandlePlot = ({ candles, scale, instrumentKind, height }: CandlePlotProps) => {
+export const CandlePlot = ({ candles, scale, instrumentKind, height, current }: CandlePlotProps) => {
   const { plot } = scale;
   const body = Math.max(1, Math.min(scale.step * 0.6, 14));
   const groups = { up: ["", ""], down: ["", ""], live: ["", ""] };
@@ -40,7 +42,6 @@ export const CandlePlot = ({ candles, scale, instrumentKind, height }: CandlePlo
     scale.priceMax,
     Math.max(2, Math.floor((plot.bottom - plot.top) / PRICE_TICK_SPACING)),
   );
-  const current = candles[scale.last];
   return (
     <g className="chart-plot" aria-hidden="true">
       <rect

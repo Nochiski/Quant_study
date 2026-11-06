@@ -5,6 +5,7 @@
 export {
   CHART_LINE_MUTATION_KEY,
   chartCandlesQuery,
+  chartLineEdit,
   chartInstrumentSearchQuery,
   chartKey,
   chartLinePreviewQuery,
@@ -12,6 +13,7 @@ export {
   useCreateChartLine,
   useDeleteChartLine,
   useUpdateChartLine,
+  type ChartLinePatch,
   type ChartTarget,
 } from "./model/chart-queries";
 export {
@@ -20,6 +22,7 @@ export {
   priceTick,
   roundPrice,
   steppedPrice,
+  type TickedInstrument,
 } from "./model/chart-price";
 export {
   DATE_AXIS_HEIGHT,
@@ -38,6 +41,7 @@ export {
   DEFAULT_PERIOD,
   DEFAULT_TIMEFRAME,
   chartTargetOf,
+  completedCandles,
   displayRange,
   monthsBefore,
   stockChartSearch,
@@ -57,7 +61,8 @@ export { levelSegments, shadedBands, type LevelSegment } from "./model/line-geom
 export { CANDLE_FIELDS, snapToCandle, type CandleField } from "./model/magnet";
 export { AxisBadges, type AxisBadge } from "./ui/axis-badges";
 export { CandlePlot } from "./ui/candle-plot";
-export { ChartLineShape, type LineTone } from "./ui/line-shape";
+export { lineTone, type LineTone } from "./model/line-tone";
+export { ChartLineShape } from "./ui/line-shape";
 export type {
   ChartCandleBody,
   ChartCandlesBody,
@@ -66,7 +71,9 @@ export type {
   ChartLineBody,
   ChartLineEditBody,
   ChartLinePreviewBody,
+  ChartLinesBody,
   ChartPointBody,
+  ChartTickStepBody,
   CreateChartLineBody,
   InstrumentKind,
   LineKind,

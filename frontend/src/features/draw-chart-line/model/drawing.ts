@@ -44,6 +44,8 @@ export type DrawingAction =
   | { type: "toggleMagnet" }
   | { type: "addPoint"; point: ChartPointBody }
   | { type: "cancel" }
+  /** 다른 종목·주기로 넘어갔다 — 찍은 점과 고른 선을 버린다(도구·마그넷은 남긴다). */
+  | { type: "reset" }
   | { type: "select"; lineId: string | null }
   /** 선 하나를 다 그렸다 — 선택 도구로 돌아가 새 선을 고른다(만들기 응답의 id). */
   | { type: "finished"; lineId: string };
@@ -58,6 +60,8 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
       return state.tool === "select" ? state : { ...state, points: [...state.points, action.point] };
     case "cancel":
       return { ...state, points: [] };
+    case "reset":
+      return { ...state, points: [], selectedId: null };
     case "select":
       return { ...state, selectedId: action.lineId };
     case "finished":

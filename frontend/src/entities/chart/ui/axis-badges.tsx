@@ -1,4 +1,5 @@
 import { spreadLabels } from "../model/label-layout";
+import type { LineTone } from "../model/line-tone";
 import type { PlotBox } from "../model/chart-scale";
 
 export type AxisBadge = {
@@ -6,8 +7,8 @@ export type AxisBadge = {
   /** 가리키는 가격의 y. */
   y: number;
   text: string;
-  /** `current` = 현재가(흰 배지), `mine` = 내 선(잉크 배지). */
-  tone: "current" | "mine" | "auto";
+  /** `current` = 현재가(흰 배지), 나머지는 선의 색 역할(`lineTone`) — 내 선은 잉크 배지, 자동 선은 옅은 배지. */
+  tone: "current" | LineTone;
 };
 
 const BADGE_HEIGHT = 18;
@@ -33,7 +34,10 @@ export const AxisBadges = ({ badges: all, plot }: { badges: readonly AxisBadge[]
         const y = placed[index];
         const moved = Math.abs(y - badge.y) > 0.5;
         return (
-          <g key={badge.key} className={`chart-badge chart-badge--${badge.tone}`}>
+          <g
+            key={badge.key}
+            className={`chart-badge chart-badge--${badge.tone === "current" ? "current" : badge.tone === "mine" ? "mine" : "auto"}`}
+          >
             {moved ? (
               <path
                 className="chart-badge__leader"

@@ -23,6 +23,7 @@ const candle = (start: string, end: string, values: Partial<ChartCandleBody> = {
   low: 90,
   close: 105,
   in_progress: false,
+  change_pct: null,
   ...values,
 });
 
@@ -126,8 +127,19 @@ describe("spreadLabels", () => {
   });
 });
 
+// backend domain `_price_tick.py`가 응답(`tick_steps`)으로 보내는 표와 같은 모양의 손 픽스처
+const STOCK_STEPS = [
+  { below: 2_000, tick: 1 },
+  { below: 5_000, tick: 5 },
+  { below: 20_000, tick: 10 },
+  { below: 50_000, tick: 50 },
+  { below: 200_000, tick: 100 },
+  { below: 500_000, tick: 500 },
+  { below: null, tick: 1_000 },
+];
+
 describe("steppedPrice", () => {
-  const stock = { kind: "stock" as const, group: "common" };
+  const stock = { kind: "stock" as const, tick_steps: STOCK_STEPS };
 
   it("moves one tick along the KRX tick grid", () => {
     expect(steppedPrice(stock, 71_500, 1)).toBe(71_600);
@@ -140,11 +152,36 @@ describe("steppedPrice", () => {
     expect(steppedPrice(stock, 1_999, 1)).toBe(2_000);
   });
 
-  it("moves an index by 0.01 and by percent with display rounding", () => {
-    const index = { kind: "index" as const, group: "KOSPI" };
+  it("reads the top band and the fund table from the response", () => {
+    // 50만 원 이상은 1,000원 호가
+    expect(steppedPrice(stock, 512_000, 1)).toBe(513_000);
+    expect(steppedPrice(stock, 500_000, -1)).toBe(499_500);
+    const fund = { kind: "stock" as const, tick_steps: [{ below: 2_000, tick: 1 }, { below: null, tick: 5 }] };
+    expect(steppedPrice(fund, 10_000, 1)).toBe(10_005);
+    expect(steppedPrice(fund, 1_999, 1)).toBe(2_000);
+  });
+
+  it("moves an index by 0.01 and snaps a 1% move onto the tick grid in the moving direction", () => {
+    const index = { kind: "index" as const, tick_steps: [{ below: null, tick: 0.01 }] };
     expect(steppedPrice(index, 2_563.12, 1)).toBe(2_563.13);
     expect(steppedPrice(index, 2_500, 1, 1)).toBe(2_525);
-    expect(steppedPrice(stock, 71_500, -1, 1)).toBe(70_785);
+    // 71,500 × 0.99 = 70,785 → 호가 100원 아래로 맞춰 70,700
+    expect(steppedPrice(stock, 71_500, -1, 1)).toBe(70_700);
+    // 12,345 × 1.01 = 12,468.45 → 호가 10원 위로 12,470
+    expect(steppedPrice(stock, 12_345, 1, 1)).toBe(12_470);
+  });
+
+  it("counts from the displayed price when the saved price sits between ticks", () => {
+    // 마그넷이 붙인 봉 값 2,726.7149는 2,726.71로 보인다 — ↑는 보이는 값에서 한 호가(2,726.72)
+    const index = { kind: "index" as const, tick_steps: [{ below: null, tick: 0.01 }] };
+    expect(steppedPrice(index, 2_726.7149, 1)).toBe(2_726.72);
+    expect(steppedPrice(index, 2_726.7149, -1)).toBe(2_726.7);
+  });
+
+  it("never goes to zero or below", () => {
+    expect(steppedPrice(stock, 1, -1)).toBe(1);
+    expect(steppedPrice(stock, 1, -1, 1)).toBe(1);
+    expect(steppedPrice(stock, 2, -1)).toBe(1);
   });
 });
 

@@ -97,6 +97,7 @@ export {
   type ChartRetracementQuery,
   type ChartWindowBody,
   type ChartWindowSuggestionBody,
+  type ChartTickStepBody,
   type ChartZoneBody,
   type ChartZonesBody,
   type ChartZonesQuery,

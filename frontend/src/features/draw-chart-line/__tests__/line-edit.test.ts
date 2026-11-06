@@ -1,15 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { ChartLineBody } from "../../../entities/chart";
-import { completedAnchors, drawingReducer, INITIAL_DRAWING } from "../model/drawing";
-import {
-  UNDO_LIMIT,
-  chartLineEdit,
-  nudgedAnchors,
-  popUndo,
-  pushUndo,
-  recreateChartLine,
-} from "../model/line-edit";
+import { chartLineEdit, type ChartLineBody } from "../../../entities/chart";
+import { ANCHOR_NAMES } from "../model/anchor-draft";
+import { CLICKS_PER_LINE, completedAnchors, drawingReducer, INITIAL_DRAWING } from "../model/drawing";
+import { UNDO_LIMIT, nudgedAnchors, popUndo, pushUndo, recreateChartLine } from "../model/line-edit";
 
 const line = (id: string, values: Partial<ChartLineBody> = {}): ChartLineBody => ({
   line_id: id,
@@ -70,18 +64,31 @@ describe("undo stack", () => {
 });
 
 describe("nudgedAnchors", () => {
-  const stock = { kind: "stock" as const, group: "common" };
+  const stock = {
+    kind: "stock" as const,
+    tick_steps: [
+      { below: 20_000, tick: 10 },
+      { below: null, tick: 50 },
+    ],
+  };
 
   it("moves a horizontal line by one tick or by 1% with shift", () => {
     expect(nudgedAnchors(line("a"), stock, 1, false)).toEqual([{ bar_date: "2025-03-03", price: 12_350 }]);
-    // 12,345 × 0.99 = 12,221.55 → 원 단위 12,222
-    expect(nudgedAnchors(line("a"), stock, -1, true)).toEqual([{ bar_date: "2025-03-03", price: 12_222 }]);
+    // 12,345 × 0.99 = 12,221.55 → 호가 10원 아래로 12,220
+    expect(nudgedAnchors(line("a"), stock, -1, true)).toEqual([{ bar_date: "2025-03-03", price: 12_220 }]);
   });
 
   it("does not move locked, auto or multi-anchor lines", () => {
     expect(nudgedAnchors(line("a", { locked: true }), stock, 1, false)).toBeNull();
     expect(nudgedAnchors(line("a", { source: "auto" }), stock, 1, false)).toBeNull();
     expect(nudgedAnchors(line("a", { kind: "fib_channel" }), stock, 1, false)).toBeNull();
+  });
+});
+
+describe("anchor names", () => {
+  it("name one row per click of each tool", () => {
+    for (const kind of Object.keys(CLICKS_PER_LINE) as (keyof typeof CLICKS_PER_LINE)[])
+      expect(ANCHOR_NAMES[kind], kind).toHaveLength(CLICKS_PER_LINE[kind]);
   });
 });
 

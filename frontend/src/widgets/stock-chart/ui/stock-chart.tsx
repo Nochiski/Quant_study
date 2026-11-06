@@ -1,5 +1,5 @@
 import { useIsMutating, useQuery } from "@tanstack/react-query";
-import { useId, useRef } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 
 import {
   AxisBadges,
@@ -11,9 +11,11 @@ import {
   chartLinesQuery,
   chartScale,
   chartTargetOf,
+  completedCandles,
   displayRange,
   formatPrice,
   levelSegments,
+  lineTone,
   timeframeLabel,
   visibleRange,
   type AxisBadge,
@@ -55,21 +57,23 @@ const percent = (value: number) => `${Math.abs(value).toFixed(2)}%`;
 const ChartHead = ({
   instrument,
   timeframe,
-  candles,
+  current,
   titleId,
+  titleRef,
 }: {
   instrument: ChartInstrumentBody;
   timeframe: Timeframe;
-  candles: readonly ChartCandleBody[];
+  current: ChartCandleBody | undefined;
   titleId: string;
+  titleRef: RefObject<HTMLHeadingElement | null>;
 }) => {
-  const last = candles[candles.length - 1];
-  const previous = candles[candles.length - 2];
-  const change = last !== undefined && previous !== undefined ? (last.close / previous.close - 1) * 100 : null;
+  const last = current;
+  // 등락률은 캔들 응답 값(직전 봉 종가 대비, application이 계산)을 그대로 보인다
+  const change = last?.change_pct ?? null;
   const price = (value: number) => formatPrice(value, instrument.kind);
   return (
     <div className="stock-chart__head">
-      <h2 id={titleId}>
+      <h2 id={titleId} ref={titleRef} tabIndex={-1}>
         {tFill("chart.head.title", { name: instrument.name, timeframe: timeframeLabel(timeframe) })}
       </h2>
       {last === undefined ? null : (
@@ -94,6 +98,8 @@ type ChartBodyProps = {
   target: ChartTarget;
   search: StockChartSearch;
   timeframe: Timeframe;
+  /** 종목을 고를 때마다 늘어나는 수. 늘면 차트가 그려진 뒤 차트 제목으로 초점을 옮긴다. */
+  focusRequest: number;
 };
 
 /** 오른쪽 축 배지: 현재가와 보이는 선의 마지막 완성 봉 레벨 가격(`end.price`). */
@@ -109,7 +115,7 @@ const axisBadges = (
       key: `${line.line_id}-${index}`,
       y: segment.endY,
       text: formatPrice(segment.endPrice, instrumentKind),
-      tone: line.source === "auto" ? ("auto" as const) : ("mine" as const),
+      tone: lineTone(line),
     })),
   ),
   ...(current === undefined
@@ -124,15 +130,16 @@ const axisBadges = (
       ]),
 ];
 
-const ChartBody = ({ target, search, timeframe }: ChartBodyProps) => {
+const ChartBody = ({ target, search, timeframe, focusRequest }: ChartBodyProps) => {
   const titleId = useId();
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const clipId = useId();
   const box = useRef<HTMLDivElement>(null);
   const width = useElementWidth(box);
   const candlesQuery = useQuery(chartCandlesQuery(target, timeframe));
   const linesQuery = useQuery(chartLinesQuery(target));
   const drawing = useChartDrawing(target, timeframe);
-  const removal = useLineRemoval();
+  const removal = useLineRemoval(target);
 
   const candles = candlesQuery.data?.candles;
   const context = candlesQuery.data?.context;
@@ -151,11 +158,17 @@ const ChartBody = ({ target, search, timeframe }: ChartBodyProps) => {
         })
       : null;
   const lines = linesQuery.data?.lines ?? [];
-  const completed = (candles ?? []).filter((candle) => !candle.in_progress);
-  const visibleCompleted =
-    candles && shown
-      ? candles.slice(shown.first, shown.last + 1).filter((candle) => !candle.in_progress)
-      : [];
+  const completed = completedCandles(candles ?? [], candlesQuery.data?.last_completed ?? null);
+  const visibleCompleted = shown ? completed.slice(shown.first, shown.last + 1) : [];
+  // 현재가 = 계열의 마지막 봉(진행 중이면 그 봉) 종가. 점선·오른쪽 배지·머리가 이 하나를 쓴다.
+  const current = candles?.[candles.length - 1];
+  const ready = candles !== undefined;
+  const handledFocus = useRef(0);
+  useEffect(() => {
+    if (!ready || focusRequest === handledFocus.current) return;
+    handledFocus.current = focusRequest;
+    titleRef.current?.focus();
+  }, [focusRequest, ready]);
 
   if (candlesQuery.isError)
     return (
@@ -180,7 +193,13 @@ const ChartBody = ({ target, search, timeframe }: ChartBodyProps) => {
     <div className="stock-chart__workspace">
       <section className="stock-chart__card" aria-labelledby={titleId}>
         {instrument && candles ? (
-          <ChartHead instrument={instrument} timeframe={timeframe} candles={candles} titleId={titleId} />
+          <ChartHead
+            instrument={instrument}
+            timeframe={timeframe}
+            current={current}
+            titleId={titleId}
+            titleRef={titleRef}
+          />
         ) : (
           <div className="stock-chart__head">
             <h2 id={titleId}>{t("chart.loading")}</h2>
@@ -223,12 +242,19 @@ const ChartBody = ({ target, search, timeframe }: ChartBodyProps) => {
                     />
                   </clipPath>
                 </defs>
-                <CandlePlot candles={candles} scale={scale} instrumentKind={instrument.kind} height={height} />
+                <CandlePlot
+                  candles={candles}
+                  scale={scale}
+                  instrumentKind={instrument.kind}
+                  height={height}
+                  current={current}
+                />
                 <g clipPath={`url(#${clipId})`}>
                   <DrawingSurface
                     drawing={drawing}
                     scale={scale}
                     candles={candles}
+                    completedCount={completed.length}
                     instrumentKind={instrument.kind}
                     timeframe={timeframe}
                     lines={shownLines}
@@ -239,7 +265,7 @@ const ChartBody = ({ target, search, timeframe }: ChartBodyProps) => {
                   badges={axisBadges(
                     shownLines,
                     (line) => levelSegments(line.paths, line.extend_right, scale),
-                    candles[candles.length - 1],
+                    current,
                     scale.yOfPrice,
                     instrument.kind,
                   )}
@@ -283,6 +309,7 @@ const ChartBody = ({ target, search, timeframe }: ChartBodyProps) => {
             timeframe={timeframe}
             completed={completed}
             visible={visibleCompleted}
+            levelChoices={linesQuery.data?.level_choices ?? []}
           />
         ) : null}
       </aside>
@@ -305,16 +332,22 @@ export const StockChart = ({ search, onSearch }: StockChartProps) => {
   const candles = useQuery(chartCandlesQuery(target, timeframe));
   const context = candles.data?.context;
   const range = context ? displayRange(search, context.as_of) : null;
+  // 종목을 고르면 차트가 그려진 뒤 차트 제목으로 초점을 옮긴다(검색 칸에 남아 있지 않게)
+  const [focusRequest, setFocusRequest] = useState(0);
+  const change = (next: StockChartSearch) => {
+    if (next.kind !== search.kind || next.code !== search.code) setFocusRequest((count) => count + 1);
+    onSearch(next);
+  };
   return (
     <div className="stock-chart">
-      <ChartConditions search={search} range={range} onSearch={onSearch} />
+      <ChartConditions search={search} range={range} onSearch={change} />
       {target === null ? (
         <EmptyState
           title={t("chart.page.pickFirst.title")}
           description={t("chart.page.pickFirst.description")}
         />
       ) : (
-        <ChartBody target={target} search={search} timeframe={timeframe} />
+        <ChartBody target={target} search={search} timeframe={timeframe} focusRequest={focusRequest} />
       )}
     </div>
   );

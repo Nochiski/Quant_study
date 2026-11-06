@@ -90,3 +90,17 @@ export const visibleRange = (
   while (last + 1 < candles.length && candles[last + 1].start <= range.end) last += 1;
   return { first, last };
 };
+
+/**
+ * 완성 봉(진행 중 봉을 뺀 앞부분). 어디까지가 완성인지는 응답의 `last_completed`가 정한다 — 기준점·좌표 칸은
+ * 진행 중 봉을 쓸 수 없다(서버도 `chart.line.anchor_in_progress`로 거절한다).
+ */
+export const completedCandles = (
+  candles: readonly ChartCandleBody[],
+  lastCompleted: string | null,
+): readonly ChartCandleBody[] => {
+  if (lastCompleted === null) return [];
+  let count = 0;
+  while (count < candles.length && candles[count].start <= lastCompleted) count += 1;
+  return candles.slice(0, count);
+};

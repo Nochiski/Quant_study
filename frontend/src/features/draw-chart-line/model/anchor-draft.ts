@@ -56,8 +56,9 @@ export const draftsOf = (
   });
 
 /**
- * 새 선 좌표의 처음 값: 보이는 완성 봉을 고르게 나눈 날짜(첫 봉 → 마지막 봉), 종가. 수평선은 날짜 없이 가격만
- * 받으므로 마지막 봉 종가로 채운다(저장 날짜는 `hlineAnchorDate`).
+ * 새 선 좌표의 처음 값: 보이는 완성 봉을 고르게 나눈 날짜(첫 봉 → 마지막 봉)와 그 봉 종가. 기준점은 어느
+ * 도구든 "고른 봉의 날짜와 가격"이다 — 차트를 눌러 그릴 때(누른 봉)와 같은 규칙이고, 수평선은 그 봉부터
+ * 오른쪽으로 그린다. 그래서 수평선의 처음 날짜는 보이는 첫 봉이다.
  */
 export const initialDrafts = (
   kind: LineKind,
@@ -67,9 +68,7 @@ export const initialDrafts = (
   if (visible.length === 0) return [];
   const count = CLICKS_PER_LINE[kind];
   return Array.from({ length: count }, (_, index) => {
-    const position =
-      kind === "hline" ? visible.length - 1 : Math.round((index * (visible.length - 1)) / Math.max(count - 1, 1));
-    const candle = visible[position];
+    const candle = visible[Math.round((index * (visible.length - 1)) / Math.max(count - 1, 1))];
     return {
       barDate: candle.start,
       field: "close" as const,
@@ -87,7 +86,8 @@ export const anchorsOf = (drafts: readonly AnchorDraft[]): ChartPointBody[] | nu
     : null;
 };
 
-const ANCHOR_NAMES: Record<LineKind, readonly MessageKey[]> = {
+// 줄 수는 도구마다 누르는 횟수(`CLICKS_PER_LINE`)와 같다 — 단위 테스트가 길이를 맞춰 본다.
+export const ANCHOR_NAMES: Record<LineKind, readonly MessageKey[]> = {
   hline: ["chart.anchor.hline.0"],
   fib_retracement: ["chart.anchor.fib_retracement.0", "chart.anchor.fib_retracement.1"],
   fib_channel: ["chart.anchor.fib_channel.0", "chart.anchor.fib_channel.1", "chart.anchor.fib_channel.2"],

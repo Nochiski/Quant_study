@@ -12,19 +12,21 @@ import { t, tFill } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import { nudgedAnchors } from "../model/line-edit";
 import type { ChartDrawing } from "../model/use-chart-drawing";
-import type { useLineRemoval } from "../model/use-line-removal";
+import type { LineRemoval } from "../model/use-line-removal";
 import { AddLineForm } from "./add-line-form";
 import { SelectedLineCard } from "./selected-line-card";
 
 type MyLinesPanelProps = {
   drawing: ChartDrawing;
-  removal: ReturnType<typeof useLineRemoval>;
+  removal: LineRemoval;
   instrument: ChartInstrumentBody;
   lines: readonly ChartLineBody[];
   timeframe: Timeframe;
   /** 지금 주기의 완성 봉 전부와 보이는 완성 봉. */
   completed: readonly ChartCandleBody[];
   visible: readonly ChartCandleBody[];
+  /** 레벨 칸 목록(저장 선 목록 응답 `level_choices`). */
+  levelChoices: readonly number[];
 };
 
 /**
@@ -39,6 +41,7 @@ export const MyLinesPanel = ({
   timeframe,
   completed,
   visible,
+  levelChoices,
 }: MyLinesPanelProps) => {
   const id = useId();
   const [adding, setAdding] = useState(false);
@@ -51,24 +54,25 @@ export const MyLinesPanel = ({
   }
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const addButton = useRef<HTMLButtonElement>(null);
-  // 지운 뒤 초점을 둘 이웃 선. 목록이 새로 그려진 뒤 옮긴다.
-  const focusAfterRemoval = useRef<string | null>(null);
+  // 목록이 새로 그려진 뒤 초점을 둘 선: 지운 뒤의 이웃 선, 좌표로 더한 새 선. 빈 글자는 "좌표로 추가" 버튼이다.
+  const focusAfterChange = useRef<string | null>(null);
   useEffect(() => {
-    const target = focusAfterRemoval.current;
+    const target = focusAfterChange.current;
     if (target === null) return;
     const button = target === "" ? null : buttons.current.get(target);
     if (target !== "" && button === undefined) return;
-    focusAfterRemoval.current = null;
+    focusAfterChange.current = null;
     (button ?? addButton.current)?.focus();
   }, [lines]);
 
   const title = (line: ChartLineBody) => lineTitle(line, instrument.kind, timeframe);
   const remove = (line: ChartLineBody) => {
+    // 지우는 요청이 나가 있으면(Delete 연타) 받지 않는다
+    if (!removal.removeLine(line, title(line))) return;
     const index = lines.findIndex((item) => item.line_id === line.line_id);
     const neighbour = lines[index + 1] ?? lines[index - 1];
-    focusAfterRemoval.current = neighbour?.line_id ?? "";
+    focusAfterChange.current = neighbour?.line_id ?? "";
     if (drawing.state.selectedId === line.line_id) drawing.dispatch({ type: "select", lineId: null });
-    removal.removeLine(line, title(line));
   };
 
   const onNameKey = (event: KeyboardEvent<HTMLButtonElement>, line: ChartLineBody) => {
@@ -79,9 +83,13 @@ export const MyLinesPanel = ({
     }
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     event.preventDefault();
-    if (drawing.editing(line.line_id)) return;
-    const anchors = nudgedAnchors(line, instrument, event.key === "ArrowUp" ? 1 : -1, event.shiftKey);
-    if (anchors !== null) drawing.edit(line, { anchors });
+    const direction = event.key === "ArrowUp" ? 1 : -1;
+    const large = event.shiftKey;
+    // 연달아 누르면 요청이 차례대로 가고, 각 이동은 앞 이동이 저장된 가격에서 센다
+    void drawing.edit(line, (latest) => {
+      const anchors = nudgedAnchors(latest, instrument, direction, large);
+      return anchors === null ? null : { anchors };
+    });
   };
 
   const selected = lines.find((line) => line.line_id === drawing.state.selectedId) ?? null;
@@ -105,7 +113,10 @@ export const MyLinesPanel = ({
           completed={completed}
           visible={visible}
           instrumentKind={instrument.kind}
-          onDone={() => setAdding(false)}
+          onAdded={(line) => {
+            setAdding(false);
+            focusAfterChange.current = line.line_id;
+          }}
         />
       ) : null}
       {lines.length === 0 ? (
@@ -120,7 +131,7 @@ export const MyLinesPanel = ({
                   type="checkbox"
                   checked={line.visible}
                   aria-label={tFill("chart.mine.show", { title: name })}
-                  onChange={() => drawing.edit(line, { visible: !line.visible })}
+                  onChange={(event) => drawing.edit(line, { visible: event.target.checked })}
                 />
                 <button
                   type="button"
@@ -174,6 +185,7 @@ export const MyLinesPanel = ({
           completed={completed}
           instrumentKind={instrument.kind}
           timeframe={timeframe}
+          levelChoices={levelChoices}
         />
       )}
     </section>

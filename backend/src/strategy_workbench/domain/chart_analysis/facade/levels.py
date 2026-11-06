@@ -2,7 +2,6 @@ from strategy_workbench.domain.chart_analysis._channel import (
     AnchorIssue,
     ChannelCandidate,
     ChannelSearch,
-    ChosenBy,
     TrendDirection,
     find_channels,
 )
@@ -21,7 +20,6 @@ __all__ = [
     "AnchorIssue",
     "ChannelCandidate",
     "ChannelSearch",
-    "ChosenBy",
     "HorizontalZone",
     "SwingChoice",
     "TrendDirection",

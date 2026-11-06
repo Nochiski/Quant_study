@@ -13,6 +13,7 @@ from strategy_workbench.domain.chart_analysis.facade.geometry import (
     Anchor,
     ChannelGeometry,
     RetracementGeometry,
+    TrendLine,
 )
 from strategy_workbench.domain.chart_analysis.facade.levels import (
     AnchorIssue,
@@ -36,14 +37,14 @@ H, L = PivotKind.HIGH, PivotKind.LOW
 
 def test_channel_geometry_levels_from_three_anchors_up_and_down() -> None:
     # 기준선 기울기 1, 봉 5의 기준선 값 105. 폭 기준점이 위(112)면 d = −7, 아래(98)면 d = 7
-    up = ChannelGeometry(Anchor(0, 100), Anchor(10, 110), Anchor(5, 112))
-    down = ChannelGeometry(Anchor(0, 110), Anchor(10, 100), Anchor(5, 98))
+    up = ChannelGeometry(TrendLine(Anchor(0, 100), Anchor(10, 110)), Anchor(5, 112))
+    down = ChannelGeometry(TrendLine(Anchor(0, 110), Anchor(10, 100)), Anchor(5, 98))
 
-    assert (up.slope, up.depth) == (1.0, -7.0)
+    assert (up.line.slope, up.line.at(5), up.depth) == (1.0, 105.0, -7.0)
     assert [up.price_at(5, 1.0), up.price_at(10, 0.5), up.price_at(0, 0.0)] == [112, 113.5, 100]
     assert (down.depth, down.price_at(5, 1.0), down.price_at(10, 0.5)) == (7.0, 98.0, 96.5)
     with pytest.raises(ValueError):
-        ChannelGeometry(Anchor(10, 110), Anchor(0, 100), Anchor(5, 112))
+        TrendLine(Anchor(10, 110), Anchor(0, 100))
 
 
 def test_retracement_levels_run_from_later_point_zero_to_earlier_point_one() -> None:
@@ -87,7 +88,7 @@ def test_up_channel_candidates_rank_by_outside_ratio_then_width_with_short_last(
     assert summary == [(2, 12, 17, 1, 29), (2, 22, 17, 2, 29), (12, 22, 17, 1, 19)]
     ab, ac, bc = found.candidates
     assert [c.width_atr for c in found.candidates] == pytest.approx([4.5, 4.425, 4.45])
-    assert (ab.geometry.slope, ab.geometry.depth, ab.created_index) == (0.5, -4.5, 19)
+    assert (ab.geometry.line.slope, ab.geometry.depth, ab.created_index) == (0.5, -4.5, 19)
     assert (ac.created_index, bc.created_index) == (24, 24)
     # C_r(t) = L(t) − r·d: 레벨 1은 폭 기준점(봉 17 고점 112)을 지난다
     assert ab.geometry.price_at(17, 1.0) == pytest.approx(112)

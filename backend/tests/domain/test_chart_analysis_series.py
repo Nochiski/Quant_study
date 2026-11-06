@@ -9,6 +9,7 @@ from datetime import date
 import numpy as np
 import pytest
 
+from strategy_workbench.domain.chart_analysis._regime import _verdict
 from strategy_workbench.domain.chart_analysis._series import _find_pivots
 from strategy_workbench.domain.chart_analysis.facade.bars import Candle
 from strategy_workbench.domain.chart_analysis.facade.levels import (
@@ -212,6 +213,36 @@ def test_structure_classification(
     )
 
     assert judge_regime(series, Window(0, 19)).structure is expected
+
+
+def test_structure_includes_pivot_confirmed_exactly_on_window_end() -> None:
+    # 고점 13은 봉 19에 확정된다: 끝 19에서는 구조에 들고, 끝 18에서는 아직 모른다
+    major = [_p(H, 1, 10), _p(L, 4, 8), _p(H, 7, 11), _p(L, 10, 9), Pivot(H, 13, 12, 19)]
+    series = series_with([100.0, 101.0] * 10, [1.0] * 20, major=major)
+
+    assert [p.index for p in judge_regime(series, Window(0, 19)).structure_highs] == [7, 13]
+    assert [p.index for p in judge_regime(series, Window(0, 18)).structure_highs] == [1, 7]
+
+
+@pytest.mark.parametrize(
+    ("strength", "structure", "expected"),
+    [
+        (math.nextafter(1.0, 0.0), Structure.UP, (RegimeVerdict.BOX, None)),
+        (1.0, Structure.UP, (RegimeVerdict.HOLD, RegimeReason.WEAK_STRENGTH)),  # |S| = 1은 보류
+        (-1.0, Structure.DOWN, (RegimeVerdict.HOLD, RegimeReason.WEAK_STRENGTH)),
+        (math.nextafter(2.0, 0.0), Structure.UP, (RegimeVerdict.HOLD, RegimeReason.WEAK_STRENGTH)),
+        (2.0, Structure.UP, (RegimeVerdict.UP, None)),  # |S| = 2는 추세
+        (-2.0, Structure.DOWN, (RegimeVerdict.DOWN, None)),
+        (2.0, Structure.DOWN, (RegimeVerdict.HOLD, RegimeReason.STRUCTURE_MISMATCH)),
+    ],
+)
+def test_strength_thresholds_are_lower_inclusive(
+    strength: float,
+    structure: Structure,
+    expected: tuple[RegimeVerdict, RegimeReason | None],
+) -> None:
+    # 실수 S를 정확히 1·2로 만드는 봉은 만들 수 없어 판정 식만 따로 본다
+    assert _verdict(strength, 0.1, structure) == expected
 
 
 # 끝 봉만 저가를 4 낮춰 TR 12 → ATR_끝 = (8·13 + 12)/14. 나머지 봉은 TR = ATR = 8

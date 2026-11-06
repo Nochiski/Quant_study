@@ -112,44 +112,47 @@ def _structure(highs: tuple[Pivot, ...], lows: tuple[Pivot, ...]) -> Structure:
     return Structure.MIXED
 
 
+def _measure(series: ChartSeries, window: Window) -> tuple[float, float] | RegimeReason:
+    """(S, B), 또는 판정 불가 사유. S = ln(C_끝/C_시작) / (s_r·√m), B = 고저폭 / (ATR_끝·√N)."""
+    if window.bars < MIN_REGIME_BARS:
+        return RegimeReason.TOO_FEW_BARS
+    sl = slice(window.start, window.end + 1)
+    close = series.close[sl]
+    spread = float(np.std(np.diff(np.log(close)), ddof=1))
+    atr_end = float(series.atr[window.end])
+    if spread == 0 or atr_end == 0:
+        return RegimeReason.DEGENERATE
+    strength = float(np.log(close[-1] / close[0])) / (spread * math.sqrt(window.bars - 1))
+    box = float((series.high[sl].max() - series.low[sl].min()) / (atr_end * math.sqrt(window.bars)))
+    return strength, box
+
+
+def _verdict(
+    strength: float, box: float, structure: Structure
+) -> tuple[RegimeVerdict, RegimeReason | None]:
+    if abs(strength) < FLAT_STRENGTH:
+        return (RegimeVerdict.BOX if box <= BOX_RATIO_MAX else RegimeVerdict.UNCLEAR), None
+    if abs(strength) < TREND_STRENGTH:
+        return RegimeVerdict.HOLD, RegimeReason.WEAK_STRENGTH
+    if structure is (Structure.UP if strength > 0 else Structure.DOWN):
+        return (RegimeVerdict.UP if strength > 0 else RegimeVerdict.DOWN), None
+    return RegimeVerdict.HOLD, RegimeReason.STRUCTURE_MISMATCH
+
+
 def judge_regime(series: ChartSeries, window: Window) -> RegimeJudgement:
     """판정 구간 `window`의 국면을 봉 `window.end`까지의 정보로 판정한다."""
     major = series.confirmed_in(window, major=True)
     highs = tuple(p for p in major if p.kind is PivotKind.HIGH)[-2:]
     lows = tuple(p for p in major if p.kind is PivotKind.LOW)[-2:]
     structure = _structure(highs, lows)
+    measured = _measure(series, window)
+    if isinstance(measured, RegimeReason):
+        verdict, reason, strength, box = RegimeVerdict.UNDECIDABLE, measured, None, None
+    else:
+        strength, box = measured
+        verdict, reason = _verdict(strength, box, structure)
     r = series.params.confirm_bars
     extremes = [p.index for p in series.pivots if p.confirmed_index <= window.end]
-    verdict = RegimeVerdict.UNDECIDABLE
-    reason: RegimeReason | None = None
-    strength: float | None = None
-    box: float | None = None
-    sl = slice(window.start, window.end + 1)
-    close = series.close[sl]
-    atr_end = float(series.atr[window.end])
-    spread = 0.0
-    if window.bars >= MIN_REGIME_BARS:
-        spread = float(np.std(np.diff(np.log(close)), ddof=1))
-    if window.bars < MIN_REGIME_BARS:
-        reason = RegimeReason.TOO_FEW_BARS
-    elif spread == 0 or atr_end == 0:
-        reason = RegimeReason.DEGENERATE
-    else:
-        # S = ln(C_끝/C_시작) / (s_r·√m): 평균 로그수익률의 t값과 같은 식
-        strength = float(np.log(close[-1] / close[0])) / (spread * math.sqrt(window.bars - 1))
-        box = float(
-            (series.high[sl].max() - series.low[sl].min()) / (atr_end * math.sqrt(window.bars))
-        )
-        if abs(strength) < FLAT_STRENGTH:
-            verdict = RegimeVerdict.BOX if box <= BOX_RATIO_MAX else RegimeVerdict.UNCLEAR
-        elif abs(strength) < TREND_STRENGTH:
-            verdict, reason = RegimeVerdict.HOLD, RegimeReason.WEAK_STRENGTH
-        else:
-            direction = Structure.UP if strength > 0 else Structure.DOWN
-            if structure is direction:
-                verdict = RegimeVerdict.UP if strength > 0 else RegimeVerdict.DOWN
-            else:
-                verdict, reason = RegimeVerdict.HOLD, RegimeReason.STRUCTURE_MISMATCH
     return RegimeJudgement(
         window=window,
         verdict=verdict,

@@ -25,17 +25,11 @@ def _require_order(first: Anchor, second: Anchor) -> None:
 
 
 @dataclass(frozen=True)
-class ChannelGeometry:
-    """기준선 `L(t) = p_a + m(t − i_a)`(a = `first`, b = `second`), 폭 `d = L(i_w) − p_w`
-    (w = `width`), 레벨 r의 가격 `C_r(t) = L(t) − r·d`.
-
-    `d`는 상승 채널(w가 기준선 위)에서 음수라 r이 클수록 위로 간다. w가 기준선 위에 놓이면 d =
-    0이라 모든 레벨이 기준선이다.
-    """
+class TrendLine:
+    """두 기준점을 지나는 기준선 `L(t) = p_a + m(t − i_a)`(a = `first`, b = `second`)."""
 
     first: Anchor
     second: Anchor
-    width: Anchor
 
     def __post_init__(self) -> None:
         _require_order(self.first, self.second)
@@ -44,15 +38,28 @@ class ChannelGeometry:
     def slope(self) -> float:
         return (self.second.price - self.first.price) / (self.second.index - self.first.index)
 
-    @property
-    def depth(self) -> float:
-        return self._baseline(self.width.index) - self.width.price
-
-    def _baseline(self, index: int) -> float:
+    def at(self, index: int) -> float:
         return self.first.price + self.slope * (index - self.first.index)
 
+
+@dataclass(frozen=True)
+class ChannelGeometry:
+    """기준선 `line`과 폭 기준점 w(`width`)로 정한 채널. 폭 `d = L(i_w) − p_w`, 레벨 r의 가격
+    `C_r(t) = L(t) − r·d`.
+
+    `d`는 상승 채널(w가 기준선보다 높음)에서 음수라 r이 클수록 위로 간다. w가 기준선 상의 점이면
+    d = 0이라 모든 레벨이 기준선이다.
+    """
+
+    line: TrendLine
+    width: Anchor
+
+    @property
+    def depth(self) -> float:
+        return self.line.at(self.width.index) - self.width.price
+
     def price_at(self, index: int, level: float) -> float:
-        return self._baseline(index) - level * self.depth
+        return self.line.at(index) - level * self.depth
 
 
 @dataclass(frozen=True)

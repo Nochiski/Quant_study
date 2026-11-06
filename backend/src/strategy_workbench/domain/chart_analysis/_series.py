@@ -64,16 +64,6 @@ class Pivot:
         return Anchor(self.index, self.price)
 
 
-class WindowSource(Enum):
-    """판정 구간의 출처.
-
-    자동 제안 길이 그대로면 preset, 사용자가 테두리를 끌거나 날짜를 고치면 user다.
-    """
-
-    PRESET = "preset"
-    USER = "user"
-
-
 @dataclass(frozen=True)
 class Window:
     """완성 봉 index의 닫힌 구간 [start, end]. `end`는 기준 봉(보통 계열의 마지막 완성 봉)이다."""
@@ -122,6 +112,9 @@ class ChartSeries:
         """`day`가 든 완성 봉 index. 봉 사이 휴장일·주 중간 날짜는 그 앞 봉(그 기간의 봉)이다.
 
         첫 봉 시작 전이거나 마지막 완성 봉의 끝 거래일 뒤(진행 중 봉 기간·미래 포함)면 None이다.
+        계열은 주기를 모르므로 마지막 완성 봉만은 끝 거래일까지다 — 정지로 수요일에 끝난 마지막
+        주봉의 목·금은 None이다. 저장 날짜는 늘 `Candle.start`라 저장된 기준점 해석에는 영향이
+        없다.
         """
         i = bisect_right(self.candles, day, key=lambda c: c.start) - 1
         if i < 0 or (i == len(self.candles) - 1 and day > self.candles[i].end):

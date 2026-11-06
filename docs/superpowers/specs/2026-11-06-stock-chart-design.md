@@ -135,7 +135,7 @@
 - 방향 d∈{up, down}(판정 추천 또는 사용자가 직접 고름 — `chosen_by`: 추천을 따랐으면 `recommendation`, 바꿨으면
   `user_override`, domain `ChosenBy`). 기준선 = 같은 방향 확정 피벗 2개 (up: 높아지는 저점, down: 낮아지는 고점)
   `L(t) = p_a + m(t − i_a)`.
-- 기하의 owner는 `ChannelGeometry`(기준점 a·b·w → `price_at(index, level)`)다. 자동 후보와 수동으로 그은 채널이 같은 것을
+- 기하의 owner는 `ChannelGeometry`(기준선 `TrendLine(a, b)` + 폭 기준점 w → `price_at(index, level)`)다. 자동 후보와 수동으로 그은 채널이 같은 것을
   쓰고, 순위의 채널 밖 종가도 이 `price_at`의 레벨 0과 1 사이로 센다.
 - 버림: 두 점 사이 가격 변화 `|m|·(i_b − i_a) < ATR_r`(사실상 수평), 뒤의 같은 쪽 확정 피벗이 기준선 너머로 0.25·ATR_r
   넘게 나감. "뒤"는 a 이후 전부(a와 b 사이 포함)다. ATR_r는 구간 끝 ATR이다.
@@ -170,13 +170,17 @@
 
 ### 4.6 중첩(컨플루언스)
 - 입력: **보이는** 선만(내 선 + 자동 후보). 각 선은 종류(kind: 수평·되돌림·채널)와 가격 구간 [lo, hi](채널은 기준 봉
-  레벨 가격, 되돌림은 레벨 가격). 되돌림 레벨 0·1(스윙 기준점 자체)은 넣지 않는다(그래서 되돌림 구간은 레벨 값이 필수다).
-  중첩·"이번 주 레벨" 같은 현재 레벨의 **기준 봉 = 선을 만든 주기 계열의 마지막 완성 봉**이다.
-- 각 선을 ±tol(`DEFAULT_CONFLUENCE_TOLERANCE` = 0.5%) 넓힌다. 종류마다 합집합을 만든 뒤 가격축을 경계점으로 쪼개, **서로 다른 종류 2개 이상이 덮는
+  레벨 가격, 되돌림은 레벨 가격). 중첩·"이번 주 레벨" 같은 현재 레벨의 **기준 봉 = 선을 만든 주기 계열의 마지막 완성
+  봉**이다.
+- 선 → 가격 구간 조립의 owner는 `bands_of(계열, 선, ref, levels)`다(선 = 채널·되돌림 기하, 수평선 가격, 수평 구간). 이
+  함수가 두 규칙을 소유한다: 레벨 가격이 0 이하인 레벨(가파른 하락 채널의 아래 레벨 등)은 넣지 않고, 되돌림 레벨
+  0·1(스윙 기준점 자체)도 넣지 않는다.
+- 각 선을 ±tol(`DEFAULT_CONFLUENCE_TOLERANCE` = 0.5%) 넓힌다. tol은 0보다 커야 한다 — 0이면 레벨 선(점 구간)끼리는
+  길이 0으로만 겹쳐 조용히 빠지므로 거절한다. 종류마다 합집합을 만든 뒤 가격축을 경계점으로 쪼개, **서로 다른 종류 2개 이상이 덮는
   구간**을 찾고 이어진 구간을 하나의 중첩으로 합친다. 구성 = 그 구간과 겹치는 선.
 - 같은 종류(자동 수평 구간과 내 수평선)는 1종. 결과에는 "독립 증거가 아니다" 주의를 붙인다.
 - 넓히기는 비율이다: `[lo·(1 − tol), hi·(1 + tol)]`. 한 점에서만 닿는 조각은 길이가 0이라 중첩이 아니다. 구성은 넓힌 구간이
-  중첩 구간과 양의 길이로 겹치는 선이고, 결과는 낮은 가격부터다. 되돌림 레벨 0·1 빼기는 domain이 선의 레벨 값으로 한다.
+  중첩 구간과 양의 길이로 겹치는 선이고, 결과는 낮은 가격부터다.
 
 ### 4.7 저장 구조 (RSI·국면 분류 연계용)
 선 하나 = `kind(hline|fib_retracement|fib_channel) · timeframe(day|week|month) · source(manual|auto|auto_copied) ·
@@ -184,11 +188,18 @@ anchors[(bar_date, price)] · levels · extend_right · memo · locked`, 자동�
 regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_override) · window_source(preset|user)`.
 레벨 가격·중첩 같은 파생값은 저장하지 않는다(기준점에서 다시 계산).
 
+- `kind`·`window_source`·`chosen_by` 어휘와 `algorithm@version` 값의 owner는 domain `_line_record`(facade
+  `line_record`)다. `algorithm@version`에는 `ALGORITHM_VERSION`(지금 `chart_analysis@1`)을 그대로 저장하고, 판정 규칙·B\*·
+  피벗·채널·수평 구간·중첩 규칙(기본 파라미터 포함)을 바꾸면 올린다. `test_chart_analysis_version.py`가 규칙 상수를 이
+  값과 함께 고정해, 상수를 바꾸고 버전을 그대로 두면 깨진다.
+
 **좌표 계약**
 - 선은 만든 주기(`timeframe`)를 저장하고, 기하(채널 기울기·레벨 가격·되돌림)는 **그 주기 계열의 완성 봉 index**에서
   계산한다. 저장 날짜 `bar_date` = 그 주기 봉의 시작일(`Candle.start`, `ChartSeries.bar_date(i)`)이다.
 - 저장 날짜 → index는 `ChartSeries.index_of(day)`: 그 날짜가 든 완성 봉(봉 사이 휴장일·주 중간 날짜는 그 기간의 봉),
-  첫 봉 전이거나 마지막 완성 봉의 끝 거래일 뒤(진행 중 봉 기간·미래 포함)면 None.
+  첫 봉 전이거나 마지막 완성 봉의 끝 거래일 뒤(진행 중 봉 기간·미래 포함)면 None. 계열은 주기를 모르므로 마지막 완성
+  봉만은 끝 거래일까지다 — 정지로 수요일에 끝난 마지막 주봉의 목·금은 None이다(저장 날짜는 늘 `Candle.start`라 저장된
+  기준점 해석에는 영향이 없고, 좌표 입력 칸에서만 그 날짜를 고르지 못한다).
 - 다른 주기 화면에 그릴 때는 기준점 날짜를 그 주기의 봉으로 옮겨 다시 계산하지 않는다. 화면은 원래 주기 계열로 계산한
   가격을 원래 주기 봉의 날짜에 놓고 날짜 축 위에서 잇는다(그래서 주기를 바꿔도 같은 선이다).
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from strategy_workbench.domain.chart_analysis._geometry import ChannelGeometry
+from strategy_workbench.domain.chart_analysis._geometry import ChannelGeometry, TrendLine
 from strategy_workbench.domain.chart_analysis._series import ChartSeries, Pivot, PivotKind, Window
 
 # 뒤의 같은 쪽 확정 피벗이 기준선 너머로 이만큼(× 구간 끝 ATR) 넘게 나가면 버린다.
@@ -21,13 +21,6 @@ MIN_CHANNEL_BARS = 20
 class TrendDirection(Enum):
     UP = "up"
     DOWN = "down"
-
-
-class ChosenBy(Enum):
-    """채널 방향을 누가 정했나: 국면 판정 추천을 따랐으면 recommendation, 바꿨으면 user_override."""
-
-    RECOMMENDATION = "recommendation"
-    USER_OVERRIDE = "user_override"
 
 
 class AnchorIssue(Enum):
@@ -88,10 +81,9 @@ def find_channels(
             rise = b.price - a.price
             if sign * rise <= 0 or abs(rise) < atr_end:
                 continue
-            # 폭 기준점을 a로 두면 d = 0이라 레벨 0 가격이 곧 기준선이다
-            line = ChannelGeometry(a.anchor, b.anchor, a.anchor)
+            line = TrendLine(a.anchor, b.anchor)
             if any(
-                sign * (line.price_at(q.index, 0.0) - q.price) > OVERSHOOT_ATR * atr_end
+                sign * (line.at(q.index) - q.price) > OVERSHOOT_ATR * atr_end
                 for q in base
                 if q.index >= a.index
             ):
@@ -99,12 +91,12 @@ def find_channels(
             far = [
                 (gap, q)
                 for q in opposite
-                if q.index > a.index and (gap := sign * (q.price - line.price_at(q.index, 0.0))) > 0
+                if q.index > a.index and (gap := sign * (q.price - line.at(q.index))) > 0
             ]
             if not far:
                 continue
             gap, w = max(far, key=lambda item: item[0])
-            geometry = ChannelGeometry(a.anchor, b.anchor, w.anchor)
+            geometry = ChannelGeometry(line, w.anchor)
             outside = 0
             for t in range(a.index, window.end + 1):
                 edges = (geometry.price_at(t, 0.0), geometry.price_at(t, 1.0))

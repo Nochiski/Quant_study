@@ -69,10 +69,12 @@ def test_start_or_closing_auction_notices_mean_open(tmp_path: Path, hhmm: str, c
     assert _phase(tmp_path, _row(hhmm, code), hhmm) is MarketPhase.OPEN
 
 
-@pytest.mark.parametrize("code", ["4", "8"])
-def test_close_notices_mean_the_regular_session_ended(tmp_path: Path, code: str) -> None:
-    rows = _row("10:00", "3") + _row("16:20", "2") + _row("16:30", code)
-    assert _phase(tmp_path, rows, "16:31") is MarketPhase.CLOSED
+def test_only_the_regular_close_notice_means_the_session_ended(tmp_path: Path) -> None:
+    # 2026-11-06 실측: 4 장마감은 15:30:00 정각, 8 정규장마감은 15:32:50. 종가 단일가는 랜덤 엔드로
+    # 4 뒤 최대 30초까지 이어질 수 있어 4만으로는 종가가 정해졌다고 보지 않는다
+    rows = _row("10:00", "3") + _row("16:20", "2") + _row("16:30", "4")
+    assert _phase(tmp_path, rows, "16:30") is MarketPhase.OPEN
+    assert _phase(tmp_path, rows + _row("16:32", "8"), "16:33") is MarketPhase.CLOSED
 
 
 @pytest.mark.parametrize("code", ["a", "b", "g", "h", "9"])

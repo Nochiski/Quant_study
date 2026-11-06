@@ -9,8 +9,8 @@
   (호출자가 실패로 드러낸다, 2026-10-22 리뷰 #605).
 - 같은 웹소켓에서 장운영(`0s`)도 받아 항목마다 장운영 기록 파일에 따로 남긴다. 수능일·새해 첫 거래일
   처럼 장 시각이 바뀌는 날을 예약 실행이 알아차리는 근거다(2026-11-05 사용자 결정, 읽기는
-  `_session.py`). 정규장이 끝났다는 신호를 받으면 `after_close` 뒤 그날 기록을 끝낸다 — `until`은
-  끝 상한이다.
+  `_session.py`). 4 장마감·8 정규장마감 가운데 먼저 온 것에서 `after_close` 뒤 그날 기록을 끝낸다
+  (종가 단일가 체결 알림까지 받는다). `until`은 끝 상한이다.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import websockets
 
 from strategy_workbench.adapters.outbound.kiwoom_mock._http import MOCK_WEBSOCKET_URL
 from strategy_workbench.adapters.outbound.kiwoom_mock._session import (
-    CLOSED,
+    SESSION_END,
     SESSION_TYPE,
     phase_code,
 )
@@ -126,7 +126,7 @@ async def record_fills(
                             fills.append(entry)
                             continue
                         _write(sessions, now(), SESSION_TYPE, entry)
-                        if phase_code(entry) in CLOSED:
+                        if phase_code(entry) in SESSION_END:
                             stop = min(stop, now() + after_close)
                     if not fills:
                         continue

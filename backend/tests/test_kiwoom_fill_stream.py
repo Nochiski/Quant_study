@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 import websockets
 
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import KiwoomNoResponseError
@@ -167,17 +168,19 @@ def _session(code: str) -> dict[str, object]:
     return {"type": "0s", "name": "장시작시간", "item": "", "values": {"215": code, "20": "163000"}}
 
 
+@pytest.mark.parametrize("code", ["4", "8"])
 def test_session_notices_go_to_their_own_file_and_the_day_ends_after_the_regular_close(
-    tmp_path: Path,
+    tmp_path: Path, code: str
 ) -> None:
     # 2026-11-05 사용자 결정: 장 시각이 바뀌는 날(수능일 마감 16:30)을 알아차리려고 장운영(0s)을
-    # 같은 웹소켓에서 받는다. 체결 기록·건수는 그대로이고, 정규장 마감 신호 5분 뒤 스스로 끝난다.
+    # 같은 웹소켓에서 받는다. 체결 기록·건수는 그대로이고, 4 장마감·8 정규장마감 가운데 먼저 온
+    # 것에서 5분 뒤 스스로 끝난다(8을 놓쳐도 끝나야 close 가 잰다).
     clock = Clock()
     login = json.dumps({"trnm": "LOGIN", "return_code": 0})
     mixed = json.dumps(
         {"trnm": "REAL", "data": [_session("3"), {"type": "00", "values": {"911": "1"}}]}
     )
-    closed = json.dumps({"trnm": "REAL", "data": [_session("8")]})
+    closed = json.dumps({"trnm": "REAL", "data": [_session(code)]})
     pings = ['{"trnm": "PING"}'] * 20
     connection = FakeConnection(clock, deque([login, mixed, _fill(2), closed, *pings]))
 
@@ -192,7 +195,7 @@ def test_session_notices_go_to_their_own_file_and_the_day_ends_after_the_regular
     )
     assert result.received == 2
     entries = [json.loads(line) for line in sessions.read_text().splitlines()]
-    assert [entry["msg"]["values"]["215"] for entry in entries] == ["3", "8"]
+    assert [entry["msg"]["values"]["215"] for entry in entries] == ["3", code]
     fills = [json.loads(line) for line in out.read_text().splitlines()]
     assert all(entry["type"] == "00" for line in fills[1:] for entry in line["msg"]["data"])
     # 마감 신호(09:04)에서 5분 — 알림 1분 간격이라 핑 5개를 받고 끝난다(11시간 상한까지 가지 않는다)

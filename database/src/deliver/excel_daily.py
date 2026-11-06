@@ -1812,7 +1812,21 @@ def daily_path(out_root: Path, d: str, basis: str) -> Path:
     return Path(out_root) / "daily" / f"model_scores_{ymd(d)}_{basis}.xlsx"
 
 
+# 사용자에게 가는 엑셀 글은 하이픈만 쓴다(10-27 사용자 규칙) — 원고마다 고치지 않고 저장 직전 한 곳에서
+# 엠 대시 · 엔 대시를 바꾼다. 숫자 마이너스 기호 '−'(U+2212)는 규칙 밖이라 그대로 둔다.
+_DASH_TO_HYPHEN = str.maketrans({"—": "-", "–": "-"})
+
+
 def save_atomic(wb: Workbook, path: Path) -> None:
+    for ws in wb.worksheets:
+        # 이미 있는 칸만 돈다 — iter_rows 는 범위 안 빈 칸을 모두 만들어 파일에 쓴다(2칸 시트가 13,000칸)
+        for c in ws._cells.values():
+            if isinstance(c.value, str) and (s := c.value.translate(_DASH_TO_HYPHEN)) != c.value:
+                kind = c.data_type                 # '=' 로 시작하는 글이 수식으로 바뀌지 않게(`qpack.put`)
+                c.value = s
+                c.data_type = kind
+            if c.comment is not None:
+                c.comment.text = c.comment.text.translate(_DASH_TO_HYPHEN)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp")
     wb.save(tmp)

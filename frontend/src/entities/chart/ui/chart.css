@@ -1,0 +1,185 @@
+/* 개별종목차트 SVG. 색은 의미 토큰만 쓴다 — 상승 빨강/하락 파랑은 캔들 전용, 내 선은 잉크(--text). */
+.chart-plot__future {
+  fill: var(--surface-raised);
+}
+
+.chart-plot__grid {
+  fill: none;
+  stroke: var(--surface-subtle);
+  stroke-width: 1;
+}
+
+.chart-plot__axis {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.chart-plot__tick {
+  fill: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-plot__tick--date {
+  text-anchor: middle;
+}
+
+.chart-plot__wick {
+  fill: none;
+  stroke-width: 1;
+}
+
+.chart-plot__wick--up {
+  stroke: var(--return-up);
+}
+
+.chart-plot__wick--down {
+  stroke: var(--return-down);
+}
+
+.chart-plot__body--up {
+  fill: var(--return-up);
+}
+
+.chart-plot__body--down {
+  fill: var(--return-down);
+}
+
+/* 진행 중 봉: 속을 비우고 테두리만 — 끝나지 않은 봉이라 판정에 쓰지 않는다. */
+.chart-plot__body--live {
+  fill: var(--surface-panel);
+  stroke-width: 1.2;
+  stroke-dasharray: 2 2;
+}
+
+.chart-plot__body--live-up {
+  stroke: var(--return-up);
+}
+
+.chart-plot__body--live-down {
+  stroke: var(--return-down);
+}
+
+.chart-plot__current {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.2;
+  stroke-dasharray: 2 3;
+}
+
+/* 오른쪽 축 배지 */
+.chart-badge__leader {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+
+.chart-badge__text {
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-badge--current .chart-badge__box {
+  fill: var(--surface-panel);
+  stroke: var(--text-muted);
+  stroke-width: 1.2;
+}
+
+.chart-badge--current .chart-badge__text {
+  fill: var(--text);
+}
+
+.chart-badge--mine .chart-badge__box {
+  fill: var(--text);
+}
+
+.chart-badge--mine .chart-badge__text {
+  fill: var(--surface-panel);
+}
+
+.chart-badge--auto .chart-badge__box {
+  fill: var(--surface-panel);
+  stroke: var(--text-muted);
+}
+
+.chart-badge--auto .chart-badge__text {
+  fill: var(--text-muted);
+}
+
+/* 선. 색은 tone 클래스가 --line-ink 로 정한다. */
+.chart-line {
+  --line-ink: var(--text);
+}
+
+.chart-line--auto-fib_retracement {
+  --line-ink: var(--chart-series-4);
+}
+
+.chart-line--auto-fib_channel {
+  --line-ink: var(--chart-series-1);
+}
+
+.chart-line--auto-hline {
+  --line-ink: var(--chart-series-6);
+}
+
+.chart-line__level {
+  fill: none;
+  stroke: var(--line-ink);
+  stroke-width: 1.4;
+}
+
+.chart-line__level--base {
+  stroke-width: 2;
+}
+
+.chart-line[class*="chart-line--auto-"] .chart-line__level {
+  stroke-dasharray: 7 4;
+}
+
+.chart-line__band {
+  fill: var(--line-ink);
+  stroke: none;
+}
+
+.chart-line__band--main {
+  fill-opacity: 0.08;
+}
+
+.chart-line__band--extension {
+  fill-opacity: 0.04;
+}
+
+.chart-line__halo {
+  fill: none;
+  stroke: var(--accent);
+  stroke-opacity: 0.3;
+  stroke-width: 6;
+}
+
+.chart-line--preview .chart-line__level {
+  stroke-opacity: 0.6;
+  stroke-dasharray: 4 3;
+}
+
+.chart-line__labels {
+  fill: var(--line-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--surface-panel);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.chart-line__hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  cursor: pointer;
+  pointer-events: stroke;
+}

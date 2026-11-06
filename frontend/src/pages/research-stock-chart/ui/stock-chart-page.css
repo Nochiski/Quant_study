@@ -1,0 +1,19 @@
+.stock-chart-page {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.stock-chart-page__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.stock-chart-page__header h1 {
+  margin: 0;
+  font-size: var(--text-size-page-title);
+  font-weight: var(--font-weight-heading);
+  line-height: var(--line-height-heading);
+}

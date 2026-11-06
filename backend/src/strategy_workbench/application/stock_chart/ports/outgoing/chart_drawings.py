@@ -73,7 +73,8 @@ class AutoRecord:
 
 @dataclass(frozen=True)
 class ChartLineContent:
-    """만든 뒤에도 고칠 수 있는 칸. `levels`가 None이면 기본 레벨(`DEFAULT_FIB_LEVELS`)이다."""
+    """만든 뒤에도 고칠 수 있는 칸. `levels`가 None이면 종류별 기본 레벨(domain
+    `levels_or_default` — 채널은 1.618 확장 포함)이다."""
 
     anchors: tuple[LineAnchor, ...]
     levels: tuple[float, ...] | None = None

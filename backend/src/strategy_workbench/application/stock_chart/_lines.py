@@ -17,8 +17,6 @@ from strategy_workbench.application.stock_chart._errors import ChartRequestError
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_drawings import LineAnchor
 from strategy_workbench.domain.chart_analysis.facade.bars import DisplayScale
 from strategy_workbench.domain.chart_analysis.facade.geometry import (
-    DEFAULT_CHANNEL_LEVELS,
-    DEFAULT_FIB_LEVELS,
     Anchor,
     ChannelGeometry,
     RetracementGeometry,
@@ -35,14 +33,6 @@ ANCHOR_COUNTS: dict[LineKind, tuple[int, ...]] = {
 }
 
 LineGeometry = ChannelGeometry | RetracementGeometry | tuple[float, float] | float
-
-
-def levels_or_default(kind: LineKind, levels: Sequence[float] | None) -> tuple[float, ...]:
-    """선의 레벨 — 저장·요청한 레벨이 있으면 그것, 없으면 종류별 기본(채널은 1.618 확장 포함).
-    그리기와 중첩이 같은 레벨을 쓴다."""
-    if levels is not None:
-        return tuple(levels)
-    return DEFAULT_CHANNEL_LEVELS if kind is LineKind.FIB_CHANNEL else DEFAULT_FIB_LEVELS
 
 
 def check_levels(levels: Sequence[float] | None) -> None:
@@ -124,14 +114,6 @@ def geometry(kind: LineKind, anchors: Sequence[Anchor]) -> LineGeometry:
     return anchors[0].price
 
 
-def same_anchors(left: Sequence[Anchor], right: Sequence[Anchor]) -> bool:
-    """같은 봉·같은 가격(화면 ↔ 저장 왕복의 마지막 자리 차이는 같다고 본다)."""
-    return len(left) == len(right) and all(
-        a.index == b.index and math.isclose(a.price, b.price, rel_tol=1e-9)
-        for a, b in zip(left, right, strict=True)
-    )
-
-
 def paths(
     series: ChartSeries,
     scale: DisplayScale,
@@ -140,7 +122,7 @@ def paths(
     levels: Sequence[float],
 ) -> tuple[LevelPath, ...]:
     """레벨마다 (기준 봉, 화면 가격) → (마지막 완성 봉, 화면 가격). `levels`는
-    `levels_or_default`로 고른 것이다."""
+    domain `levels_or_default`로 고른 것이다."""
     end = len(series.candles) - 1
     end_date = series.bar_date(end)
 

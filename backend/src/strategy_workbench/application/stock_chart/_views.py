@@ -51,12 +51,17 @@ class InstrumentSearch:
 
 @dataclass(frozen=True)
 class CandleView:
-    """화면 가격 캔들. 마지막 봉이 진행 중일 수 있다(`Candle.in_progress`, 표시만)."""
+    """화면 가격 캔들. 마지막 봉이 진행 중일 수 있다(`Candle.in_progress`, 표시만).
+
+    `change_pct`는 `candles`와 같은 순서로 직전 봉 종가 대비 등락률(%)이다. 직전 봉은 표시
+    구간 밖이어도 같은 계열의 바로 앞 봉이고, 계열의 첫 봉은 None이다. 화면은 그대로 보인다.
+    """
 
     context: ChartContext
     timeframe: Timeframe
     candles: tuple[Candle, ...]
     last_completed: date | None
+    change_pct: tuple[float | None, ...] = ()
 
 
 @dataclass(frozen=True)

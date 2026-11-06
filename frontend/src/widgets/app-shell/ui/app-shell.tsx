@@ -13,7 +13,12 @@ type AppShellProps = {
 };
 
 const RESEARCH = [
-  { key: "research", label: "nav.research", icon: "research", to: null },
+  {
+    key: "stockChart",
+    label: "nav.stockChart",
+    icon: "stockChart",
+    to: "/research/chart",
+  },
   { key: "home", label: "nav.home", icon: "home", to: "/", exact: true },
   {
     key: "strategies",
@@ -49,10 +54,9 @@ const OPERATIONS = [
 ] as const;
 
 /**
- * Persistent frame from the concept: brand, research group (연구 · 전략 · 백테스트 · 실험),
- * operations group marked 향후 (배포 · 실시간 · 주문 · 리스크), collapse control; the routed
- * page fills the rest. Entries without a screen yet are disabled text that assistive technology
- * hears as "coming later, not available", in both flag states, so nothing reads as live trading.
+ * 앱 틀: 브랜드, 연구 묶음(개별종목차트 · 홈 · 전략 · 백테스트 · 실험 · 내 팩터), "향후" 표시를 단 운영 묶음
+ * (배포 · 실시간 · 주문 · 리스크), 접기. 나머지는 라우트 화면이 채운다. 아직 화면이 없는 운영 항목은 보조 기술이
+ * "향후 제공, 사용 불가"로 듣는 비활성 글자라, 기능 플래그와 무관하게 실거래처럼 읽히지 않는다.
  */
 export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
   const operationsId = useId();
@@ -84,22 +88,18 @@ export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
         <ul className="app-shell__list">
           {RESEARCH.map((item) => (
             <li key={item.key}>
-              {item.to ? (
-                <Link
-                  to={item.to}
-                  search={{}}
-                  className="app-shell__link"
-                  activeProps={{ "aria-current": "page" }}
-                  activeOptions={{ exact: "exact" in item && item.exact }}
-                >
-                  <span className="app-shell__icon" aria-hidden="true">
-                    <NavigationIcon name={item.icon} />
-                  </span>
-                  <span className="app-shell__label">{t(item.label)}</span>
-                </Link>
-              ) : (
-                disabledItem(t(item.label), item.icon)
-              )}
+              <Link
+                to={item.to}
+                search={{}}
+                className="app-shell__link"
+                activeProps={{ "aria-current": "page" }}
+                activeOptions={{ exact: "exact" in item && item.exact }}
+              >
+                <span className="app-shell__icon" aria-hidden="true">
+                  <NavigationIcon name={item.icon} />
+                </span>
+                <span className="app-shell__label">{t(item.label)}</span>
+              </Link>
             </li>
           ))}
         </ul>

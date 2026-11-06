@@ -14,6 +14,10 @@ DEFAULT_FIB_LEVELS: tuple[float, ...] = (0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1
 # 채널의 기본 레벨 — 되돌림 레벨에 바깥 확장 1.618을 더한다(설계 문서 6장 채널 표시). 2.618은
 # 사용자가 고르는 선택 레벨이라 기본에 넣지 않는다.
 DEFAULT_CHANNEL_LEVELS: tuple[float, ...] = (*DEFAULT_FIB_LEVELS, 1.618)
+# 사용자가 켜고 끌 수 있는 레벨 칸(설계 문서 6장). 기본 레벨에 선택 레벨 2.618을 더한
+# 목록이고, 화면의 레벨 체크 칸은 저장 선 목록 응답(`level_choices`)으로 이것을 받는다.
+# 저장 레벨은 이 목록 밖의 값도 받는다.
+LEVEL_CHOICES: tuple[float, ...] = (*DEFAULT_CHANNEL_LEVELS, 2.618)
 
 
 @dataclass(frozen=True)

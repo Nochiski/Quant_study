@@ -63,6 +63,7 @@ from strategy_workbench.domain.chart_analysis.facade.confluence import (
 from strategy_workbench.domain.chart_analysis.facade.geometry import (
     DEFAULT_CHANNEL_LEVELS,
     DEFAULT_FIB_LEVELS,
+    LEVEL_CHOICES,
 )
 from strategy_workbench.domain.chart_analysis.facade.levels import (
     AnchorIssue,
@@ -76,6 +77,7 @@ from strategy_workbench.domain.chart_analysis.facade.line_record import (
     LineSource,
     WindowSource,
 )
+from strategy_workbench.domain.chart_analysis.facade.price_tick import TICK_STEPS
 from strategy_workbench.domain.chart_analysis.facade.regime import (
     RegimeReason,
     RegimeVerdict,
@@ -110,6 +112,14 @@ class ChartErrorResponse:
 
 
 @dataclass(frozen=True)
+class ChartTickStepBody:
+    below: Annotated[
+        float | None, Field(description="이 화면 가격 미만에 쓰는 호가. null이면 그 위 전부.")
+    ]
+    tick: float
+
+
+@dataclass(frozen=True)
 class ChartInstrumentBody:
     kind: InstrumentKind
     code: Annotated[
@@ -120,6 +130,10 @@ class ChartInstrumentBody:
     group: Annotated[
         str | None,
         Field(description="종목은 증권 종류(common·preferred·etf …), 지수는 시장 구분(KOSPI …)."),
+    ]
+    tick_steps: Annotated[
+        list[ChartTickStepBody],
+        Field(description="한 호가 표(가격 구간 오름차순). 키보드로 선을 옮길 때 화면이 읽는다."),
     ]
 
 
@@ -222,6 +236,10 @@ class ChartCandleBody:
     close: float
     in_progress: Annotated[
         bool, Field(description="기준일이 기간 중간이라 아직 끝나지 않은 봉. 표시만 한다.")
+    ]
+    change_pct: Annotated[
+        float | None,
+        Field(description="직전 봉 종가 대비 등락률(%). 계열의 첫 봉은 null."),
     ]
 
 
@@ -390,6 +408,10 @@ class ChartLineBody:
 class ChartLinesBody:
     context: ChartContextBody
     lines: list[ChartLineBody]
+    level_choices: Annotated[
+        list[float],
+        Field(description="화면이 켜고 끌 수 있게 보이는 레벨 칸(기본 레벨 + 선택 레벨 2.618)."),
+    ]
 
 
 # ── 요청 ─────────────────────────────────────────────────────────────────────
@@ -460,7 +482,13 @@ class ChartConfluenceRequestBody:
 
 
 def _instrument(item: ChartInstrument) -> ChartInstrumentBody:
-    return ChartInstrumentBody(item.ref.kind, item.ref.code, item.name, item.group)
+    return ChartInstrumentBody(
+        item.ref.kind,
+        item.ref.code,
+        item.name,
+        item.group,
+        [ChartTickStepBody(step.below, step.tick) for step in TICK_STEPS[item.tick]],
+    )
 
 
 def _context(context: ChartContext) -> ChartContextBody:
@@ -560,8 +588,8 @@ def _candles(view: CandleView) -> ChartCandlesBody:
         context=_context(view.context),
         timeframe=view.timeframe,
         candles=[
-            ChartCandleBody(c.start, c.end, c.open, c.high, c.low, c.close, c.in_progress)
-            for c in view.candles
+            ChartCandleBody(c.start, c.end, c.open, c.high, c.low, c.close, c.in_progress, change)
+            for c, change in zip(view.candles, view.change_pct, strict=True)
         ],
         last_completed=view.last_completed,
     )
@@ -674,7 +702,9 @@ def _confluence(view: ConfluenceView) -> ChartConfluenceBody:
 
 def _lines(view: ChartLines) -> ChartLinesBody:
     return ChartLinesBody(
-        context=_context(view.context), lines=[_line(line) for line in view.lines]
+        context=_context(view.context),
+        lines=[_line(line) for line in view.lines],
+        level_choices=list(LEVEL_CHOICES),
     )
 
 

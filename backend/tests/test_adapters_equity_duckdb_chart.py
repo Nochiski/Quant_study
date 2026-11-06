@@ -27,6 +27,7 @@ from strategy_workbench.application.stock_chart.facade.ports import (
     InstrumentRef,
 )
 from strategy_workbench.domain.chart_analysis.facade.bars import PriceBar
+from strategy_workbench.domain.chart_analysis.facade.price_tick import TickTable
 from tests.equity_fixture import (
     PriceRow,
     calendar_table,
@@ -140,7 +141,7 @@ def build_chart_root(root: Path) -> Path:
     write_equity_table(root, "universe_policy", policy_table([("krx.all", "all", 1, "TRUE")]))
     write_equity_table(root, "price_daily", price_table(rows, basis=basis), year_column="date")
     security = security_table(
-        [("005930", "common"), ("000020", "common"), ("000030", "common")],
+        [("005930", "common"), ("000020", "common"), ("000030", "etf")],
         names={"005930": "삼성전자보통주", "000020": "새회사", "000030": "옮긴회사"},
     )
     security = security.append_column(
@@ -164,8 +165,13 @@ def test_instruments_list_stocks_with_short_names_and_indices_per_market(
     adapter: EquityDuckdbAdapter,
 ) -> None:
     items = {item.ref: item for item in adapter.chart_instruments()}
-    assert items[SAMSUNG] == ChartInstrument(SAMSUNG, "삼성전자", "common", ("삼성전자보통주",))
-    assert items[REUSED] == ChartInstrument(REUSED, "새회사", "common")
+    assert items[SAMSUNG] == ChartInstrument(
+        SAMSUNG, "삼성전자", "common", ("삼성전자보통주",), TickTable.STOCK
+    )
+    assert items[REUSED] == ChartInstrument(REUSED, "새회사", "common", (), TickTable.STOCK)
+    # 상장지수상품은 원장 증권 종류(`etf`)를 어댑터가 호가표로 바꿔 넘긴다(위로는 enum)
+    moved = items[InstrumentRef(InstrumentKind.STOCK, "000030")]
+    assert (moved.group, moved.tick) == ("etf", TickTable.FUND)
     # 같은 이름의 업종 지수는 시장 구분으로 갈린다
     indices = sorted(ref.code for ref in items if ref.kind is InstrumentKind.INDEX)
     assert indices == ["KOSDAQ:건설", "KOSPI:건설", "KOSPI:코스피"]

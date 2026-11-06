@@ -1,5 +1,5 @@
 type NavigationIconName =
-  | "research"
+  | "stockChart"
   | "home"
   | "strategies"
   | "backtests"
@@ -12,7 +12,8 @@ type NavigationIconName =
   | "settings";
 
 const PATHS: Record<NavigationIconName, string> = {
-  research: "M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3M8 15h8",
+  // 캔들 셋(심지 + 몸통)
+  stockChart: "M6 3v18M12 5v15M18 2v16M4.5 7h3v8h-3zM10.5 9h3v6h-3zM16.5 5h3v9h-3z",
   home: "M4 11 12 4l8 7M6 9.5V20h4v-6h4v6h4V9.5",
   strategies: "M4 18l5-6 4 3 7-10M14 5h6v6",
   backtests: "M4 4v16h16M8 16v-5M12 16V7M16 16v-6",

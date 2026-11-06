@@ -2733,7 +2733,7 @@ CLI 출력은 그대로다(로컬 price_daily 두 판 JSON 보고서가 바꾸�
 |---|---|
 | 대상 | 모델 폐포 — fi 직접 원천 `factor_inputs.queries.TABLE_SOURCES` 에서 equity `RULES[t].inputs` 를 거꾸로 따라 닫은 stage·equity 표(원장 제외, `closure_tables`). 10-10 코드 기준 **53표 = equity 18 + stage 35**(정본 문구 '27표'와 다르다 — stage 입력까지 닫으면 35표가 붙는다). 목록은 박지 않는다 |
 | 판 | 오늘 아침 인계 이력 `data/deliver/history/<D>_morning.json` 의 stage_builds·equity_builds 대 직전 거래일(판정 달력) 아침 인계 이력의 판. 판이 MANIFEST·디스크에서 사라졌으면(stage keep 3 · equity keep 10) 그 표는 **판정 불가**(P1) |
-| grain | equity 는 선언 grain. stage 는 `key_unique` 면 자연키, 판본 표(append_only — G6 이 유일성 보장)면 자연키 + `observed_date`, 판본 없는 로그면 선언 열 전부 + `observed_date`. NULL 키는 막지 않는다(조인이 NULL 안전 — equity 격자 flow_daily 의 not_collected 셀은 src NULL 이 설계, 로컬 10-03 판 25,685행). 중복 키만 판정 불가 |
+| grain | equity 는 선언 grain — 격자 표는 선언 셀 축 `cell_key`(flow_daily = (date, ticker), 11-05: 수집 전 셀 src NULL 이 다음 판에 채워지면 grain (date, ticker, src) 조인으로는 삭제 1 + 추가 1 이라 미설명으로 셌다 — 11-03 4행 · 11-04 10행 오경보. 셀 축이면 src · 값 칸의 NULL→값이고, 셀이 통째로 사라질 때만 행 삭제다). stage 는 `key_unique` 면 자연키, 판본 표(append_only — G6 이 유일성 보장)면 자연키 + `observed_date`, 판본 없는 로그면 선언 열 전부 + `observed_date`. NULL 키는 막지 않는다(조인이 NULL 안전 — equity 격자 flow_daily 의 not_collected 셀은 src NULL 이 설계, 로컬 10-03 판 25,685행). 중복 키만 판정 불가 |
 | 건너뛰기 | 같은 판 id → 읽지 않음(`same_build`). 표 content_hash·행 수가 같음 → 읽지 않음(`same_content`). equity 는 **파티션 content_hash 가 같은 파티션을 양쪽에서 함께 뺀다** — 같은 해시 = 같은 행 집합이고 grain 이 표 전체에서 유일하므로 남은 파티션끼리의 조인이 표 전체 조인과 같은 숫자를 낸다. stage 판 기록에는 파티션 해시가 없어 표 전체를 조인한다 |
 
 **갈래**(기록형 첫 판 — 보수적으로, 설명 못 하면 미설명):

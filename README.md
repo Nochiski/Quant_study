@@ -104,15 +104,14 @@ schema 1.2부터 시장·기간·유니버스·체결·비용은 전략 문서�
 현재 범위와 다음 연구의 기준은 [연구→자동매매 진행 현황](docs/planning/research-to-trading/README.md)과
 [S04 연속 평가 계약](docs/planning/research-to-trading/S04-walk-forward.md)을 따른다.
 
-홀드아웃 준비의 [V6-01 사전등록·모의 검증 core](docs/planning/validation-lab/V6-01-preregistration-simulation.md)는
-동결 후보·기준과 일회성 모의 claim을 영속화한다. 합성 지표로 절차를 확인하는 범위이며 실제 봉인
-개봉·실자료 후보 통과·개봉 UI는 제공하지 않는다. 이 core는 #547로 머지된 부분 구현이며 V6 전체 완료가 아니다.
+앱은 어느 구간이든 실행한다. 홀드아웃은 실험마다 사전등록 문서로 관리하며 앱의 연구 구간 잠금·봉인 원장·
+홀드아웃 개봉(V6)은 2026-11-05 사용자 결정으로 없앴다([홀드아웃 규칙](.claude/rules/holdout-window.md)).
 
 키움 없이 먼저 진행하는 범위와 다음 작업은 [키움 독립 작업 인계](docs/planning/validation-lab/KIWOOM-INDEPENDENT.md)를
-따른다. 회귀 접수 상한(#546)·V6 모의 core(#547)·선택 파라미터 배선(#548)은 머지됐고 V5-02는 완료됐다.
-후보 지도(#549, main `45328d0b`)·비용/회귀 보고서(#550, main `366dc241`)·IDE 연구 진입점(#551, main `c2f46dfb`)도 머지됐다. 검증 랩은 26/28(93%)로 V5 화면을 완료했으며, 이는 전체 자동매매의 완료율이 아니다. 이후에도 사전등록 모의 화면, 데이터·회계 검산, 신호 연구·실자료 계좌 평가와 운영 준비를 진행할 수 있다.
+따른다. 회귀 접수 상한(#546)·선택 파라미터 배선(#548)은 머지됐고 V5-02는 완료됐다.
+후보 지도(#549, main `45328d0b`)·비용/회귀 보고서(#550, main `366dc241`)·IDE 연구 진입점(#551, main `c2f46dfb`)도 머지됐다. 검증 랩은 V6 폐기로 26/26 완료이며, 이는 전체 자동매매의 완료율이 아니다. 이후에도 데이터·회계 검산, 신호 연구·실자료 계좌 평가와 운영 준비를 진행할 수 있다.
 실제 모의계좌 주문·체결 대사는 브로커 연결이 필요하다. 2026-10-19 주간 예정인 실자료 수익성 평가는 기능·화면의
-기술 QA와 별도이며, 봉인 개봉·자본 투입·실거래 승인을 뜻하지 않는다.
+기술 QA와 별도이며, 자본 투입·실거래 승인을 뜻하지 않는다.
 
 ## 구조
 
@@ -388,7 +387,7 @@ uv run server
 | `pr-review.md`                | 전체                                 | PR 본문 양식, 결함 보고 4요소                                      |
 | `collaboration-language.md`   | 전체                                 | 코드 주석·Issue·PR 한글 작성 규칙의 단일 정본                      |
 | `backend-package-boundary.md` | `backend/**/*.py`                    | 헥사고날 방향, facade, `DEPENDS_ON`, mock adapter 경계             |
-| `strategy-workbench-sot.md`   | `backend/`, `frontend/`, `database/src/equity/`, 관련 spec·기획 패키지 | 전략·팩터·지표·상태의 단일 owner |
+| `strategy-workbench-sot.md`   | `backend/`, `frontend/`, `database/src/equity/`, 관련 spec·기획 패키지 | 사실은 한 곳만 소유하고 owner는 코드(docstring·import)로 드러냄, 금지 목록 |
 | `user-story-harness.md`       | `backend/`, `frontend/`, `docs/{product/user-stories,planning,manual}/` | 사용자 동작을 바꾸는 PR은 관련 유저 스토리와 e2e 태그를 같은 PR에서 갱신 |
 | `frontend-fsd.md`             | `frontend/src/`                      | FSD 단방향, slice 격리, public API                                 |
 | `frontend-api-state.md`       | frontend API/state                   | 생성 SDK, 서버·draft·UI 상태 소유권                                |

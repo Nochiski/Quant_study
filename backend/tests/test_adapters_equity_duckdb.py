@@ -170,7 +170,8 @@ ALL_FIELDS = (
     *WB_WISE_FIELDS,
 )
 
-# 경고 문장이 한글로 완성됐는지 보는 표지(SoT 경고 문장 행, 이슈 #229).
+# 경고 문장이 한글로 완성됐는지 보는 표지. 문장은 경고를 만드는 `equity_duckdb/_adapter.py`가
+# 완성한다(이슈 #229).
 _HANGUL = re.compile("[가-힣]")
 
 
@@ -1787,6 +1788,30 @@ def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) 
         assert re.search(locked, str(stopped.__cause__))
     assert _raw(booted, fields=fin).ok  # 잠금이 풀리면 다시 읽는다
     assert booted.load_backtest_dataset(backtest).bars
+
+
+def test_a_catalog_replaced_after_boot_stops_macro_queries_until_the_app_reloads(
+    tmp_path: Path,
+) -> None:
+    """부팅 뒤 sync 가 카탈로그를 바꾸면 매크로 질의는 새 판 경로를 읽지 않고 멈춘다(DB 새로고침).
+
+    상황: 서버가 떠 있는 동안 `ledger_sync sync` 가 표를 새 `v=` 로 바꾸고 카탈로그를 다시 만든다.
+    부팅 때 고정한 표 판본(옛 `v=`)과 새 카탈로그 매크로(새 `v=`)를 한 run 이 섞어 읽으면 판본
+    표기가 거짓이 된다. 표 원천만 읽는 질의는 고정한 판본 그대로라 계속 돈다.
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    booted = EquityDuckdbAdapter(root)
+    fin = ("financial.book_equity",)
+    assert _raw(booted, fields=fin).ok
+    catalog = root / "equity.duckdb"
+    data = catalog.read_bytes()
+    catalog.unlink()
+    catalog.write_bytes(data + bytes(4096))  # 다른 파일로 바뀐다(크기·시각)
+    with pytest.raises(BacktestDataNotReadyError, match="catalog_changed"):
+        _raw(booted, fields=fin)
+    with pytest.raises(BacktestDataNotReadyError, match="catalog_changed"):
+        booted.load_backtest_dataset(BacktestDataQuery(START, END, ("005930:1",), None))
+    assert _raw(booted, fields=("price.close",)).ok
 
 
 def test_a_non_lock_catalog_error_after_boot_is_not_reported_as_locked(

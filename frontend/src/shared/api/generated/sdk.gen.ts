@@ -18,6 +18,8 @@ import type {
   CancelExperimentData,
   CancelExperimentErrors,
   CancelExperimentResponses,
+  CheckLedgerRefreshData,
+  CheckLedgerRefreshResponses,
   CompileStrategyDocumentData,
   CompileStrategyDocumentErrors,
   CompileStrategyDocumentResponses,
@@ -138,9 +140,16 @@ import type {
   GetHealthResponses,
   GetKiwoomMockConnectionData,
   GetKiwoomMockConnectionResponses,
+  GetLedgerRefreshData,
+  GetLedgerRefreshResponses,
   GetLibraryFactorData,
   GetLibraryFactorErrors,
   GetLibraryFactorResponses,
+  GetMarketOverviewData,
+  GetMarketOverviewResponses,
+  GetMarketSectorData,
+  GetMarketSectorErrors,
+  GetMarketSectorResponses,
   GetRunEnvironmentSchemaData,
   GetRunEnvironmentSchemaErrors,
   GetRunEnvironmentSchemaResponses,
@@ -261,6 +270,9 @@ import type {
   StartBacktestData,
   StartBacktestErrors,
   StartBacktestResponses,
+  StartLedgerRefreshData,
+  StartLedgerRefreshErrors,
+  StartLedgerRefreshResponses,
   StreamAssistantEventsData,
   StreamAssistantEventsErrors,
   StreamAssistantEventsResponse,
@@ -1441,6 +1453,68 @@ export const getHealth = <ThrowOnError extends boolean = false>(
     url: "/api/v1/health",
     ...options,
   });
+
+/**
+ * Get Status
+ */
+export const getLedgerRefresh = <ThrowOnError extends boolean = false>(
+  options?: Options<GetLedgerRefreshData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetLedgerRefreshResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/ledger-refresh", ...options });
+
+/**
+ * Start
+ */
+export const startLedgerRefresh = <ThrowOnError extends boolean = false>(
+  options?: Options<StartLedgerRefreshData, ThrowOnError>,
+) =>
+  (options?.client ?? client).post<
+    StartLedgerRefreshResponses,
+    StartLedgerRefreshErrors,
+    ThrowOnError
+  >({ url: "/api/v1/ledger-refresh", ...options });
+
+/**
+ * Check
+ *
+ * 서버 판을 다시 확인한다(원격 MANIFEST 만 읽는다). 받는 중이면 지금 상태만 돌려준다.
+ */
+export const checkLedgerRefresh = <ThrowOnError extends boolean = false>(
+  options?: Options<CheckLedgerRefreshData, ThrowOnError>,
+) =>
+  (options?.client ?? client).post<
+    CheckLedgerRefreshResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/ledger-refresh/check", ...options });
+
+/**
+ * Get Overview
+ */
+export const getMarketOverview = <ThrowOnError extends boolean = false>(
+  options?: Options<GetMarketOverviewData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetMarketOverviewResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/market/overview", ...options });
+
+/**
+ * Get Sector
+ */
+export const getMarketSector = <ThrowOnError extends boolean = false>(
+  options: Options<GetMarketSectorData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetMarketSectorResponses,
+    GetMarketSectorErrors,
+    ThrowOnError
+  >({ url: "/api/v1/market/sectors/{wics_l2_cd}", ...options });
 
 /**
  * Portfolio Preview

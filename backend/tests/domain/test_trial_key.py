@@ -323,7 +323,8 @@ def test_renaming_factors_with_their_risk_reference_keeps_the_axis_but_retargeti
 
 
 # 의미 해시가 보는 칸이나 정규화를 바꾸는 PR 은 `STRATEGY_SEMANTIC_HASH_VERSION` 을 올리고 이 짝을
-# 함께 고친다(SoT 시도 키 행). 판본을 올리면 계열마다 다음 실행이 한 번 새 시도로 셀 수 있다.
+# 함께 고친다(owner `domain/strategy/_canonical.py`). 판본을 올리면 계열마다 다음 실행이 한 번
+# 새 시도로 셀 수 있다.
 # 고정 예시는 이 판본의 규칙 셋을 모두 거친다: 노드 번호(팩터마다 출력 0 → 나누기 왼쪽 모멘텀 1 →
 # 종가 2 → 변동성 3), 죽은 노드 제외, 팩터 id·`risk_factor_id` 치환(팩터 0·1).
 _PINNED_SEMANTIC_HASH = (
@@ -341,7 +342,7 @@ def test_semantic_hash_changes_come_with_a_version_bump() -> None:
 
 # 스키마 기본값은 키 표기의 기준이다. 기본값은 표기에서 빠지므로 기본값만 바꾸면 옛 기본값 실행과 새
 # 기본값 실행이 같은 키를 받는다 — 바꾸는 PR 은 `TRIAL_KEY_DEFAULTS_VERSION` 을 올리고 이 짝을 함께
-# 고친다(SoT 시도 키 행, #342). 기본값이 없는 칸은 늘 키에 든다.
+# 고친다(owner `domain/backtest/_trial_key.py`, #342). 기본값이 없는 칸은 늘 키에 든다.
 _SCHEMA_DEFAULTS_VERSION = "trial-key-defaults-v2"
 _SCHEMA_DEFAULTS = {
     "market": "KRX",

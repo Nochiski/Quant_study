@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
 from typing import Annotated, Literal, TypeAlias
 
 from pydantic import Field
@@ -81,21 +80,6 @@ class BacktestEnvironmentRequiredDetail:
 
 
 @dataclass(frozen=True)
-class BacktestResearchWindowViolationDetail:
-    """측정 시작일이 연구 구간 밖이다(spec D1).
-
-    화면 문장은 frontend 가 `code` 로 번역하되 날짜는 자리표시자로 두고 이 detail 의 값으로 채운다 —
-    날짜 owner 는 `domain/backtest/_research_window.py` 하나다.
-    """
-
-    code: Literal["backtest.run.research_window_violation"]
-    message: str
-    sealed_start: date
-    sealed_end: date
-    research_start: date
-
-
-@dataclass(frozen=True)
 class RequestValidationIssue:
     loc: tuple[str | int, ...]
     msg: str
@@ -115,8 +99,7 @@ PortfolioUnprocessableDetail: TypeAlias = Annotated[
     | PortfolioRawObservationInvalidDetail
     | BacktestRunFieldInvalidDetail
     | BacktestParameterInvalidDetail
-    | BacktestEnvironmentRequiredDetail
-    | BacktestResearchWindowViolationDetail,
+    | BacktestEnvironmentRequiredDetail,
     Field(discriminator="code"),
 ]
 

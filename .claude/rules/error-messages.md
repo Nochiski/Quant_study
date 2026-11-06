@@ -56,8 +56,7 @@ logger.warning(
   (`ValidationIssue`)와 결과·데이터 경고의 `message`(`DataWarning`·`PortfolioWarning`·
   `ResearchDataWarning`)가 여기 든다. 영문 안정 키 `code`를 함께 싣고, 재현용 컨텍스트(종목·세션·
   개수 등)는 문장 안에 `key=value` 원문으로 남긴다. 소비자(frontend·AI 결과 설명)는 문장을 다시
-  조립·번역하지 않는다. 정본은 `.claude/rules/strategy-workbench-sot.md`의 "authoring 진단 코드"·
-  "결과·데이터 경고 문장" 행이다.
+  조립·번역하지 않는다. 문장의 owner는 그 진단·경고를 만드는 모듈이다.
 - 정상 설정 안내인 `strategy.risk.risk_factor_excluded`·`strategy.portfolio.tie_breaker_factor_excluded`는
   그래프의 식별자 비노출 계약에 따라 `팩터=<label>`을 문장에 넣는다. 정확한 위치는 기존 진단 pointer가
   소유하며, 오류 진단의 재현 컨텍스트나 소비자의 문장 재조립 규칙은 바꾸지 않는다.
@@ -71,9 +70,9 @@ logger.warning(
   - 전례: 상위 비율·개수 규칙 값(`strategy.eligibility.rule_value`)은 "…(20%는 0.2). 지금 값은 0입니다."로
     `field_id=` 를 뺀다(pointer `eligibility.rules.<i>.value`). 표기 helper 는 `_plain_number` 하나다.
   - 이 예외 밖(오타 필드처럼 사용자가 고칠 식별자 자체가 재현 정보인 경우)은 위 규칙대로 `key=value` 를 남긴다.
-- 진단 코드의 네임스페이스(`strategy.*`·`structure.*`·codec 코드, 팩터 그래프 `factor.graph.*`를
-  `strategy.expression.*`로 옮기는 규칙)도 같은 SoT의 "authoring 진단 코드" 행이 소유한다. 레지스트리에
-  없는 코드를 호출 지점에서 새로 만들지 않는다.
+- 진단 코드는 네임스페이스마다 레지스트리가 하나이고, 레지스트리에 없는 코드를 호출 지점에서 새로 만들지
+  않는다. 전략 문서 진단은 관문 `semantic_issue`(`domain/strategy/_validation.py`)로만 만든다.
+- 팩터 그래프 코드 `factor.graph.*`는 전략 문서에 그대로 나가지 않고 `strategy.expression.*`로 옮겨서만 나간다.
 - 내부 예외·로그 메시지의 언어는 정한 규칙이 없다. 지금은 영문과 한글이 섞여 있다(예외는 영문이
   많고, 최근 로그 경고에는 한글이 있다). 어느 언어로 쓰든 위 컨텍스트 규칙은 같다.
 

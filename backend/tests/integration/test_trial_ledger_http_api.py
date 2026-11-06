@@ -11,7 +11,7 @@ from strategy_workbench.bootstrap.facade.http import build_http_app
 from tests.backtest_run_wait import wait_for_terminal_state
 
 
-def _saved_run(client: TestClient, **environment: str) -> dict[str, Any]:
+def _saved_run(client: TestClient) -> dict[str, Any]:
     template = client.get("/api/v1/strategies/template").json()
     template.pop("identity")
     template["schema_version"] = "1.2"
@@ -32,8 +32,7 @@ def _saved_run(client: TestClient, **environment: str) -> dict[str, Any]:
             "start": "2025-01-02",
             "end": "2025-03-31",
             "universe_id": "krx.common-stock",
-        }
-        | environment,
+        },
     }
 
 
@@ -78,22 +77,6 @@ def test_the_ledger_counts_a_run_once_and_the_preview_agrees() -> None:
         "span_days": counted["span_days"],
     }
     assert counted["span_days"] > 0
-
-
-def test_a_sealed_run_is_blocked_with_the_start_contract_and_the_preview_leaves_no_record() -> None:
-    client = TestClient(build_http_app())
-    request = _saved_run(client, start="2019-06-03")
-    lineage = request["strategy_source"]["strategy_id"]
-
-    preview = client.post("/api/v1/backtests/trial-preview", json=request)
-    blocked_after_preview = client.get(f"/api/v1/strategies/{lineage}/trials").json()["blocked"]
-    start = client.post("/api/v1/backtests", json=request)
-    blocked = client.get(f"/api/v1/strategies/{lineage}/trials").json()["blocked"]
-
-    assert preview.status_code == start.status_code == 422
-    assert preview.json()["detail"]["code"] == start.json()["detail"]["code"]
-    assert start.json()["detail"]["code"] == "backtest.run.research_window_violation"
-    assert (blocked_after_preview, [item["start"] for item in blocked]) == ([], ["2019-06-03"])
 
 
 def test_merging_a_lineage_twice_or_an_unknown_one_is_refused() -> None:

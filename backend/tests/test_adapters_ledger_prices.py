@@ -85,8 +85,8 @@ def _ledger(root: Path) -> Path:
     return root
 
 
-def test_reads_only_the_current_build_from_the_holdout_floor(tmp_path: Path) -> None:
-    history = LedgerPriceHistory(_ledger(tmp_path)).history(["A", "B", "D"], date(2019, 6, 1))
+def test_reads_only_the_current_build_since_the_given_date(tmp_path: Path) -> None:
+    history = LedgerPriceHistory(_ledger(tmp_path)).history(["A", "B", "D"], date(2020, 1, 1))
     assert history.status is PriceHistoryStatus.OK
     # 옛 빌드(1.0)·2019 파티션·빈 값·요청하지 않은 종목은 없다. 없는 종목은 지어내지 않는다
     assert history.closes == {

@@ -22,12 +22,19 @@ import {
   type StrategyTitles,
 } from "../../../entities/strategy";
 import { listDrafts } from "../../../features/edit-strategy";
+import { LedgerRefreshControl } from "../../../features/refresh-ledger";
+import {
+  daysBefore,
+  marketOverviewQuery,
+  sessionLabel,
+} from "../../../entities/market";
 import { t, tFill } from "../../../shared/config";
 import { browserStorage } from "../../../shared/lib/browser-storage";
 import { displayTime } from "../../../shared/lib/display-time";
-import { Link } from "../../../shared/lib/router";
+import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
 import { Badge, EmptyState } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
+import { MarketOverview } from "../../../widgets/market-overview";
 import { activityLog, awaitingCandidate, type ActivityEntry } from "../model/home-model";
 import "./research-home-page.css";
 
@@ -106,12 +113,88 @@ const ActivityText = ({
 /** 계좌 자리: 운영 기능이 없어 숫자를 그리지 않는다(RD-01-B). */
 const AccountCard = () => (
   <section className="research-home__card" aria-labelledby="home-account-title">
-    <h2 id="home-account-title">
+    <h3 id="home-account-title">
       {t("home.account.title")} <Badge tone="neutral">{t("home.account.unconnected")}</Badge>
-    </h2>
+    </h3>
     <p>{t("home.account.body")}</p>
   </section>
 );
+
+/** 제목과 시장 데이터 기준일·DB 새로고침. 기준일은 시장 블록과 같은 응답에서 읽는다. */
+const HomeHeader = () => {
+  const overview = useQuery(marketOverviewQuery());
+  const session = overview.data?.status === "available" ? overview.data.session : null;
+  const days = session ? daysBefore(session, new Date()) : null;
+  return (
+    <header className="research-home__header">
+      <a className="research-home__skip" href="#home-research">
+        {t("home.skipToResearch")}
+      </a>
+      <h1 id="home-title">{t("home.title")}</h1>
+      <div className="research-home__data">
+        {session ? (
+          <span className="research-home__session">
+            {days === 0
+              ? tFill("market.sessionToday", { date: sessionLabel(session) })
+              : tFill("market.session", { date: sessionLabel(session), days: days ?? "?" })}
+          </span>
+        ) : null}
+        <LedgerRefreshControl />
+      </div>
+    </header>
+  );
+};
+
+/** 시장보다 먼저 읽는 할 일 한 줄(US-DM-15). 누르면 아래 연구 카드로 간다. 할 일이 없으면 그리지 않는다. */
+const TodoSummary = ({
+  failed,
+  awaiting,
+  running,
+}: {
+  failed: number;
+  awaiting: number;
+  running: number;
+}) => {
+  if (failed + awaiting + running === 0) return null;
+  const item = (tone: "error" | "info" | "neutral", badge: string, count: string) => (
+    <a className="research-home__summary-item" href="#home-research">
+      <Badge tone={tone}>{badge}</Badge>
+      {count}
+    </a>
+  );
+  return (
+    <nav className="research-home__summary" aria-label={t("home.summary.label")}>
+      {failed > 0
+        ? item("error", t("home.summary.failed"), tFill("home.summary.failedCount", { count: failed }))
+        : null}
+      {awaiting > 0
+        ? item(
+            "info",
+            t("home.summary.awaiting"),
+            tFill("home.summary.awaitingCount", { count: awaiting }),
+          )
+        : null}
+      {running > 0
+        ? item(
+            "neutral",
+            t("home.summary.running"),
+            tFill("home.summary.runningCount", { count: running }),
+          )
+        : null}
+      <span className="research-home__muted">{t("home.summary.hint")}</span>
+    </nav>
+  );
+};
+
+/** 섹터맵 드릴다운 자리는 주소가 갖는다 — 뒤로 가기가 전체 지도로 돌아온다. */
+const useSector = (): [string | undefined, (code: string | undefined) => void] => {
+  const search = useSearch({ from: "/" });
+  const navigate = useNavigate();
+  return [
+    search.sector,
+    (code) => void navigate({ to: "/", search: code === undefined ? {} : { sector: code } }),
+  ];
+};
 
 export const ResearchHomePage = () => {
   // 로컬 보관함은 React 밖 상태라 화면을 열 때 한 번 읽는다.
@@ -125,11 +208,13 @@ export const ResearchHomePage = () => {
   const titles = useStrategyTitles(
     runs.map((summary) => summary.strategy_provenance.strategy_id),
   );
+  const [sector, setSector] = useSector();
 
   if (strategies.isSuccess && strategies.data.total === 0)
     return (
       <section className="page research-home" aria-labelledby="home-title">
-        <h1 id="home-title">{t("home.title")}</h1>
+        <HomeHeader />
+        {/* 첫 방문의 주 행동은 하나뿐이다 — 시장보다 위에 둔다(US-DM-15). */}
         <EmptyState
           title={t("home.empty.title")}
           description={t("home.empty.description")}
@@ -143,6 +228,7 @@ export const ResearchHomePage = () => {
             </Link>
           }
         />
+        <MarketOverview sector={sector} onSector={setSector} />
         <AccountCard />
       </section>
     );
@@ -164,12 +250,25 @@ export const ResearchHomePage = () => {
 
   return (
     <section className="page research-home" aria-labelledby="home-title">
-      <h1 id="home-title">{t("home.title")}</h1>
+      <HomeHeader />
+      <TodoSummary
+        failed={failures.length}
+        awaiting={waiting.length}
+        running={runningExperiments.length + runningBacktests.length}
+      />
+      <MarketOverview sector={sector} onSector={setSector} />
+      <section
+        id="home-research"
+        className="research-home__research"
+        tabIndex={-1}
+        aria-labelledby="home-research-title"
+      >
+      <h2 id="home-research-title">{t("home.research.title")}</h2>
       <div className="research-home__grid">
         <section className="research-home__card research-home__todo" aria-labelledby="home-todo-title">
-          <h2 id="home-todo-title">
+          <h3 id="home-todo-title">
             {todoCount === 0 ? t("home.todo.none") : t("home.todo.title")}
-          </h2>
+          </h3>
           {todoCount === 0 ? null : (
             <ul className="research-home__list">
               {waiting.map((experiment) => (
@@ -249,7 +348,7 @@ export const ResearchHomePage = () => {
         </section>
         <AccountCard />
         <section className="research-home__card" aria-labelledby="home-running-title">
-          <h2 id="home-running-title">{t("home.running.title")}</h2>
+          <h3 id="home-running-title">{t("home.running.title")}</h3>
           {slots === undefined ? null : (
             <p className="research-home__muted">{tFill("experiments.slots", slots)}</p>
           )}
@@ -293,7 +392,7 @@ export const ResearchHomePage = () => {
           )}
         </section>
         <section className="research-home__card research-home__wide" aria-labelledby="home-results-title">
-          <h2 id="home-results-title">{t("home.results.title")}</h2>
+          <h3 id="home-results-title">{t("home.results.title")}</h3>
           {results.length === 0 ? (
             <p>{t("home.results.none")}</p>
           ) : (
@@ -333,7 +432,7 @@ export const ResearchHomePage = () => {
           )}
         </section>
         <section className="research-home__card research-home__wide" aria-labelledby="home-activity-title">
-          <h2 id="home-activity-title">{t("home.activity.title")}</h2>
+          <h3 id="home-activity-title">{t("home.activity.title")}</h3>
           <p className="research-home__muted">{t("home.activity.note")}</p>
           {activity.length === 0 ? (
             <p>{t("home.activity.none")}</p>
@@ -349,6 +448,7 @@ export const ResearchHomePage = () => {
           )}
         </section>
       </div>
+      </section>
     </section>
   );
 };

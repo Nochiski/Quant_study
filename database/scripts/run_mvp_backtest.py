@@ -15,7 +15,6 @@ EQUITY_WORKFLOW §3-5(S21 축소): `build_container(equity_adapter="duckdb", equ
       --root <equity_root> --start 2020-01-02 --end 2026-08-20 --universe krx.common-stock \\
       [--price-field price.adj_close] [--top 20] [--artifact-root <dir>]
       [--engine-src <repo>/backend/src]
-  `--start` 가 2020-01-02 앞이면 워크벤치가 봉인 구간 측정으로 거절한다(검증 랩 spec D1).
 
 종료 코드 0 = run COMPLETED, 1 = FAILED/CANCELLED(요약에 error), 2 = 인자·환경 오류.
 """

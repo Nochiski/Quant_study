@@ -82,7 +82,7 @@ const runEntry = (page: Page, runId: string) =>
     .filter({ has: page.getByRole("link", { name: runId.slice(0, 12) }) });
 
 test(
-  "US-SM-12 시도 원장은 설정을 바꾼 실행만 새 시도로 세고 재확인·결과 없는 요청을 따로 보이며 합치기만 있다",
+  "US-SM-12 시도 원장은 설정을 바꾼 실행만 새 시도로 세고 재확인을 묶어 보이며 합치기만 있다",
   { tag: ["@story", "@US-SM-12"] },
   async ({ page }) => {
     test.setTimeout(300_000);
@@ -125,14 +125,6 @@ test(
       ),
     );
     const titleOnly = await completedRun(request(retitled));
-    // 봉인 구간과 겹치는 요청은 거절되고 원장에 결과 없는 요청으로 남는다.
-    const blocked = await startBacktest({
-      client: apiClient,
-      body: request(retitled, {
-        environment: { ...REQUESTED_ENVIRONMENT, start: "2018-01-02" },
-      }),
-    });
-    expect(blocked.response?.status).toBe(422);
 
     await page.goto("/research/strategies");
     const revisionToggle = page.getByRole("button", {
@@ -170,11 +162,6 @@ test(
     await expect(
       rowOf(changedRun).getByRole("link", { name: titleOnly.slice(0, 12) }),
     ).toBeVisible();
-    await expect(
-      ledger
-        .getByRole("row")
-        .filter({ hasText: "봉인 구간과 겹쳐 거절된 요청" }),
-    ).toContainText("시도 수 제외");
 
     // 시도를 지우거나 계열을 나누는 버튼은 없고 합치기만 있다.
     await expect(ledger.getByRole("button")).toHaveText(["다른 계열과 합치기"]);

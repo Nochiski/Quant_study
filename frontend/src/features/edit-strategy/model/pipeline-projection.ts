@@ -3,9 +3,12 @@
  * 표준 단계 모델과 전략 한 문장 요약. Form 투영의 필드 행과 목록(컨트롤·값·작성 여부·적용 여부·진단)을
  * 그대로 쓰고 단계와 카드로만 다시 묶는다. 순수 함수이며 편집기·React를 모른다.
  *
- * 필드 목록을 여기 적지 않는다. 필드의 단계는 스키마 `x-stage`·`x-applied-stage`(읽는 규칙의 정본은 정본
- * 대장 "그래프 표현 투영" 행), 카드 묶음은 같은 단계 안의 `x-applicable-when` 조건, 요약에 나올 필드는
- * 스키마 설명 키 아래 i18n 조각이 정한다(리드 결정 2026-09-30).
+ * 필드 목록을 여기 적지 않는다. 필드의 단계는 스키마 `x-stage`·`x-applied-stage`, 카드 묶음은 같은 단계
+ * 안의 `x-applicable-when` 조건, 요약에 나올 필드는 스키마 설명 키 아래 i18n 조각이 정한다(리드 결정 2026-09-30).
+ *
+ * 필드의 단계를 읽는 순서(자기 `x-stage` → 자기 제약 행의 `x-applied-stage` → 가장 가까운 조상의
+ * `x-stage`)는 backend `domain/strategy/_schema.py`가 정한 `x-stage` 의미이고, 여기서는 그대로 적용만
+ * 한다. frontend가 소유하는 것은 행을 단계·카드로 묶는 투영뿐이다.
  */
 import { t, tName, tOptional } from "../../../shared/config";
 import type { DocumentDiagnostic } from "./document-state";
@@ -136,7 +139,7 @@ export const projectPipeline = (
       else entryOf(sectionStage).lists.push(section);
       continue;
     }
-    // 행의 단계: 자기 `x-stage`·`x-applied-stage`, 없으면 섹션의 단계(정본 대장 "그래프 표현 투영" 행).
+    // 행의 단계: 자기 `x-stage`·`x-applied-stage`, 없으면 섹션의 단계(backend `_schema.py`의 `x-stage` 의미).
     const fields = section.fields.filter((field) => {
       const facts = factsAt(field.pointer);
       const stage = facts?.stage ?? facts?.appliedStage ?? sectionStage;

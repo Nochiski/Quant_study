@@ -17,9 +17,8 @@
   대조한다(spec 5절 L1). 원장에는 시점축 있는 범주 필드가 없어 그룹 노드는 종목 id 로 정한 합성
   라벨을 쓴다. 두 평가기의 시간도 낸다.
 
-홀드아웃(`.claude/rules/holdout-window.md`):
+출력:
 
-- 측정 시작일이 연구 하한(`RESEARCH_START`)보다 이르면 아무것도 읽지 않고 거절한다.
 - 출력은 불일치 개수와 차이의 (층, 사례, 경로)뿐이다. 값·수익률·IC 는 내지 않는다. L0 은 경로마다
   다른 칸 수만 낸다(워밍업 칸 값도 내지 않는다).
 - 대조기가 잡지 않은 예외도 실원장에서는 예외 종류만 남긴다(메시지에 값이 실릴 수 있다).
@@ -65,11 +64,7 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     RawObservationSet,
     RawPanel,
 )
-from strategy_workbench.domain.backtest.facade.environment import (
-    ResearchWindowViolationError,
-    RunEnvironment,
-    require_research_window,
-)
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.factor.facade.evaluation import FactorFieldValue, FactorObservation
 from strategy_workbench.domain.factor.facade.expression import (
@@ -152,7 +147,7 @@ def _raw_queries(
             queries.append(recorded.query)
             continue
         except Exception as error:
-            # 실원장 예외 메시지는 셀 값을 실을 수 있어 종류만 남긴다(holdout-window.md).
+            # 실원장 예외 메시지는 셀 값을 실을 수 있어 종류만 남긴다.
             outcomes[f"query_error:{type(error).__name__}"] += 1
             print(f"{case.key} query_error={type(error).__name__}", flush=True)
             continue
@@ -187,7 +182,7 @@ def _bits(values: np.ndarray) -> np.ndarray:
 
 
 def panel_differences(expected: RawPanel, actual: RawPanel) -> list[tuple[str, int]]:
-    """L0 차이를 (경로, 다른 칸 수)로 낸다. 값은 싣지 않는다(holdout-window.md).
+    """L0 차이를 (경로, 다른 칸 수)로 낸다. 값은 싣지 않는다.
 
     field_id 로 열을 짝짓고, 칸마다 present·has_value·kind·available 이 같고 값이 IEEE 비트로
     같은지 본다(허용오차 0, spec D1). 행 키가 다르면 칸 비교는 하지 않는다.
@@ -393,7 +388,7 @@ def _run_l1(
     limit: int,
     outcomes: collections.Counter[str],
 ) -> int:
-    """L1 대조를 돌려 불일치 칸 수를 낸다. 값은 내지 않는다(holdout-window.md).
+    """L1 대조를 돌려 불일치 칸 수를 낸다. 값은 내지 않는다.
 
     `selected` 는 graph 키 거르기다. 원시 질의의 필드는 고른 graph 가 읽는 필드뿐이고(실원장
     메모리), 워밍업 세션 수는 모든 사례 질의의 최댓값이다(어느 graph 든 창이 찬다).
@@ -451,7 +446,7 @@ def _run_l1(
                 actual = columnar_nodes(case, panel)
                 columnar_seconds = time.perf_counter() - started
             except Exception as error:
-                # 실원장 예외 메시지는 셀 값을 실을 수 있어 종류만 남긴다(holdout-window.md).
+                # 실원장 예외 메시지는 셀 값을 실을 수 있어 종류만 남긴다.
                 outcomes[f"l1_error:{type(error).__name__}"] += 1
                 print(f"{case.key} result=error:{type(error).__name__}", flush=True)
                 continue
@@ -485,11 +480,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--case", default="", help="사례 키에 이 문자열이 든 것만 돈다")
     parser.add_argument("--limit", type=int, default=20, help="사례마다 보일 차이 경로 수")
     args = parser.parse_args(argv)
-    try:
-        require_research_window(args.start, requested_by="scripts/parity_tape.py")
-    except ResearchWindowViolationError as error:
-        print(error, file=sys.stderr)
-        return 2
     equity_root = None if args.equity_root is None else args.equity_root.expanduser().resolve()
     environment = RunEnvironment(start=args.start, end=args.end, universe_id=args.universe)
     engine_a, engine_b = ENGINES[args.engine_a], ENGINES[args.engine_b]
@@ -524,7 +514,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 except Exception as error:
                     if equity_root is None:
                         raise
-                    # 실원장 예외 메시지는 셀 값을 실을 수 있어 종류만 남긴다(holdout-window.md).
+                    # 실원장 예외 메시지는 셀 값을 실을 수 있어 종류만 남긴다.
                     outcome = f"error:{type(error).__name__}"
                     outcomes[outcome] += 1
                     print(f"{case.key} result={outcome}", flush=True)

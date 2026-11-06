@@ -377,7 +377,7 @@ def test_equity_는_해시가_같은_파티션을_건너뛰고_바뀐_파티션�
 
 
 def test_격자의_NULL_키는_막지_않고_중복_키만_판정_불가다(tmp_path: Path) -> None:
-    """flow_daily grain (date, ticker, src) — not_collected 셀은 src NULL 이 설계다(조인은 NULL 안전). 같은 키가
+    """flow_daily — not_collected 셀은 src NULL 이 설계다(조인은 NULL 안전). 같은 셀(비교 축 date · ticker)이
     두 번이면 조인이 팬아웃하므로 그때만 판정 불가."""
     home = _home(tmp_path)
     schema = {"date": "DATE", "ticker": "VARCHAR", "src": "VARCHAR", "net_krw": "DOUBLE"}
@@ -395,6 +395,28 @@ def test_격자의_NULL_키는_막지_않고_중복_키만_판정_불가다(tmp_
     _handoff(home, D, stage={}, equity={"flow_daily": "m_dup"})
     t = _tbl(sl.check(home, D, tables=[("equity", "flow_daily")]), "flow_daily")
     assert t["status"] == "undecidable" and "중복" in t["reason"]
+
+
+def test_격자_셀_채움은_행_삭제가_아니고_셀이_통째로_사라지면_미설명이다(tmp_path: Path) -> None:
+    """flow_daily 는 셀 축(선언 `cell_key` = date · ticker)으로 대조한다. 수집 전 셀(src NULL · not_collected)이 다음 판에
+    키움 값으로 채워지면 src · 값 칸의 NULL→값이다 — grain (date, ticker, src) 로 조인하면 삭제 1 + 추가 1 이라
+    미설명으로 셌다(11-03 4행 · 11-04 10행, 서버 판 실측). 셀이 통째로 없어지면 그대로 행 삭제 · 미설명이다."""
+    home = _home(tmp_path)
+    schema = {"date": "DATE", "ticker": "VARCHAR", "src": "VARCHAR", "net_krw": "DOUBLE", "fill_kind": "VARCHAR"}
+    before = [{"date": "2026-10-07", "ticker": "A", "src": None, "net_krw": None, "fill_kind": "not_collected"},
+              {"date": WIN_OUT, "ticker": "B", "src": "kiwoom", "net_krw": 5.0, "fill_kind": "measured"}]
+    after = [{"date": "2026-10-07", "ticker": "A", "src": "kiwoom", "net_krw": 7.0, "fill_kind": "measured"}]
+    _build(home, "equity", "flow_daily", "m_b", before, schema=schema)
+    _build(home, "equity", "flow_daily", "m_a", after, schema=schema)
+    _handoff(home, DP, stage={}, equity={"flow_daily": "m_b"})
+    _handoff(home, D, stage={}, equity={"flow_daily": "m_a"})
+    t = _tbl(sl.check(home, D, tables=[("equity", "flow_daily")]), "flow_daily")
+    assert t["key"] == ["date", "ticker"]
+    c = t["counts"]
+    assert (c["rows_added"], c["rows_removed"], c["null_to_value"], c["window"]) == (0, 1, 2, 1)
+    assert c["unexplained"] == 1
+    assert t["unexplained_by_kind"] == {"value_to_null": 0, "rows_removed": 1, "available_date": 0}
+    assert [s["key"] for s in t["samples"]] == [{"date": WIN_OUT, "ticker": "B"}]
 
 
 # ── stage 표 ────────────────────────────────────────────────────────────────

@@ -84,7 +84,8 @@ def build_e2e_http_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with AsyncExitStack() as stack:
-            await stack.enter_async_context(root.router.lifespan_context(root))
+            # 바꿔 끼울 수 있는 앱의 지금 앱 — e2e 는 연습용 원천이라 새로고침으로 바꾸지 않는다.
+            await stack.enter_async_context(root.app.router.lifespan_context(root.app))
             await stack.enter_async_context(ideas.router.lifespan_context(ideas))
             yield
 

@@ -141,17 +141,12 @@ test(
     await expect(dialog).toContainText(
       "지금 값과 양옆을 볼 파라미터: scale 0, 1",
     );
-    // 창 미리보기의 어떤 창도 봉인 구간(2019-12-31 이전)에 걸리지 않는다.
+    // 창 미리보기에 학습·검증 창이 하나 보인다.
     const windows = dialog.getByRole("table", { name: "학습·검증 창" });
     const rows = windows.locator("tbody tr");
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toContainText("2020-01-02 ~");
     await expect(rows.first()).toContainText("2023-01-");
-    for (const text of await windows.locator("tbody td").allInnerTexts()) {
-      for (const day of text.match(/\d{4}-\d{2}-\d{2}/gu) ?? []) {
-        expect(day >= "2020-01-02").toBe(true);
-      }
-    }
     await dialog.getByRole("button", { name: "시작" }).click();
     await expect(dialog).toBeHidden();
     // 실험이 대기열에 들어가 두 항목이 "도는 중"을 말한다.

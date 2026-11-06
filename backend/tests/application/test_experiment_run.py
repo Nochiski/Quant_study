@@ -210,12 +210,12 @@ class _FakeRuns:
             strategy=self.strategy,
             parameter_values={"scale": 1.0, "mode": "a", **request.parameter_values},
         )
-        return AdmittedRun(resolved, summarize_trial_ledger("s-1", (), self.ledger_entries, ()))
+        return AdmittedRun(resolved, summarize_trial_ledger("s-1", (), self.ledger_entries))
 
     def trial_ledger(self, request: BacktestRunSpec) -> TrialLedger:
         if self.on_ledger is not None:
             self.on_ledger()
-        return summarize_trial_ledger("s-1", (), self.ledger_entries, ())
+        return summarize_trial_ledger("s-1", (), self.ledger_entries)
 
     def start(
         self, request: BacktestRunSpec, *, trial_key: str, owner: str, controls: ExperimentControls
@@ -779,6 +779,8 @@ def test_recover_skips_finished_and_unreadable_experiments(tmp_path: Path) -> No
         connection.execute(
             "UPDATE experiments SET design_json = '{}' WHERE experiment_id = ?", (broken,)
         )
+    # 끝나지 않은 실험 수 — 읽지 못하는 실험도 끝나지 않은 것으로 센다(DB 새로고침이 막히는 쪽)
+    assert service.unfinished_count() == 2
     pending: list[Callable[[], None]] = []
 
     _service(runs, repository=SQLiteExperimentRepository(path), spawn=pending.append).recover()
@@ -999,8 +1001,15 @@ def _write_legacy_research_file(
         connection.execute("ATTACH DATABASE ? AS fixture", (str(path),))
         for _, _, ddl in objects:
             connection.execute(ddl)
+        # 현행 판본이 지운 표(v11 의 `sealed_window_blocks`)는 옮길 행이 없다.
+        current = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM fixture.sqlite_schema WHERE type = 'table'"
+            ).fetchall()
+        }
         for kind, name, _ in objects:
-            if kind == "table":
+            if kind == "table" and name in current:
                 connection.execute(f'INSERT INTO "{name}" SELECT * FROM fixture."{name}"')
         connection.execute(f"PRAGMA application_id = {application_id}")
         connection.execute(f"PRAGMA user_version = {version}")

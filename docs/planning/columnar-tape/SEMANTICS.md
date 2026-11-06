@@ -95,7 +95,7 @@
 
 - 측정 구간 행만 넣는다(history 제외, 963, 1010).
 - 팩터 값은 (factor_id, as_of, security_id)로 찾는다.
-- 팩터 값의 공개일(`_latest_input_publication` 1014-1029)은 같은 행의 **present** 셀 가운데 `plan.required_field_ids`(그룹 필드 포함, `_validation.py:133-141`)의 `available_date` 최댓값이다. 해당 셀이 없으면 `as_of`다(SoT 대장 55행).
+- 팩터 값의 공개일(`_latest_input_publication` 1014-1029)은 같은 행의 **present** 셀 가운데 `plan.required_field_ids`(그룹 필드 포함, `_validation.py:133-141`)의 `available_date` 최댓값이다. 해당 셀이 없으면 `as_of`다(owner `application/portfolio_design/_service.py`의 `_latest_input_publication`).
 - 필드는 kind를 버리고 (id, value, available_date)만 옮긴다(996-999).
 - `starting_holdings`가 있으면 모든 행의 previous_weight를 대체하고, 없는 종목은 0.0이다(973-1005).
 

@@ -114,6 +114,9 @@ from strategy_workbench.application.factor_library.facade.ports import (
 from strategy_workbench.application.factor_research.facade.research import (
     FactorResearchService,
 )
+from strategy_workbench.application.market_overview.facade.overview import (
+    MarketOverviewService,
+)
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
 from strategy_workbench.application.portfolio_design.facade.trace import StrategyTraceService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
@@ -168,6 +171,7 @@ class BackendContainer:
     continuous_accounts: ContinuousAccountService
     factor_library: FactorLibraryService
     broker_connections: BrokerConnectionService
+    market_overview: MarketOverviewService
     assistant_profiles: ProviderProfileService
     assistant_chat: AssistantChatService
     assistant_turns: AssistantTurnRunner
@@ -362,6 +366,10 @@ def build_container(
                 credentials_file=assistant_services.credentials_file,
             ),
             _broker_probe(fake=broker_fake_probe),
+        ),
+        # 연습용(mock) 원천에는 시장 데이터 포트를 주지 않는다 — 시장 숫자를 지어내지 않는다.
+        market_overview=MarketOverviewService(
+            equity_data if isinstance(equity_data, EquityDuckdbAdapter) else None
         ),
         assistant_profiles=assistant_services.profiles,
         assistant_chat=assistant_services.chat,

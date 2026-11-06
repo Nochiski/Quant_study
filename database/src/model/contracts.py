@@ -201,8 +201,8 @@ FI_FIN_SUMMARY = TableContract(
              "처음 본 날(연간 행은 cF3002·cF4002 판 중 늦은 날, 분기 행은 Q:IS 판)이라 원문이 "
              "그대로인 종목은 D 보다 이르다")),
     window="확정치만(추정치는 fi_consensus). 연간 2기(v3 LIMIT 2) + 분기 5기(v4 TTM)",
-    source=("stg_fin_wise(연간 손익·지표) + stg_fin_wise_q(분기 손익, 10-01 T-Q4 — WISE 가 없는 종목만 "
-            "equity fin_std 분기) + equity fin_std(연간 자산·현금흐름) — compat T1.5 SQL 을 이 층으로 옮긴다"),
+    source=("stg_fin_wise(연간 손익·지표) + stg_fin_wise_q(분기 손익, 10-01 T-Q4 — WISE 가 없는 종목은 "
+            "equity fin_std 분기, WISE 종목도 WISE 확정보다 뒤 기말은 fin_std 분기 — N-64 Q1 fi1.13.0) + equity fin_std(연간 자산·현금흐름) — compat T1.5 SQL 을 이 층으로 옮긴다"),
     readers=ALL_ENGINES)
 
 FI_CREDIT = TableContract(

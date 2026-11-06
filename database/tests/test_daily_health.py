@@ -759,3 +759,20 @@ def test_krx_all_holiday_on_a_trading_day_is_left_to_the_halt(tmp_path):
     c = _by(rep)
     assert c["krx.holiday_misfire"].status is lh.Status.FAIL and "krx.rows" not in c
     assert not rep.failed_required and rep.halts and not rep.ok
+
+
+# ── 원문 대상(doc_targets) ─────────────────────────────────────────────────────
+
+
+def test_dart_docs_는_그날_잠정실적_원문도_대상으로_센다(tmp_path):
+    """원문 대상 술어의 정본은 수집기 우선순위(`doc_targets.PRIORITIES`) 하나다. 잠정실적(N-64 P4)을 더할 때 일일
+    게이트 사본만 고쳐(#665) 이 검사의 사본은 옛 대상 그대로였다 — 그날 잠정실적 원문을 못 받아도 통과했다.
+    자회사 실적 공시는 수집 대상이 아니라 세지 않는다."""
+    con = sqlite3.connect(_dart(tmp_path))
+    con.executemany("INSERT INTO dart_disclosure VALUES (?,?,?,?)", [
+        ("20260908800001", D, "005930", "연결재무제표기준영업(잠정)실적(공정공시)"),
+        ("20260908800002", D, "000660", "연결재무제표기준영업(잠정)실적(공정공시)(자회사의 주요경영사항)")])
+    docs = {c.name: c for c in lh.check_dart(con, D, True, "2026-09-07T15:00:00")}["dart.docs"]
+    assert docs.status is lh.Status.FAIL
+    assert docs.value == {"target": 1, "never_tried": 1, "failed": 0}
+    con.close()

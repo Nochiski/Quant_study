@@ -13,7 +13,6 @@ from typing import Annotated, Any, NoReturn, TypeVar
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import StringConstraints
@@ -79,6 +78,10 @@ from strategy_workbench.application.factor_research.facade.research import (
     FactorGraphValidation,
     FactorResearchService,
 )
+from strategy_workbench.application.ledger_refresh.facade.refresh import LedgerRefreshService
+from strategy_workbench.application.market_overview.facade.overview import (
+    MarketOverviewService,
+)
 from strategy_workbench.application.portfolio_design.facade.design import (
     IncompatiblePortfolioRequestError,
     InvalidPortfolioRequestError,
@@ -142,7 +145,6 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyRevisionConflictError,
     StrategySummary,
 )
-from strategy_workbench.domain.backtest.facade.environment import ResearchWindowViolationError
 from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
     UniverseDefinition,
@@ -179,6 +181,8 @@ from ._execution_error_contract import (
 )
 from ._experiment_routes import register_experiment_routes
 from ._factor_library_routes import register_factor_library_routes
+from ._ledger_refresh_routes import STARTS_WORK, register_ledger_refresh_routes
+from ._market_routes import register_market_routes
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
 from ._settings_routes import CredentialsFileIssue, register_settings_routes
 from ._sse import SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_SECONDS, SSE_POLL_SECONDS, sse_frame
@@ -388,6 +392,8 @@ def create_app(
     continuous_accounts: ContinuousAccountService | None = None,
     factor_library: FactorLibraryService | None = None,
     broker_connections: BrokerConnectionService | None = None,
+    market_overview: MarketOverviewService | None = None,
+    ledger_refresh: LedgerRefreshService | None = None,
     assistant_profiles: ProviderProfileService | None = None,
     assistant_chat: AssistantChatService | None = None,
     assistant_turns: AssistantTurnRunner | None = None,
@@ -529,6 +535,7 @@ def create_app(
         status_code=status.HTTP_202_ACCEPTED,
         route_class_override=CodedBodyValidationRoute,
         responses=admission_responses,
+        dependencies=[STARTS_WORK],
     )
     app.router.add_api_route(
         "/api/v1/backtests/trial-preview",
@@ -549,6 +556,12 @@ def create_app(
     # 키움 모의 연결 설정(S06 ②-2)도 서비스가 올 때만 생긴다.
     if broker_connections is not None:
         register_broker_connection_routes(app, broker_connections)
+    if market_overview is not None:
+        register_market_routes(app, market_overview)
+    # 계산을 시작하는 라우트의 `STARTS_WORK` 가 읽는다.
+    app.state.ledger_refresh = ledger_refresh
+    if ledger_refresh is not None:
+        register_ledger_refresh_routes(app, ledger_refresh)
 
     strategy_not_found: dict[int | str, dict[str, Any]] = {
         404: {"model": StrategyNotFoundResponse, "description": "The strategy does not exist"}
@@ -956,20 +969,14 @@ def create_app(
         operation_id="previewEquityPanel",
     )
     def equity_panel_preview(request: ResearchPanelPreviewRequest) -> ResearchPanelPreview:
-        try:
-            return equity_workspace.preview_panel(request)
-        except ResearchWindowViolationError as error:
-            raise _research_window_rejection(error, ("body", "query", "start")) from error
+        return equity_workspace.preview_panel(request)
 
     @app.post(
         "/api/v1/equity/preview",
         operation_id="previewEquityData",
     )
     def equity_preview(query: ResearchPanelQuery, venue: str = "XKRX") -> ResearchPreview:
-        try:
-            return equity_workspace.preview(query, venue=venue)
-        except ResearchWindowViolationError as error:
-            raise _research_window_rejection(error, ("body", "start")) from error
+        return equity_workspace.preview(query, venue=venue)
 
     @app.get(
         FACTOR_CATALOG_PATH,
@@ -1501,18 +1508,6 @@ def _invalid_document_compiled(compiled: CompiledDocument) -> HTTPException:
     )
 
 
-def _research_window_rejection(
-    error: ResearchWindowViolationError, loc: tuple[str, ...]
-) -> RequestValidationError:
-    """equity 미리보기의 연구 구간 거절을 이 경로의 기존 422(본문 검증 실패 목록)로 싣는다(spec D1).
-
-    두 경로는 코드화된 422 detail 이 없고 본문 검증 실패 `HTTPValidationError` 만 선언한다. 같은
-    모양의 항목 하나로 싣고 `type` 에 진단 코드, `msg` 에 backend 가 날짜까지 넣어 완성한 문장을
-    둔다.
-    """
-    return RequestValidationError([{"type": error.code, "loc": loc, "msg": str(error)}])
-
-
 async def _clean_up(cleanups: tuple[Callable[[], Awaitable[None]], ...]) -> Exception | None:
     """정리를 차례로 모두 부르고 첫 실패를 돌려준다. 실패마다 로그를 남긴다."""
     first: Exception | None = None
@@ -1542,13 +1537,7 @@ def _raise_run_request_rejection(error: Exception) -> NoReturn:
     if code is None:
         raise error
     detail: dict[str, object] = {"code": code, "message": str(error)}
-    if isinstance(error, ResearchWindowViolationError):
-        detail |= {
-            "sealed_start": error.sealed_start.isoformat(),
-            "sealed_end": error.sealed_end.isoformat(),
-            "research_start": error.research_start.isoformat(),
-        }
-    elif isinstance(error, (BacktestParameterValueError, InvalidParameterValueError)):
+    if isinstance(error, (BacktestParameterValueError, InvalidParameterValueError)):
         detail["parameter_id"] = error.parameter_id
     raise HTTPException(
         status_code=_ADMISSION_STATUS.get(code, status.HTTP_422_UNPROCESSABLE_CONTENT),

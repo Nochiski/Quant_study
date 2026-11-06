@@ -548,6 +548,9 @@ class EquityTable:
     """stage 테이블 → 선언 컬럼. 비어 있으면 전 컬럼 투영. EG0-P02 의 대조축이다."""
     available_basis: tuple[str, ...] = ()       # 이 테이블이 쓰는 basis. 비면 BASIS_VOCAB 전체
     content_date_column: str | None = None      # EG2-P02 `available_date >= 내용일` 축
+    cell_key: tuple[str, ...] = ()
+    """격자 표의 셀 축 — grain 에서 NULL 이 설계인 원천 열을 뺀 것(셀마다 행 하나). 판 대조(`daily.silent_loss`)가
+    이 축으로 조인해 수집 전 셀(원천 NULL)의 채움을 행 삭제 + 추가가 아니라 값 칸의 NULL→값으로 본다. 비면 grain."""
     reject_reasons: tuple[str, ...] = ()        # `_reject/` 로 나갈 사유 어휘 (EG3 폐쇄)
     consts: tuple[str, ...] = ()                # baseline 에서 `_const` 로 주입할 metric 키
     extra_gates: tuple[ExtraGate, ...] = ()     # 테이블 특화 술어 (EG6·EG8·EG9·EG10~)
@@ -571,6 +574,10 @@ class EquityTable:
         if missing:
             raise ValueError(f"grain column not declared in columns: table={self.name} "
                              f"missing={missing} columns={sorted(self.columns)}")
+        outside = [c for c in self.cell_key if c not in self.grain]
+        if outside:
+            raise ValueError(f"cell_key outside grain: table={self.name} "
+                             f"got={outside} grain={list(self.grain)}")
         if self.partition_class not in PARTITION_CLASSES:
             raise ValueError(f"unknown partition_class: table={self.name} "
                              f"got={self.partition_class!r} allowed={list(PARTITION_CLASSES)}")

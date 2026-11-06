@@ -1,0 +1,415 @@
+"""`ledger_sync` subprocess 어댑터: 기계용 출력만 읽고, 기록이 없으면 반영하지 않는 쪽으로."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from strategy_workbench.adapters.outbound.ledger_sync_process import _process
+from strategy_workbench.adapters.outbound.ledger_sync_process._process import (
+    LAST_RUN_NAME,
+    LOCK_NAME,
+    LOCK_STALE_S,
+    SYNC_DIR,
+    LedgerSyncProcess,
+    ledger_sync_command,
+    outcome_from_last_run,
+)
+from strategy_workbench.application.ledger_refresh.facade.refresh import (
+    SyncFailureKind,
+    SyncStage,
+    UnavailableReason,
+    classify,
+)
+from tests.equity_fixture import import_ledger_module
+
+REPO = Path(__file__).resolve().parents[2]
+NOW = datetime(2026, 11, 5, 3, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "LOCK_STALE_S",
+        "LOCK_NAME",
+        "LAST_RUN_NAME",
+        "SYNC_DIR",
+        "EXIT_OK",
+        "EXIT_ERROR",
+        "EXIT_DRIFTED",
+        "EXIT_MISMATCH",
+    ],
+)
+def test_constants_match_the_ledger_sync_module(name: str) -> None:
+    assert getattr(_process, name) == getattr(import_ledger_module("ledger_sync.__main__"), name)
+
+
+def test_the_kept_builds_and_layer_match_the_tool() -> None:
+    pull = import_ledger_module("ledger_sync.pull")
+    main = import_ledger_module("ledger_sync.__main__")
+    assert _process.KEEP_BUILDS > pull.KEEP_DEFAULT  # 도구 기본값보다 한 판 더 남긴다
+    assert _process.LAYER in main.LAYERS
+
+
+def test_the_paramiko_pin_matches_the_wrappers() -> None:
+    for wrapper in ("ledger_sync.ps1", "ledger_sync.sh"):
+        text = (REPO / "database" / "scripts" / wrapper).read_text(encoding="utf-8")
+        assert _process.PARAMIKO in text, wrapper
+
+
+def test_the_command_targets_the_app_root_without_resyncing_the_app_environment() -> None:
+    command = ledger_sync_command("uv", REPO, Path("/data/equity"), "--json", "plan")
+    assert command[:4] == ["uv", "run", "--project", str(REPO / "backend")]
+    assert "--no-sync" in command
+    root = command.index("--root")
+    assert command[root + 1 : root + 4] == [str(Path("/data")), "--layer", "equity"]
+    assert command[-2:] == ["--json", "plan"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        # 표를 받기 전에 접속 실패 — 카탈로그를 다시 만들지 않았다
+        (
+            {"exit_code": 2, "error": "x", "error_kind": "connect"},
+            (SyncFailureKind.CONNECT, 0, False, False, False, False),
+        ),
+        (
+            {
+                "exit_code": 0,
+                "pull": {"results": [{"outcome": "done"}], "drifted": []},
+                "catalog_rc": 0,
+                "verify": {"ok": True},
+            },
+            (None, 0, True, False, False, False),
+        ),
+        # 받을 새 판이 없어도 카탈로그는 다시 만든다
+        (
+            {
+                "exit_code": 0,
+                "pull": {"results": [{"outcome": "unchanged"}]},
+                "catalog_rc": 0,
+                "verify": {"ok": True},
+            },
+            (None, 0, True, False, False, False),
+        ),
+        (
+            {"exit_code": 2, "pull": {"results": [{"outcome": "done"}, {"outcome": "failed"}]}},
+            (None, 1, False, False, False, False),
+        ),
+        (
+            {"exit_code": 2, "pull": {"results": [{"outcome": "done"}]}, "catalog_rc": 2},
+            (None, 0, False, True, False, False),
+        ),
+        (
+            {
+                "exit_code": 4,
+                "pull": {"results": [{"outcome": "done"}]},
+                "catalog_rc": 0,
+                "verify": {"ok": False},
+            },
+            (None, 0, True, False, True, False),
+        ),
+        # drifted 는 확인하기의 차이보다 먼저 남는 종료 코드다
+        (
+            {
+                "exit_code": 3,
+                "pull": {"results": [{"outcome": "done"}], "drifted": ["price"]},
+                "catalog_rc": 0,
+                "verify": {"ok": False},
+            },
+            (None, 0, True, False, True, True),
+        ),
+        # 정리하기 동안 서버가 새 판을 올려 확인하기가 차이를 본다 — 로컬 판은 맞다(drifted 와 같다)
+        (
+            {
+                "exit_code": 4,
+                "pull": {"results": [{"outcome": "done"}], "drifted": []},
+                "catalog_rc": 0,
+                "verify": {
+                    "ok": False,
+                    "remote_ahead": ["price_daily"],
+                    "findings": [{"table": "price_daily", "detail": "x", "remote_ahead": True}],
+                },
+            },
+            (None, 0, True, False, False, True),
+        ),
+        # 서버가 앞선 차이와 로컬 손상이 함께 있으면 불일치다(앞섬이 손상을 가리지 않는다)
+        (
+            {
+                "exit_code": 4,
+                "pull": {"results": []},
+                "catalog_rc": 0,
+                "verify": {
+                    "ok": False,
+                    "remote_ahead": ["price_daily"],
+                    "findings": [
+                        {"table": "price_daily", "detail": "x", "remote_ahead": True},
+                        {"table": "price_daily", "detail": "file missing", "remote_ahead": False},
+                    ],
+                },
+            },
+            (None, 0, True, False, True, False),
+        ),
+        # 모르는 실패 갈래·종료 코드는 예상 밖으로 접는다
+        (
+            {"exit_code": 2, "error_kind": "weird"},
+            (SyncFailureKind.UNEXPECTED, 0, False, False, False, False),
+        ),
+        ({"exit_code": 9}, (SyncFailureKind.UNEXPECTED, 0, False, False, False, False)),
+    ],
+)
+def test_last_run_is_read_into_an_outcome(payload: dict[str, object], expected: tuple) -> None:
+    outcome = outcome_from_last_run(payload, 0)
+    assert (
+        outcome.failure, outcome.tables_failed, outcome.catalog_rebuilt, outcome.catalog_failed,
+        outcome.verify_mismatch, outcome.drifted,
+    ) == expected  # fmt: skip
+
+
+def test_a_missing_record_is_an_unexpected_failure_that_rebuilt_nothing() -> None:
+    outcome = outcome_from_last_run(None, 1)
+    assert (outcome.failure, outcome.catalog_rebuilt) == (SyncFailureKind.UNEXPECTED, False)
+
+
+def _adapter(tmp_path: Path, **kwargs: object) -> LedgerSyncProcess:
+    root = tmp_path / "data" / "equity"
+    root.mkdir(parents=True, exist_ok=True)
+    return LedgerSyncProcess("uv", REPO, root, environ={}, **kwargs)  # pyright: ignore[reportArgumentType]  # reason: 테스트 대역 키워드
+
+
+def test_lock_reports_the_holder_and_staleness(tmp_path: Path) -> None:
+    adapter = _adapter(tmp_path)
+    assert adapter.lock() is None
+    lock = tmp_path / "data" / "equity" / SYNC_DIR / LOCK_NAME
+    lock.parent.mkdir(parents=True)
+    lock.write_text(json.dumps({"pid": 1, "started_at_utc": NOW.isoformat()}), encoding="utf-8")
+    held = adapter.lock()
+    assert held is not None and (held.started_at, held.stale) == (NOW, False)
+    old = time.time() - LOCK_STALE_S - 60
+    os.utime(lock, (old, old))
+    held = adapter.lock()
+    assert held is not None and held.stale
+    # 깨진 잠금은 도구(`lock_info`)처럼 낡은 것으로 본다
+    lock.write_text("{", encoding="utf-8")
+    held = adapter.lock()
+    assert held is not None and held.stale
+
+
+def test_plan_counts_new_builds_and_reads_the_build_window(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        stdout = json.dumps(
+            {
+                "download_bytes": 1234,
+                "in_build_window": True,
+                "tables": [
+                    {"action": "new_build"},
+                    {"action": "up_to_date"},
+                    {"action": "new_build"},
+                ],
+            }
+        )
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    plan = _adapter(tmp_path, run=run).plan()
+    assert (plan.new_tables, plan.download_bytes, plan.in_build_window, plan.failure) == (
+        2,
+        1234,
+        True,
+        None,
+    )
+    assert calls[0][-2:] == ["--json", "plan"]
+
+    def refuse(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 2, "", "error: server host is not set")
+
+    assert _adapter(tmp_path, run=refuse).plan().failure is SyncFailureKind.CONNECT
+
+
+_FAKE_SYNC = """
+import json, sys, time
+from datetime import datetime, timezone
+progress, last_run = sys.argv[1], sys.argv[2]
+now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+open(progress, "w", encoding="utf-8").write(json.dumps({
+    "stage": "catalog", "stage_started_at_utc": now, "tables_total": 3, "tables_done": 3,
+    "bytes_total": 10, "bytes_done": 10}))
+time.sleep(0.5)
+open(last_run, "w", encoding="utf-8").write(json.dumps({
+    "started_at_utc": now, "exit_code": 0, "pull": {"results": [{"outcome": "done"}]},
+    "catalog_rc": 0, "verify": {"ok": True}}))
+"""
+
+
+def test_a_started_sync_reports_progress_then_the_recorded_outcome(tmp_path: Path) -> None:
+    sync_dir = tmp_path / "data" / "equity" / SYNC_DIR
+
+    def spawn(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
+        progress = command[command.index("--progress-file") + 1]
+        return subprocess.Popen(  # 진짜 프로세스 — 진행 파일과 기록을 남기고 끝난다
+            [sys.executable, "-c", _FAKE_SYNC, progress, str(sync_dir / LAST_RUN_NAME)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+        )
+
+    job = _adapter(
+        tmp_path, spawn=spawn, now=lambda: datetime.now(UTC) - timedelta(seconds=1)
+    ).start()
+    deadline = time.monotonic() + 10
+    while job.progress() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    progress = job.progress()
+    assert progress is not None and (progress.stage, progress.tables_done) == (SyncStage.CATALOG, 3)
+    outcome = None
+    while outcome is None and time.monotonic() < deadline:
+        outcome = job.wait(0.2)
+    assert outcome is not None and (outcome.failure, outcome.catalog_rebuilt) == (None, True)
+    assert not list(sync_dir.glob("app_progress_*.json"))  # 진행 파일을 치운다
+
+
+def test_a_stale_record_from_an_earlier_run_is_not_trusted(tmp_path: Path) -> None:
+    sync_dir = tmp_path / "data" / "equity" / SYNC_DIR
+    sync_dir.mkdir(parents=True)
+    (sync_dir / LAST_RUN_NAME).write_text(
+        json.dumps({"started_at_utc": (NOW - timedelta(days=3)).isoformat(), "exit_code": 0}),
+        encoding="utf-8",
+    )
+
+    def spawn(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
+        return subprocess.Popen([sys.executable, "-c", "pass"])
+
+    job = _adapter(tmp_path, spawn=spawn, now=lambda: NOW).start()
+    outcome = None
+    while outcome is None:
+        outcome = job.wait(1.0)
+    assert (outcome.failure, outcome.catalog_rebuilt) == (SyncFailureKind.UNEXPECTED, False)
+
+
+def test_research_snapshot_markers_match_the_ledger_module() -> None:
+    snapshot = import_ledger_module("equity.research_snapshot")
+    assert set(_process.RESEARCH_SNAPSHOT_MARKERS) == {
+        snapshot.SNAPSHOT_NAME,
+        snapshot.PENDING_NAME,
+    }
+
+
+def test_discovery_receives_only_the_equity_root_the_app_reads(tmp_path: Path) -> None:
+    root = tmp_path / "data" / "equity"
+    root.mkdir(parents=True)
+    configured = {"QL_SYNC_HOST": "203.0.113.7", "QL_SYNC_USER": "sync"}
+
+    def discover(path: Path, environ: dict[str, str] = configured, uv: str | None = "uv") -> object:
+        return _process.discover_ledger_sync(path, REPO, environ=environ, which=lambda _: uv)
+
+    found = discover(root)
+    assert isinstance(found, LedgerSyncProcess)
+    assert discover(tmp_path / "data") is UnavailableReason.ROOT_MISMATCH  # 이름이 equity 가 아니다
+    assert discover(root, environ={}) is UnavailableReason.NOT_CONFIGURED
+    assert discover(root, uv=None) is UnavailableReason.SYNC_TOOL_MISSING
+    (root / "_research_snapshot.pending").write_text("", encoding="utf-8")
+    assert discover(root) is UnavailableReason.ROOT_MISMATCH  # 연구 보존본을 덮지 않는다
+
+
+_HUNG_SYNC = """
+import json, sys, time
+from datetime import datetime, timezone
+now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+open(sys.argv[1], "w", encoding="utf-8").write(json.dumps({"pid": 1, "started_at_utc": now}))
+if len(sys.argv) > 2:  # 잠금을 잡은 뒤 진행 파일을 쓴다(도구 순서)
+    open(sys.argv[2], "w", encoding="utf-8").write(json.dumps({"stage": "download"}))
+time.sleep(120)
+"""
+
+
+def test_a_sync_past_its_deadline_is_killed_and_its_own_lock_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "data" / "equity" / SYNC_DIR / LOCK_NAME
+    spawned: list[subprocess.Popen[bytes]] = []
+
+    def spawn(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
+        progress = command[command.index("--progress-file") + 1]
+        process = subprocess.Popen(  # 잠금을 잡고 멈춘 도구
+            [sys.executable, "-c", _HUNG_SYNC, str(lock), progress],
+            stdin=subprocess.DEVNULL,
+            start_new_session=sys.platform != "win32",
+        )
+        spawned.append(process)
+        return process
+
+    monkeypatch.setattr(_process, "SYNC_DEADLINE_S", 1.5)
+    job = _adapter(
+        tmp_path, spawn=spawn, now=lambda: datetime.now(UTC) - timedelta(seconds=1)
+    ).start()
+    deadline = time.monotonic() + 10
+    while not lock.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    outcome = None
+    while outcome is None and time.monotonic() < deadline:
+        outcome = job.wait(0.2)
+    assert outcome is not None and outcome.failure is SyncFailureKind.UNEXPECTED
+    assert spawned[0].poll() is not None  # 끊었다
+    assert not lock.exists()  # 끊긴 도구가 풀지 못한 이번 실행의 잠금을 치웠다
+
+
+@pytest.mark.parametrize(
+    ("verify", "applied"),
+    [
+        ({"ok": False, "findings": [{"table": "t", "remote_ahead": True}]}, True),
+        (
+            {
+                "ok": False,
+                "findings": [
+                    {"table": "t", "remote_ahead": True},
+                    {"table": "_state", "remote_ahead": False},
+                ],
+            },
+            False,
+        ),
+        # 옛 도구(차이마다 표시가 없다)의 차이는 불일치로 본다
+        ({"ok": False, "findings": [{"table": "t"}]}, False),
+    ],
+)
+def test_a_record_reaches_the_apply_decision_end_to_end(
+    verify: dict[str, object], applied: bool
+) -> None:
+    payload = {"exit_code": 4, "pull": {"results": []}, "catalog_rc": 0, "verify": verify}
+    assert (classify(outcome_from_last_run(payload, 4)) is None) is applied
+
+
+def test_a_cancel_from_another_thread_still_clears_its_own_lock(tmp_path: Path) -> None:
+    # 서버 종료(stop)가 다른 스레드에서 끊는 사이 받기 스레드의 wait 가 진행 파일을 치운다
+    lock = tmp_path / "data" / "equity" / SYNC_DIR / LOCK_NAME
+
+    def spawn(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
+        progress = command[command.index("--progress-file") + 1]
+        return subprocess.Popen(
+            [sys.executable, "-c", _HUNG_SYNC, str(lock), progress],
+            stdin=subprocess.DEVNULL,
+            start_new_session=sys.platform != "win32",
+        )
+
+    job = _adapter(
+        tmp_path, spawn=spawn, now=lambda: datetime.now(UTC) - timedelta(seconds=1)
+    ).start()
+    deadline = time.monotonic() + 10
+    while job.progress() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    outcomes: list[object] = []
+    waiter = threading.Thread(target=lambda: outcomes.append(job.wait(30)))
+    waiter.start()
+    job.cancel()
+    waiter.join(30)
+    assert outcomes and outcomes[0] is not None
+    assert not lock.exists()

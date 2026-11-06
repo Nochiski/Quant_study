@@ -555,4 +555,4 @@ def test_normal_but_noted_statuses_are_registered_as_warn_in_runlog():
 
 def test_repo_default_session_table_has_2027_csat_day():
     days = trading_calendar.load_session_exceptions(Path("/nonexistent-ops-dir"))
-    assert "20261119" in days and "KRX 공지로 확인 필요" in days["20261119"]
+    assert "20261119" in days and "정규장 10:00~16:30" in days["20261119"]   # KRX 11-05 공지로 확정

@@ -596,7 +596,7 @@ class PortfolioDesignService:
 
         실행 설정 확정도 여기서 한다: 문서 검증이 먼저고(코드화된 진단의 owner 는 validator),
         엔진 능력 판정은 `environment.participation_rate` 를, 플랜 컴파일은 `environment.missing`
-        을 인자로 받아야 한다(P2-02·P2-03). 실행 설정이 없거나 연구 구간 밖이면 domain 오류를 그대로
+        을 인자로 받아야 한다(P2-02·P2-03). 실행 설정이 없으면 domain 오류를 그대로
         올린다 — 백테스트 시작과 같은 접수 거절 코드로 나간다(#351).
         """
 
@@ -632,20 +632,10 @@ class PortfolioDesignService:
             parameter_values=parameter_values,
         )
 
-    def validate_trial_strategy(self, spec: StrategySpec, *, missing: MissingPolicy) -> None:
-        """봉인 거절을 기록하기 전에 입력 전략만 검증한다. 구간 관측이나 실행은 하지 않는다.
-
-        실행 preflight와 같은 validator·metadata·plan owner를 소비하되 연구 구간을 바꾸거나
-        우회하지 않는다. 봉인 오류 응답 우선순위를 유지하면서 무효 전략의 감사 기록을 막는다.
-        """
-        _require_valid_strategy(spec)
-        self._numeric_factor_plans(spec, missing)
-
     def _numeric_factor_plans(
         self, spec: StrategySpec, missing: MissingPolicy
     ) -> tuple[FactorMetadataSnapshot, dict[str, FactorExecutionPlan]]:
-        """팩터 계획을 컴파일하고 숫자가 아닌 출력을 거절한다. 실행 preflight와 봉인 기록 전
-        검증이 같은 단계를 같은 순서로 쓴다."""
+        """팩터 계획을 컴파일하고 숫자가 아닌 출력을 거절한다."""
         metadata = self._strategy_metadata(spec)
         plans = self._plans(spec, metadata, missing)
         _reject_non_numeric_factor_outputs(spec, plans)

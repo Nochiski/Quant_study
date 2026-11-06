@@ -28,6 +28,7 @@ import {
 import { t } from "../../shared/config";
 import { isJsonPointer } from "../../shared/lib/yaml12";
 import { AppShell } from "../../widgets/app-shell";
+import { LedgerRefreshNotice } from "../../features/refresh-ledger";
 import { ExperimentCompletionNotice } from "../../widgets/experiment-notice";
 
 /** Everything routes can read without importing the app: query cache and feature flags. */
@@ -171,6 +172,19 @@ const newExperimentSearch = (
   from: textOf(search.from),
 });
 
+// 옛 빌더 북마크는 값이 무엇이든(`?run=123` 은 숫자, `?step=` 는 빈 값으로 읽힌다) 있기만 하면 보낸다.
+const presentOf = (value: unknown): string | undefined =>
+  value === undefined || value === null ? undefined : String(value);
+
+/** 홈: 섹터맵 드릴다운 자리(`sector`)와 옛 빌더 북마크(`step`·`run`)만 읽는다. */
+const homeSearch = (
+  search: Record<string, unknown>,
+): { sector?: string; step?: string; run?: string } => ({
+  sector: textOf(search.sector),
+  step: presentOf(search.step),
+  run: presentOf(search.run),
+});
+
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: () => {
     const { operationsEnabled } = rootRoute.useRouteContext();
@@ -178,6 +192,7 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
       <AppShell operationsEnabled={operationsEnabled}>
         <Outlet />
         <ExperimentCompletionNotice />
+        <LedgerRefreshNotice />
       </AppShell>
     );
   },
@@ -189,10 +204,10 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  // 연구 홈(재설계 P6). 옛 빌더 북마크(`?step=…&run=…`)만 예전처럼 새 전략 편집기로 보낸다.
+  // 홈(재설계 P6). 옛 빌더 북마크(`?step=…&run=…`)만 예전처럼 새 전략 편집기로 보낸다.
+  validateSearch: homeSearch,
   beforeLoad: ({ search }) => {
-    const legacy = search as Record<string, unknown>;
-    if (legacy.step === undefined && legacy.run === undefined) return;
+    if (search.step === undefined && search.run === undefined) return;
     throw redirect({
       to: "/research/strategies/new",
       search: {},

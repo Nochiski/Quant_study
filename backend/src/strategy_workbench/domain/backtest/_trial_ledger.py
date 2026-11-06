@@ -6,7 +6,6 @@
   샤프다(파산이면 없다). 끝난 순서로 고르므로 나중 결과가 대표를 바꾸지 않는다.
 - 같은 시도에서 나중에 결과가 나온 실행은 재확인이고, 결과 없이 끝난 실행(시작 전 취소·파산
   아닌 실패·중단)은 N 에서 빠진다.
-- 봉인 겹침으로 거절한 요청은 봉인 원장이 정본이고(spec D11) 여기서는 N 제외로 보이기만 한다.
 """
 
 from __future__ import annotations
@@ -53,17 +52,6 @@ class TrialLedgerEntry:
 
 
 @dataclass(frozen=True)
-class BlockedTrialAttempt:
-    """봉인 겹침으로 거절한 실행 요청(봉인 원장의 "차단한 시도"). 결과가 없어 N 에 들지 않는다."""
-
-    blocked_at: datetime
-    lineage_id: str | None
-    trial_key: str
-    spec_hash: str
-    start: date
-
-
-@dataclass(frozen=True)
 class TrialRun:
     run_id: str
     status: RunStatus
@@ -99,7 +87,6 @@ class TrialLedger:
     merged_lineage_ids: tuple[str, ...]
     trial_count: int
     trials: tuple[TrialGroup, ...]
-    blocked: tuple[BlockedTrialAttempt, ...]
 
 
 class TrialPreviewReason(StrEnum):
@@ -130,7 +117,6 @@ def summarize_trial_ledger(
     lineage_id: str,
     merged_lineage_ids: tuple[str, ...],
     entries: Sequence[TrialLedgerEntry],
-    blocked: tuple[BlockedTrialAttempt, ...],
 ) -> TrialLedger:
     """접수 순 원장 행을 시도로 묶는다. 시도 순서는 그 시도의 첫 접수 순이다."""
     groups: dict[str, list[TrialLedgerEntry]] = {}
@@ -142,7 +128,6 @@ def summarize_trial_ledger(
         merged_lineage_ids=merged_lineage_ids,
         trial_count=sum(trial.representative_run_id is not None for trial in trials),
         trials=trials,
-        blocked=blocked,
     )
 
 

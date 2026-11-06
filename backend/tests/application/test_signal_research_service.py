@@ -1,4 +1,4 @@
-"""연구 실행은 입력 판본·봉인·실패 상태를 확인하고 미래 결과를 계획에 되돌리지 않는다."""
+"""연구 실행은 입력 판본·실패 상태를 확인하고 미래 결과를 계획에 되돌리지 않는다."""
 
 from __future__ import annotations
 
@@ -25,10 +25,7 @@ from strategy_workbench.application.signal_research.facade.research import (
     SignalResearchService,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
-from strategy_workbench.domain.backtest.facade.environment import (
-    ResearchWindowViolationError,
-    RunEnvironment,
-)
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioFactorValue,
     PortfolioObservation,
@@ -183,16 +180,12 @@ def test_unsupported_label_source_is_a_failure_value_and_still_rechecks_preserve
 
 
 @pytest.mark.parametrize(
-    "change", ["sealed", "future_signal", "calendar_short", "unknown_factor", "duplicate_factor"]
+    "change", ["future_signal", "calendar_short", "unknown_factor", "duplicate_factor"]
 )
 def test_invalid_research_request_is_rejected_before_reading_preserved_data(change: str) -> None:
     guard, pipeline, labels = _Guard(), _Pipeline(), _Labels()
     request = _request()
-    if change == "sealed":
-        request = replace(
-            request, environment=replace(request.environment, start=date(2019, 12, 30))
-        )
-    elif change == "future_signal":
+    if change == "future_signal":
         request = replace(request, environment=replace(request.environment, end=date(2024, 1, 10)))
     elif change == "calendar_short":
         request = replace(request, label_calendar_through=D0)
@@ -200,8 +193,7 @@ def test_invalid_research_request_is_rejected_before_reading_preserved_data(chan
         request = replace(request, factor_ids=("unknown",))
     else:
         request = replace(request, factor_ids=(*request.factor_ids, *request.factor_ids))
-    error = ResearchWindowViolationError if change == "sealed" else ValueError
-    with pytest.raises(error):
+    with pytest.raises(ValueError):
         SignalResearchService(guard, pipeline, labels).run(request)
     assert (guard.calls, pipeline.calls, labels.calls) == (0, 0, 0)
 

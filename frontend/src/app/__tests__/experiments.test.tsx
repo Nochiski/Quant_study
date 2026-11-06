@@ -15,6 +15,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { App } from "../app";
 import type { BacktestRunSpec } from "../../shared/api";
+import { practiceDataHandlers } from "./practice-data-handlers";
 
 // 실험 화면(검증 랩 V5-01, US-SM-14·15). 상태·진행 수·슬롯·우선순위 상한·조합 수·시도 수 변화는 backend
 // 응답이고, 화면은 그 값을 보이고 요청을 싣기만 한다.
@@ -118,6 +119,7 @@ const document = {
 };
 
 const server = setupServer(
+  ...practiceDataHandlers(API),
   // 실행 설정 유니버스 칸·요약 띠가 읽는 연결된 시장 데이터의 유니버스 목록.
   http.get(`${API}/api/v1/equity/universes`, () =>
     HttpResponse.json([

@@ -53,7 +53,8 @@ def fingerprint_run_spec(spec: BacktestRunSpec | ResolvedBacktestRunSpec) -> Bac
     """실행 결과를 가르는 요청 칸만 남긴 spec — 실행 지문과 같은 입력 잇기가 이것을 비교한다.
 
     전략 출처·계열은 출처 정보이고, 지표 창의 표시 이름(`label`)은 화면이 지은 문자열이라
-    뺀다(#335).
+    뺀다(#335). 이 투영을 바꾸면 같은 입력 잇기와 시도 원장 계수가 갈리므로 판본 상향과 함께
+    바꾼다.
     """
     # 기존 지문의 null 출처 키를 보존한다. 새 내부 DTO를 직접 asdict하면 과거 지문이 바뀐다.
     wire = spec.to_wire() if isinstance(spec, ResolvedBacktestRunSpec) else spec
@@ -69,7 +70,9 @@ def run_input_key(spec: BacktestRunSpec | ResolvedBacktestRunSpec) -> str:
     """접수 때 아는 실행 입력의 해시 — 같은 입력 잇기(중복 실행 제거)의 기준.
 
     실행 지문에서 실행 뒤에야 아는 칸(target tape 해시)과 프로세스 안에서 고정인 칸(데이터 스냅샷·
-    엔진 규칙·지표 레지스트리 판본)을 뺀 것이다. JSON 표기라 `1` 과 `True` 가 갈린다.
+    엔진 규칙·지표 레지스트리 판본)을 뺀 것이다. JSON 표기라 `1` 과 `True` 가 갈린다. 어댑터가
+    프로세스 안에서 snapshot 을 바꾸게 되면 이 키와 팩터 회귀 캐시 키에 `data_snapshot_id` 를
+    넣는다.
     """
     return canonical_json_hash(asdict(fingerprint_run_spec(spec)))
 

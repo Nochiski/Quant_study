@@ -79,7 +79,7 @@ TRIAL_KEY_ROLES: dict[str, TrialKeyRole] = {
 def trial_key(spec: BacktestRunSpec | ResolvedBacktestRunSpec) -> str:
     """전략·실행 설정이 채워진 실행 spec 의 시도 키.
 
-    파라미터 값은 해소한 값(spec D4)으로 싣는다. 해소는 멱등이라 봉인 기록·미리 계산(해소 전 요청)과
+    파라미터 값은 해소한 값(spec D4)으로 싣는다. 해소는 멱등이라 미리 계산(해소 전 요청)과
     접수(해소한 값을 박은 spec)가 같은 키를 내고, 기본값을 명시한 요청은 생략한 요청과 같은 키다.
 
     Raises:

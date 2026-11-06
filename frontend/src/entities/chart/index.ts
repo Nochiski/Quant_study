@@ -49,7 +49,23 @@ export {
   type ChartPeriod,
   type StockChartSearch,
 } from "./model/chart-search";
-export { spreadLabels } from "./model/label-layout";
+export {
+  MIN_VISIBLE_BARS,
+  defaultViewport,
+  panViewport,
+  viewportRange,
+  visibleBars,
+  wheelZoomFactor,
+  zoomViewport,
+  type ChartViewport,
+} from "./model/chart-viewport";
+export {
+  labelAnchor,
+  placeLevelLabels,
+  spreadLabels,
+  type LevelLabel,
+  type PlacedLabel,
+} from "./model/label-layout";
 export {
   chartErrorSentence,
   lineIssueLabel,
@@ -57,7 +73,7 @@ export {
   lineTitle,
   timeframeLabel,
 } from "./model/line-copy";
-export { levelSegments, shadedBands, type LevelSegment } from "./model/line-geometry";
+export { levelSegments, segmentLabels, shadedBands, type LevelSegment } from "./model/line-geometry";
 export { CANDLE_FIELDS, snapToCandle, type CandleField } from "./model/magnet";
 export { AxisBadges, type AxisBadge } from "./ui/axis-badges";
 export { CandlePlot } from "./ui/candle-plot";

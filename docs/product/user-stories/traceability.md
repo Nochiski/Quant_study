@@ -21,9 +21,9 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
 | 김철수 | 13 | 1 | 0 | 1 | 15 |
-| 정동민 | 19 | 0 | 0 | 0 | 19 |
+| 정동민 | 20 | 0 | 0 | 0 | 20 |
 | 한상목 | 17 | 1 | 0 | 1 | 19 |
-| 합계 | 49 | 2 | 0 | 2 | 53 |
+| 합계 | 50 | 2 | 0 | 2 | 54 |
 
 ### 스토리별 추적
 
@@ -63,6 +63,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-DM-17 | 정동민 | 홈에서 마지막 장이 어땠는지 쉬운 말로 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.home-market.spec.ts` :: US-DM-17 연습용 데이터로 켜진 홈은 시장 숫자 없이 실제 데이터 연결 안내만 보이고 연구 카드가 그 아래에 있다 |
 | US-DM-18 | 정동민 | 버튼 하나로 최신 시장 데이터를 받는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.home-market.spec.ts` :: US-DM-18 받을 실제 데이터가 없는 연습용 데이터에서는 DB 새로고침 버튼이 보이지 않는다 |
 | US-DM-19 | 정동민 | 종목 차트에 직접 선을 긋고 다음에 열어도 남아 있다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.stock-chart.spec.ts` :: US-DM-19 마우스로 되돌림·채널을 긋고 카드에서 메모·잠금·레벨·연장을 고치며, 손잡이를 끌어 옮기고 다른 주기에서는 손잡이가 없다<br>`frontend/e2e/stories/dm.stock-chart.spec.ts` :: US-DM-19 코스피 차트에 마우스로 수평선을 긋고 다시 열어도 남아 있으며, 지운 선을 되돌리고 좌표로 되돌림을 더한다 |
+| US-DM-20 | 정동민 | 종목 차트를 트레이딩뷰처럼 확대·이동해 보고 싶은 구간을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.stock-chart-zoom.spec.ts` :: US-DM-20 오른쪽 축 배지는 현재가와 고른 선의 레벨만 보인다<br>`frontend/e2e/stories/dm.stock-chart-zoom.spec.ts` :: US-DM-20 휠·끌기·키보드로 코스피 일봉을 확대·이동하면 날짜 칸이 따라오고 더블클릭·Home이 고른 기간으로 되돌린다 |
 | US-SM-01 | 한상목 | YAML을 붙여 넣고 오타를 필드 경로로 찾아 고친다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
 | US-SM-02 | 한상목 | 필드의 단위·범위·기본값을 계약 패널에서 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.field-contract.spec.ts` :: US-SM-02 전략 구조에서 필드를 고르면 계약 패널이 단위·범위·표시 값을 알려 준다 |
 | US-SM-03 | 한상목 | 저장할 때마다 새 버전이 쌓이고 버전끼리의 차이와 충돌을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |

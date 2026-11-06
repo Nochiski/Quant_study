@@ -9,6 +9,8 @@ export const StockChartPage = () => {
   const search = useSearch({ from: "/research/chart" });
   const navigate = useNavigate();
   const onSearch = (next: StockChartSearch) => void navigate({ to: "/research/chart", search: next });
+  const onReplaceSearch = (next: StockChartSearch) =>
+    void navigate({ to: "/research/chart", search: next, replace: true });
   return (
     <section className="page stock-chart-page" aria-labelledby="stock-chart-title">
       <header className="stock-chart-page__header">
@@ -18,7 +20,7 @@ export const StockChartPage = () => {
         </div>
         <ChartSaveStatus search={search} />
       </header>
-      <StockChart search={search} onSearch={onSearch} />
+      <StockChart search={search} onSearch={onSearch} onReplaceSearch={onReplaceSearch} />
     </section>
   );
 };

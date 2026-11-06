@@ -19,7 +19,10 @@ export type StockChartSearch = {
   code?: string;
   tf?: Timeframe;
   period?: ChartPeriod;
-  /** 직접 고른 표시 기간(`YYYY-MM-DD`). 둘 다 있어야 하고 시작 ≤ 끝이다. 있으면 `period`보다 앞선다. */
+  /**
+   * 직접 고르거나 줌·이동으로 정한 표시 기간(`YYYY-MM-DD`). 둘 다 있어야 하고 시작 ≤ 끝이다. 있으면 `period`보다
+   * 앞서고, `period`는 기본 보기로 되돌릴 기간으로 남는다.
+   */
   start?: string;
   end?: string;
 };
@@ -45,7 +48,7 @@ export const stockChartSearch = (search: Record<string, unknown>): StockChartSea
   return {
     ...(kind !== undefined && code !== undefined ? { kind, code } : {}),
     tf: oneOf(CHART_TIMEFRAMES, search.tf),
-    period: custom ? undefined : oneOf(CHART_PERIODS, search.period),
+    period: oneOf(CHART_PERIODS, search.period),
     start: custom ? start : undefined,
     end: custom ? end : undefined,
   };

@@ -4,18 +4,24 @@ import {
   ChartLineShape,
   levelSegments,
   lineTone,
+  placeLevelLabels,
   roundPrice,
+  segmentLabels,
   snapToCandle,
   type ChartCandleBody,
   type ChartLineBody,
   type ChartPointBody,
   type ChartScale,
   type InstrumentKind,
+  type PlacedLabel,
   type Timeframe,
 } from "../../../entities/chart";
 import { useCommittedRef } from "../../../shared/lib/react";
 import { isDraggable } from "../model/line-edit";
 import type { ChartDrawing } from "../model/use-chart-drawing";
+
+// 그리는 중인 미리보기 선의 라벨 주인 이름(저장 선 id와 겹치지 않는다)
+const DRAFT = "draft";
 
 type DrawingSurfaceProps = {
   drawing: ChartDrawing;
@@ -34,6 +40,7 @@ type DrawingSurfaceProps = {
  * 찍기, 저장 선 고르기와 손잡이 끌기. 미리보기는 서버 응답(`drawing.preview`)의 두 점을 그대로 잇는다.
  *
  * 포인터 움직임은 rAF 한 번으로 묶어 상태를 바꾼다 — 서버 미리보기 호출은 그 위에서 다시 잠깐 멈춘 초안만 간다.
+ * 레벨 라벨은 보이는 선 전부를 한 번에 배치한다 — 가까운 자리의 라벨끼리 밀어내고 그림 칸 안으로 들인다.
  */
 export const DrawingSurface = ({
   drawing,
@@ -117,6 +124,27 @@ export const DrawingSurface = ({
   const placed = state.points.map(marker);
   const lastPlaced = placed[placed.length - 1];
 
+  // 그릴 선분(끄는 선은 미리보기 응답의 점) → 선마다의 라벨 자리 → 함께 배치
+  const shapes = lines.map((line) => {
+    const dragging = drag?.line.line_id === line.line_id;
+    const paths = dragging && preview.drawing !== null ? preview.drawing.paths : line.paths;
+    return { line, dragging, segments: levelSegments(paths, line.extend_right, scale) };
+  });
+  const draft =
+    drag === null && preview.drawing !== null && state.tool !== "select"
+      ? levelSegments(preview.drawing.paths, true, scale)
+      : null;
+  const labelsByOwner = new Map<string, PlacedLabel[]>();
+  placeLevelLabels(
+    [
+      ...shapes.flatMap(({ line, segments }) =>
+        segmentLabels(line.line_id, segments, line.memo, instrumentKind, plot),
+      ),
+      ...(draft === null ? [] : segmentLabels(DRAFT, draft, undefined, instrumentKind, plot)),
+    ],
+    plot,
+  ).forEach((label) => labelsByOwner.set(label.owner, [...(labelsByOwner.get(label.owner) ?? []), label]));
+
   return (
     <g
       className={`drawing-surface drawing-surface--${state.tool === "select" ? "select" : "draw"}`}
@@ -137,34 +165,29 @@ export const DrawingSurface = ({
         width={plot.right - plot.left}
         height={plot.bottom - plot.top}
       />
-      {lines.map((line) => {
-        const dragging = drag?.line.line_id === line.line_id;
-        const paths = dragging && preview.drawing !== null ? preview.drawing.paths : line.paths;
-        return (
-          <ChartLineShape
-            key={line.line_id}
-            segments={levelSegments(paths, line.extend_right, scale)}
-            tone={lineTone(line)}
-            instrumentKind={instrumentKind}
-            selected={line.line_id === state.selectedId}
-            preview={dragging}
-            memo={line.memo}
-            onSelect={
-              state.tool === "select"
-                ? () => dispatch({ type: "select", lineId: line.line_id })
-                : undefined
-            }
-          />
-        );
-      })}
-      {drag === null && preview.drawing !== null && state.tool !== "select" ? (
+      {shapes.map(({ line, dragging, segments }) => (
         <ChartLineShape
-          segments={levelSegments(preview.drawing.paths, true, scale)}
-          tone="mine"
-          instrumentKind={instrumentKind}
-          preview
+          key={line.line_id}
+          segments={segments}
+          tone={lineTone(line)}
+          labels={labelsByOwner.get(line.line_id) ?? []}
+          selected={line.line_id === state.selectedId}
+          preview={dragging}
+          onSelect={
+            state.tool === "select"
+              ? () => dispatch({ type: "select", lineId: line.line_id })
+              : undefined
+          }
+          onHover={(over) =>
+            drawing.setHoverLineId((current) =>
+              over ? line.line_id : current === line.line_id ? null : current,
+            )
+          }
         />
-      ) : null}
+      ))}
+      {draft === null ? null : (
+        <ChartLineShape segments={draft} tone="mine" labels={labelsByOwner.get(DRAFT) ?? []} preview />
+      )}
       {hoverAt !== null ? (
         <g className="drawing-surface__cursor" aria-hidden="true">
           <path d={`M${plot.left} ${hoverAt.y.toFixed(1)}H${plot.right}M${hoverAt.x.toFixed(1)} ${plot.top}V${plot.bottom}`} />

@@ -31,7 +31,8 @@ export const ChartConditions = ({ search, range, onSearch }: ChartConditionsProp
     onSearch({ ...search, kind: instrument.kind, code: instrument.code });
   const setDate = (edge: "start" | "end", value: string) => {
     if (range === null || value === "") return;
-    onSearch({ ...search, period: undefined, ...range, [edge]: value });
+    // 기간 버튼(`period`)은 남긴다 — 날짜가 앞서고, 기본 보기로 되돌릴 때 그 기간을 쓴다
+    onSearch({ ...search, ...range, [edge]: value });
   };
   return (
     <div className="chart-conditions" role="group" aria-label={t("chart.conditions.label")}>

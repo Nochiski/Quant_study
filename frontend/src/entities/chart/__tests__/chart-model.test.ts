@@ -2,16 +2,25 @@ import { describe, expect, it } from "vitest";
 
 import {
   chartScale,
+  dateTicks,
+  defaultViewport,
   displayRange,
   fractionalIndex,
+  labelAnchor,
   levelSegments,
   monthsBefore,
+  panViewport,
+  placeLevelLabels,
   priceTicks,
   snapToCandle,
   spreadLabels,
   steppedPrice,
   stockChartSearch,
+  viewportRange,
+  visibleBars,
   visibleRange,
+  wheelZoomFactor,
+  zoomViewport,
   type ChartCandleBody,
 } from "..";
 
@@ -37,7 +46,7 @@ const WEEKS = [
 
 describe("chartScale", () => {
   // 폭 484 = 그림 칸 400 + 가격 축 84, 봉 4 + 미래 1 = 5칸 → 칸 폭 80
-  const scale = chartScale({ candles: WEEKS, first: 0, last: 3, width: 484, height: 228, futureBars: 1 });
+  const scale = chartScale({ candles: WEEKS, view: { from: -0.5, to: 4.5 }, width: 484, height: 228 });
 
   it("puts bar centres at half steps and reads the nearest bar back from x", () => {
     expect(scale.step).toBe(80);
@@ -67,6 +76,123 @@ describe("chartScale", () => {
   });
 });
 
+describe("chartScale with a zoomed view", () => {
+  // 첫 봉 고가만 200 — 보기 창 밖이면 가격 축에 들지 않는다
+  const candles = [candle("2025-01-06", "2025-01-10", { high: 200 }), ...WEEKS.slice(1)];
+
+  it("draws only the bars the view touches and fits the price axis to them", () => {
+    // 봉 1~3 + 미래 3칸 = 6칸 → 칸 폭 400 / 6
+    const scale = chartScale({ candles, view: { from: 0.5, to: 6.5 }, width: 484, height: 228 });
+    expect([scale.first, scale.last]).toEqual([1, 3]);
+    expect(scale.step).toBeCloseTo(400 / 6);
+    expect(scale.xOfIndex(1)).toBeCloseTo(400 / 12);
+    expect(scale.indexAtX(400 / 12)).toBe(1);
+    expect(scale.futureLeft).toBeCloseTo(200);
+    expect(scale.priceMax).toBeCloseTo(111.2);
+    // 첫 봉까지 보이면 그 고가가 가격 축 위 끝을 정한다(90 ~ 200, 여유 6.6)
+    expect(chartScale({ candles, view: { from: -0.5, to: 4.5 }, width: 484, height: 228 }).priceMax).toBeCloseTo(206.6);
+  });
+});
+
+describe("chart viewport", () => {
+  it("counts every bar the view touches, clipped to the series", () => {
+    expect(visibleBars({ from: -0.5, to: 4.5 }, 4)).toEqual({ first: 0, last: 3 });
+    // 2.7 ~ 10.2: 봉 3([2.5, 3.5])부터 봉 10([9.5, 10.5])까지 걸친다
+    expect(visibleBars({ from: 2.7, to: 10.2 }, 20)).toEqual({ first: 3, last: 10 });
+  });
+
+  it("right-aligns the latest bar with a future margin and leaves past ranges unpadded", () => {
+    // 1-14~1-30: 봉 1~3, 마지막이 최신 봉이라 미래 3칸(적어도 3봉)
+    expect(defaultViewport(WEEKS, { start: "2025-01-14", end: "2025-01-30" })).toEqual({ from: 0.5, to: 6.5 });
+    // 1-06~1-15: 봉 0~1, 과거 구간이라 여백 없음
+    expect(defaultViewport(WEEKS, { start: "2025-01-06", end: "2025-01-15" })).toEqual({ from: -0.5, to: 1.5 });
+    expect(defaultViewport(WEEKS, { start: "2025-02-01", end: "2025-03-01" })).toBeNull();
+  });
+
+  it("zooms around the cursor so the bar under it stays put", () => {
+    // 40 ~ 80(40칸), 커서 1/4 자리(봉 50) — 반으로 확대하면 20칸이고 봉 50은 여전히 1/4 자리
+    expect(zoomViewport({ from: 40, to: 80 }, 0.5, 0.25, 100)).toEqual({ from: 45, to: 65 });
+  });
+
+  it("limits the zoom between ten bars and 1.25 times the series", () => {
+    // 오른쪽 끝을 붙들고 최소 10칸
+    expect(zoomViewport({ from: 40, to: 80 }, 0.01, 1, 100)).toEqual({ from: 70, to: 80 });
+    // 봉 100개 → 최대 125칸, 가운데(봉 60)를 붙든다
+    expect(zoomViewport({ from: 40, to: 80 }, 10, 0.5, 100)).toEqual({ from: -2.5, to: 122.5 });
+  });
+
+  it("pans but never leaves more than half the view empty", () => {
+    expect(panViewport({ from: 40, to: 80 }, 10, 100)).toEqual({ from: 50, to: 90 });
+    // 오른쪽 끝 한계 = 마지막 봉 끝 99.5 + 40칸의 절반
+    expect(panViewport({ from: 40, to: 80 }, 100, 100)).toEqual({ from: 79.5, to: 119.5 });
+    // 왼쪽 끝 한계 = 첫 봉 앞 -0.5 - 20
+    expect(panViewport({ from: 40, to: 80 }, -200, 100)).toEqual({ from: -20.5, to: 19.5 });
+  });
+
+  it("reads the visible date range back as the same bars", () => {
+    const range = viewportRange({ from: 0.5, to: 6.5 }, WEEKS);
+    expect(range).toEqual({ start: "2025-01-14", end: "2025-01-30" });
+    expect(visibleRange(WEEKS, range!)).toEqual({ first: 1, last: 3 });
+  });
+
+  it("turns one mouse wheel notch into about 16% and caps a burst at twice", () => {
+    expect(wheelZoomFactor(100)).toBeCloseTo(Math.exp(0.15));
+    expect(wheelZoomFactor(-100)).toBeCloseTo(Math.exp(-0.15));
+    expect(wheelZoomFactor(10_000)).toBeLessThan(2);
+  });
+});
+
+describe("level labels", () => {
+  const plot = { left: 0, top: 12, right: 400, bottom: 200 };
+  const label = (key: string, x: number, y: number) => ({ owner: "a", key, text: "0.5 (2,500.00)", x, y });
+
+  it("anchors a label where the line enters the plot and drops lines outside it", () => {
+    // (-50, 100) → (150, 200): 왼쪽 끝 x 0에서 y 125
+    expect(labelAnchor({ x1: -50, y1: 100, x2: 150, y2: 200 }, plot)).toEqual({ x: 0, y: 125 });
+    expect(labelAnchor({ x1: -80, y1: 100, x2: -10, y2: 100 }, plot)).toBeNull();
+    expect(labelAnchor({ x1: 10, y1: 250, x2: 300, y2: 250 }, plot)).toBeNull();
+  });
+
+  it("pushes labels at the same place apart and keeps them inside the plot", () => {
+    // 글자 14자 × 7.4 = 103.6px. 같은 x의 두 라벨은 바닥선 95·99 → 14px 간격으로 95·109
+    const [first, second, right, high] = placeLevelLabels(
+      [label("a", 100, 100), label("b", 100, 104), label("c", 380, 104), label("d", 250, 14)],
+      plot,
+    );
+    expect([first.x, first.y, second.y]).toEqual([106, 95, 109]);
+    // 오른쪽 끝을 넘는 라벨은 안으로(400 - 103.6 - 6), 가로로 떨어진 라벨은 밀지 않는다
+    expect(right.x).toBeCloseTo(290.4);
+    expect(right.y).toBe(99);
+    // 위 끝을 넘는 바닥선(9)은 글자 높이만큼 안으로(12 + 11)
+    expect(high.y).toBe(23);
+  });
+});
+
+describe("dateTicks", () => {
+  // 2015-01 ~ 2024-12 월봉 120개
+  const months = Array.from({ length: 120 }, (_, index) => {
+    const year = 2015 + Math.floor(index / 12);
+    const month = String((index % 12) + 1).padStart(2, "0");
+    return candle(`${year}-${month}-01`, `${year}-${month}-28`);
+  });
+
+  it("thins to whole years when many years share a narrow plot", () => {
+    // 봉 간격 2px: 60달(120px)이 처음으로 64px를 넘는다 → 5년마다, 해만 쓴다
+    expect(dateTicks(months, { first: 0, last: 119, step: 2 }, 64)).toEqual([
+      { index: 0, label: "2015" },
+      { index: 60, label: "2020" },
+    ]);
+  });
+
+  it("keeps months with the year on January and the first tick when bars are wide", () => {
+    // 봉 간격 30px: 3달(90px)마다
+    expect(dateTicks(months, { first: 10, last: 16, step: 30 }, 64)).toEqual([
+      { index: 12, label: "2016.01" },
+      { index: 15, label: "04" },
+    ]);
+  });
+});
+
 describe("priceTicks", () => {
   it("steps by 1-2-5 units inside the range", () => {
     // 22.4 / 4 = 5.6 → 단위 10
@@ -77,7 +203,7 @@ describe("priceTicks", () => {
 });
 
 describe("levelSegments", () => {
-  const scale = chartScale({ candles: WEEKS, first: 0, last: 3, width: 484, height: 228, futureBars: 1 });
+  const scale = chartScale({ candles: WEEKS, view: { from: -0.5, to: 4.5 }, width: 484, height: 228 });
   const path = {
     level: 0.5,
     start: { bar_date: "2025-01-06", price: 100 },
@@ -200,7 +326,8 @@ describe("stockChartSearch", () => {
       kind: "index",
       code: "KOSPI:코스피",
       tf: "day",
-      period: undefined,
+      // 날짜가 앞서고 기간 버튼은 기본 보기로 되돌릴 기간으로 남는다
+      period: "1y",
       start: "2024-01-02",
       end: "2024-06-28",
     });

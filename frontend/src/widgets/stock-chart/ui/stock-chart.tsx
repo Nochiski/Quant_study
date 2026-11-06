@@ -1,11 +1,12 @@
 import { useIsMutating, useQuery } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
 
 import {
   AxisBadges,
   CHART_LINE_MUTATION_KEY,
   CandlePlot,
   DEFAULT_TIMEFRAME,
+  PRICE_AXIS_WIDTH,
   chartCandlesQuery,
   chartErrorSentence,
   chartLinesQuery,
@@ -17,7 +18,6 @@ import {
   levelSegments,
   lineTone,
   timeframeLabel,
-  visibleRange,
   type AxisBadge,
   type ChartCandleBody,
   type ChartInstrumentBody,
@@ -35,6 +35,7 @@ import {
   useChartDrawing,
   useLineRemoval,
 } from "../../../features/draw-chart-line";
+import { useChartNavigation } from "../../../features/navigate-chart";
 import { failureReason } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
 import { useElementWidth } from "../../../shared/lib/react";
@@ -47,9 +48,6 @@ const MAX_HEIGHT = 560;
 
 /** 차트 높이: 칸 폭의 절반쯤, 320~560px. */
 const chartHeight = (width: number) => Math.round(Math.min(Math.max(width * 0.52, MIN_HEIGHT), MAX_HEIGHT));
-
-/** 오른쪽 연장할 미래 칸: 보이는 봉 수의 8%(적어도 3봉). */
-const futureBars = (count: number) => Math.max(3, Math.round(count * 0.08));
 
 const percent = (value: number) => `${Math.abs(value).toFixed(2)}%`;
 
@@ -94,15 +92,22 @@ const ChartHead = ({
   );
 };
 
+type DateRange = { start: string; end: string };
+
 type ChartBodyProps = {
   target: ChartTarget;
   search: StockChartSearch;
   timeframe: Timeframe;
   /** 종목을 고를 때마다 늘어나는 수. 늘면 차트가 그려진 뒤 차트 제목으로 초점을 옮긴다. */
   focusRequest: number;
+  /** 줌·이동이 멈춘 뒤 보이는 날짜 구간(null = 기본 보기로 되돌림). 주소를 바꾸되 이력을 쌓지 않는다. */
+  onViewRange: (range: DateRange | null) => void;
 };
 
-/** 오른쪽 축 배지: 현재가와 보이는 선의 마지막 완성 봉 레벨 가격(`end.price`). */
+/**
+ * 오른쪽 축 배지: 현재가와 **한 선**(고른 선, 없으면 포인터를 올린 선)의 마지막 완성 봉 레벨 가격(`end.price`).
+ * 다른 선은 선 위 라벨만 단다 — 선마다 배지를 달면 축에 레벨 수십 개가 쌓여 읽을 수 없다.
+ */
 const axisBadges = (
   lines: readonly ChartLineBody[],
   segmentsOf: (line: ChartLineBody) => ReturnType<typeof levelSegments>,
@@ -130,10 +135,11 @@ const axisBadges = (
       ]),
 ];
 
-const ChartBody = ({ target, search, timeframe, focusRequest }: ChartBodyProps) => {
+const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: ChartBodyProps) => {
   const titleId = useId();
   const titleRef = useRef<HTMLHeadingElement>(null);
   const clipId = useId();
+  const keysId = useId();
   const box = useRef<HTMLDivElement>(null);
   const width = useElementWidth(box);
   const candlesQuery = useQuery(chartCandlesQuery(target, timeframe));
@@ -144,22 +150,26 @@ const ChartBody = ({ target, search, timeframe, focusRequest }: ChartBodyProps) 
   const candles = candlesQuery.data?.candles;
   const context = candlesQuery.data?.context;
   const range = context ? displayRange(search, context.as_of) : null;
-  const shown = candles && range ? visibleRange(candles, range) : null;
+  // 되돌릴 기본 보기: 고른 기간 버튼(없으면 기본 기간)을 기준일에서 센 기간
+  const baseRange = context ? displayRange({ period: search.period }, context.as_of) : null;
+  const navigation = useChartNavigation({
+    candles,
+    series: `${target.kind}|${target.code}|${timeframe}`,
+    range,
+    baseRange,
+    plotWidth: Math.max(width - PRICE_AXIS_WIDTH, 1),
+    canDrag: drawing.state.tool === "select",
+    onRange: onViewRange,
+  });
+  const viewport = navigation.viewport;
   const height = chartHeight(width);
   const scale =
-    candles && shown && width > 0
-      ? chartScale({
-          candles,
-          first: shown.first,
-          last: shown.last,
-          width,
-          height,
-          futureBars: futureBars(shown.last - shown.first + 1),
-        })
-      : null;
+    candles && viewport && width > 0 ? chartScale({ candles, view: viewport, width, height }) : null;
   const lines = linesQuery.data?.lines ?? [];
-  const completed = completedCandles(candles ?? [], candlesQuery.data?.last_completed ?? null);
-  const visibleCompleted = shown ? completed.slice(shown.first, shown.last + 1) : [];
+  const lastCompleted = candlesQuery.data?.last_completed ?? null;
+  // 응답이 같으면 같은 배열 — 고른 선 카드의 봉 날짜 목록(수천 개)이 다시 그려지지 않는다
+  const completed = useMemo(() => completedCandles(candles ?? [], lastCompleted), [candles, lastCompleted]);
+  const visibleCompleted = scale ? completed.slice(scale.first, scale.last + 1) : [];
   // 현재가 = 계열의 마지막 봉(진행 중이면 그 봉) 종가. 점선·오른쪽 배지·머리가 이 하나를 쓴다.
   const current = candles?.[candles.length - 1];
   const ready = candles !== undefined;
@@ -185,6 +195,12 @@ const ChartBody = ({ target, search, timeframe, focusRequest }: ChartBodyProps) 
 
   const instrument = context?.instrument;
   const shownLines = lines.filter((line) => line.visible);
+  // 포인터를 올린 선은 선택 도구일 때만 본다(그리기 도구로 바꾸면 선의 누를 자리가 사라져 떠남이 오지 않는다)
+  const badgeLine =
+    shownLines.find((line) => line.line_id === drawing.state.selectedId) ??
+    (drawing.state.tool === "select"
+      ? shownLines.find((line) => line.line_id === drawing.hoverLineId)
+      : undefined);
   const svgLabel = instrument
     ? tFill("chart.svgLabel", { name: instrument.name, timeframe: timeframeLabel(timeframe) })
     : "";
@@ -219,18 +235,22 @@ const ChartBody = ({ target, search, timeframe, focusRequest }: ChartBodyProps) 
               <p className="stock-chart__state" role="status">
                 {t("chart.loading")}
               </p>
-            ) : shown === null ? (
+            ) : viewport === null ? (
               <p className="stock-chart__state" role="status">
                 {t("chart.empty.range")}
               </p>
             ) : scale !== null && candles && instrument ? (
               <svg
-                className="stock-chart__svg"
+                className={`stock-chart__svg${navigation.panning ? " stock-chart__svg--panning" : ""}`}
                 width={width}
                 height={height}
                 viewBox={`0 0 ${width} ${height}`}
                 role="group"
                 aria-label={svgLabel}
+                aria-describedby={keysId}
+                // 키보드 줌·이동(+/−·←/→·Home)을 받는 Tab 정지
+                tabIndex={0}
+                {...navigation.svgProps}
               >
                 <defs>
                   <clipPath id={clipId}>
@@ -263,7 +283,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest }: ChartBodyProps) 
                 <AxisBadges
                   plot={scale.plot}
                   badges={axisBadges(
-                    shownLines,
+                    badgeLine === undefined ? [] : [badgeLine],
                     (line) => levelSegments(line.paths, line.extend_right, scale),
                     current,
                     scale.yOfPrice,
@@ -276,6 +296,14 @@ const ChartBody = ({ target, search, timeframe, focusRequest }: ChartBodyProps) 
         </div>
         <div className="stock-chart__foot">
           <DrawingHint drawing={drawing} />
+          <p id={keysId} className="stock-chart__keys">
+            {t("chart.view.keys")}
+          </p>
+          {range === null ? null : (
+            <p className="sr-only" aria-live="polite">
+              {tFill("chart.view.visible", range)}
+            </p>
+          )}
           <ul className="stock-chart__legend" aria-label={t("chart.legend.label")}>
             <li>
               <svg width="22" height="8" aria-hidden="true">
@@ -320,13 +348,15 @@ const ChartBody = ({ target, search, timeframe, focusRequest }: ChartBodyProps) 
 type StockChartProps = {
   search: StockChartSearch;
   onSearch: (next: StockChartSearch) => void;
+  /** 줌·이동이 바꾼 표시 기간을 주소에 쓴다(이력을 쌓지 않는 replace). */
+  onReplaceSearch: (next: StockChartSearch) => void;
 };
 
 /**
  * 개별종목차트 작업 칸: 조건 줄, 차트(캔들·내 선·그리기), 레이어 칸. 조건은 주소(`search`)가 갖고, 서버 값은
  * query cache가, 도구·고른 선·되돌리기 같은 화면 상태는 `features/draw-chart-line`이 갖는다.
  */
-export const StockChart = ({ search, onSearch }: StockChartProps) => {
+export const StockChart = ({ search, onSearch, onReplaceSearch }: StockChartProps) => {
   const target = chartTargetOf(search);
   const timeframe = search.tf ?? DEFAULT_TIMEFRAME;
   const candles = useQuery(chartCandlesQuery(target, timeframe));
@@ -347,7 +377,14 @@ export const StockChart = ({ search, onSearch }: StockChartProps) => {
           description={t("chart.page.pickFirst.description")}
         />
       ) : (
-        <ChartBody target={target} search={search} timeframe={timeframe} focusRequest={focusRequest} />
+        <ChartBody
+          target={target}
+          search={search}
+          timeframe={timeframe}
+          focusRequest={focusRequest}
+          // 보기의 날짜 구간은 기간 버튼(`period`)을 남긴 채 쓴다 — 더블클릭·Home이 그 기간으로 되돌린다
+          onViewRange={(view) => onReplaceSearch({ ...search, start: view?.start, end: view?.end })}
+        />
       )}
     </div>
   );

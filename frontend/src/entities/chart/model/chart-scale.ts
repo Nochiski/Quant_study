@@ -1,9 +1,11 @@
 import type { ChartCandleBody } from "../../../shared/api";
+import { visibleBars, type ChartViewport } from "./chart-viewport";
 
 /**
  * 차트 좌표 변환(날짜 ↔ x, 가격 ↔ y)의 owner. SVG를 px로 그리므로 여기 값이 곧 화면 위치다.
  *
- * x는 봉 순서(index)에 비례한다 — 휴장일·주말에 빈칸을 두지 않는 캔들 차트 관례다. 다른 주기로 만든 선의 날짜처럼
+ * x는 봉 순서(index)에 비례한다 — 휴장일·주말에 빈칸을 두지 않는 캔들 차트 관례다. 어느 봉 구간을 보이는지는
+ * 보기 창(`ChartViewport`, 줌·이동)이 정하고 가격 축은 보이는 봉의 고가·저가에 맞춘다. 다른 주기로 만든 선의 날짜처럼
  * 봉 시작일이 아닌 날짜는 그 날짜가 든 봉 안에서 달력일 비율로 놓는다(설계 문서 4.7 좌표 계약: 화면은 원래 주기
  * 봉의 날짜를 날짜 축 위에서 잇는다). 가격은 계산하지 않고 위치만 바꾼다.
  */
@@ -20,10 +22,10 @@ export type ChartScale = {
   plot: PlotBox;
   /** 봉 하나의 폭(px). */
   step: number;
-  /** 보이는 첫·마지막 봉 index(포함). */
+  /** 보기 창에 걸친 첫·마지막 봉 index(포함). 걸친 봉이 없으면 `first > last`다. */
   first: number;
   last: number;
-  /** 마지막 봉 오른쪽의 미래 칸이 시작하는 x. */
+  /** 계열 마지막 봉 오른쪽의 미래 칸이 시작하는 x(그 봉이 오른쪽 밖이면 그림 칸 밖이다). */
   futureLeft: number;
   priceMin: number;
   priceMax: number;
@@ -78,12 +80,10 @@ export const fractionalIndex = (candles: readonly ChartCandleBody[], date: strin
 
 export type ChartScaleInput = {
   candles: readonly ChartCandleBody[];
-  first: number;
-  last: number;
+  /** 보이는 봉 구간(줌·이동 상태). */
+  view: ChartViewport;
   width: number;
   height: number;
-  /** 미래(오른쪽 연장) 칸에 둘 봉 수. */
-  futureBars: number;
 };
 
 /** 보이는 봉의 고가·저가 범위에 위아래 여유를 둔 가격 범위. 값이 하나뿐이면 ±1%. */
@@ -104,24 +104,17 @@ const priceRange = (
   return [low - padding, high + padding];
 };
 
-export const chartScale = ({
-  candles,
-  first,
-  last,
-  width,
-  height,
-  futureBars,
-}: ChartScaleInput): ChartScale => {
+export const chartScale = ({ candles, view, width, height }: ChartScaleInput): ChartScale => {
   const plot: PlotBox = {
     left: 0,
     top: PLOT_TOP,
     right: Math.max(width - PRICE_AXIS_WIDTH, 1),
     bottom: Math.max(height - DATE_AXIS_HEIGHT, PLOT_TOP + 1),
   };
-  const bars = last - first + 1 + futureBars;
-  const step = (plot.right - plot.left) / Math.max(bars, 1);
+  const step = (plot.right - plot.left) / Math.max(view.to - view.from, 1e-9);
+  const { first, last } = visibleBars(view, candles.length);
   const [priceMin, priceMax] = priceRange(candles, first, last);
-  const xOfIndex = (index: number) => plot.left + (index - first + 0.5) * step;
+  const xOfIndex = (index: number) => plot.left + (index - view.from) * step;
   const yOfPrice = (price: number) =>
     plot.bottom - ((price - priceMin) / (priceMax - priceMin)) * (plot.bottom - plot.top);
   return {
@@ -129,12 +122,12 @@ export const chartScale = ({
     step,
     first,
     last,
-    futureLeft: xOfIndex(last) + step / 2,
+    futureLeft: xOfIndex(candles.length - 1) + step / 2,
     priceMin,
     priceMax,
     xOfIndex,
     xOfDate: (date) => xOfIndex(fractionalIndex(candles, date)),
-    indexAtX: (x) => Math.round((x - plot.left) / step - 0.5) + first,
+    indexAtX: (x) => Math.round(view.from + (x - plot.left) / step),
     yOfPrice,
     priceAtY: (y) =>
       priceMin + ((plot.bottom - y) / (plot.bottom - plot.top)) * (priceMax - priceMin),
@@ -159,8 +152,9 @@ export const priceTicks = (min: number, max: number, count: number): number[] =>
 export type DateTick = { index: number; label: string };
 
 /**
- * 날짜 눈금: 보이는 봉 중 달이 바뀌는 첫 봉. 칸이 좁으면 `minGap`(px) 이상 떨어지게 1·3·6·12달 간격으로 솎는다.
- * 해가 바뀌는 눈금과 첫 눈금은 `2025.01`, 나머지는 `07`처럼 달만 쓴다.
+ * 날짜 눈금: 보이는 봉 중 달이 바뀌는 첫 봉. 칸이 좁으면 `minGap`(px) 이상 떨어지게 1·3·6·12·24·60·120달 간격으로
+ * 솎는다(여러 해를 한 칸에 넣도록 축소했을 때도 글자가 겹치지 않는다). 해가 바뀌는 눈금과 첫 눈금은 `2025.01`, 나머지는
+ * `07`처럼 달만 쓰고, 해 단위로 솎을 때(12달 이상)는 `2025`처럼 해만 쓴다.
  */
 export const dateTicks = (
   candles: readonly ChartCandleBody[],
@@ -177,15 +171,20 @@ export const dateTicks = (
   const months = starts.length;
   const span = Math.max(scale.last - scale.first + 1, 1);
   const barsPerMonth = months > 0 ? span / months : span;
-  const stride = [1, 3, 6, 12].find((m) => m * barsPerMonth * scale.step >= minGap) ?? 12;
+  const stride = [1, 3, 6, 12, 24, 60, 120].find((m) => m * barsPerMonth * scale.step >= minGap) ?? 120;
   return starts
-    .filter((tick) => (tick.month - 1) % stride === 0)
+    .filter((tick) => (tick.year * 12 + tick.month - 1) % stride === 0)
     .map((tick, order) => {
       const month = String(tick.month).padStart(2, "0");
       // 첫 눈금에는 해를 붙여 어느 해인지 읽히게 한다
       return {
         index: tick.index,
-        label: tick.month === 1 || order === 0 ? `${tick.year}.${month}` : month,
+        label:
+          stride >= 12
+            ? String(tick.year)
+            : tick.month === 1 || order === 0
+              ? `${tick.year}.${month}`
+              : month,
       };
     });
 };

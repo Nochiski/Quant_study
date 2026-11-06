@@ -7,6 +7,10 @@
   반영되지만, 대사의 정본은 조회다.
 - 토큰 발급이 실패해도 끝내지 않고 다시 시도한다. 로그인이 거절되면 그 사유를 돌려주고 멈춘다
   (호출자가 실패로 드러낸다, 2026-10-22 리뷰 #605).
+- 같은 웹소켓에서 장운영(`0s`)도 받아 항목마다 장운영 기록 파일에 따로 남긴다. 수능일·새해 첫 거래일
+  처럼 장 시각이 바뀌는 날을 예약 실행이 알아차리는 근거다(2026-11-05 사용자 결정, 읽기는
+  `_session.py`). 4 장마감·8 정규장마감 가운데 먼저 온 것에서 `after_close` 뒤 그날 기록을 끝낸다
+  (종가 단일가 체결 알림까지 받는다). `until`은 끝 상한이다.
 """
 
 from __future__ import annotations
@@ -17,22 +21,28 @@ import os
 import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
 import websockets
 
 from strategy_workbench.adapters.outbound.kiwoom_mock._http import MOCK_WEBSOCKET_URL
+from strategy_workbench.adapters.outbound.kiwoom_mock._session import (
+    SESSION_END,
+    SESSION_TYPE,
+    phase_code,
+)
 from strategy_workbench.application.offline_execution.facade.execution import BrokerError
 
 _REGISTER = {
     "trnm": "REG",
     "grp_no": "1",
     "refresh": "1",
-    "data": [{"item": [""], "type": ["00"]}],
+    "data": [{"item": [""], "type": ["00", SESSION_TYPE]}],
 }
 _ACCOUNT_FIELD = "9201"
+AFTER_CLOSE = timedelta(minutes=5)  # 장 마감 단일가 체결 알림이 늦게 올 몫
 
 
 class StreamConnection(Protocol):
@@ -70,12 +80,18 @@ async def record_fills(
     until: datetime,
     now: Callable[[], datetime],
     *,
+    sessions: Path,
+    after_close: timedelta = AFTER_CLOSE,
     reconnect_seconds: float = 5.0,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> FillStreamResult:
-    """`until`까지 받는다."""
+    """`until`까지, 정규장 마감 신호를 받았으면 그 `after_close` 뒤까지 받는다.
+
+    체결 알림은 `out`에, 장운영(`0s`) 항목은 `sessions`에 남긴다.
+    """
     received = 0
-    while now() < until:
+    stop = until
+    while now() < stop:
         try:
             session_token = token()
         except BrokerError as error:
@@ -93,8 +109,8 @@ async def record_fills(
                 why = f"return_code={login.get('return_code')} {login.get('return_msg', '')}"
                 return FillStreamResult(received, why)
             await connection.send(json.dumps(_REGISTER))
-            while now() < until:
-                remaining = (until - now()).total_seconds()
+            while now() < stop:
+                remaining = (stop - now()).total_seconds()
                 try:
                     raw = await asyncio.wait_for(connection.recv(), max(0.01, min(remaining, 60)))
                 except TimeoutError:
@@ -104,7 +120,18 @@ async def record_fills(
                     await connection.send(raw if isinstance(raw, str) else raw.decode())
                     continue
                 if message.get("trnm") == "REAL":
-                    received += len(message.get("data") or [])
+                    fills = []
+                    for entry in message.get("data") or []:
+                        if not isinstance(entry, dict) or entry.get("type") != SESSION_TYPE:
+                            fills.append(entry)
+                            continue
+                        _write(sessions, now(), SESSION_TYPE, entry)
+                        if phase_code(entry) in SESSION_END:
+                            stop = min(stop, now() + after_close)
+                    if not fills:
+                        continue
+                    received += len(fills)
+                    message = {**message, "data": fills}
                 _write(out, now(), str(message.get("trnm", "?")), message)
         except (OSError, ValueError, websockets.WebSocketException) as error:
             _write(out, now(), "disconnected", {"error": type(error).__name__})

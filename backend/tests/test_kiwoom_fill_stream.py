@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 import websockets
 
 from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import KiwoomNoResponseError
@@ -81,12 +82,13 @@ def test_recorder_logs_fills_masks_the_account_echoes_ping_and_reconnects(
             out,
             START + timedelta(minutes=8),
             clock.now,
+            sessions=tmp_path / "records" / "session-2026-10-26.jsonl",
             sleep=no_wait,
         )
     )
     assert (received.received, received.refused) == (3, None)
     assert json.loads(first.sent[0]) == {"trnm": "LOGIN", "token": "fake-token-0123"}
-    assert json.loads(first.sent[1])["data"] == [{"item": [""], "type": ["00"]}]
+    assert json.loads(first.sent[1])["data"] == [{"item": [""], "type": ["00", "0s"]}]
     assert first.sent[2] == '{"trnm": "PING"}' and first.closed and second.closed
     lines = [json.loads(line) for line in out.read_text().splitlines()]
     assert [line["kind"] for line in lines] == [
@@ -112,7 +114,14 @@ def test_recorder_stops_when_login_is_refused(tmp_path: Path) -> None:
 
     out = tmp_path / "fills.jsonl"
     received = asyncio.run(
-        record_fills(lambda: "t", connect, out, START + timedelta(hours=6), clock.now)
+        record_fills(
+            lambda: "t",
+            connect,
+            out,
+            START + timedelta(hours=6),
+            clock.now,
+            sessions=tmp_path / "session.jsonl",
+        )
     )
     # 리뷰 #605 P3: 로그인 거절도 [ok] 로 끝났다. 거절 사유를 돌려줘 실패로 드러낸다
     assert (received.received, received.refused) == (0, "return_code=1 ")
@@ -140,8 +149,55 @@ def test_a_token_failure_is_retried_instead_of_ending_the_day(tmp_path: Path) ->
 
     out = tmp_path / "fills.jsonl"
     result = asyncio.run(
-        record_fills(token, connect, out, START + timedelta(minutes=3), clock.now, sleep=no_wait)
+        record_fills(
+            token,
+            connect,
+            out,
+            START + timedelta(minutes=3),
+            clock.now,
+            sessions=tmp_path / "session.jsonl",
+            sleep=no_wait,
+        )
     )
     assert result.received == 1 and len(attempts) == 2
     kinds = [json.loads(line)["kind"] for line in out.read_text().splitlines()]
     assert kinds[0] == "token_failed" and "REAL" in kinds
+
+
+def _session(code: str) -> dict[str, object]:
+    return {"type": "0s", "name": "장시작시간", "item": "", "values": {"215": code, "20": "163000"}}
+
+
+@pytest.mark.parametrize("code", ["4", "8"])
+def test_session_notices_go_to_their_own_file_and_the_day_ends_after_the_regular_close(
+    tmp_path: Path, code: str
+) -> None:
+    # 2026-11-05 사용자 결정: 장 시각이 바뀌는 날(수능일 마감 16:30)을 알아차리려고 장운영(0s)을
+    # 같은 웹소켓에서 받는다. 체결 기록·건수는 그대로이고, 4 장마감·8 정규장마감 가운데 먼저 온
+    # 것에서 5분 뒤 스스로 끝난다(8을 놓쳐도 끝나야 close 가 잰다).
+    clock = Clock()
+    login = json.dumps({"trnm": "LOGIN", "return_code": 0})
+    mixed = json.dumps(
+        {"trnm": "REAL", "data": [_session("3"), {"type": "00", "values": {"911": "1"}}]}
+    )
+    closed = json.dumps({"trnm": "REAL", "data": [_session(code)]})
+    pings = ['{"trnm": "PING"}'] * 20
+    connection = FakeConnection(clock, deque([login, mixed, _fill(2), closed, *pings]))
+
+    async def connect() -> StreamConnection:
+        return connection
+
+    out, sessions = tmp_path / "fills.jsonl", tmp_path / "session.jsonl"
+    result = asyncio.run(
+        record_fills(
+            lambda: "t", connect, out, START + timedelta(hours=11), clock.now, sessions=sessions
+        )
+    )
+    assert result.received == 2
+    entries = [json.loads(line) for line in sessions.read_text().splitlines()]
+    assert [entry["msg"]["values"]["215"] for entry in entries] == ["3", code]
+    fills = [json.loads(line) for line in out.read_text().splitlines()]
+    assert all(entry["type"] == "00" for line in fills[1:] for entry in line["msg"]["data"])
+    # 마감 신호(09:04)에서 5분 — 알림 1분 간격이라 핑 5개를 받고 끝난다(11시간 상한까지 가지 않는다)
+    assert clock.now_value == START + timedelta(minutes=9)
+    assert connection.closed

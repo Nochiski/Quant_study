@@ -10,7 +10,10 @@
     close    --workdir <폴더> [--plan weekly-YYYY-MM-DD]
     report   --workdir <폴더>
     export   --workdir <폴더>   # <작업 폴더>/exports 에 분석·복기용 CSV 4개
-    record-fills --workdir <폴더> --until HH:MM   # 장중 실시간 체결 알림 기록(한 곳에서만)
+    record-fills --workdir <폴더> --until HH:MM   # 장중 실시간 체결 알림·장운영 기록(한 곳에서만)
+             # 정규장 마감 신호 5분 뒤 끝나고, 신호가 없으면 --until 에 끝난다
+    session-status --workdir <폴더>   # 지금 정규장 상태(키움 접속 없음)
+             # unknown | before_open | open | closed 한 낱말. 예약 스크립트가 읽는다
     notify-plan --workdir <폴더> --plan weekly-YYYY-MM-DD --execute-on YYYY-MM-DD [--print]
     signal-status --workdir <폴더> --model-root <모델 루트> --signal-date YYYY-MM-DD
              [--basis evening|supplement]
@@ -65,6 +68,7 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     ExecuteStatus,
     ExecutionEvent,
     LedgerRepairService,
+    MarketPhase,
     NoticeError,
     NoticeSender,
     Phase,
@@ -123,6 +127,9 @@ RepairFactory = Callable[[Path], AbstractContextManager[LedgerRepairService]]
 RiskFactory = Callable[[Path], RiskGuardService]
 # (작업 폴더, 원장 equity 루트) → 위험 보고. 보고 보기(risk-show)는 원장을 읽지 않아 루트가 None.
 RiskReportFactory = Callable[[Path, Path | None], RiskReportService]
+# 작업 폴더 → 지금 정규장 상태(체결 기록기가 남긴 장운영 기록, 키움 접속 없음).
+# 읽지 못하면 `OSError`·`ValueError`.
+SessionFactory = Callable[[Path], MarketPhase]
 # `signal-status`가 "아직 빌드가 없다(기다린다)"를 알리는 종료 코드. 예약 스크립트가 읽는다.
 SIGNAL_NOT_READY_EXIT = 3
 
@@ -136,6 +143,7 @@ class CliFactories:
     repair: RepairFactory | None = None
     risk: RiskFactory | None = None
     risk_report: RiskReportFactory | None = None
+    session: SessionFactory | None = None
 
 
 _ACTION_LABELS = {
@@ -205,7 +213,10 @@ def _parser() -> argparse.ArgumentParser:
     report = commands.add_parser("report", help="하루 기록을 모아 보인다")
     export = commands.add_parser("export", help="분석·복기용 CSV를 <작업 폴더>/exports에 쓴다")
     fills = commands.add_parser("record-fills", help="장중 실시간 체결 알림을 기록한다")
-    fills.add_argument("--until", type=time.fromisoformat, required=True, help="끝낼 시각 HH:MM")
+    fills.add_argument(
+        "--until", type=time.fromisoformat, required=True, help="끝 상한 HH:MM(마감 신호가 없을 때)"
+    )
+    session = commands.add_parser("session-status", help="오늘 정규장 상태를 한 낱말로 보인다")
     notify = commands.add_parser("notify-plan", help="남긴 주문지를 텔레그램으로 보낸다")
     notify.add_argument("--plan", required=True)
     notify.add_argument("--execute-on", type=date.fromisoformat, required=True)
@@ -237,7 +248,7 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--operator", required=True, help="고친 사람(기록에 남는다)")
         command.add_argument("--note", default="")
     planning = (prepare, signal, show, approve, notify)
-    running = (execute, close, report, export, fills)
+    running = (execute, close, report, export, fills, session)
     risks = (risk_status, risk_reset, risk_resume, risk_report, risk_show)
     for command in (*planning, *running, status, bind, reject, clear, resume, *risks):
         command.add_argument(
@@ -259,6 +270,16 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             print(f"[login_refused] received={recording.received} {recording.refused}".rstrip())
             return 1
         print(f"[ok] received={recording.received}")
+        return 0
+    if args.command == "session-status":
+        if factories.session is None:
+            print("[unavailable] 장 상태 읽기를 이 명령줄에 연결하지 않았다")
+            return 1
+        try:
+            print(factories.session(args.workdir).value)
+        except (OSError, ValueError) as error:
+            print(f"[unreadable] {error}")
+            return 1
         return 0
     if args.command in ("risk-report", "risk-show"):
         if factories.risk_report is None:

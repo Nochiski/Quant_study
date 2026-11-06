@@ -46,6 +46,7 @@ from deliver.extra_common import (
 from deliver.qpack import XRefs, new_workbook
 from deliver.sources import SourceMissing, Sources, connect, open_sources
 from openpyxl import Workbook, load_workbook
+from openpyxl.comments import Comment
 from stage import manifest
 from test_deliver_excel import FRI, HOLIDAY, W38, W39, tick, write_fi_day, write_model_day
 
@@ -755,6 +756,42 @@ def test_daily_excel_has_new_sheets_in_order_with_meta(fi_world: dict[str, Path]
                    if n.startswith("xl/worksheets/sheet"))
 
 
+DASHES = ("—", "–")   # 엠 대시 · 엔 대시
+
+
+def test_매일_엑셀_글_칸과_메모에_엠_대시_엔_대시가_없다(fi_world: dict[str, Path],
+                                                    tmp_path: Path) -> None:
+    """사용자에게 가는 엑셀 글은 하이픈만(10-27 사용자 규칙). 11-05 · 11-06 운영 장 마감 엑셀에 '—' · '–' 가
+    62곳(Meta 55 · ETF 4 · Earnings Z5 칸과 Score · ETF 머리 메모 2) 들어가 있었다 — 저장 직전 바꾸는 단계가
+    없었다."""
+    res = build_daily(FRI, "morning", model_root=fi_world["model"], fi_root=fi_world["fi"],
+                      out_root=tmp_path)
+    wb = load_workbook(res.path)
+    left = [(ws.title, c.coordinate) for ws in wb.worksheets for row in ws.iter_rows() for c in row
+            if any(d in str(c.value or "") + (c.comment.text if c.comment else "") for d in DASHES)]
+    assert left == []
+
+
+def test_저장은_엠_대시_엔_대시만_하이픈으로_바꾸고_마이너스와_숫자는_둔다(tmp_path: Path) -> None:
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws["A1"] = "P = 잠정실적(공정공시) — 확정되면 바뀜"
+    ws["A1"].comment = Comment("설정(유입) – 환매(유출) 추정", "kael")
+    ws["B2"] = "(상장좌수 − 전날 좌수) × NAV"
+    ws["C3"] = -1.5
+    qpack.put(ws, 4, 4, "=EPS — 글")                           # '=' 로 시작하는 글 칸(qpack.put)
+    path = tmp_path / "x.xlsx"
+    excel_daily.save_atomic(wb, path)
+    got = load_workbook(path).active
+    assert got is not None
+    assert got["A1"].value == "P = 잠정실적(공정공시) - 확정되면 바뀜"
+    assert got["A1"].comment is not None and got["A1"].comment.text == "설정(유입) - 환매(유출) 추정"
+    assert got["B2"].value == "(상장좌수 − 전날 좌수) × NAV"     # 마이너스 기호(U+2212)는 규칙 밖
+    assert got["C3"].value == -1.5
+    assert got["D4"].value == "=EPS - 글" and got["D4"].data_type == "s"   # 수식이 되지 않는다
+
+
 def test_supplement_board_analyst_reads_the_holiday_fetch(fi_world: dict[str, Path],
                                                           tmp_path: Path) -> None:
     """N-45 · E5 — 주말 보강판 엑셀은 fi 판 JSON(supplement)의 wise_asof(토요일 수집일)까지 WISE
@@ -842,7 +879,7 @@ def test_unexpected_error_in_one_sheet_is_logged_with_traceback(
         res = build_daily(FRI, "morning", model_root=fi_world["model"], fi_root=fi_world["fi"],
                           out_root=tmp_path / "out")
     wb = load_workbook(res.path)
-    assert wb["Flow"]["A6"].value == "데이터 없음: 계산 오류(RuntimeError) — 로그 참고"
+    assert wb["Flow"]["A6"].value == "데이터 없음: 계산 오류(RuntimeError) - 로그 참고"
     assert wb["Short"]["A2"].value == "Short: 공매도 · 대차 · 신용"
     rec = next(r for r in caplog.records if "Flow" in r.getMessage())
     assert rec.exc_info is not None and "계산 중 터짐" in str(rec.exc_info[1])

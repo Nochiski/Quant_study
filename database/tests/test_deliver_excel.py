@@ -1648,7 +1648,7 @@ def test_postclose_run_in_model_db_leaves_operating_roots_alone(
 
 
 # ── T-50(PR-6b) — 장 마감 판 1M 비교 판이 evening 이력에 없으면 아침 확정판으로 ─────────────
-T50_NOTE = "(아침 확정 데이터 — 장 마감 데이터 비교 데이터 없음, T-50)"
+T50_NOTE = "(아침 확정 데이터 - 장 마감 데이터 비교 데이터 없음, T-50)"
 
 
 def _evening_copy(src: Path, dst: Path, day: str) -> None:
@@ -1908,7 +1908,7 @@ def test_daily_earnings_estimated_prior_year_yoy_is_grey_too(tmp_path: Path) -> 
 # ── Earnings 순이익 = 지배주주 순이익(결함 2) ──────────────────────────────────────
 CTRL, CTRL_EST, CTRL_NONE = tick(20), tick(21), tick(22)
 STAGE_PIN = "b_pin_0001"
-NI_DEF = "지배주주 순이익(컨센서스 표 기준 — 확정·추정 같은 정의)"
+NI_DEF = "지배주주 순이익(컨센서스 표 기준 - 확정·추정 같은 정의)"
 
 
 def _controlling_ni(table: str, rows: list[dict[str, object]]) -> None:
@@ -3239,7 +3239,7 @@ def test_no_previous_day_leaves_change_blank(world: dict[str, Path], tmp_path: P
                           out_root=tmp_path / "b")
     chg, n_cand, meta, _memo = change_and_meta(res.path)
     assert set(chg) == {None} and n_cand == 30
-    assert meta["전일 비교 데이터"] == f"{THU} {prev.build_id} — 순위를 쓸 수 없어 전일 데이터 없음"
+    assert meta["전일 비교 데이터"] == f"{THU} {prev.build_id} - 순위를 쓸 수 없어 전일 데이터 없음"
     assert any("전일 순위를 읽지 못했다" in rec.getMessage() for rec in caplog.records)
     # 보통 날(전일 순위 있음)은 변화를 매긴다 — 회귀 가드
     chg, _n, meta, memo = change_and_meta(build_daily(
@@ -3326,7 +3326,7 @@ def test_history_continues_from_the_predecessor_model(grace_board, tmp_path: Pat
                       out_root=tmp_path / "c" / "out")
     meta, ws, h, _rows = _score_view(res.path)
     assert meta["전일 비교 데이터"] == (
-        "2026-09-24 m_20260924T000000Z — 순위를 쓸 수 없어 전일 데이터 없음")
+        "2026-09-24 m_20260924T000000Z - 순위를 쓸 수 없어 전일 데이터 없음")
     assert meta["순위 흐름 날짜"] == "2026-09-28 ~ 2026-09-28 · 1개"
     assert "이전은" not in str(getattr(ws.cell(7, h["1M 흐름"]).comment, "text", ""))
 

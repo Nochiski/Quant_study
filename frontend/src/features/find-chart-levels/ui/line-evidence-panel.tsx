@@ -86,7 +86,9 @@ export const LineEvidencePanel = ({
           });
   const sameTimeframe = first.timeframe === timeframe;
 
+  // 단추를 끄지 않고 겹친 누르기만 받지 않는다 — 꺼진 단추는 초점을 잃어 패널의 Esc가 닿지 않는다
   const copy = async () => {
+    if (create.isPending) return;
     const results = await Promise.allSettled(
       lines.map((line) =>
         create.mutateAsync(
@@ -118,7 +120,6 @@ export const LineEvidencePanel = ({
         <>
           <Button
             tone="primary"
-            disabled={create.isPending}
             onClick={() => void copy()}
           >
             {t("chart.finder.evidence.copy")}

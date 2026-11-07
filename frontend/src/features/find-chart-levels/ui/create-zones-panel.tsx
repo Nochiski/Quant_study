@@ -52,7 +52,9 @@ export const CreateZonesPanel = ({
   const price = (value: number) => formatPrice(value, instrument.kind);
   const picked = results.previews;
 
+  // 저장 중에도 단추를 끄지 않는다(꺼지면 초점을 잃는다) — 겹친 누르기만 받지 않는다
   const add = async () => {
+    if (adding.pending) return;
     if (
       record !== undefined &&
       picked.length > 0 &&
@@ -73,7 +75,7 @@ export const CreateZonesPanel = ({
         <>
           <Button
             tone="primary"
-            disabled={picked.length === 0 || adding.pending}
+            disabled={picked.length === 0}
             onClick={() => void add()}
           >
             {t("chart.finder.zones.add")}

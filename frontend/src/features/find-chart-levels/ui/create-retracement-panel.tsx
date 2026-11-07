@@ -81,7 +81,9 @@ export const CreateRetracementPanel = ({
     group.members.some((member) => member.ref === ref),
   );
 
+  // 저장 중에도 단추를 끄지 않는다(꺼지면 초점을 잃는다) — 겹친 누르기만 받지 않는다
   const add = async () => {
+    if (adding.pending) return;
     const preview = results.previews.find((item) => item.key === "retracement");
     if (
       preview !== undefined &&
@@ -103,7 +105,7 @@ export const CreateRetracementPanel = ({
         <>
           <Button
             tone="primary"
-            disabled={drawing === null || adding.pending}
+            disabled={drawing === null}
             onClick={() => void add()}
           >
             {t("chart.finder.add")}

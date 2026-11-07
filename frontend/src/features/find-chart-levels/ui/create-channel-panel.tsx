@@ -69,7 +69,9 @@ export const CreateChannelPanel = ({
   const changedParams =
     draft.candidateSensitivity !== null || draft.structureSensitivity !== null;
 
+  // 저장 중에도 단추를 끄지 않는다(꺼지면 초점을 잃는다) — 겹친 누르기만 받지 않는다
   const add = async () => {
+    if (adding.pending) return;
     if (picked === undefined || record === undefined) return;
     const preview = results.previews.find((item) => item.key === "channel");
     if (preview !== undefined && (await adding.add([preview], record))) close();
@@ -87,7 +89,7 @@ export const CreateChannelPanel = ({
         <>
           <Button
             tone="primary"
-            disabled={picked === undefined || adding.pending}
+            disabled={picked === undefined}
             onClick={() => void add()}
           >
             {t("chart.finder.add")}

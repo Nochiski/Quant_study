@@ -54,6 +54,15 @@ class ChannelSearch:
     anchor_issue: AnchorIssue | None = None
 
 
+def first_anchor_choices(
+    series: ChartSeries, window: Window, direction: TrendDirection
+) -> tuple[Pivot, ...]:
+    """채널 기준선이 될 수 있는 첫 점 후보: 구간 안에서 구간 끝까지 확정된 그 방향의 피벗(up: 저점,
+    down: 고점). `find_channels`의 `first_anchor`가 받아들이는 점이 정확히 이것이다."""
+    kind = PivotKind.LOW if direction is TrendDirection.UP else PivotKind.HIGH
+    return tuple(p for p in series.confirmed_in(window) if p.kind is kind)
+
+
 def find_channels(
     series: ChartSeries,
     window: Window,
@@ -68,9 +77,12 @@ def find_channels(
     찾는다.
     """
     up = direction is TrendDirection.UP
-    pivots = series.confirmed_in(window)
-    base = [p for p in pivots if p.kind is (PivotKind.LOW if up else PivotKind.HIGH)]
-    opposite = [p for p in pivots if p.kind is (PivotKind.HIGH if up else PivotKind.LOW)]
+    base = list(first_anchor_choices(series, window, direction))
+    opposite = [
+        p
+        for p in series.confirmed_in(window)
+        if p.kind is (PivotKind.HIGH if up else PivotKind.LOW)
+    ]
     if first_anchor is not None:
         if not window.start <= first_anchor <= window.end:
             return ChannelSearch((), AnchorIssue.OUTSIDE_WINDOW)

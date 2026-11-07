@@ -148,6 +148,27 @@ def test_practice_source_runs_the_whole_chart_flow(tmp_path: Path) -> None:
     )
     assert confluence.status_code == 200, confluence.text
     assert _strict(confluence)["caution"]
+    assert _strict(confluence)["rules"]
+    # 내 선 빼기는 요청 칸이다 — 손으로 그은 수평선은 빠지고 저장한 자동 채널은 남는다
+    autos_only = _strict(
+        client.post(
+            f"{BASE}/confluence",
+            json={
+                "instrument_kind": "stock",
+                "instrument_code": "practice:005930",
+                "lines": [],
+                "include_mine": False,
+            },
+        )
+    )
+    members = {m["ref"] for g in autos_only["groups"] for m in g["members"]}
+    assert hline["line_id"] not in members
+    # 판정 규칙·피벗 규칙·첫 점 고르기 목록·수평 구간 규칙은 응답 문장이다
+    regime = _strict(client.get(f"{BASE}/regime", params={**SAMSUNG, "timeframe": "day"}))
+    assert regime["rules"] and regime["pivot_rule"]
+    assert {p["kind"] for p in channels["anchor_choices"]} <= {"low"}
+    zones = _strict(client.get(f"{BASE}/zones", params={**SAMSUNG, "timeframe": "day"}))
+    assert zones["rules"]
 
     assert client.delete(f"{BASE}/lines/{hline['line_id']}").status_code == 204
     missing = client.delete(f"{BASE}/lines/{hline['line_id']}")

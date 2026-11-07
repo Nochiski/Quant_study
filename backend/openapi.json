@@ -2387,6 +2387,14 @@
       },
       "ChartChannelsBody": {
         "properties": {
+          "anchor_choices": {
+            "description": "첫 점(`first_anchor`)으로 고를 수 있는 점 — 구간 안에서 구간 끝까지 확정된 그 방향의 피벗(up: 저점, down: 고점).",
+            "items": {
+              "$ref": "#/components/schemas/ChartPivotBody"
+            },
+            "title": "Anchor Choices",
+            "type": "array"
+          },
           "anchor_issue": {
             "anyOf": [
               {
@@ -2456,7 +2464,8 @@
           "total_candidates",
           "anchor_issue",
           "anchor_issue_message",
-          "record"
+          "record",
+          "anchor_choices"
         ],
         "title": "ChartChannelsBody",
         "type": "object"
@@ -2478,6 +2487,14 @@
             "title": "Groups",
             "type": "array"
           },
+          "rules": {
+            "description": "중첩을 세는 규칙 문장(backend가 완성).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
           "skipped_line_ids": {
             "description": "기준점이 지금 계열 밖이라 넣지 못한 저장 선.",
             "items": {
@@ -2496,6 +2513,7 @@
           "tolerance",
           "groups",
           "caution",
+          "rules",
           "skipped_line_ids"
         ],
         "title": "ChartConfluenceBody",
@@ -3236,13 +3254,10 @@
             "title": "Ends Near Extreme",
             "type": "boolean"
           },
-          "pivots": {
-            "description": "구간 안에서 구간 끝까지 확정된 후보용 피벗(채널 첫 점 고르기 목록).",
-            "items": {
-              "$ref": "#/components/schemas/ChartPivotBody"
-            },
-            "title": "Pivots",
-            "type": "array"
+          "pivot_rule": {
+            "description": "피벗 확정 규칙 문장(backend가 완성).",
+            "title": "Pivot Rule",
+            "type": "string"
           },
           "reason": {
             "anyOf": [
@@ -3342,8 +3357,8 @@
           "ends_near_extreme",
           "warnings",
           "channel_direction",
-          "pivots",
-          "rules"
+          "rules",
+          "pivot_rule"
         ],
         "title": "ChartRegimeBody",
         "type": "object"
@@ -3596,6 +3611,14 @@
           "record": {
             "$ref": "#/components/schemas/ChartAutoRecordBody"
           },
+          "rules": {
+            "description": "묶기·접촉·구분·생긴 날 규칙 문장(backend가 완성).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
           "timeframe": {
             "$ref": "#/components/schemas/Timeframe"
           },
@@ -3617,7 +3640,8 @@
           "window",
           "zones",
           "basis",
-          "record"
+          "record",
+          "rules"
         ],
         "title": "ChartZonesBody",
         "type": "object"

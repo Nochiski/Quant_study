@@ -106,6 +106,7 @@ from strategy_workbench.domain.chart_analysis.facade.levels import (
     ZoneParams,
     find_channels,
     find_zones,
+    first_anchor_choices,
     retracement_pivots,
 )
 from strategy_workbench.domain.chart_analysis.facade.line_record import (
@@ -137,7 +138,10 @@ from strategy_workbench.domain.chart_analysis.facade.wording import (
     STARTS_NEAR_EXTREME_WARNING,
     ZONE_BASIS,
     anchor_issue_message,
+    confluence_rules,
+    pivot_rule,
     regime_sentence,
+    zone_rules,
 )
 
 # 데이터 원천 안내라 분석 규칙(domain)이 아니라 이 유스케이스가 문장의 owner다.
@@ -287,8 +291,8 @@ class StockChartService:
             structure_lows=_pivots(series, loaded.scale, judgement.structure_lows),
             sentence=regime_sentence(judgement),
             warnings=_warnings(judgement),
-            pivots=_pivots(series, loaded.scale, series.confirmed_in(span)),
             rules=REGIME_RULES,
+            pivot_rule=pivot_rule(series.params),
         )
 
     def channels(
@@ -340,6 +344,9 @@ class StockChartService:
                 ),
                 regime=RegimeRecord(judgement.verdict, judgement.strength, judgement.structure),
                 chosen=chosen_by(judgement.channel_direction, direction),
+            ),
+            anchor_choices=_pivots(
+                series, loaded.scale, first_anchor_choices(series, span, direction)
             ),
         )
 
@@ -403,6 +410,7 @@ class StockChartService:
             window=view,
             zones=zones,
             basis=ZONE_BASIS,
+            rules=zone_rules(params, series.params),
             record=_record(
                 view,
                 replace(
@@ -491,6 +499,7 @@ class StockChartService:
                 for group in found
             ),
             caution=CONFLUENCE_CAUTION,
+            rules=confluence_rules(tolerance),
             skipped_line_ids=tuple(skipped),
         )
 
@@ -531,6 +540,23 @@ class StockChartService:
         _, stored, _ = self._shape(
             loaded, frame, draft.kind, draft.edit.anchors, draft.edit.levels, "draft"
         )
+        if draft.source is LineSource.AUTO:
+            # 같은 기준점의 자동 선(같은 띠·되돌림·채널)이 이미 있으면 새로 만들지 않고
+            # 그 선을 준다 — 묶음 추가를 다시 보내도(부분 실패 뒤 재시도) 같은 띠가 두 줄
+            # 생기지 않는다
+            same_line = next(
+                (
+                    line
+                    for line in self._drawings.list_lines(draft.instrument)
+                    if line.source is LineSource.AUTO
+                    and line.timeframe is draft.timeframe
+                    and line.kind is draft.kind
+                    and line.content.anchors == stored
+                ),
+                None,
+            )
+            if same_line is not None:
+                return self._line_view(loaded, same_line)
         content = self._content(stored, draft.edit)
         now = self._now()
         line = ChartLine(

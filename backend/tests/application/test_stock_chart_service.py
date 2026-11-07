@@ -46,10 +46,12 @@ from strategy_workbench.domain.chart_analysis.facade.line_record import (
     WindowSource,
 )
 from strategy_workbench.domain.chart_analysis.facade.regime import (
+    BOX_RATIO_MAX,
     RegimeReason,
     RegimeVerdict,
     Structure,
 )
+from strategy_workbench.domain.chart_analysis.facade.series import PivotKind
 
 STOCK = InstrumentRef(InstrumentKind.STOCK, "005930")
 UPTREND = InstrumentRef(InstrumentKind.STOCK, "000660")
@@ -236,13 +238,7 @@ def test_channel_direction_records_whether_the_user_followed_the_recommendation(
     service = _service()
     regime = service.regime(UPTREND, Timeframe.DAY)
     assert regime.judgement.channel_direction is TrendDirection.UP
-    # 첫 점 고르기 목록: 구간 안에서 구간 끝까지 확정된 후보용 피벗
-    assert regime.pivots
-    assert all(
-        regime.window.start <= p.bar_date and p.confirmed_date <= regime.window.end
-        for p in regime.pivots
-    )
-    assert any("0.73" in rule for rule in regime.rules)
+    assert any(f"{BOX_RATIO_MAX:g}" in rule for rule in regime.rules)
 
     followed = service.channels(UPTREND, Timeframe.DAY, TrendDirection.UP)
     overridden = service.channels(UPTREND, Timeframe.DAY, TrendDirection.DOWN)
@@ -251,6 +247,16 @@ def test_channel_direction_records_whether_the_user_followed_the_recommendation(
     assert followed.record.algorithm_version == ALGORITHM_VERSION
     assert followed.record.regime_window == (date(2025, 9, 1), AS_OF)
     assert followed.candidates
+    # 첫 점 고르기 목록은 그 방향의 확정 피벗(up: 저점)이고, 어느 것을 첫 점으로 보내도 받아들인다
+    choices = followed.anchor_choices
+    assert choices
+    assert {p.kind for p in choices} == {PivotKind.LOW}
+    for choice in choices:
+        picked = service.channels(
+            UPTREND, Timeframe.DAY, TrendDirection.UP, first_anchor=choice.bar_date
+        )
+        assert picked.anchor_issue is None, choice
+        assert all(c.drawing.anchors[0].bar_date == choice.bar_date for c in picked.candidates)
     # 계열 밖 첫 점은 구간 밖이다
     outside = service.channels(
         UPTREND, Timeframe.DAY, TrendDirection.UP, first_anchor=date(2025, 8, 1)
@@ -409,6 +415,36 @@ def test_confluence_reads_visible_saved_lines_and_inline_candidates() -> None:
     assert service.confluence(STOCK, (replace(candidate, ref=shown),)).groups == ()
     # 내 선을 빼면(include_mine=False) 손으로 그은 수평선이 빠져 되돌림 혼자라 중첩이 없다
     assert service.confluence(STOCK, (candidate,), include_mine=False).groups == ()
+    # 저장한 자동 선은 내 선을 빼도 남는다 — 같은 60의 자동 띠는 되돌림 0.5와 계속 겹친다
+    band = service.create_line(
+        replace(
+            _hline(59.9),
+            source=LineSource.AUTO,
+            edit=LineEdit((ChartPoint(date(2025, 9, 3), 59.9), ChartPoint(date(2025, 9, 3), 60.1))),
+            auto=AutoRecord(ALGORITHM_VERSION, {"candidate_sensitivity": 1.0}),
+        )
+    ).line.line_id
+    (kept,) = service.confluence(STOCK, (candidate,), include_mine=False).groups
+    assert sorted(m.ref for m in kept.members) == sorted(["auto-1", band])
+
+
+def test_saving_the_same_auto_line_again_returns_the_saved_one() -> None:
+    # 묶음 추가를 부분 실패 뒤 다시 보내도 같은 기준점의 자동 띠가 두 줄 생기지 않는다
+    drawings = FakeDrawings()
+    service = _service(drawings)
+    band = replace(
+        _hline(59.9),
+        source=LineSource.AUTO,
+        edit=LineEdit((ChartPoint(date(2025, 9, 3), 59.9), ChartPoint(date(2025, 9, 3), 60.1))),
+        auto=AutoRecord(ALGORITHM_VERSION, {"candidate_sensitivity": 1.0}),
+    )
+    first = service.create_line(band).line.line_id
+    assert service.create_line(band).line.line_id == first
+    assert len(drawings.lines) == 1
+    # 손으로 그은 선은 같은 자리여도 새 선이다
+    service.create_line(_hline(60.0))
+    service.create_line(_hline(60.0))
+    assert len(drawings.lines) == 3
 
 
 def test_search_ranks_index_name_then_ticker_then_exact_name_then_contains() -> None:

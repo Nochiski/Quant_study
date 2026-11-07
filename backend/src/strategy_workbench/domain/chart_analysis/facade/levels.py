@@ -15,6 +15,7 @@ from strategy_workbench.domain.chart_analysis._zones import (
     ZoneParams,
     ZoneSide,
     find_zones,
+    zone_side,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "find_zones",
     "first_anchor_choices",
     "retracement_pivots",
+    "zone_side",
 ]

@@ -1,7 +1,8 @@
 """수평 지지·저항 구간 찾기의 owner(설계 문서 4.5).
 
-어떤 점을 묶을지는 기준일 폭으로 고르고, 생긴 날은 그날의 폭으로도 한 구간인 첫 봉이다.
-지킴·뚫림은 생긴 날 뒤의 재접촉만 센다.
+어떤 점을 묶을지는 판정 구간 끝 봉의 폭으로 고르고, 생긴 날은 그날의 폭으로도 한 구간인 첫 봉이다.
+지킴·뚫림은 생긴 날 뒤 판정 구간 안의 재접촉만 센다. 저항·지지 구분은 구간 찾기와 따로 현재가로
+정한다(`zone_side`) — 판정 구간을 과거로 옮겨도 구분은 지금 가격 기준이다.
 """
 
 from __future__ import annotations
@@ -46,7 +47,6 @@ class HorizontalZone:
     formed_index: int
     held: int
     broken: int
-    side: ZoneSide
 
 
 def _side(price: float, lo: float, hi: float) -> int:
@@ -56,6 +56,11 @@ def _side(price: float, lo: float, hi: float) -> int:
 
 # 현재가가 구간 아래(−1)면 그 구간은 저항, 위(1)면 지지, 안이면 걸침이다.
 _ZONE_SIDES = {-1: ZoneSide.RESISTANCE, 1: ZoneSide.SUPPORT, 0: ZoneSide.STRADDLE}
+
+
+def zone_side(zone: HorizontalZone, current: float) -> ZoneSide:
+    """현재가(`current`, 구간과 같은 가격 공간)에 대한 구간의 구분. 경계에 닿으면 걸침이다."""
+    return _ZONE_SIDES[_side(current, zone.low, zone.high)]
 
 
 def _touches(members: list[Pivot]) -> int:
@@ -92,7 +97,7 @@ def find_zones(
             continue
         lo, hi = group[0].price, group[-1].price
         formed = max(p.confirmed_index for p in group)
-        # 기준일(end)에서는 묶기 조건과 같은 식이라 반드시 멈춘다.
+        # 구간 끝(end)에서는 묶기 조건과 같은 식이라 반드시 멈춘다.
         while math.log(hi / lo) > tolerance(formed):
             formed += 1
         held = broken = 0
@@ -121,7 +126,6 @@ def find_zones(
                 formed_index=formed,
                 held=held,
                 broken=broken,
-                side=_ZONE_SIDES[_side(float(close[end]), lo, hi)],
             )
         )
     zones.sort(key=lambda z: -z.high)

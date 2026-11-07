@@ -66,20 +66,20 @@ const percent = (value: number) => `${Math.abs(value).toFixed(2)}%`;
 const ChartHead = ({
   instrument,
   timeframe,
-  current,
+  last,
   titleId,
   titleRef,
   actions,
 }: {
   instrument: ChartInstrumentBody;
   timeframe: Timeframe;
-  current: ChartCandleBody | undefined;
+  /** 받은 계열의 마지막 봉(진행 중일 수 있다). */
+  last: ChartCandleBody | undefined;
   titleId: string;
   titleRef: RefObject<HTMLHeadingElement | null>;
   /** 머리 오른쪽 끝(분석 방식 전환). */
   actions: ReactNode;
 }) => {
-  const last = current;
   // 등락률은 캔들 응답 값(직전 봉 종가 대비, application이 계산)을 그대로 보인다
   const change = last?.change_pct ?? null;
   const price = (value: number) => formatPrice(value, instrument.kind);
@@ -138,7 +138,7 @@ type ChartBodyProps = {
 const axisBadges = (
   lines: readonly ChartLineBody[],
   segmentsOf: (line: ChartLineBody) => ReturnType<typeof levelSegments>,
-  current: ChartCandleBody | undefined,
+  current: number | null,
   yOf: (price: number) => number,
   instrumentKind: ChartInstrumentBody["kind"],
 ): AxisBadge[] => [
@@ -150,13 +150,13 @@ const axisBadges = (
       tone: lineTone(line),
     })),
   ),
-  ...(current === undefined
+  ...(current === null
     ? []
     : [
         {
           key: "current",
-          y: yOf(current.close),
-          text: formatPrice(current.close, instrumentKind),
+          y: yOf(current),
+          text: formatPrice(current, instrumentKind),
           tone: "current" as const,
         },
       ]),
@@ -201,8 +201,10 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
   // 응답이 같으면 같은 배열 — 고른 선 카드의 봉 날짜 목록(수천 개)이 다시 그려지지 않는다
   const completed = useMemo(() => completedCandles(candles ?? [], lastCompleted), [candles, lastCompleted]);
   const visibleCompleted = scale ? completed.slice(scale.first, scale.last + 1) : [];
-  // 현재가 = 계열의 마지막 봉(진행 중이면 그 봉) 종가. 점선·오른쪽 배지·머리가 이 하나를 쓴다.
-  const current = candles?.[candles.length - 1];
+  // 머리는 받은 계열의 마지막 봉을 보인다. 현재가(점선·오른쪽 배지·"현재가 대비")는 응답 머리 값 하나다
+  // — 과거 범위만 보여도 기준일 종가이고, 서버의 수평 구간 저항·지지 구분과 같은 값이다.
+  const lastCandle = candles?.[candles.length - 1];
+  const currentPrice = context?.current_price ?? null;
   const ready = candles !== undefined;
   const handledFocus = useRef(0);
   useEffect(() => {
@@ -260,7 +262,6 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
       if (selected !== undefined && lineTone(selected) !== "mine") drawing.dispatch({ type: "select", lineId: null });
     }
   };
-  const currentPrice = current?.close ?? null;
   const creating = panel.view === "create";
   // 포인터를 올린 선은 선택 도구일 때만 본다(그리기 도구로 바꾸면 선의 누를 자리가 사라져 떠남이 오지 않는다)
   const badgeLine =
@@ -279,7 +280,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
           <ChartHead
             instrument={instrument}
             timeframe={timeframe}
-            current={current}
+            last={lastCandle}
             titleId={titleId}
             titleRef={titleRef}
             actions={<ModeSwitch mode={mode} onMode={changeMode} />}
@@ -347,7 +348,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                   scale={scale}
                   instrumentKind={instrument.kind}
                   height={height}
-                  current={current}
+                  current={currentPrice}
                 />
                 <g clipPath={`url(#${clipId})`}>
                   <DrawingSurface
@@ -379,7 +380,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                   badges={axisBadges(
                     badgeLine === undefined ? [] : [badgeLine],
                     (line) => levelSegments(line.paths, line.extend_right, scale),
-                    current,
+                    currentPrice,
                     scale.yOfPrice,
                     instrument.kind,
                   )}

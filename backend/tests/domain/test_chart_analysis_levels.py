@@ -24,6 +24,7 @@ from strategy_workbench.domain.chart_analysis.facade.levels import (
     find_channels,
     find_zones,
     retracement_pivots,
+    zone_side,
 )
 from strategy_workbench.domain.chart_analysis.facade.series import Pivot, PivotKind, Window
 
@@ -220,10 +221,10 @@ def test_zones_group_by_complete_linkage_merge_near_touches_and_sort_top_down() 
 
     zones = find_zones(series, Window(0, 30))
 
-    assert [(z.low, z.high, z.touches, z.formed_index, z.side) for z in zones] == [
-        (105.0, 105.2, 2, 29, ZoneSide.RESISTANCE),
-        (100.6, 100.9, 2, 17, ZoneSide.STRADDLE),
-        (100.0, 100.4, 2, 10, ZoneSide.SUPPORT),
+    assert [(z.low, z.high, z.touches, z.formed_index) for z in zones] == [
+        (105.0, 105.2, 2, 29),
+        (100.6, 100.9, 2, 17),
+        (100.0, 100.4, 2, 10),
     ]
 
 
@@ -251,12 +252,11 @@ def test_zone_width_tolerance_is_inclusive() -> None:
     ],
 )
 def test_zone_side_boundaries_count_as_straddle(current: float, side: ZoneSide) -> None:
-    close = [101.0] * 14 + [current]
-    series = series_with(close, [1.0] * 15, (Pivot(L, 2, 100.0, 4), Pivot(L, 6, 100.4, 8)))
+    series = series_with([101.0] * 15, [1.0] * 15, (Pivot(L, 2, 100.0, 4), Pivot(L, 6, 100.4, 8)))
 
     (zone,) = find_zones(series, Window(0, 14))
 
-    assert zone.side is side
+    assert zone_side(zone, current) is side
 
 
 # (고가, 저가, 종가). 구간 [100, 100.4]는 봉 12에 생기고, 그 뒤 지킴 1·뚫림 1
@@ -300,4 +300,3 @@ def test_zone_formed_date_waits_for_that_days_width_and_counts_only_later_retouc
     (zone,) = find_zones(series, Window(0, 24))
 
     assert (zone.formed_index, zone.held, zone.broken) == (12, 1, 1)
-    assert zone.side is ZoneSide.RESISTANCE  # 현재가 99.6 < 100

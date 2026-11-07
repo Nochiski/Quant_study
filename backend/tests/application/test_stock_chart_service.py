@@ -37,7 +37,11 @@ from strategy_workbench.application.stock_chart.facade.ports import (
     RegimeRecord,
 )
 from strategy_workbench.domain.chart_analysis.facade.bars import PriceBar, Timeframe
-from strategy_workbench.domain.chart_analysis.facade.levels import SwingChoice, TrendDirection
+from strategy_workbench.domain.chart_analysis.facade.levels import (
+    SwingChoice,
+    TrendDirection,
+    ZoneSide,
+)
 from strategy_workbench.domain.chart_analysis.facade.line_record import (
     ALGORITHM_VERSION,
     ChosenBy,
@@ -585,6 +589,47 @@ def test_analysis_parameter_ranges_are_checked_by_the_domain() -> None:
     with pytest.raises(ChartRequestError) as reversed_range:
         service.candles(STOCK, Timeframe.DAY, date(2025, 10, 1), date(2025, 9, 1))
     assert reversed_range.value.code == "chart.window.reversed"
+
+
+def test_zone_side_compares_the_current_price_not_the_window_end_close() -> None:
+    # 판정 구간 끝(봉 19) 종가 116은 고점 띠 123 아래지만, 현재가(기준일 종가) 140은
+    # 모든 띠 위다 — 다 지지다
+    window = WindowRequest(SESSIONS[0], SESSIONS[19])
+
+    view = _service().zones(UPTREND, Timeframe.DAY, window, min_touches=1)
+
+    assert (_zigzag()[19], _zigzag()[-1]) == (116.0, 140.0)
+    assert [(z.high, z.side) for z in view.zones] == [
+        (123.0, ZoneSide.SUPPORT),
+        (115.0, ZoneSide.SUPPORT),
+        (107.0, ZoneSide.SUPPORT),
+        (101.0, ZoneSide.SUPPORT),
+    ]
+
+
+def test_zone_side_compares_in_the_stored_price_space_when_k_is_not_one() -> None:
+    # k = 0.5: 띠는 저장 가격(123 등), 현재가는 저장 140 = 화면 70.
+    # 화면 값(70)과 비교하면 띠가 모두 저항이 된다
+    prices = FakePrices()
+    prices.history[UPTREND] = ChartHistory(_bars(_zigzag()), _zigzag()[-1] / 2)
+    window = WindowRequest(SESSIONS[0], SESSIONS[19])
+
+    view = _service(prices=prices).zones(UPTREND, Timeframe.DAY, window, min_touches=1)
+
+    assert view.context.current_price == 70.0
+    assert [(z.high, z.side) for z in view.zones] == [
+        (61.5, ZoneSide.SUPPORT),
+        (57.5, ZoneSide.SUPPORT),
+        (53.5, ZoneSide.SUPPORT),
+        (50.5, ZoneSide.SUPPORT),
+    ]
+
+
+def test_current_price_is_the_last_ledger_close_whatever_candle_range() -> None:
+    # 과거 범위만 보여도 현재가는 기준일까지 마지막 일봉 종가(화면 가격 143 × k 0.5)다
+    view = _service().candles(STOCK, Timeframe.DAY, date(2025, 9, 1), date(2025, 9, 30))
+
+    assert (view.candles[-1].close, view.context.current_price) == (60.5, 71.5)
 
 
 class _MixedPrices(FakePrices):

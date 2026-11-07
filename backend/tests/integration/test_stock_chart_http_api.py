@@ -315,6 +315,8 @@ def test_real_data_candles_show_actual_prices(tmp_path: Path) -> None:
         "2024-01-11",
         _raw(date(2024, 1, 11)),
     )
+    # 현재가는 응답 머리가 싣는다 — 기준일 원주가(화면 가격)
+    assert body["context"]["current_price"] == _raw(date(2024, 1, 11))
     index = _strict(client.get(f"{BASE}/instruments", params={"query": "건설"}))["instruments"]
     assert sorted(item["code"] for item in index) == ["KOSDAQ:건설", "KOSPI:건설"]
     # 금요일(01-12)은 잠정 행뿐이라 기준일은 목요일이고 그 주는 진행 중이다

@@ -127,6 +127,10 @@ export const useFinderResults = (target: ChartTarget, timeframe: Timeframe, pane
     });
   }
   const anyQuery = tool === "fib_channel" ? regime : tool === "fib_retracement" ? retracement : zones;
+  // 앞 결과를 보이며 새 조건으로 다시 받는 중(처음 받는 중은 아니다)
+  const waiting = (query: Parameters<typeof settled>[0]) => query.data !== undefined && !settled(query);
+  const refreshing =
+    tool === "fib_channel" ? waiting(regime) || (direction !== null && waiting(channels)) : tool !== null && waiting(anyQuery);
   // 응답이 지금 입력의 것이면 서버가 맞춘 구간, 아니면(기다리는 중) 고친 날짜
   const window: DateRange | null =
     answered !== null && (draft?.window === null || settled(anyQuery))
@@ -142,7 +146,22 @@ export const useFinderResults = (target: ChartTarget, timeframe: Timeframe, pane
     levels: preview.levels === null ? null : [...preview.levels],
   }));
 
-  return { draft, tool, regime, judged, channels, retracement, zones, direction, recommended, window, ready, previews, inlineLines };
+  return {
+    draft,
+    tool,
+    regime,
+    judged,
+    channels,
+    retracement,
+    zones,
+    direction,
+    recommended,
+    window,
+    ready,
+    refreshing,
+    previews,
+    inlineLines,
+  };
 };
 
 export type FinderResults = ReturnType<typeof useFinderResults>;

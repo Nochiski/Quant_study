@@ -17,7 +17,7 @@ import { changeFromCurrent } from "../model/line-evidence";
 import { useAddCandidates } from "../model/use-add-candidates";
 import { PREVIEW_REF } from "../model/use-finder-results";
 import type { LevelFinder } from "../model/use-level-finder";
-import { CreateFooter, FinderFailure, WindowFields } from "./finder-fields";
+import { CreateFooter, FinderFailure, RefreshingNote, WindowFields } from "./finder-fields";
 import { FinderPanelFrame } from "./finder-panel-frame";
 import { percentText } from "./percent-text";
 
@@ -141,7 +141,12 @@ export const CreateRetracementPanel = ({
         </label>
       </fieldset>
 
-      <section className="finder-section" aria-labelledby={`${id}-result`} aria-busy={!results.ready}>
+      <RefreshingNote refreshing={results.refreshing} />
+      <section
+        className={`finder-section${results.refreshing ? " finder-section--stale" : ""}`}
+        aria-labelledby={`${id}-result`}
+        aria-busy={!results.ready}
+      >
         <h3 id={`${id}-result`}>{t("chart.finder.result")}</h3>
         {results.retracement.isError ? <FinderFailure error={results.retracement.error} /> : null}
         {found?.message ? <p className="finder-note">{found.message}</p> : null}

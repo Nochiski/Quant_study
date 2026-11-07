@@ -250,8 +250,10 @@ regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_
   빼고 자동 선만 넣는다 — 중첩 패널의 "내 선도 넣기" 토글이 보이기 저장 칸을 바꾸지 않게 한다(PR4). 채널 첫 점 후보는
   `/channels` 응답 `anchor_choices`(domain `first_anchor_choices` — 그 방향의 확정 피벗, `find_channels`가 첫 점을 검사하는
   같은 목록)다. 화면이 보이는 규칙 문장은 domain `_wording`이 상수를 인용해 완성해 응답에 싣는다: regime `rules`·
-  `pivot_rule`, zones `rules`, confluence `rules`(PR4). 같은 기준점의 자동 선을 다시 저장하면 새로 만들지 않고 있는
-  선을 준다 — 묶음 추가를 다시 보내도 같은 띠가 두 줄 생기지 않는다(손으로 그은 선은 그대로 새 선). 분석 파라미터 범위는 domain 값 타입 하나가 검사해 `chart.params.invalid`로
+  `pivot_rule`, zones `rules`, confluence `rules`(PR4). 저장 내용이 완전히 같은 자동 선(주기·종류·기준점·레벨·
+  연장·메모·잠금·자동 기록 전부, 보이기만 다를 수 있다)을 다시 저장하면 새로 만들지 않고 있는 선을 주고, 숨겨 둔
+  선이면 다시 보이게 한다 — 묶음 추가를 다시 보내도 같은 띠가 두 줄 생기지 않는다. 하나라도 다르면(레벨·조건을 바꿔
+  다시 만든 선) 새 선이고, 손으로 그은 선·복사본은 늘 새 선이다. 분석 파라미터 범위는 domain 값 타입 하나가 검사해 `chart.params.invalid`로
   거절한다(HTTP 스키마에 같은 범위를 두지 않는다). 저장 띠(자동 수평 구간)는 기준점
   둘인 수평선(`hline`)이다. 거절은 404·422 `{code, message}`이고 요청 칸 검증 실패도 `chart.request_invalid`다.
 

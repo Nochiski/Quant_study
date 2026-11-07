@@ -46,7 +46,7 @@ export const dayNumber = (date: string): number => {
 };
 
 /** 봉 시작일이 `date` 이하인 마지막 봉 index. 첫 봉보다 앞이면 -1. */
-const barAtOrBefore = (candles: readonly ChartCandleBody[], date: string): number => {
+export const barAtOrBefore = (candles: readonly ChartCandleBody[], date: string): number => {
   let low = 0;
   let high = candles.length - 1;
   let found = -1;

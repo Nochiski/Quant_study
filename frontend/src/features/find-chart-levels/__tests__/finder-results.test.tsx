@@ -93,8 +93,11 @@ describe("finder results while a new window is being judged", () => {
     expect(result.current.results.recommended).toBeNull();
     expect(result.current.results.direction).toBeNull();
     expect(result.current.results.ready).toBe(false);
+    // 앞 판정을 보이며 다시 찾는 중이라고 알린다
+    expect(result.current.results.refreshing).toBe(true);
     await waitFor(() => expect(result.current.results.direction).toBe("down"));
     await waitFor(() => expect(result.current.results.ready).toBe(true));
+    expect(result.current.results.refreshing).toBe(false);
     expect(requests.filter((request) => request.start === W2.start)).toEqual([{ start: W2.start, direction: "down" }]);
   });
 

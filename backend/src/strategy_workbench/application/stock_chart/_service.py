@@ -540,24 +540,15 @@ class StockChartService:
         _, stored, _ = self._shape(
             loaded, frame, draft.kind, draft.edit.anchors, draft.edit.levels, "draft"
         )
-        if draft.source is LineSource.AUTO:
-            # 같은 기준점의 자동 선(같은 띠·되돌림·채널)이 이미 있으면 새로 만들지 않고
-            # 그 선을 준다 — 묶음 추가를 다시 보내도(부분 실패 뒤 재시도) 같은 띠가 두 줄
-            # 생기지 않는다
-            same_line = next(
-                (
-                    line
-                    for line in self._drawings.list_lines(draft.instrument)
-                    if line.source is LineSource.AUTO
-                    and line.timeframe is draft.timeframe
-                    and line.kind is draft.kind
-                    and line.content.anchors == stored
-                ),
-                None,
-            )
-            if same_line is not None:
-                return self._line_view(loaded, same_line)
         content = self._content(stored, draft.edit)
+        if draft.source is LineSource.AUTO:
+            same_line = self._same_auto_line(draft, content)
+            if same_line is not None:
+                if not same_line.content.visible:
+                    same_line = self._drawings.update_content(
+                        same_line.line_id, content, self._now()
+                    )
+                return self._line_view(loaded, same_line)
         now = self._now()
         line = ChartLine(
             line_id=self._new_id(),
@@ -593,6 +584,26 @@ class StockChartService:
         content = self._content(stored, edit)
         line = self._drawings.update_content(line_id, content, self._now())
         return self._line_view(loaded, line)
+
+    def _same_auto_line(self, draft: ChartLineDraft, content: ChartLineContent) -> ChartLine | None:
+        """저장 내용이 완전히 같은 자동 선. 주기·종류·기준점·레벨·연장·메모·잠금·자동 기록
+        (알고리즘·파라미터·판정 구간·판정·방향 출처) 전부가 같고 보이기만 다를 수 있다.
+
+        묶음 추가를 다시 보내도(부분 실패 뒤 재시도) 같은 띠가 두 줄 생기지 않게 그 선을 돌려준다.
+        하나라도 다르면 None — 레벨이나 조건을 바꿔 다시 만든 선은 새 선이다."""
+        shown = replace(content, visible=True)
+        return next(
+            (
+                line
+                for line in self._drawings.list_lines(draft.instrument)
+                if line.source is LineSource.AUTO
+                and line.timeframe is draft.timeframe
+                and line.kind is draft.kind
+                and line.auto == draft.auto
+                and replace(line.content, visible=True) == shown
+            ),
+            None,
+        )
 
     def delete_line(self, line_id: str) -> None:
         self._drawings.delete_line(self._owned(line_id).line_id)

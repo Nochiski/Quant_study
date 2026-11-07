@@ -171,6 +171,11 @@
   font-weight: var(--font-weight-label);
 }
 
+/* 앞 결과를 보이며 새 조건으로 다시 찾는 중 — 지금 조건의 결과가 아님을 옅게 보인다 */
+.finder-section--stale {
+  opacity: 0.55;
+}
+
 .finder-section__meta {
   color: var(--text-muted);
   font-size: var(--text-size-small);

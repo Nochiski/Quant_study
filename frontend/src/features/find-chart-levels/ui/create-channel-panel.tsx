@@ -16,7 +16,7 @@ import { Badge, Button } from "../../../shared/ui";
 import { serverParam, strengthText } from "../model/line-evidence";
 import { useAddCandidates } from "../model/use-add-candidates";
 import type { LevelFinder } from "../model/use-level-finder";
-import { CreateFooter, FinderFailure, ParamField, WindowFields } from "./finder-fields";
+import { CreateFooter, FinderFailure, ParamField, RefreshingNote, WindowFields } from "./finder-fields";
 import { FinderPanelFrame } from "./finder-panel-frame";
 
 type CreateChannelPanelProps = {
@@ -84,7 +84,12 @@ export const CreateChannelPanel = ({ finder, target, timeframe, instrument }: Cr
         </p>
       ))}
 
-      <section className="finder-section" aria-labelledby={`${id}-regime`} aria-busy={judged === undefined}>
+      <RefreshingNote refreshing={results.refreshing} />
+      <section
+        className={`finder-section${results.refreshing ? " finder-section--stale" : ""}`}
+        aria-labelledby={`${id}-regime`}
+        aria-busy={judged === undefined}
+      >
         <h3 id={`${id}-regime`}>
           {t("chart.finder.regime.title")}
           {shownRegime ? (
@@ -260,7 +265,10 @@ export const CreateChannelPanel = ({ finder, target, timeframe, instrument }: Cr
       </details>
 
       {direction === null ? null : (
-        <fieldset className="finder-section finder-choices" aria-busy={!ready}>
+        <fieldset
+          className={`finder-section finder-choices${results.refreshing ? " finder-section--stale" : ""}`}
+          aria-busy={!ready}
+        >
           <legend>
             {t("chart.finder.channel.candidates")}
             {found ? (

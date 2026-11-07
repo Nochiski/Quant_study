@@ -185,3 +185,14 @@ export const CreateFooter = ({ addLabel, canAdd, onAdd, onClose, adding }: Creat
     <Button onClick={onClose}>{t("chart.finder.cancel")}</Button>
   </>
 );
+
+/**
+ * 앞 결과를 보이며 새 조건으로 다시 찾는 동안의 한 줄(생성 패널 3종 공통). 결과 절은 `finderStale`로 옅게 그린다 —
+ * 지금 보이는 판정·표가 새 조건의 것이 아니라는 표시다.
+ */
+export const RefreshingNote = ({ refreshing }: { refreshing: boolean }) =>
+  refreshing ? (
+    <p className="finder-note" role="status">
+      {t("chart.finder.refreshing")}
+    </p>
+  ) : null;

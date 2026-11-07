@@ -12,7 +12,7 @@ import { t, tFill } from "../../../shared/config";
 import { serverParam } from "../model/line-evidence";
 import { useAddCandidates } from "../model/use-add-candidates";
 import type { LevelFinder } from "../model/use-level-finder";
-import { CreateFooter, FinderFailure, ParamField, WindowFields } from "./finder-fields";
+import { CreateFooter, FinderFailure, ParamField, RefreshingNote, WindowFields } from "./finder-fields";
 import { FinderPanelFrame } from "./finder-panel-frame";
 
 type CreateZonesPanelProps = {
@@ -112,7 +112,12 @@ export const CreateZonesPanel = ({ finder, target, timeframe, instrument }: Crea
         ) : null}
       </fieldset>
 
-      <section className="finder-section" aria-labelledby={`${id}-result`} aria-busy={!results.ready}>
+      <RefreshingNote refreshing={results.refreshing} />
+      <section
+        className={`finder-section${results.refreshing ? " finder-section--stale" : ""}`}
+        aria-labelledby={`${id}-result`}
+        aria-busy={!results.ready}
+      >
         <h3 id={`${id}-result`}>
           {t("chart.finder.zones.found")}
           {found ? (

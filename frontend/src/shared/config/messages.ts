@@ -3551,6 +3551,7 @@ const ko = {
   "chart.finder.confluence.skipped": "기준점이 지금 계열 밖이라 넣지 못한 선이 {count}개 있어요.",
   "chart.finder.confluence.bias": "내 선은 내가 보고 그은 것이라 자동 후보와 겹쳐도 확인 편향이 섞일 수 있어요.",
   "chart.finder.partial": "{total}개 중 {failed}개를 저장하지 못했어요. 다시 누르면 저장 안 된 것만 새로 생겨요.",
+  "chart.finder.refreshing": "새 조건으로 다시 찾는 중이에요. 아래는 앞 조건의 결과예요.",
   // ── 개별종목차트 끝 ──
 } as const;
 
@@ -7134,6 +7135,7 @@ export const messages = {
     "chart.finder.confluence.skipped": "{count} lines were left out because their anchors are outside the series.",
     "chart.finder.confluence.bias": "Your own lines reflect what you saw, so overlaps with them can carry confirmation bias.",
     "chart.finder.partial": "{failed} of {total} could not be saved. Press again to add only the missing ones.",
+    "chart.finder.refreshing": "Finding again with the new settings. Below are the previous results.",
     // ── 개별종목차트 끝 ──
   } satisfies Record<MessageKey, string>,
 } as const;

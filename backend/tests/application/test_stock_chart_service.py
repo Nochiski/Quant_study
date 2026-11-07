@@ -429,22 +429,60 @@ def test_confluence_reads_visible_saved_lines_and_inline_candidates() -> None:
 
 
 def test_saving_the_same_auto_line_again_returns_the_saved_one() -> None:
-    # 묶음 추가를 부분 실패 뒤 다시 보내도 같은 기준점의 자동 띠가 두 줄 생기지 않는다
+    # 묶음 추가를 부분 실패 뒤 다시 보내도 저장 내용이 완전히 같은 자동 선은 두 줄 생기지 않는다
     drawings = FakeDrawings()
     service = _service(drawings)
-    band = replace(
-        _hline(59.9),
-        source=LineSource.AUTO,
-        edit=LineEdit((ChartPoint(date(2025, 9, 3), 59.9), ChartPoint(date(2025, 9, 3), 60.1))),
-        auto=AutoRecord(ALGORITHM_VERSION, {"candidate_sensitivity": 1.0}),
+    day = date(2025, 9, 3)
+    record = AutoRecord(ALGORITHM_VERSION, {"candidate_sensitivity": 1.0})
+    retracement = ChartLineDraft(
+        STOCK,
+        Timeframe.DAY,
+        LineKind.FIB_RETRACEMENT,
+        LineSource.AUTO,
+        LineEdit((ChartPoint(day, 50.0), ChartPoint(date(2025, 10, 1), 70.0))),
+        record,
     )
-    first = service.create_line(band).line.line_id
-    assert service.create_line(band).line.line_id == first
+    first = service.create_line(retracement).line.line_id
+    assert service.create_line(retracement).line.line_id == first
     assert len(drawings.lines) == 1
+    # 같은 내용인데 숨긴 선이면 다시 보이게 해서 준다
+    hidden = service.update_line(first, replace(retracement.edit, visible=False)).line
+    assert hidden.content.visible is False
+    shown = service.create_line(retracement).line
+    assert (shown.line_id, shown.content.visible) == (first, True)
+    assert len(drawings.lines) == 1
+    # 레벨만·연장만·파라미터만 다르면 새 선이다(옛 선을 고치지 않는다)
+    different = (
+        replace(retracement, edit=replace(retracement.edit, levels=(0.0, 0.5, 1.0))),
+        replace(retracement, edit=replace(retracement.edit, extend_right=False)),
+        replace(retracement, auto=AutoRecord(ALGORITHM_VERSION, {"candidate_sensitivity": 1.5})),
+    )
+    for draft in different:
+        made = service.create_line(draft).line
+        assert made.line_id != first
+        assert (made.content.levels, made.content.extend_right, made.auto) == (
+            draft.edit.levels,
+            draft.edit.extend_right,
+            draft.auto,
+        )
+    assert service.lines(STOCK).lines[0].line.content.levels is None
+    assert len(drawings.lines) == 4
+    # 주기가 다르거나 출처가 다르면 합치지 않는다
+    service.create_line(
+        replace(
+            retracement,
+            timeframe=Timeframe.WEEK,
+            edit=LineEdit(
+                (ChartPoint(date(2025, 9, 1), 50.0), ChartPoint(date(2025, 9, 29), 70.0))
+            ),
+        )
+    )
+    service.create_line(replace(retracement, source=LineSource.AUTO_COPIED))
+    assert len(drawings.lines) == 6
     # 손으로 그은 선은 같은 자리여도 새 선이다
     service.create_line(_hline(60.0))
     service.create_line(_hline(60.0))
-    assert len(drawings.lines) == 3
+    assert len(drawings.lines) == 8
 
 
 def test_search_ranks_index_name_then_ticker_then_exact_name_then_contains() -> None:

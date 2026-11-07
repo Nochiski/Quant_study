@@ -1,4 +1,4 @@
-import type { ChartCandleBody, DateRange } from "../../../entities/chart";
+import { barAtOrBefore, type ChartCandleBody, type DateRange } from "../../../entities/chart";
 
 /**
  * 판정·분석 구간을 차트 위에서 고치는 규칙(테두리 끌기·키보드)의 owner. 구간은 완성 봉 index의 양 끝(포함)이고,
@@ -59,10 +59,8 @@ export const nudgeWindowEdge = (
  * 봉으로 읽힌다 — 서버가 맞춘 응답 구간이 오면 그것을 쓰므로 그동안만의 어림이다.
  */
 const indexHolding = (completed: readonly ChartCandleBody[], date: string): number => {
-  let found = -1;
-  for (let index = 0; index < completed.length && completed[index].start <= date; index += 1) found = index;
-  if (found === completed.length - 1 && found >= 0 && date > completed[found].end) return -1;
-  return found;
+  const found = barAtOrBefore(completed, date);
+  return found === completed.length - 1 && found >= 0 && date > completed[found].end ? -1 : found;
 };
 
 /** 구간 날짜 → 완성 봉 index 구간(각 날짜가 든 봉). 봉을 찾지 못하면 null. */

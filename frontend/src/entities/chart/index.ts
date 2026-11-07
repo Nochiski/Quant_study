@@ -33,6 +33,7 @@ export {
 export {
   DATE_AXIS_HEIGHT,
   PRICE_AXIS_WIDTH,
+  barAtOrBefore,
   chartScale,
   dateTicks,
   dayNumber,

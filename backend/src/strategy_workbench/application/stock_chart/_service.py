@@ -166,6 +166,9 @@ class _Loaded:
     ref: InstrumentRef
     scale: DisplayScale
     daily: tuple[PriceBar, ...]
+    # 현재가(기준일까지 원장 마지막 일봉 종가)의 저장 공간 값.
+    # 응답 머리 `current_price`는 이 값의 화면 가격이다.
+    current_close: float | None
 
 
 @dataclass(frozen=True, eq=False)
@@ -394,8 +397,11 @@ class StockChartService:
         span, view = _window(series, timeframe, window)
         params = _domain_params(ZoneParams(), width_atr=width_atr, min_touches=min_touches)
         scale = loaded.scale
-        # 현재가(`ChartContext.current_price`)를 구간과 같은 저장 가격 공간에서 비교한다
-        current = loaded.daily[-1].close
+        # 구간과 같은 저장 가격 공간에서 현재가와 비교한다
+        current = loaded.current_close
+        if current is None:
+            # 완성 봉이 있는 계열(`_required_frame`)이면 일봉도 있다 — 적재 불변식이 깨진 것이다
+            raise RuntimeError(f"chart has completed bars but no current close — ref={ref}")
         zones = tuple(
             ZoneView(
                 drawing=_drawing(series, scale, LineKind.HLINE, zone_anchors(zone)),
@@ -652,12 +658,14 @@ class StockChartService:
         scale = DisplayScale(1.0)
         if ref.kind is InstrumentKind.STOCK and bars and history.last_actual_close is not None:
             scale = DisplayScale.from_last_close(history.last_actual_close, bars[-1].close)
-        current = scale.to_display(bars[-1].close) if bars else None
+        current_close = bars[-1].close if bars else None
+        current = None if current_close is None else scale.to_display(current_close)
         return _Loaded(
             ChartContext(instrument, as_of, self._practice, self._notice(), current),
             ref,
             scale,
             bars,
+            current_close,
         )
 
     def _frame(self, loaded: _Loaded, timeframe: Timeframe, params: SwingParams) -> _Frame | None:

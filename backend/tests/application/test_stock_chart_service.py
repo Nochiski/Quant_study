@@ -607,6 +607,24 @@ def test_zone_side_compares_the_current_price_not_the_window_end_close() -> None
     ]
 
 
+def test_zone_side_compares_in_the_stored_price_space_when_k_is_not_one() -> None:
+    # k = 0.5: 띠는 저장 가격(123 등), 현재가는 저장 140 = 화면 70.
+    # 화면 값(70)과 비교하면 띠가 모두 저항이 된다
+    prices = FakePrices()
+    prices.history[UPTREND] = ChartHistory(_bars(_zigzag()), _zigzag()[-1] / 2)
+    window = WindowRequest(SESSIONS[0], SESSIONS[19])
+
+    view = _service(prices=prices).zones(UPTREND, Timeframe.DAY, window, min_touches=1)
+
+    assert view.context.current_price == 70.0
+    assert [(z.high, z.side) for z in view.zones] == [
+        (61.5, ZoneSide.SUPPORT),
+        (57.5, ZoneSide.SUPPORT),
+        (53.5, ZoneSide.SUPPORT),
+        (50.5, ZoneSide.SUPPORT),
+    ]
+
+
 def test_current_price_is_the_last_ledger_close_whatever_candle_range() -> None:
     # 과거 범위만 보여도 현재가는 기준일까지 마지막 일봉 종가(화면 가격 143 × k 0.5)다
     view = _service().candles(STOCK, Timeframe.DAY, date(2025, 9, 1), date(2025, 9, 30))

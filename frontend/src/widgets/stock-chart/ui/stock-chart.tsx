@@ -73,7 +73,7 @@ const ChartHead = ({
 }: {
   instrument: ChartInstrumentBody;
   timeframe: Timeframe;
-  /** 보이는 범위의 마지막 봉(진행 중일 수 있다). */
+  /** 받은 계열의 마지막 봉(진행 중일 수 있다). */
   last: ChartCandleBody | undefined;
   titleId: string;
   titleRef: RefObject<HTMLHeadingElement | null>;
@@ -201,7 +201,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
   // 응답이 같으면 같은 배열 — 고른 선 카드의 봉 날짜 목록(수천 개)이 다시 그려지지 않는다
   const completed = useMemo(() => completedCandles(candles ?? [], lastCompleted), [candles, lastCompleted]);
   const visibleCompleted = scale ? completed.slice(scale.first, scale.last + 1) : [];
-  // 머리는 보이는 범위의 마지막 봉을 보인다. 현재가(점선·오른쪽 배지·"현재가 대비")는 응답 머리 값 하나다
+  // 머리는 받은 계열의 마지막 봉을 보인다. 현재가(점선·오른쪽 배지·"현재가 대비")는 응답 머리 값 하나다
   // — 과거 범위만 보여도 기준일 종가이고, 서버의 수평 구간 저항·지지 구분과 같은 값이다.
   const lastCandle = candles?.[candles.length - 1];
   const currentPrice = context?.current_price ?? null;

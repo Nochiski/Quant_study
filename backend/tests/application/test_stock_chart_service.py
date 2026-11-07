@@ -20,6 +20,7 @@ from strategy_workbench.application.stock_chart.facade.chart import (
     ConfluenceLine,
     InstrumentNotFoundError,
     LineEdit,
+    LineIssue,
     LineShape,
     StockChartService,
     SwingSettings,
@@ -623,6 +624,35 @@ def test_zone_side_compares_in_the_stored_price_space_when_k_is_not_one() -> Non
         (53.5, ZoneSide.SUPPORT),
         (50.5, ZoneSide.SUPPORT),
     ]
+
+
+def test_a_line_that_can_no_longer_be_drawn_can_still_be_hidden_but_not_moved() -> None:
+    # 9-03에 그은 수평선. 원장이 바뀌어(재상장 등) 계열이 9-10부터 시작하면 기준점이 계열 밖이다
+    drawings = FakeDrawings()
+    created = _service(drawings).create_line(_hline(60.0, date(2025, 9, 3)))
+    prices = FakePrices()
+    full = prices.history[STOCK]
+    prices.history[STOCK] = ChartHistory(
+        tuple(bar for bar in full.bars if bar.session >= date(2025, 9, 10)), full.last_actual_close
+    )
+    service = _service(drawings, prices)
+    (listed,) = service.lines(STOCK).lines
+    assert listed.issue is LineIssue.ANCHOR_OUTSIDE_SERIES
+
+    hidden = service.update_line(
+        listed.line.line_id, LineEdit(listed.anchors, memo="재상장 전 선", visible=False)
+    )
+
+    assert (hidden.issue, hidden.line.content.visible, hidden.line.content.memo) == (
+        LineIssue.ANCHOR_OUTSIDE_SERIES,
+        False,
+        "재상장 전 선",
+    )
+    assert hidden.line.content.anchors == created.line.content.anchors
+    # 기준점을 옮기는 수정은 여전히 계열로 검사한다
+    with pytest.raises(ChartRequestError) as moved:
+        service.update_line(listed.line.line_id, LineEdit((ChartPoint(date(2025, 9, 3), 61.0),)))
+    assert moved.value.code == "chart.line.anchor_outside_series"
 
 
 def test_current_price_is_the_last_ledger_close_whatever_candle_range() -> None:

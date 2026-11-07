@@ -9,11 +9,17 @@ import {
 import { useCommittedRef } from "../../../shared/lib/react";
 import { isTextEntry, popUndo, pushUndo, type UndoStack } from "./line-edit";
 
-export type RemovalNotice = { kind: "deleted"; title: string } | { kind: "restored" };
+/** `lost` = 되돌리기에 쌓지 못한 선 수(지금 그릴 수 없는 선), `undoable` = 이 지우기를 되돌릴 수 있는가. */
+export type RemovalNotice =
+  | { kind: "deleted"; title: string; lost: number; undoable: boolean }
+  | { kind: "restored" };
 
 /**
  * 선 지우기와 되돌리기. 지우면 같은 내용으로 다시 만들 본문을 쌓아 두고(로컬 UI 상태), 되돌리기 알림의 버튼이나
  * Ctrl+Z(⌘Z)가 마지막에 지운 선을 다시 만든다. 다시 만든 선은 새 id를 받는다.
+ *
+ * - 지금 그릴 수 없는 선(`issue`)은 쌓지 않는다 — 다시 만들기는 새 선처럼 기준점을 계열로 검사해 거절되므로, 쌓아
+ *   두면 되돌리기가 조용히 실패한다. 지울 때 알림이 되돌릴 수 없다고 바로 말한다.
  *
  * - 쌓기와 알림은 그 종목의 것이다 — 다른 종목으로 넘어가면 비운다(다른 종목 화면에서 앞 종목의 선을 되살리지
  *   않는다). 지우기 응답이 종목을 바꾼 뒤에 와도 새 종목의 쌓기에 넣지 않는다(요청 때의 종목과 견준다).
@@ -52,8 +58,14 @@ export const useLineRemoval = (target: ChartTarget) => {
       .then((results) => {
         const removed = group.filter((_, index) => results[index].status === "fulfilled");
         if (removed.length === 0 || scopeRef.current !== requested) return;
-        setStack((current) => pushUndo(current, removed));
-        setNotice({ kind: "deleted", title });
+        const restorable = removed.filter((line) => line.issue === null);
+        if (restorable.length > 0) setStack((current) => pushUndo(current, restorable));
+        setNotice({
+          kind: "deleted",
+          title,
+          lost: removed.length - restorable.length,
+          undoable: restorable.length > 0,
+        });
       })
       .finally(() => {
         removing.current = false;

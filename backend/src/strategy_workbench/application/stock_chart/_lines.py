@@ -82,6 +82,17 @@ def check_shape(
     check_levels(levels)
 
 
+def unmoved(
+    stored: Sequence[LineAnchor], edited: Sequence[ChartPoint], scale: DisplayScale
+) -> bool:
+    """편집한 기준점(화면 가격)이 저장된 기준점과 같은가 — 같은 봉 날짜이고, 저장 가격으로
+    바꾸면 같은 가격이다(화면 ↔ 저장 왕복의 마지막 자리 차이는 같다고 본다)."""
+    return len(stored) == len(edited) and all(
+        s.bar_date == e.bar_date and math.isclose(s.price, scale.to_stored(e.price), rel_tol=1e-9)
+        for s, e in zip(stored, edited, strict=True)
+    )
+
+
 def resolve(series: ChartSeries, anchors: Sequence[LineAnchor]) -> tuple[Anchor, ...] | date:
     """기준점 날짜 → 그 주기 완성 봉 index. 계열 밖 날짜가 있으면 그 첫 날짜를 돌려준다."""
     resolved: list[Anchor] = []

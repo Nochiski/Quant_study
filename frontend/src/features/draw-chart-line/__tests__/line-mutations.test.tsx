@@ -177,9 +177,49 @@ describe("useLineRemoval", () => {
     });
 
     expect(accepted).toEqual([true, false]);
-    await waitFor(() => expect(result.current.notice).toEqual({ kind: "deleted", title: "a" }));
+    await waitFor(() =>
+      expect(result.current.notice).toEqual({ kind: "deleted", title: "a", lost: 0, undoable: true }),
+    );
     expect(deletes).toBe(1);
     expect(result.current.canUndo).toBe(true);
+  });
+
+  it("does not stack a line that cannot be drawn now, so undo never sends a doomed create", async () => {
+    // 그릴 수 없는 선(issue)을 다시 만들면 서버가 기준점을 검사해 거절한다 — 쌓지 않고 알림이 바로 말한다
+    let creates = 0;
+    server.use(
+      http.delete(`${API}/lines/:id`, () => new HttpResponse(null, { status: 204 })),
+      http.post(`${API}/lines`, () => {
+        creates += 1;
+        return HttpResponse.json(line("new"), { status: 201 });
+      }),
+      http.get(`${API}/lines`, () => HttpResponse.json({ lines: [] })),
+    );
+    const broken = line("a", { issue: "anchor_outside_series" });
+    const { wrapper } = setup([broken, line("b")]);
+    const { result } = renderHook(() => useLineRemoval(KOSPI), { wrapper });
+
+    act(() => {
+      result.current.removeLine([broken], "a");
+    });
+    await waitFor(() =>
+      expect(result.current.notice).toEqual({ kind: "deleted", title: "a", lost: 1, undoable: false }),
+    );
+    expect(result.current.canUndo).toBe(false);
+    expect(result.current.undo()).toBe(false);
+
+    // 묶음에 섞이면 그릴 수 있는 선만 되살린다
+    act(() => {
+      result.current.removeLine([line("b"), line("c", { issue: "anchor_order" })], "b");
+    });
+    await waitFor(() =>
+      expect(result.current.notice).toEqual({ kind: "deleted", title: "b", lost: 1, undoable: true }),
+    );
+    act(() => {
+      result.current.undo();
+    });
+    await waitFor(() => expect(result.current.notice).toEqual({ kind: "restored" }));
+    expect(creates).toBe(1);
   });
 
   it("forgets the undo stack and notice when another instrument opens", async () => {

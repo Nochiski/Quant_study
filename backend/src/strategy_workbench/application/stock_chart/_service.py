@@ -30,6 +30,7 @@ from strategy_workbench.application.stock_chart._lines import (
     geometry,
     paths,
     resolve,
+    unmoved,
 )
 from strategy_workbench.application.stock_chart._provenance import (
     AutoParams,
@@ -579,6 +580,13 @@ class StockChartService:
         결과라 옮기면 기록이 거짓이 된다. 옮기려면 `auto_copied`로 새로 저장한다."""
         current = self._owned(line_id)
         loaded = self._load(current.instrument)
+        kept = current.content.anchors
+        if unmoved(kept, edit.anchors, loaded.scale):
+            # 기준점을 옮기지 않은 수정(보이기·메모·잠금·레벨)은 기준점을 다시 해석하지 않는다
+            # — 원장이 바뀌어 지금 그릴 수 없는 선(`issue`)도 숨기고 메모를 고칠 수 있어야 한다
+            check_shape(current.kind, kept, edit.levels)
+            line = self._drawings.update_content(line_id, self._content(kept, edit), self._now())
+            return self._line_view(loaded, line)
         frame = self._required_frame(loaded, current.timeframe)
         _, stored, indexed = self._shape(
             loaded, frame, current.kind, edit.anchors, edit.levels, line_id

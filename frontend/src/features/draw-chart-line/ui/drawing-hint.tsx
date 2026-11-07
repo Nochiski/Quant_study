@@ -54,8 +54,9 @@ export const UndoNotice = ({ removal }: { removal: ReturnType<typeof useLineRemo
             {notice.kind === "deleted"
               ? tFill("chart.undo.deleted", { title: notice.title })
               : t("chart.undo.restored")}
+            {notice.kind === "deleted" && notice.lost > 0 ? ` ${t("chart.undo.lost")}` : null}
           </span>
-          {notice.kind === "deleted" && removal.canUndo ? (
+          {notice.kind === "deleted" && notice.undoable && removal.canUndo ? (
             <Button size="small" tone="ghost" className="undo-notice__undo" onClick={() => removal.undo()}>
               {t("chart.undo.action")}
             </Button>

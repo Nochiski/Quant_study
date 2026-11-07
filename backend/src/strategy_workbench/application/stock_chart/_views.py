@@ -111,7 +111,8 @@ class PivotPoint:
 @dataclass(frozen=True)
 class RegimeView:
     """판정 값은 domain `judgement` 그대로이고, 피벗만 화면 좌표(`structure_highs`·`_lows`)로
-    옮긴다."""
+    옮긴다. `rules`는 판정 규칙 설명 문장(domain `REGIME_RULES`), `pivot_rule`은 피벗 확정 규칙
+    문장이다."""
 
     context: ChartContext
     timeframe: Timeframe
@@ -122,6 +123,8 @@ class RegimeView:
     structure_lows: tuple[PivotPoint, ...]
     sentence: str
     warnings: tuple[str, ...]
+    rules: tuple[str, ...]
+    pivot_rule: str
 
 
 @dataclass(frozen=True)
@@ -151,6 +154,8 @@ class ChannelView:
     anchor_issue: AnchorIssue | None
     anchor_issue_message: str | None
     record: AutoRecord
+    # 첫 점으로 고를 수 있는 점(그 방향의 확정 피벗, domain `first_anchor_choices`)
+    anchor_choices: tuple[PivotPoint, ...]
 
 
 @dataclass(frozen=True)
@@ -183,6 +188,7 @@ class ZonesView:
     zones: tuple[ZoneView, ...]
     basis: str
     record: AutoRecord
+    rules: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -271,5 +277,6 @@ class ConfluenceView:
     tolerance: float
     groups: tuple[ConfluenceGroup, ...]
     caution: str
+    rules: tuple[str, ...]
     # 기준점이 지금 계열 밖이라 넣지 못한 저장 선
     skipped_line_ids: tuple[str, ...]

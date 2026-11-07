@@ -5,6 +5,7 @@ import {
   dateTicks,
   defaultViewport,
   displayRange,
+  formedSegments,
   fractionalIndex,
   labelAnchor,
   levelSegments,
@@ -12,6 +13,7 @@ import {
   panViewport,
   placeLevelLabels,
   priceTicks,
+  shadedBands,
   snapToCandle,
   spreadLabels,
   steppedPrice,
@@ -21,6 +23,7 @@ import {
   visibleBars,
   visibleRange,
   wheelZoomFactor,
+  widensRange,
   zoomViewport,
   type ChartCandleBody,
 } from "..";
@@ -110,6 +113,28 @@ describe("chart viewport", () => {
     expect(defaultViewport(WEEKS, { start: "2025-02-01", end: "2025-03-01" })).toBeNull();
   });
 
+  it("keeps a one-bar series right-aligned instead of pushing it a slot left", () => {
+    // 봉 하나: 미래 여백 3봉이면 빈칸(3)이 보기(4칸)의 절반을 넘어 한도에 밀린다 — 여백을 1봉으로 줄여 봉이 왼쪽
+    // 끝 [-0.5, 0.5]에 그대로 붙고 미래 1칸이 남는다
+    const one = [candle("2025-01-06", "2025-01-10")];
+    expect(defaultViewport(one, { start: "2025-01-06", end: "2025-01-10" })).toEqual({ from: -0.5, to: 1.5 });
+    // 봉 둘: 여백 2봉 = 보기 4칸의 절반
+    expect(defaultViewport(WEEKS.slice(0, 2), { start: "2025-01-06", end: "2025-01-15" })).toEqual({
+      from: -0.5,
+      to: 3.5,
+    });
+  });
+
+  it("tells when a short date range is widened to the minimum span", () => {
+    const daily = Array.from({ length: 100 }, (_, index) => {
+      const day = new Date(Date.UTC(2024, 0, 1 + index)).toISOString().slice(0, 10);
+      return candle(day, day);
+    });
+    expect(widensRange(daily, { start: daily[40].start, end: daily[41].start })).toBe(true);
+    expect(widensRange(daily, { start: daily[40].start, end: daily[49].start })).toBe(false);
+    expect(widensRange(daily, { start: "2030-01-01", end: "2030-02-01" })).toBe(false);
+  });
+
   it("zooms around the cursor so the bar under it stays put", () => {
     // 40 ~ 80(40칸), 커서 1/4 자리(봉 50) — 반으로 확대하면 20칸이고 봉 50은 여전히 1/4 자리
     expect(zoomViewport({ from: 40, to: 80 }, 0.5, 0.25, 100)).toEqual({ from: 45, to: 65 });
@@ -154,6 +179,37 @@ describe("chart viewport", () => {
     expect(wheelZoomFactor(100)).toBeCloseTo(Math.exp(0.15));
     expect(wheelZoomFactor(-100)).toBeCloseTo(Math.exp(-0.15));
     expect(wheelZoomFactor(10_000)).toBeLessThan(2);
+  });
+});
+
+describe("auto line drawing", () => {
+  const segment = (level: number | null, y1: number, y2: number) => ({
+    level,
+    x1: 100,
+    y1,
+    x2: 300,
+    y2,
+    startPrice: 0,
+    endPrice: 0,
+    endY: y2,
+  });
+
+  it("splits a line at the day it formed — faint before, solid after — on the drawn segment", () => {
+    // (100, 50) → (300, 150)를 x 150에서 나누면 y = 50 + 100 × 0.25 = 75
+    const { before, after } = formedSegments([segment(0, 50, 150)], 150);
+    expect(before).toEqual([{ ...segment(0, 50, 150), x2: 150, y2: 75 }]);
+    expect(after).toEqual([{ ...segment(0, 50, 150), x1: 150, y1: 75 }]);
+    // 생긴 날이 선 앞이면 모두 그대로, 끝 뒤면 모두 옅게, 없으면 모두 그대로
+    expect(formedSegments([segment(0, 50, 150)], 80).before).toEqual([]);
+    expect(formedSegments([segment(0, 50, 150)], 320).after).toEqual([]);
+    expect(formedSegments([segment(0, 50, 150)], undefined).after).toHaveLength(1);
+  });
+
+  it("fills a two-line horizontal zone as one band and keeps level shading for channels", () => {
+    expect(shadedBands([segment(null, 40, 40), segment(null, 60, 60)])).toEqual([
+      { tone: "zone", d: "M100.0 40.0L300.0 40.0L300.0 60.0L100.0 60.0Z" },
+    ]);
+    expect(shadedBands([segment(0, 40, 40), segment(1, 60, 60)]).map((band) => band.tone)).toEqual(["main"]);
   });
 });
 

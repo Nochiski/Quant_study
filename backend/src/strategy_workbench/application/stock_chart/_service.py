@@ -106,6 +106,7 @@ from strategy_workbench.domain.chart_analysis.facade.levels import (
     ZoneParams,
     find_channels,
     find_zones,
+    first_anchor_choices,
     retracement_pivots,
 )
 from strategy_workbench.domain.chart_analysis.facade.line_record import (
@@ -133,10 +134,14 @@ from strategy_workbench.domain.chart_analysis.facade.wording import (
     CONFLUENCE_CAUTION,
     ENDS_NEAR_EXTREME_WARNING,
     NO_SWING_MESSAGE,
+    REGIME_RULES,
     STARTS_NEAR_EXTREME_WARNING,
     ZONE_BASIS,
     anchor_issue_message,
+    confluence_rules,
+    pivot_rule,
     regime_sentence,
+    zone_rules,
 )
 
 # 데이터 원천 안내라 분석 규칙(domain)이 아니라 이 유스케이스가 문장의 owner다.
@@ -286,6 +291,8 @@ class StockChartService:
             structure_lows=_pivots(series, loaded.scale, judgement.structure_lows),
             sentence=regime_sentence(judgement),
             warnings=_warnings(judgement),
+            rules=REGIME_RULES,
+            pivot_rule=pivot_rule(series.params),
         )
 
     def channels(
@@ -337,6 +344,9 @@ class StockChartService:
                 ),
                 regime=RegimeRecord(judgement.verdict, judgement.strength, judgement.structure),
                 chosen=chosen_by(judgement.channel_direction, direction),
+            ),
+            anchor_choices=_pivots(
+                series, loaded.scale, first_anchor_choices(series, span, direction)
             ),
         )
 
@@ -400,6 +410,7 @@ class StockChartService:
             window=view,
             zones=zones,
             basis=ZONE_BASIS,
+            rules=zone_rules(params, series.params),
             record=_record(
                 view,
                 replace(
@@ -415,8 +426,14 @@ class StockChartService:
         ref: InstrumentRef,
         lines: Sequence[ConfluenceLine] = (),
         tolerance: float = DEFAULT_CONFLUENCE_TOLERANCE,
+        *,
+        include_mine: bool = True,
     ) -> ConfluenceView:
         """보이는 선(저장 선 중 `visible`인 것 + 요청에 실은 저장 안 한 선)의 중첩.
+
+        `include_mine`이 거짓이면 저장 선 중 내 선(손으로 그었거나 복사한 선 — `source`가 auto가
+        아닌 것)은 빼고 자동 선만 넣는다. 보이기는 저장 칸이라 "내 선 빼고 보기"를 위해 선을 숨겨
+        저장하지 않게 하려는 칸이다.
 
         보이기는 저장 칸이라 저장 선은 서버가 고른다. 요청 ref가 저장 선 id와 같으면(저장한 후보를
         다시 실었다) 그 요청 선은 빼서 두 번 세지 않는다. 계산은 저장 좌표에서 하고(비율 넓히기라
@@ -433,7 +450,8 @@ class StockChartService:
         bands: list[PriceBand] = []
         skipped: list[str] = []
         for line in saved:
-            if not line.content.visible:
+            mine = line.source is not LineSource.AUTO
+            if not line.content.visible or (mine and not include_mine):
                 continue
             frame = self._frame(loaded, line.timeframe, SwingParams())
             resolved = (
@@ -481,6 +499,7 @@ class StockChartService:
                 for group in found
             ),
             caution=CONFLUENCE_CAUTION,
+            rules=confluence_rules(tolerance),
             skipped_line_ids=tuple(skipped),
         )
 
@@ -522,6 +541,14 @@ class StockChartService:
             loaded, frame, draft.kind, draft.edit.anchors, draft.edit.levels, "draft"
         )
         content = self._content(stored, draft.edit)
+        if draft.source is LineSource.AUTO:
+            same_line = self._same_auto_line(draft, content)
+            if same_line is not None:
+                if not same_line.content.visible:
+                    same_line = self._drawings.update_content(
+                        same_line.line_id, content, self._now()
+                    )
+                return self._line_view(loaded, same_line)
         now = self._now()
         line = ChartLine(
             line_id=self._new_id(),
@@ -557,6 +584,26 @@ class StockChartService:
         content = self._content(stored, edit)
         line = self._drawings.update_content(line_id, content, self._now())
         return self._line_view(loaded, line)
+
+    def _same_auto_line(self, draft: ChartLineDraft, content: ChartLineContent) -> ChartLine | None:
+        """저장 내용이 완전히 같은 자동 선. 주기·종류·기준점·레벨·연장·메모·잠금·자동 기록
+        (알고리즘·파라미터·판정 구간·판정·방향 출처) 전부가 같고 보이기만 다를 수 있다.
+
+        묶음 추가를 다시 보내도(부분 실패 뒤 재시도) 같은 띠가 두 줄 생기지 않게 그 선을 돌려준다.
+        하나라도 다르면 None — 레벨이나 조건을 바꿔 다시 만든 선은 새 선이다."""
+        shown = replace(content, visible=True)
+        return next(
+            (
+                line
+                for line in self._drawings.list_lines(draft.instrument)
+                if line.source is LineSource.AUTO
+                and line.timeframe is draft.timeframe
+                and line.kind is draft.kind
+                and line.auto == draft.auto
+                and replace(line.content, visible=True) == shown
+            ),
+            None,
+        )
 
     def delete_line(self, line_id: str) -> None:
         self._drawings.delete_line(self._owned(line_id).line_id)

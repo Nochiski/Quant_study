@@ -273,6 +273,8 @@ class ChartRegimeBody:
     channel_direction: Annotated[
         TrendDirection | None, Field(description="추천 채널 방향. 상승·하락 판정만 있다.")
     ]
+    rules: Annotated[list[str], Field(description="판정 규칙 설명 문장(backend가 완성).")]
+    pivot_rule: Annotated[str, Field(description="피벗 확정 규칙 문장(backend가 완성).")]
 
 
 @dataclass(frozen=True)
@@ -301,6 +303,13 @@ class ChartChannelsBody:
     anchor_issue: AnchorIssue | None
     anchor_issue_message: str | None
     record: ChartAutoRecordBody
+    anchor_choices: Annotated[
+        list[ChartPivotBody],
+        Field(
+            description="첫 점(`first_anchor`)으로 고를 수 있는 점 — 구간 안에서 구간 끝까지 "
+            "확정된 그 방향의 피벗(up: 저점, down: 고점)."
+        ),
+    ]
 
 
 @dataclass(frozen=True)
@@ -344,6 +353,9 @@ class ChartZonesBody:
     zones: Annotated[list[ChartZoneBody], Field(description="위쪽 구간(상단 내림차순)부터.")]
     basis: str
     record: ChartAutoRecordBody
+    rules: Annotated[
+        list[str], Field(description="묶기·접촉·구분·생긴 날 규칙 문장(backend가 완성).")
+    ]
 
 
 @dataclass(frozen=True)
@@ -369,6 +381,7 @@ class ChartConfluenceBody:
     tolerance: float
     groups: Annotated[list[ChartConfluenceGroupBody], Field(description="낮은 가격부터.")]
     caution: str
+    rules: Annotated[list[str], Field(description="중첩을 세는 규칙 문장(backend가 완성).")]
     skipped_line_ids: Annotated[
         list[str], Field(description="기준점이 지금 계열 밖이라 넣지 못한 저장 선.")
     ]
@@ -476,6 +489,10 @@ class ChartConfluenceRequestBody:
     instrument_code: Annotated[str, Field(min_length=1)]
     lines: list[ChartConfluenceLineBody]
     tolerance: float = DEFAULT_CONFLUENCE_TOLERANCE
+    include_mine: Annotated[
+        bool,
+        Field(description="거짓이면 저장 선 중 내 선(source ≠ auto)을 빼고 자동 선만 넣는다."),
+    ] = True
 
 
 # ── 변환 ─────────────────────────────────────────────────────────────────────
@@ -615,6 +632,8 @@ def _regime(view: RegimeView) -> ChartRegimeBody:
         ends_near_extreme=view.judgement.ends_near_extreme,
         warnings=list(view.warnings),
         channel_direction=view.judgement.channel_direction,
+        rules=list(view.rules),
+        pivot_rule=view.pivot_rule,
     )
 
 
@@ -639,6 +658,7 @@ def _channels(view: ChannelView) -> ChartChannelsBody:
         anchor_issue=view.anchor_issue,
         anchor_issue_message=view.anchor_issue_message,
         record=_record_body(view.record),
+        anchor_choices=[_pivot(p) for p in view.anchor_choices],
     )
 
 
@@ -676,6 +696,7 @@ def _zones(view: ZonesView) -> ChartZonesBody:
         ],
         basis=view.basis,
         record=_record_body(view.record),
+        rules=list(view.rules),
     )
 
 
@@ -696,6 +717,7 @@ def _confluence(view: ConfluenceView) -> ChartConfluenceBody:
             for g in view.groups
         ],
         caution=view.caution,
+        rules=list(view.rules),
         skipped_line_ids=list(view.skipped_line_ids),
     )
 
@@ -892,7 +914,13 @@ def register_chart_routes(app: FastAPI, service: StockChartService) -> None:
             )
             for line in body.lines
         )
-        return _confluence(guarded(lambda: service.confluence(ref, lines, body.tolerance)))
+        return _confluence(
+            guarded(
+                lambda: service.confluence(
+                    ref, lines, body.tolerance, include_mine=body.include_mine
+                )
+            )
+        )
 
     @router.post("/lines/preview", operation_id="previewChartLine", responses=responses)
     def preview_line(body: ChartLinePreviewBody) -> ChartDrawingBody:

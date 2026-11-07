@@ -153,6 +153,16 @@
   fill-opacity: 0.04;
 }
 
+/* 자동 수평 구간(하단·상단 두 선) 사이의 호박색 띠 */
+.chart-line__band--zone {
+  fill-opacity: 0.18;
+}
+
+/* 자동 선의 생긴 날 전 구간 — 그때는 없던 선이라 옅게 */
+.chart-line__level--before {
+  stroke-opacity: 0.3;
+}
+
 .chart-line__halo {
   fill: none;
   stroke: var(--accent);

@@ -1,4 +1,5 @@
 import {
+  chartLineCreateBody,
   steppedPrice,
   type ChartLineBody,
   type ChartPointBody,
@@ -7,29 +8,19 @@ import {
 } from "../../../entities/chart";
 
 /** 지운 선을 같은 내용으로 다시 만드는 본문(되돌리기). 새 선은 새 id를 받는다. */
-export const recreateChartLine = (line: ChartLineBody): CreateChartLineBody => ({
-  instrument_kind: line.instrument_kind,
-  instrument_code: line.instrument_code,
-  timeframe: line.timeframe,
-  kind: line.kind,
-  source: line.source,
-  anchors: line.anchors,
-  levels: line.levels,
-  extend_right: line.extend_right,
-  memo: line.memo,
-  locked: line.locked,
-  visible: line.visible,
-  auto: line.auto,
-});
+export const recreateChartLine = (line: ChartLineBody): CreateChartLineBody => chartLineCreateBody(line);
 
-/** 되돌리기 쌓기. 마지막에 지운 것이 위다. 오래된 것부터 버려 `UNDO_LIMIT`개까지 둔다. */
+/**
+ * 되돌리기 쌓기. 한 칸은 한 번에 지운 선 묶음(자동 수평 구간 한 벌은 여러 선을 함께 지운다)이고 되돌리기 한 번이 그
+ * 묶음을 함께 되살린다. 마지막에 지운 것이 위다. 오래된 것부터 버려 `UNDO_LIMIT`칸까지 둔다.
+ */
 export const UNDO_LIMIT = 20;
-export type UndoStack = readonly CreateChartLineBody[];
+export type UndoStack = readonly (readonly CreateChartLineBody[])[];
 
-export const pushUndo = (stack: UndoStack, line: ChartLineBody): UndoStack =>
-  [...stack, recreateChartLine(line)].slice(-UNDO_LIMIT);
+export const pushUndo = (stack: UndoStack, lines: readonly ChartLineBody[]): UndoStack =>
+  [...stack, lines.map(recreateChartLine)].slice(-UNDO_LIMIT);
 
-export const popUndo = (stack: UndoStack): [CreateChartLineBody | null, UndoStack] =>
+export const popUndo = (stack: UndoStack): [readonly CreateChartLineBody[] | null, UndoStack] =>
   stack.length === 0 ? [null, stack] : [stack[stack.length - 1], stack.slice(0, -1)];
 
 /**

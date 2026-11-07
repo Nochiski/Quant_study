@@ -22,13 +22,14 @@ const clearLines = async () => {
     await deleteChartLine({ client: apiClient, path: { line_id: line.line_id } });
 };
 
-/** 코스피 차트를 연다(내비 → 종목 검색 → 결과). 처음 주기는 주봉이다. */
+/** 코스피 차트를 연다(내비 → 종목 검색 → 결과). 처음 주기는 주봉이다. 그리기 도구를 쓰려고 수동 그리기로 바꾼다. */
 const openKospi = async (page: Page) => {
   await page.goto("/");
   await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link", { name: "개별종목차트" }).click();
   await page.getByRole("searchbox", { name: "종목" }).fill("코스피");
   await page.getByRole("button", { name: /^코스피 .*지수$/u }).click();
   await expect(page.getByRole("group", { name: "코스피 주봉 캔들 차트와 선" })).toBeVisible();
+  await page.getByRole("group", { name: "분석 방식" }).getByRole("button", { name: "수동 그리기" }).click();
 };
 
 /** 그림 칸 안의 비율 자리(오른쪽 가격 축 84px·위 12px·아래 날짜 축 28px를 뺀 칸). */
@@ -146,6 +147,8 @@ test(
     await expect(page.getByText("이 기간에는 봉이 없어요.", { exact: false })).toBeVisible();
     await page.getByRole("button", { name: "고른 기간으로 돌아가기" }).click();
     await expect(chart).toBeVisible();
+    // 사라진 버튼 대신 차트 제목에 초점이 있다
+    await expect(page.getByRole("heading", { level: 2, name: "코스피 · 일봉" })).toBeFocused();
     await expect(twoYears).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => shownRange(page)).toEqual(base);
   },

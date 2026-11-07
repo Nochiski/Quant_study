@@ -4,16 +4,15 @@ import {
   ChartLineShape,
   levelSegments,
   lineTone,
-  placeLevelLabels,
+  placeLineLabels,
   roundPrice,
-  segmentLabels,
   snapToCandle,
   type ChartCandleBody,
   type ChartLineBody,
+  type ChartOverlayLine,
   type ChartPointBody,
   type ChartScale,
   type InstrumentKind,
-  type LevelLabel,
   type Timeframe,
 } from "../../../entities/chart";
 import { useCommittedRef } from "../../../shared/lib/react";
@@ -33,6 +32,8 @@ type DrawingSurfaceProps = {
   timeframe: Timeframe;
   /** 보이는 저장 선(`visible`). */
   lines: readonly ChartLineBody[];
+  /** 저장 선이 아닌 그림(자동 후보 미리보기). 누를 수 없고, 라벨은 저장 선과 함께 배치한다. */
+  overlays?: readonly ChartOverlayLine[];
 };
 
 /**
@@ -50,6 +51,7 @@ export const DrawingSurface = ({
   instrumentKind,
   timeframe,
   lines,
+  overlays = [],
 }: DrawingSurfaceProps) => {
   const { state, dispatch, hover, drag, preview } = drawing;
   const frame = useRef<number | null>(null);
@@ -134,16 +136,15 @@ export const DrawingSurface = ({
     drag === null && preview.drawing !== null && state.tool !== "select"
       ? levelSegments(preview.drawing.paths, true, scale)
       : null;
-  const labelsByOwner = new Map<string, LevelLabel[]>();
-  placeLevelLabels(
+  const labelsByOwner = placeLineLabels(
     [
-      ...shapes.flatMap(({ line, segments }) =>
-        segmentLabels(line.line_id, segments, line.memo, instrumentKind, plot),
-      ),
-      ...(draft === null ? [] : segmentLabels(DRAFT, draft, undefined, instrumentKind, plot)),
+      ...shapes.map(({ line, segments }) => ({ owner: line.line_id, segments, memo: line.memo })),
+      ...overlays,
+      ...(draft === null ? [] : [{ owner: DRAFT, segments: draft }]),
     ],
+    instrumentKind,
     plot,
-  ).forEach((label) => labelsByOwner.set(label.owner, [...(labelsByOwner.get(label.owner) ?? []), label]));
+  );
 
   return (
     <g
@@ -173,6 +174,7 @@ export const DrawingSurface = ({
           labels={labelsByOwner.get(line.line_id) ?? []}
           selected={line.line_id === state.selectedId}
           preview={dragging}
+          formedX={line.created === null ? undefined : scale.xOfDate(line.created)}
           onSelect={
             state.tool === "select"
               ? () => dispatch({ type: "select", lineId: line.line_id })
@@ -183,6 +185,16 @@ export const DrawingSurface = ({
               over ? line.line_id : current === line.line_id ? null : current,
             )
           }
+        />
+      ))}
+      {overlays.map((overlay) => (
+        <ChartLineShape
+          key={overlay.owner}
+          segments={overlay.segments}
+          tone={overlay.tone}
+          labels={labelsByOwner.get(overlay.owner) ?? []}
+          preview
+          formedX={overlay.formedX}
         />
       ))}
       {draft === null ? null : (

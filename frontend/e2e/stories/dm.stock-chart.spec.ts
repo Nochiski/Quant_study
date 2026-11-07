@@ -25,7 +25,10 @@ const clearLines = async () => {
     await deleteChartLine({ client: apiClient, path: { line_id: line.line_id } });
 };
 
-/** 코스피 주봉 차트를 연다(내비 → 종목 검색 → 결과). 고르면 초점이 차트 제목으로 간다. */
+/**
+ * 코스피 주봉 차트를 연다(내비 → 종목 검색 → 결과). 고르면 초점이 차트 제목으로 간다. 화면은 자동 찾기로 열리므로 손으로
+ * 그으려면 머리의 "수동 그리기"로 바꾼다(그때 도구 막대가 나온다).
+ */
 const openKospi = async (page: Page): Promise<Locator> => {
   await page.goto("/");
   await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link", { name: "개별종목차트" }).click();
@@ -35,6 +38,8 @@ const openKospi = async (page: Page): Promise<Locator> => {
   await expect(page.getByRole("heading", { level: 2, name: "코스피 · 주봉" })).toBeFocused();
   const chart = page.getByRole("group", { name: "코스피 주봉 캔들 차트와 선" });
   await expect(chart).toBeVisible();
+  await page.getByRole("group", { name: "분석 방식" }).getByRole("button", { name: "수동 그리기" }).click();
+  await expect(page.getByRole("toolbar", { name: "그리기 도구" })).toBeVisible();
   return chart;
 };
 

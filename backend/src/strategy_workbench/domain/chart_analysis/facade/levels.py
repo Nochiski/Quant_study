@@ -4,6 +4,7 @@ from strategy_workbench.domain.chart_analysis._channel import (
     ChannelSearch,
     TrendDirection,
     find_channels,
+    first_anchor_choices,
 )
 from strategy_workbench.domain.chart_analysis._retracement import (
     SwingChoice,
@@ -27,5 +28,6 @@ __all__ = [
     "ZoneSide",
     "find_channels",
     "find_zones",
+    "first_anchor_choices",
     "retracement_pivots",
 ]

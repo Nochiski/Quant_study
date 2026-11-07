@@ -43,6 +43,9 @@ export const visibleBars = (
  * 오른쪽에 미래 봉 여백을 둔다(최신 봉 오른쪽 정렬). 과거 구간을 고른 날짜 기간은 여백 없이 끝 봉에서 끝난다.
  * 폭은 확대·축소와 같은 한도 안이다 — 봉이 몇 개뿐인 기간은 오른쪽 끝을 둔 채 최소 칸 수로 넓힌다. 기간에 걸친
  * 봉이 없으면 null.
+ *
+ * 미래 여백도 한쪽 빈칸 한도(보기의 절반) 안이다. 봉이 한둘인 계열에서 "적어도 3봉" 여백을 그대로 두면 한도에
+ * 걸려 보기가 왼쪽으로 밀리고 최신 봉이 오른쪽 정렬에서 한 칸 벗어난다 — 그래서 여백을 한도까지 줄인다.
  */
 export const defaultViewport = (
   candles: readonly ChartCandleBody[],
@@ -50,9 +53,12 @@ export const defaultViewport = (
 ): ChartViewport | null => {
   const shown = visibleRange(candles, range);
   if (shown === null) return null;
-  const margin = shown.last === candles.length - 1 ? futureBars(shown.last - shown.first + 1) : 0;
-  const to = shown.last + 0.5 + margin;
   const { min, max } = spanLimits(candles.length);
+  const bars = shown.last - shown.first + 1;
+  // 여백 m의 빈칸이 보기(봉 + m, 최소 폭 이상)의 절반을 넘지 않는 가장 큰 값: m ≤ 봉 수, 또는 최소 폭의 절반
+  const marginLimit = Math.max(bars, Math.floor(min * MAX_EMPTY_RATIO));
+  const margin = shown.last === candles.length - 1 ? Math.min(futureBars(bars), marginLimit) : 0;
+  const to = shown.last + 0.5 + margin;
   const span = Math.min(Math.max(to - (shown.first - 0.5), min), max);
   return keepSeriesInView({ from: to - span, to }, candles.length);
 };
@@ -100,6 +106,15 @@ export const viewportRange = (
 ): DateRange | null => {
   const { first, last } = visibleBars(view, candles.length);
   return first > last ? null : { start: candles[first].start, end: candles[last].end };
+};
+
+/**
+ * 표시 기간이 최소 폭보다 짧아 기본 보기가 그 앞 봉까지 넓혀 보이는가 — 날짜 칸(이틀 등)과 화면 봉 수가 다른 까닭을
+ * 안내할 때 쓴다. 기간에 걸친 봉이 없으면 false.
+ */
+export const widensRange = (candles: readonly ChartCandleBody[], range: DateRange): boolean => {
+  const shown = visibleRange(candles, range);
+  return shown !== null && shown.last - shown.first + 1 < spanLimits(candles.length).min;
 };
 
 /** 휠 한 번(px 단위 `deltaY`)의 배율. 마우스 한 칸(100px)이 약 16%이고 한 번에 2배를 넘지 않는다. */

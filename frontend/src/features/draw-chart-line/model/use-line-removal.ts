@@ -40,21 +40,21 @@ export const useLineRemoval = (target: ChartTarget) => {
   // 부르는 순간 세운다.
   const removing = useRef(false);
 
-  /** 지운다. 이미 지우는 중이면 받지 않고 false. */
-  const removeLine = (line: ChartLineBody, title: string): boolean => {
+  /**
+   * 지운다(선 하나, 또는 함께 지울 묶음 — 자동 수평 구간 한 벌). 묶음은 되돌리기 한 번에 함께 되살아난다. 이미 지우는
+   * 중이면 받지 않고 false. 묶음 중 일부만 지워졌으면 지워진 것만 되돌리기에 쌓는다.
+   */
+  const removeLine = (group: readonly ChartLineBody[], title: string): boolean => {
     if (removing.current) return false;
     removing.current = true;
     const requested = scopeKey;
-    remove
-      .mutateAsync(line)
-      .then(
-        () => {
-          if (scopeRef.current !== requested) return;
-          setStack((current) => pushUndo(current, line));
-          setNotice({ kind: "deleted", title });
-        },
-        () => undefined,
-      )
+    Promise.allSettled(group.map((line) => remove.mutateAsync(line)))
+      .then((results) => {
+        const removed = group.filter((_, index) => results[index].status === "fulfilled");
+        if (removed.length === 0 || scopeRef.current !== requested) return;
+        setStack((current) => pushUndo(current, removed));
+        setNotice({ kind: "deleted", title });
+      })
       .finally(() => {
         removing.current = false;
       });
@@ -65,17 +65,17 @@ export const useLineRemoval = (target: ChartTarget) => {
   const restoring = useRef(false);
 
   const undo = (): boolean => {
-    const [body, rest] = popUndo(stack);
-    if (body === null || restoring.current) return false;
+    const [group, rest] = popUndo(stack);
+    if (group === null || restoring.current) return false;
     restoring.current = true;
     setStack(rest);
-    create
-      .mutateAsync(body)
-      .then(
-        () => setNotice({ kind: "restored" }),
-        // 되살리지 못했으면 다시 해 볼 수 있게 돌려 둔다
-        () => setStack((current) => [...current, body]),
-      )
+    Promise.allSettled(group.map((body) => create.mutateAsync(body)))
+      .then((results) => {
+        // 되살리지 못한 것은 다시 해 볼 수 있게 돌려 둔다
+        const failed = group.filter((_, index) => results[index].status === "rejected");
+        if (failed.length > 0) setStack((current) => [...current, failed]);
+        else setNotice({ kind: "restored" });
+      })
       .finally(() => {
         restoring.current = false;
       });

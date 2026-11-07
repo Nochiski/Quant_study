@@ -51,21 +51,28 @@ describe("undo stack", () => {
   it("recreates the last deleted line first with the same content and no id", () => {
     const first = line("a", { memo: "첫째" });
     const second = line("b", { kind: "fib_retracement", levels: [0, 0.5, 1] });
-    const stack = pushUndo(pushUndo([], first), second);
+    const stack = pushUndo(pushUndo([], [first]), [second]);
     const [top, rest] = popUndo(stack);
-    expect(top).toEqual(recreateChartLine(second));
-    expect(top).not.toHaveProperty("line_id");
-    expect(top?.levels).toEqual([0, 0.5, 1]);
-    expect(popUndo(rest)[0]?.memo).toBe("첫째");
+    expect(top).toEqual([recreateChartLine(second)]);
+    expect(top?.[0]).not.toHaveProperty("line_id");
+    expect(top?.[0].levels).toEqual([0, 0.5, 1]);
+    expect(popUndo(rest)[0]?.[0].memo).toBe("첫째");
     expect(popUndo([])).toEqual([null, []]);
+  });
+
+  it("keeps lines deleted together in one slot so one undo restores them all", () => {
+    const zones = [line("z1", { memo: "아래" }), line("z2", { memo: "위" })];
+    const [top, rest] = popUndo(pushUndo(pushUndo([], [line("a")]), zones));
+    expect(top?.map((body) => body.memo)).toEqual(["아래", "위"]);
+    expect(rest).toHaveLength(1);
   });
 
   it("keeps only the most recent deletions", () => {
     let stack: ReturnType<typeof pushUndo> = [];
     for (let index = 0; index < UNDO_LIMIT + 3; index += 1)
-      stack = pushUndo(stack, line(`l${index}`, { memo: String(index) }));
+      stack = pushUndo(stack, [line(`l${index}`, { memo: String(index) })]);
     expect(stack).toHaveLength(UNDO_LIMIT);
-    expect(stack[0].memo).toBe("3");
+    expect(stack[0][0].memo).toBe("3");
   });
 });
 

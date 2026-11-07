@@ -3,13 +3,14 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import {
   lineIssueLabel,
   lineTitle,
+  lineTone,
   type ChartCandleBody,
   type ChartInstrumentBody,
   type ChartLineBody,
   type Timeframe,
 } from "../../../entities/chart";
 import { t, tFill } from "../../../shared/config";
-import { Badge, Button } from "../../../shared/ui";
+import { Button } from "../../../shared/ui";
 import { nudgedAnchors } from "../model/line-edit";
 import type { ChartDrawing } from "../model/use-chart-drawing";
 import type { LineRemoval } from "../model/use-line-removal";
@@ -20,6 +21,7 @@ type MyLinesPanelProps = {
   drawing: ChartDrawing;
   removal: LineRemoval;
   instrument: ChartInstrumentBody;
+  /** 그 대상의 저장 선 전부. 목록에는 내 선만 두고, 고른 선 카드는 차트에서 고른 자동 선도 연다. */
   lines: readonly ChartLineBody[];
   timeframe: Timeframe;
   /** 지금 주기의 완성 봉 전부와 보이는 완성 봉. */
@@ -30,7 +32,7 @@ type MyLinesPanelProps = {
 };
 
 /**
- * 레이어 칸 "내가 그은 선": 선마다 보이기 토글·이름(고르기)·지우기, 빈 상태, 좌표로 추가, 고른 선 카드. 선 이름
+ * 레이어 칸 "내가 그은 선"(손으로 그었거나 복사한 선 — `lineTone`이 정한다. 자동 선은 자동 분석 후보 칸이 보인다): 선마다 보이기 토글·이름(고르기)·지우기, 빈 상태, 좌표로 추가, 고른 선 카드. 선 이름
  * 버튼에 초점이 있으면 ↑/↓ 한 호가, Shift+↑/↓ 1%(수평선), Delete로 지운다.
  */
 export const MyLinesPanel = ({
@@ -65,12 +67,13 @@ export const MyLinesPanel = ({
     (button ?? addButton.current)?.focus();
   }, [lines]);
 
+  const mine = lines.filter((line) => lineTone(line) === "mine");
   const title = (line: ChartLineBody) => lineTitle(line, instrument.kind, timeframe);
   const remove = (line: ChartLineBody) => {
     // 지우는 요청이 나가 있으면(Delete 연타) 받지 않는다
-    if (!removal.removeLine(line, title(line))) return;
-    const index = lines.findIndex((item) => item.line_id === line.line_id);
-    const neighbour = lines[index + 1] ?? lines[index - 1];
+    if (!removal.removeLine([line], title(line))) return;
+    const index = mine.findIndex((item) => item.line_id === line.line_id);
+    const neighbour = mine[index + 1] ?? mine[index - 1];
     focusAfterChange.current = neighbour?.line_id ?? "";
     if (drawing.state.selectedId === line.line_id) drawing.dispatch({ type: "select", lineId: null });
   };
@@ -119,11 +122,11 @@ export const MyLinesPanel = ({
           }}
         />
       ) : null}
-      {lines.length === 0 ? (
+      {mine.length === 0 ? (
         <p className="my-lines__empty">{t("chart.mine.empty")}</p>
       ) : (
         <ul className="my-lines__list">
-          {lines.map((line) => {
+          {mine.map((line) => {
             const name = title(line);
             return (
               <li key={line.line_id} className="my-lines__row">
@@ -150,12 +153,6 @@ export const MyLinesPanel = ({
                   onKeyDown={(event) => onNameKey(event, line)}
                 >
                   {name}
-                  {line.source === "auto" ? (
-                    <>
-                      {" "}
-                      <Badge tone="neutral">{t("chart.mine.auto")}</Badge>
-                    </>
-                  ) : null}
                   {line.issue === null ? null : (
                     <span className="my-lines__issue">{lineIssueLabel(line.issue)}</span>
                   )}

@@ -2,10 +2,17 @@ import {
   ApiRequestError,
   type ChartErrorDetail,
   type ChartLineBody,
+  type ChosenBy,
   type InstrumentKind,
   type LineIssue,
   type LineKind,
+  type RegimeVerdict,
+  type Structure,
+  type SwingChoice,
   type Timeframe,
+  type TrendDirection,
+  type WindowSource,
+  type ZoneSide,
 } from "../../../shared/api";
 import { t, tCode, tFill, tOptional, type MessageKey } from "../../../shared/config";
 import { formatPrice } from "./chart-price";
@@ -36,6 +43,25 @@ export const timeframeLabel = (timeframe: Timeframe): string =>
   tCode(`chart.timeframe.${timeframe}`, timeframe);
 
 export const lineIssueLabel = (issue: LineIssue): string => tCode(`chart.issue.${issue}`, issue);
+
+// 분석 응답 어휘의 짧은 이름(라벨). 판정·문장 자체는 서버가 완성한다 — 여기서는 값의 이름만 고른다.
+export const regimeVerdictLabel = (verdict: RegimeVerdict): string =>
+  tCode(`chart.regime.verdict.${verdict}`, verdict);
+
+export const structureLabel = (structure: Structure): string =>
+  tCode(`chart.regime.structure.${structure}`, structure);
+
+export const trendDirectionLabel = (direction: TrendDirection): string =>
+  tCode(`chart.direction.${direction}`, direction);
+
+export const chosenByLabel = (chosen: ChosenBy): string => tCode(`chart.chosenBy.${chosen}`, chosen);
+
+export const windowSourceLabel = (source: WindowSource): string =>
+  tCode(`chart.windowSource.${source}`, source);
+
+export const swingChoiceLabel = (swing: SwingChoice): string => tCode(`chart.swing.${swing}`, swing);
+
+export const zoneSideLabel = (side: ZoneSide): string => tCode(`chart.zoneSide.${side}`, side);
 
 /**
  * 목록·카드에서 선을 부르는 이름. 수평선은 가격, 되돌림·채널은 기준점 날짜로 구분한다. 다른 주기로 만든 선이면

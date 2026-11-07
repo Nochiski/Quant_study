@@ -21,6 +21,8 @@ from strategy_workbench.domain.chart_analysis._zones import HorizontalZone
 _RETRACEMENT_ANCHOR_LEVELS = (0.0, 1.0)
 # 선마다 가격 구간을 넓히는 비율(±).
 DEFAULT_CONFLUENCE_TOLERANCE = 0.005
+# 서로 다른 종류가 이만큼 이상 덮는 가격대만 중첩이다(같은 종류는 1종)
+MIN_CONFLUENCE_KINDS = 2
 
 
 @dataclass(frozen=True)
@@ -119,7 +121,7 @@ def find_confluences(
     for lo, hi in zip(edges, edges[1:], strict=False):
         mid = (lo + hi) / 2
         covering = {kind for kind, spans in unions.items() if any(a <= mid <= b for a, b in spans)}
-        if len(covering) < 2:
+        if len(covering) < MIN_CONFLUENCE_KINDS:
             continue
         if regions and regions[-1][1] == lo:
             regions[-1] = (regions[-1][0], hi, regions[-1][2] | covering)

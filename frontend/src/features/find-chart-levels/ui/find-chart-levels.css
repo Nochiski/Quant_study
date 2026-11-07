@@ -1,0 +1,508 @@
+/* 자동 찾기: 자동 후보 칸·생성/근거/중첩 패널·차트 위 판정 구간과 중첩 괄호. 색은 의미 토큰만 쓴다. */
+
+/* 판정·분석 구간: 차트 위 음영과 좌우 테두리 손잡이(role=slider). 쉬는 상태는 --border-control 잉크 */
+.analysis-window__band {
+  fill: var(--accent);
+  fill-opacity: 0.08;
+  pointer-events: none;
+}
+
+.analysis-window__edge {
+  cursor: ew-resize;
+  outline: none;
+}
+
+.analysis-window__line {
+  stroke: var(--border-control);
+  stroke-width: 1.5;
+}
+
+.analysis-window__grip {
+  fill: var(--surface-panel);
+  stroke: var(--border-control);
+}
+
+.analysis-window__hit {
+  fill: transparent;
+}
+
+.analysis-window__tip {
+  opacity: 0;
+  fill: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--surface-panel);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.analysis-window__edge:hover .analysis-window__line,
+.analysis-window__edge:focus-visible .analysis-window__line,
+.analysis-window__edge[data-active="true"] .analysis-window__line {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+.analysis-window__edge:hover .analysis-window__grip,
+.analysis-window__edge:focus-visible .analysis-window__grip,
+.analysis-window__edge[data-active="true"] .analysis-window__grip {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.analysis-window__edge:hover .analysis-window__tip,
+.analysis-window__edge:focus-visible .analysis-window__tip,
+.analysis-window__edge[data-active="true"] .analysis-window__tip {
+  opacity: 1;
+}
+
+.analysis-window__edge:focus-visible .analysis-window__hit {
+  stroke: var(--focus-ring);
+  stroke-width: 2;
+}
+
+/* 중첩: 차트 오른쪽 잉크 괄호 */
+.confluence-bracket {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+/* 패널 틀(레이어 칸 자리를 바꾸는 비모달 패널) */
+.finder-panel {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.finder-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.finder-panel__head h2 {
+  margin: 0;
+  font-size: var(--text-size-subsection);
+  font-weight: var(--font-weight-label);
+}
+
+.finder-panel__head h2:focus-visible,
+.auto-lines h2:focus-visible,
+.finder-details summary:focus-visible,
+.finder-panel__close:focus-visible,
+.auto-lines__remove:focus-visible,
+.auto-lines__link:focus-visible,
+.finder-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.finder-panel__subtitle {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.finder-panel__close,
+.auto-lines__remove {
+  display: inline-grid;
+  place-items: center;
+  width: var(--control-height-dense);
+  height: var(--control-height-dense);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-medium);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.finder-panel__close:hover,
+.auto-lines__remove:hover {
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+
+.finder-panel__body {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.finder-panel__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+/* 패널 안의 절 */
+.finder-section {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.finder-section h3,
+.finder-section legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  font-size: var(--text-size-label);
+  font-weight: var(--font-weight-label);
+}
+
+.finder-section__meta {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  font-weight: normal;
+}
+
+.finder-fields__dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.finder-field {
+  display: grid;
+  gap: var(--field-gap);
+  min-width: 0;
+}
+
+.finder-field label {
+  font-size: var(--text-size-small);
+  font-weight: var(--font-weight-label);
+}
+
+.finder-field .ui-input {
+  font-family: var(--font-mono);
+}
+
+.finder-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.finder-chip {
+  min-height: var(--control-height-dense);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  cursor: pointer;
+}
+
+.finder-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: var(--font-weight-label);
+}
+
+.finder-note,
+.finder-warning {
+  margin: 0;
+  font-size: var(--text-size-small);
+  line-height: 1.5;
+}
+
+.finder-note {
+  color: var(--text-muted);
+}
+
+.finder-warning {
+  color: var(--status-warn);
+}
+
+.finder-verdict {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.finder-verdict strong {
+  font-size: var(--text-size-subsection);
+}
+
+.finder-verdict p {
+  margin: 0;
+  font-size: var(--text-size-label);
+  line-height: 1.5;
+}
+
+.finder-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-size-small);
+}
+
+.finder-table th,
+.finder-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.finder-table td {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 칸이 많은 표(수평 구간 결과)는 줄을 바꾸지 않고 가로로 넘긴다 */
+.finder-table-scroll {
+  overflow-x: auto;
+}
+
+.finder-table--nowrap th,
+.finder-table--nowrap td {
+  white-space: nowrap;
+}
+
+.finder-table thead th {
+  color: var(--text-muted);
+  font-weight: var(--font-weight-label);
+}
+
+.finder-details summary {
+  cursor: pointer;
+  font-size: var(--text-size-label);
+  font-weight: var(--font-weight-label);
+}
+
+.finder-details[open] {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.finder-details ul,
+.finder-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: var(--text-size-small);
+  line-height: 1.5;
+}
+
+.finder-choices {
+  gap: var(--space-1);
+}
+
+.finder-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  font-size: var(--text-size-label);
+}
+
+.finder-choice--candidate {
+  align-items: flex-start;
+}
+
+.finder-choice--candidate > span {
+  display: grid;
+  gap: 2px;
+}
+
+.finder-choice__meta {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+.finder-choice input,
+.finder-levels input,
+.finder-table input,
+.auto-lines input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.finder-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+.finder-levels label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.finder-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--text-size-small);
+}
+
+.finder-facts dt {
+  color: var(--text-muted);
+}
+
+.finder-facts dd {
+  margin: 0;
+}
+
+.finder-mono {
+  font-family: var(--font-mono);
+}
+
+.finder-pre {
+  overflow: auto;
+  max-height: 16rem;
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+  font-size: var(--text-size-small);
+  white-space: pre;
+}
+
+.finder-group {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+/* 자동 분석 후보 칸 */
+.auto-lines {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.auto-lines h2 {
+  margin: 0;
+  font-size: var(--text-size-subsection);
+  font-weight: var(--font-weight-label);
+}
+
+.auto-lines__list,
+.auto-lines__zones {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auto-lines__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+}
+
+.auto-lines__text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.auto-lines__name {
+  font-size: var(--text-size-label);
+  font-weight: var(--font-weight-label);
+}
+
+/* 이름 앞 작은 색 칸: 종류 색(수평 구간 호박·되돌림 보라·채널 청록·중첩 잉크) */
+.auto-lines__name::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  margin-right: var(--space-1);
+  vertical-align: middle;
+  background: var(--text);
+}
+
+.auto-lines__name--hline::before {
+  height: 8px;
+  background: var(--chart-series-6);
+}
+
+.auto-lines__name--fib_retracement::before {
+  background: var(--chart-series-4);
+}
+
+.auto-lines__name--fib_channel::before {
+  background: var(--chart-series-1);
+}
+
+.auto-lines__meta {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.auto-lines__issue {
+  color: var(--status-warn);
+  font-size: var(--text-size-small);
+}
+
+.auto-lines__link {
+  padding: var(--space-1);
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--text-size-small);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.auto-lines__zones {
+  padding-left: var(--space-5);
+}
+
+.auto-lines__zones li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 32px;
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+.auto-lines__zones label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.auto-lines__new {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-size-small);
+}

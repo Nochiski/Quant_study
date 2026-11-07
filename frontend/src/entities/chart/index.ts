@@ -5,11 +5,17 @@
 export {
   CHART_LINE_MUTATION_KEY,
   chartCandlesQuery,
+  chartChannelsQuery,
+  chartConfluenceQuery,
+  chartLineCreateBody,
   chartLineEdit,
   chartInstrumentSearchQuery,
   chartKey,
   chartLinePreviewQuery,
   chartLinesQuery,
+  chartRegimeQuery,
+  chartRetracementQuery,
+  chartZonesQuery,
   useCreateChartLine,
   useDeleteChartLine,
   useUpdateChartLine,
@@ -58,6 +64,7 @@ export {
   viewportRange,
   visibleBars,
   wheelZoomFactor,
+  widensRange,
   zoomViewport,
   type ChartViewport,
 } from "./model/chart-viewport";
@@ -69,30 +76,58 @@ export {
 } from "./model/label-layout";
 export {
   chartErrorSentence,
+  chosenByLabel,
   lineIssueLabel,
   lineKindLabel,
   lineTitle,
+  regimeVerdictLabel,
+  structureLabel,
+  swingChoiceLabel,
   timeframeLabel,
+  trendDirectionLabel,
+  windowSourceLabel,
+  zoneSideLabel,
 } from "./model/line-copy";
-export { levelSegments, segmentLabels, shadedBands, type LevelSegment } from "./model/line-geometry";
+export {
+  formedSegments,
+  levelSegments,
+  segmentLabels,
+  shadedBands,
+  type LevelSegment,
+} from "./model/line-geometry";
 export { CANDLE_FIELDS, snapToCandle, type CandleField } from "./model/magnet";
 export { AxisBadges, type AxisBadge } from "./ui/axis-badges";
 export { CandlePlot } from "./ui/candle-plot";
 export { lineTone, type LineTone } from "./model/line-tone";
 export { ChartLineShape } from "./ui/line-shape";
 export type {
+  ChartAutoRecordBody,
   ChartCandleBody,
   ChartCandlesBody,
+  ChartChannelsBody,
+  ChartConfluenceBody,
+  ChartConfluenceGroupBody,
+  ChartConfluenceLineBody,
+  ChartDrawingBody,
   ChartInstrumentBody,
   ChartLevelPathBody,
   ChartLineBody,
   ChartLineEditBody,
   ChartLinePreviewBody,
   ChartLinesBody,
+  ChartPivotBody,
   ChartPointBody,
+  ChartRegimeBody,
+  ChartRetracementBody,
   ChartTickStepBody,
+  ChartZoneBody,
+  ChartZonesBody,
   CreateChartLineBody,
   InstrumentKind,
   LineKind,
+  LineSource,
+  RegimeVerdict,
+  SwingChoice,
   Timeframe,
+  TrendDirection,
 } from "../../shared/api";

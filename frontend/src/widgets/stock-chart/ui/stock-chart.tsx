@@ -1,5 +1,5 @@
 import { useIsMutating, useQuery } from "@tanstack/react-query";
-import { useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import {
   AxisBadges,
@@ -7,6 +7,7 @@ import {
   CandlePlot,
   DEFAULT_TIMEFRAME,
   chartCandlesQuery,
+  chartConfluenceQuery,
   chartErrorSentence,
   chartLinesQuery,
   chartTargetOf,
@@ -17,6 +18,7 @@ import {
   levelSegments,
   lineTone,
   timeframeLabel,
+  widensRange,
   type AxisBadge,
   type ChartCandleBody,
   type ChartInstrumentBody,
@@ -35,6 +37,15 @@ import {
   useChartDrawing,
   useLineRemoval,
 } from "../../../features/draw-chart-line";
+import {
+  AnalysisWindowOverlay,
+  AutoLinesPanel,
+  ConfluenceBrackets,
+  FinderPanels,
+  PreviewLines,
+  useLevelFinder,
+  visibleWindow,
+} from "../../../features/find-chart-levels";
 import { useChartNavigation } from "../../../features/navigate-chart";
 import { failureReason } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
@@ -58,12 +69,15 @@ const ChartHead = ({
   current,
   titleId,
   titleRef,
+  actions,
 }: {
   instrument: ChartInstrumentBody;
   timeframe: Timeframe;
   current: ChartCandleBody | undefined;
   titleId: string;
   titleRef: RefObject<HTMLHeadingElement | null>;
+  /** 머리 오른쪽 끝(분석 방식 전환). */
+  actions: ReactNode;
 }) => {
   const last = current;
   // 등락률은 캔들 응답 값(직전 봉 종가 대비, application이 계산)을 그대로 보인다
@@ -88,9 +102,24 @@ const ChartHead = ({
           {last.in_progress ? <Badge tone="neutral">{t("chart.head.inProgress")}</Badge> : null}
         </span>
       )}
+      {actions}
     </div>
   );
 };
+
+/** 분석 방식: 자동 찾기(자동 후보·생성 패널) / 수동 그리기(도구 막대). 수동 중에는 자동 후보를 가린다. */
+type ChartMode = "auto" | "manual";
+
+const ModeSwitch = ({ mode, onMode }: { mode: ChartMode; onMode: (mode: ChartMode) => void }) => (
+  <div className="chart-segmented stock-chart__mode" role="group" aria-label={t("chart.mode.label")}>
+    <button type="button" aria-pressed={mode === "auto"} onClick={() => onMode("auto")}>
+      {t("chart.mode.auto")}
+    </button>
+    <button type="button" aria-pressed={mode === "manual"} onClick={() => onMode("manual")}>
+      {t("chart.mode.manual")}
+    </button>
+  </div>
+);
 
 type ChartBodyProps = {
   target: ChartTarget;
@@ -144,6 +173,11 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
   const linesQuery = useQuery(chartLinesQuery(target));
   const drawing = useChartDrawing(target, timeframe);
   const removal = useLineRemoval(target);
+  const finder = useLevelFinder(target, timeframe);
+  const [mode, setMode] = useState<ChartMode>("auto");
+  // 중첩에 내 선도 넣는가 — 요청 칸이라 선의 보이기 저장 칸을 바꾸지 않는다
+  const [includeMine, setIncludeMine] = useState(true);
+  const layersRef = useRef<HTMLElement>(null);
 
   const candles = candlesQuery.data?.candles;
   const context = candlesQuery.data?.context;
@@ -177,6 +211,30 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
     titleRef.current?.focus();
   }, [focusRequest, ready]);
 
+  // 패널을 닫으면 레이어 칸이 다시 그려진 뒤 연 버튼(`data-finder-key`)으로 초점을 돌려준다. 그 버튼이 사라졌으면(지운
+  // 줄의 근거 등) 자동 후보 칸 제목으로 간다.
+  const { panel } = finder;
+  useEffect(() => {
+    if (panel.view !== "layers" || panel.focusKey === null) return;
+    const root = layersRef.current;
+    const opener = root?.querySelector<HTMLElement>(`[data-finder-key="${CSS.escape(panel.focusKey)}"]`);
+    (opener ?? root?.querySelector<HTMLElement>(".auto-lines h2"))?.focus();
+  }, [panel]);
+
+  const instrumentForQuery = candlesQuery.data?.context.instrument;
+  const confluence = useQuery(
+    chartConfluenceQuery(
+      mode === "auto" && instrumentForQuery !== undefined
+        ? {
+            instrument_kind: target.kind,
+            instrument_code: target.code,
+            lines: finder.results.inlineLines,
+            include_mine: includeMine,
+          }
+        : null,
+    ),
+  );
+
   if (candlesQuery.isError)
     return (
       <FailureNotice
@@ -191,7 +249,19 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
     );
 
   const instrument = context?.instrument;
-  const shownLines = lines.filter((line) => line.visible);
+  // 수동 그리기 중에는 자동 후보를 가린다(내 선만 그린다)
+  const shownLines = lines.filter((line) => line.visible && (mode === "auto" || lineTone(line) === "mine"));
+  const changeMode = (next: ChartMode) => {
+    setMode(next);
+    if (next === "auto") drawing.dispatch({ type: "pickTool", tool: "select" });
+    else {
+      finder.dispatch({ type: "reset" });
+      const selected = lines.find((line) => line.line_id === drawing.state.selectedId);
+      if (selected !== undefined && lineTone(selected) !== "mine") drawing.dispatch({ type: "select", lineId: null });
+    }
+  };
+  const currentPrice = current?.close ?? null;
+  const creating = panel.view === "create";
   // 포인터를 올린 선은 선택 도구일 때만 본다(그리기 도구로 바꾸면 선의 누를 자리가 사라져 떠남이 오지 않는다)
   const badgeLine =
     shownLines.find((line) => line.line_id === drawing.state.selectedId) ??
@@ -212,6 +282,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
             current={current}
             titleId={titleId}
             titleRef={titleRef}
+            actions={<ModeSwitch mode={mode} onMode={changeMode} />}
           />
         ) : (
           <div className="stock-chart__head">
@@ -224,9 +295,8 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
           </p>
         ) : null}
         <div className="stock-chart__frame">
-          <div className="stock-chart__tools">
-            <DrawingToolbar drawing={drawing} />
-          </div>
+          {/* 도구 막대 자리는 두 방식 모두 비워 둬서 차트가 튀지 않는다 */}
+          <div className="stock-chart__tools">{mode === "manual" ? <DrawingToolbar drawing={drawing} /> : null}</div>
           <div className="stock-chart__plot" ref={box}>
             {candlesQuery.isPending ? (
               <p className="stock-chart__state" role="status">
@@ -237,7 +307,14 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                 <p role="status">{t("chart.empty.range")}</p>
                 {/* 상장 전 구간처럼 날짜 칸이 봉 없는 기간이면 고른 기간 버튼의 기본 보기로 돌아간다 */}
                 {hasCustomRange(search) ? (
-                  <Button size="small" onClick={navigation.reset}>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      navigation.reset();
+                      // 이 버튼은 봉이 그려지면 사라진다 — 초점을 차트 제목으로 옮겨 길을 잃지 않게 한다
+                      titleRef.current?.focus();
+                    }}
+                  >
                     {t("chart.empty.reset")}
                   </Button>
                 ) : null}
@@ -282,6 +359,20 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                     timeframe={timeframe}
                     lines={shownLines}
                   />
+                  {creating ? (
+                    <PreviewLines previews={finder.results.previews} scale={scale} instrumentKind={instrument.kind} />
+                  ) : null}
+                  {creating ? (
+                    <AnalysisWindowOverlay
+                      scale={scale}
+                      completed={completed}
+                      window={finder.results.window}
+                      onChange={(window) => finder.dispatch({ type: "edit", input: { window } })}
+                    />
+                  ) : null}
+                  {mode === "auto" && confluence.data ? (
+                    <ConfluenceBrackets groups={confluence.data.groups} scale={scale} />
+                  ) : null}
                 </g>
                 <AxisBadges
                   plot={scale.plot}
@@ -302,6 +393,9 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
           <p id={keysId} className="stock-chart__keys">
             {t("chart.view.keys")}
           </p>
+          {range !== null && candles && hasCustomRange(search) && widensRange(candles, range) ? (
+            <p className="stock-chart__keys">{t("chart.view.widened")}</p>
+          ) : null}
           {range === null ? null : (
             <p className="sr-only" aria-live="polite">
               {tFill("chart.view.visible", range)}
@@ -326,23 +420,91 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
               </svg>
               {t("chart.legend.inProgress")}
             </li>
+            {mode === "auto" ? (
+              <>
+                <li>
+                  <svg width="22" height="10" aria-hidden="true">
+                    <rect x="0" y="1" width="22" height="8" className="stock-chart__swatch stock-chart__swatch--zone" />
+                  </svg>
+                  {t("chart.legend.zone")}
+                </li>
+                <li>
+                  <svg width="22" height="8" aria-hidden="true">
+                    <path d="M0 4H22" className="stock-chart__swatch stock-chart__swatch--retracement" />
+                  </svg>
+                  {t("chart.legend.retracement")}
+                </li>
+                <li>
+                  <svg width="22" height="8" aria-hidden="true">
+                    <path d="M0 4H22" className="stock-chart__swatch stock-chart__swatch--channel" />
+                  </svg>
+                  {t("chart.legend.channel")}
+                </li>
+                <li>
+                  <svg width="10" height="14" aria-hidden="true">
+                    <path d="M1 1H8V13H1" className="stock-chart__swatch stock-chart__swatch--confluence" />
+                  </svg>
+                  {t("chart.legend.confluence")}
+                </li>
+                <li>
+                  <svg width="22" height="8" aria-hidden="true">
+                    <path d="M0 4H22" className="stock-chart__swatch stock-chart__swatch--before" />
+                  </svg>
+                  {t("chart.legend.before")}
+                </li>
+                <li className="stock-chart__legend-note">{t("chart.legend.notSignal")}</li>
+              </>
+            ) : null}
           </ul>
         </div>
         <UndoNotice removal={removal} />
       </section>
-      <aside className="stock-chart__layers" aria-label={t("chart.layers.label")}>
-        {instrument ? (
-          <MyLinesPanel
-            drawing={drawing}
-            removal={removal}
-            instrument={instrument}
-            lines={lines}
+      <aside className="stock-chart__layers" aria-label={t("chart.layers.label")} ref={layersRef}>
+        {instrument === undefined ? null : panel.view === "layers" ? (
+          <>
+            <MyLinesPanel
+              drawing={drawing}
+              removal={removal}
+              instrument={instrument}
+              lines={lines}
+              timeframe={timeframe}
+              completed={completed}
+              visible={visibleCompleted}
+              levelChoices={linesQuery.data?.level_choices ?? []}
+            />
+            <AutoLinesPanel
+              finder={finder}
+              lines={lines}
+              instrument={instrument}
+              timeframe={timeframe}
+              manual={mode === "manual"}
+              confluenceCount={confluence.data?.groups.length ?? null}
+              includeMine={includeMine}
+              onToggle={(group, visible) => group.forEach((line) => void drawing.edit(line, { visible }))}
+              onRemove={(group, title) => {
+                if (!removal.removeLine(group, title)) return;
+                if (group.some((line) => line.line_id === drawing.state.selectedId))
+                  drawing.dispatch({ type: "select", lineId: null });
+              }}
+              removing={removal.removing}
+              screenWindow={visibleWindow(visibleCompleted)}
+            />
+          </>
+        ) : (
+          <FinderPanels
+            finder={finder}
+            target={target}
             timeframe={timeframe}
-            completed={completed}
-            visible={visibleCompleted}
+            instrument={instrument}
+            current={currentPrice}
+            lines={lines}
             levelChoices={linesQuery.data?.level_choices ?? []}
+            confluence={confluence.data}
+            confluenceError={confluence.error}
+            includeMine={includeMine}
+            onIncludeMine={setIncludeMine}
           />
-        ) : null}
+        )}
       </aside>
     </div>
   );

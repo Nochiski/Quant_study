@@ -316,6 +316,45 @@ div.stock-chart__state p {
   stroke-dasharray: 2 2;
 }
 
+.stock-chart__swatch--zone {
+  fill: var(--chart-series-6);
+  fill-opacity: 0.35;
+}
+
+.stock-chart__swatch--retracement,
+.stock-chart__swatch--channel,
+.stock-chart__swatch--before {
+  stroke-width: 1.6;
+  stroke-dasharray: 5 3;
+}
+
+.stock-chart__swatch--retracement {
+  stroke: var(--chart-series-4);
+}
+
+.stock-chart__swatch--channel {
+  stroke: var(--chart-series-1);
+}
+
+.stock-chart__swatch--before {
+  stroke: var(--chart-series-1);
+  stroke-opacity: 0.3;
+}
+
+.stock-chart__swatch--confluence {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+.stock-chart__legend-note {
+  color: var(--text-muted);
+}
+
+/* 분석 방식 전환은 머리 오른쪽 끝 */
+.stock-chart__mode {
+  margin-left: auto;
+}
+
 .stock-chart__card > .undo-notice {
   margin: 0 var(--space-4) var(--space-3);
 }

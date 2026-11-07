@@ -8,11 +8,16 @@ import {
 
 import {
   strategyWorkbenchApi,
+  type ChartChannelsQuery,
+  type ChartConfluenceRequestBody,
   type ChartDrawingBody,
   type ChartLineBody,
   type ChartLineEditBody,
   type ChartLinePreviewBody,
   type ChartLinesBody,
+  type ChartRegimeQuery,
+  type ChartRetracementQuery,
+  type ChartZonesQuery,
   type CreateChartLineBody,
   type InstrumentKind,
   type Timeframe,
@@ -95,8 +100,115 @@ const targetOf = (line: Pick<ChartLineBody, "instrument_kind" | "instrument_code
   code: line.instrument_code,
 });
 
+// 중첩은 저장 선 중 보이는 것을 서버가 고른다 — 선이 바뀌면 다시 묻는다(`refreshLines`·고치기 응답).
+const confluenceKey = () => [...chartKey(), "confluence"] as const;
+
 const refreshLines = (queryClient: QueryClient, target: ChartTarget) =>
-  queryClient.invalidateQueries({ queryKey: linesKey(target) });
+  Promise.all([
+    queryClient.invalidateQueries({ queryKey: linesKey(target) }),
+    queryClient.invalidateQueries({ queryKey: confluenceKey() }),
+  ]);
+
+type SeriesQuery = { kind: InstrumentKind; code: string; timeframe: Timeframe };
+
+/**
+ * 앞 응답을 다음 응답이 올 때까지 보인다(판정 구간 테두리를 끄는 동안 깜박임 방지) — 같은 조회 이름·대상·주기(키 앞
+ * 다섯 칸)일 때만. 다른 종목의 응답을 잠깐이라도 보이지 않는다.
+ */
+const sameSeriesPlaceholder = <T>(
+  previous: T | undefined,
+  previousQuery: { queryKey: readonly unknown[] } | undefined,
+  key: readonly unknown[],
+): T | undefined =>
+  previousQuery !== undefined &&
+  JSON.stringify(previousQuery.queryKey.slice(0, 5)) === JSON.stringify(key.slice(0, 5))
+    ? previous
+    : undefined;
+
+// 판정·분석 조회 묶음(국면 판정·채널 후보·되돌림 스윙·수평 구간). 같은 입력이면 같은 답이고 거절(422)도 다시 물어도
+// 같으므로 재시도하지 않는다. 묻지 않을 때(null)는 `skipToken`이다.
+const analysisKey = <Q extends SeriesQuery>(name: string, query: Q | null) =>
+  [...chartKey(), name, query?.kind ?? null, query?.code ?? null, query?.timeframe ?? null, query] as const;
+
+const ANALYSIS_OPTIONS = { staleTime: Infinity, retry: false } as const;
+
+/** 판정 구간의 국면 판정(문장·제안 칩·첫 점 피벗 목록·판정 규칙 문장 포함). 구간이 없으면 서버 기본 구간이다. */
+export const chartRegimeQuery = (query: ChartRegimeQuery | null) => {
+  const key = analysisKey("regime", query);
+  return queryOptions({
+    ...ANALYSIS_OPTIONS,
+    queryKey: key,
+    queryFn: query === null ? skipToken : () => strategyWorkbenchApi.getChartRegime(query),
+    placeholderData: (previous, previousQuery) => sameSeriesPlaceholder(previous, previousQuery, key),
+  });
+};
+
+export const chartChannelsQuery = (query: ChartChannelsQuery | null) => {
+  const key = analysisKey("channels", query);
+  return queryOptions({
+    ...ANALYSIS_OPTIONS,
+    queryKey: key,
+    queryFn: query === null ? skipToken : () => strategyWorkbenchApi.getChartChannels(query),
+    placeholderData: (previous, previousQuery) => sameSeriesPlaceholder(previous, previousQuery, key),
+  });
+};
+
+export const chartRetracementQuery = (query: ChartRetracementQuery | null) => {
+  const key = analysisKey("retracement", query);
+  return queryOptions({
+    ...ANALYSIS_OPTIONS,
+    queryKey: key,
+    queryFn: query === null ? skipToken : () => strategyWorkbenchApi.getChartRetracement(query),
+    placeholderData: (previous, previousQuery) => sameSeriesPlaceholder(previous, previousQuery, key),
+  });
+};
+
+export const chartZonesQuery = (query: ChartZonesQuery | null) => {
+  const key = analysisKey("zones", query);
+  return queryOptions({
+    ...ANALYSIS_OPTIONS,
+    queryKey: key,
+    queryFn: query === null ? skipToken : () => strategyWorkbenchApi.getChartZones(query),
+    placeholderData: (previous, previousQuery) => sameSeriesPlaceholder(previous, previousQuery, key),
+  });
+};
+
+/**
+ * 보이는 선의 중첩. 저장 선 중 보이는 것은 서버가 고르고 본문 `lines`에는 저장하지 않은 미리보기 후보만 싣는다.
+ * 선 변이가 끝나면 다시 묻는다. 묻지 않을 때(null)는 `skipToken`이다.
+ */
+export const chartConfluenceQuery = (body: ChartConfluenceRequestBody | null) => {
+  const key = [...confluenceKey(), body?.instrument_kind ?? null, body?.instrument_code ?? null, null, body] as const;
+  return queryOptions({
+    queryKey: key,
+    queryFn: body === null ? skipToken : () => strategyWorkbenchApi.findChartConfluence(body),
+    retry: false,
+    placeholderData: (previous, previousQuery) => sameSeriesPlaceholder(previous, previousQuery, key),
+  });
+};
+
+/**
+ * 저장 선과 같은 내용으로 새 선을 만드는 본문(되돌리기, 자동 후보를 내 선으로 복사). `patch`로 바꿀 칸만 덮는다 —
+ * 복사는 `source: "auto_copied"`. 자동 기록(`auto`)은 그대로 싣는다(복사본도 기록을 갖는다, 설계 문서 4.7).
+ */
+export const chartLineCreateBody = (
+  line: ChartLineBody,
+  patch: Partial<CreateChartLineBody> = {},
+): CreateChartLineBody => ({
+  instrument_kind: line.instrument_kind,
+  instrument_code: line.instrument_code,
+  timeframe: line.timeframe,
+  kind: line.kind,
+  source: line.source,
+  anchors: line.anchors,
+  levels: line.levels,
+  extend_right: line.extend_right,
+  memo: line.memo,
+  locked: line.locked,
+  visible: line.visible,
+  auto: line.auto,
+  ...patch,
+});
 
 /**
  * 저장 선 고치기 본문. `PUT /lines/{id}`는 칸 전체를 바꾸는 계약이라(빠진 칸은 기본값으로 돌아간다) 지금 선의
@@ -193,6 +305,8 @@ export const useUpdateChartLine = () => {
       // 응답이 고친 선 전부(그릴 점 포함)라 목록을 다시 읽지 않고 그 줄만 바꾼다.
       const waiting = pendingInstant(line.line_id, variables);
       replaceLine(queryClient, line.line_id, targetOf(line), () => ({ ...line, ...waiting }));
+      // 보이기·레벨이 바뀌면 중첩도 바뀐다
+      void queryClient.invalidateQueries({ queryKey: confluenceKey() });
     },
     onError: (_, { line }) => refreshLines(queryClient, targetOf(line)),
   });

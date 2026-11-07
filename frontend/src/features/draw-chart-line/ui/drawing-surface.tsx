@@ -173,6 +173,7 @@ export const DrawingSurface = ({
           labels={labelsByOwner.get(line.line_id) ?? []}
           selected={line.line_id === state.selectedId}
           preview={dragging}
+          formedX={line.created === null ? undefined : scale.xOfDate(line.created)}
           onSelect={
             state.tool === "select"
               ? () => dispatch({ type: "select", lineId: line.line_id })

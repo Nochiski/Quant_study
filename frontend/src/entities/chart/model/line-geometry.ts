@@ -56,22 +56,47 @@ export const SHADED_BANDS = [
   { from: 1, to: 1.618, tone: "extension" },
 ] as const;
 
-export type ShadedBand = { tone: (typeof SHADED_BANDS)[number]["tone"]; d: string };
+export type ShadedBand = { tone: (typeof SHADED_BANDS)[number]["tone"] | "zone"; d: string };
 
 const point = (x: number, y: number) => `${x.toFixed(1)} ${y.toFixed(1)}`;
 
-export const shadedBands = (segments: readonly LevelSegment[]): ShadedBand[] =>
-  SHADED_BANDS.flatMap((band) => {
+const between = (lower: LevelSegment, upper: LevelSegment) =>
+  `M${point(lower.x1, lower.y1)}L${point(lower.x2, lower.y2)}L${point(upper.x2, upper.y2)}L${point(upper.x1, upper.y1)}Z`;
+
+/** 음영. 수평 띠(레벨 없는 선분 둘 — 자동 수평 구간의 하단·상단)는 두 선 사이를 띠(`zone`)로 칠한다. */
+export const shadedBands = (segments: readonly LevelSegment[]): ShadedBand[] => {
+  const flat = segments.filter((segment) => segment.level === null);
+  if (flat.length === 2) return [{ tone: "zone", d: between(flat[0], flat[1]) }];
+  return SHADED_BANDS.flatMap((band) => {
     const lower = segments.find((segment) => segment.level === band.from);
     const upper = segments.find((segment) => segment.level === band.to);
-    if (lower === undefined || upper === undefined) return [];
-    return [
-      {
-        tone: band.tone,
-        d: `M${point(lower.x1, lower.y1)}L${point(lower.x2, lower.y2)}L${point(upper.x2, upper.y2)}L${point(upper.x1, upper.y1)}Z`,
-      },
-    ];
+    return lower === undefined || upper === undefined ? [] : [{ tone: band.tone, d: between(lower, upper) }];
   });
+};
+
+/**
+ * 자동 선을 생긴 날(`created`) 자리 x에서 나눈다: 그 앞(그때는 없던 선)은 옅게, 뒤는 그대로 그린다(설계 문서 2장).
+ * 나누는 점은 그려 둔 선분 위의 px 자리라 가격을 계산하지 않는다. 생긴 날이 선분 시작보다 앞이면 모두 뒤 칸이다.
+ */
+export const formedSegments = (
+  segments: readonly LevelSegment[],
+  formedX: number | undefined,
+): { before: LevelSegment[]; after: LevelSegment[] } => {
+  if (formedX === undefined) return { before: [], after: [...segments] };
+  const before: LevelSegment[] = [];
+  const after: LevelSegment[] = [];
+  for (const segment of segments) {
+    if (formedX <= segment.x1) after.push(segment);
+    else if (formedX >= segment.x2) before.push(segment);
+    else {
+      const ratio = (formedX - segment.x1) / (segment.x2 - segment.x1);
+      const y = segment.y1 + (segment.y2 - segment.y1) * ratio;
+      before.push({ ...segment, x2: formedX, y2: y });
+      after.push({ ...segment, x1: formedX, y1: y });
+    }
+  }
+  return { before, after };
+};
 
 export const segmentPath = (segment: LevelSegment): string =>
   `M${point(segment.x1, segment.y1)}L${point(segment.x2, segment.y2)}`;

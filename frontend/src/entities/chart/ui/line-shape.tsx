@@ -1,6 +1,6 @@
 import type { LevelLabel } from "../model/label-layout";
 import type { LineTone } from "../model/line-tone";
-import { segmentPath, shadedBands, type LevelSegment } from "../model/line-geometry";
+import { formedSegments, segmentPath, shadedBands, type LevelSegment } from "../model/line-geometry";
 
 type ChartLineShapeProps = {
   segments: readonly LevelSegment[];
@@ -11,6 +11,8 @@ type ChartLineShapeProps = {
   selected?: boolean;
   /** 미리보기(그리는 중·끄는 중)는 점선 없이 옅게 그린다. */
   preview?: boolean;
+  /** 자동 선의 생긴 날(`created`) 자리 x. 그 앞 구간은 옅게 그린다(그때는 없던 선). 없으면 모두 그대로. */
+  formedX?: number;
   /**
    * 누르면 고른다(선택 도구일 때만 넘긴다). 넓은 투명 선이 포인터로 누를 자리이고, 키보드로는 레이어 칸 목록의 같은
    * 선 이름 버튼으로 고른다 — 그래서 누를 자리는 낭독에서 뺀다.
@@ -30,6 +32,7 @@ export const ChartLineShape = ({
   labels,
   selected = false,
   preview = false,
+  formedX,
   onSelect,
   onHover,
 }: ChartLineShapeProps) => {
@@ -42,9 +45,17 @@ export const ChartLineShape = ({
     .filter(Boolean)
     .join(" ");
   const all = segments.map(segmentPath).join("");
+  const { before, after } = formedSegments(segments, formedX);
   return (
     <g className={className}>
-      {shadedBands(segments).map((band) => (
+      {before.map((segment, index) => (
+        <path
+          key={`before-${segment.level ?? "h"}-${index}`}
+          className="chart-line__level chart-line__level--before"
+          d={segmentPath(segment)}
+        />
+      ))}
+      {shadedBands(after).map((band) => (
         <path
           key={band.tone}
           className={`chart-line__band chart-line__band--${band.tone}`}
@@ -52,7 +63,7 @@ export const ChartLineShape = ({
         />
       ))}
       {selected ? <path className="chart-line__halo" d={all} /> : null}
-      {segments.map((segment, index) => (
+      {after.map((segment, index) => (
         <path
           key={`${segment.level ?? "h"}-${index}`}
           className={

@@ -1,5 +1,5 @@
 import type { ChartCandleBody } from "../../../shared/api";
-import { visibleRange } from "./chart-search";
+import { visibleRange, type DateRange } from "./chart-search";
 
 /**
  * 차트 보기 창(줌·이동 상태) 계산의 owner. TradingView 관례를 따른다 — 휠은 커서 자리를 붙든 채 봉 간격을 바꾸고,
@@ -12,8 +12,8 @@ import { visibleRange } from "./chart-search";
 export type ChartViewport = { from: number; to: number };
 
 /** 가장 크게 확대했을 때 보이는 봉 칸 수. */
-export const MIN_VISIBLE_BARS = 10;
-/** 가장 작게 축소했을 때 보이는 봉 칸 수 = 계열 봉 수 × 이 배수(앞뒤 빈칸 여유). */
+const MIN_VISIBLE_BARS = 10;
+/** 가장 작게 축소했을 때 보이는 봉 칸 수 = 계열 봉 수 × 이 배수(앞뒤 빈칸 여유). 봉이 적으면 기본 보기 폭 이상. */
 const MAX_SPAN_RATIO = 1.25;
 /** 한쪽 끝에 비워 둘 수 있는 칸의 최대 비율 — 계열을 화면 밖으로 다 밀어내지 않는다. */
 const MAX_EMPTY_RATIO = 0.5;
@@ -21,9 +21,12 @@ const MAX_EMPTY_RATIO = 0.5;
 /** 오른쪽 연장(채널·되돌림)을 보일 미래 칸: 보이는 봉 수의 8%(적어도 3봉). */
 export const futureBars = (count: number): number => Math.max(3, Math.round(count * 0.08));
 
+// 보기 창 폭(봉 칸 수)의 한도. 최대는 계열 전부 + 미래 여백(기본 보기)보다 좁지 않다 — 봉이 적은 계열에서
+// 기본 보기보다 좁으면 축소하려던 휠이 오히려 확대로 뒤집힌다.
 const spanLimits = (count: number) => {
   const min = Math.min(MIN_VISIBLE_BARS, Math.max(count, 1));
-  return { min, max: Math.max(min, Math.ceil(count * MAX_SPAN_RATIO)) };
+  const max = Math.max(Math.ceil(count * MAX_SPAN_RATIO), count + futureBars(count));
+  return { min, max: Math.max(min, max) };
 };
 
 /** 보기 창에 조금이라도 걸친 봉 index 범위(포함). 계열 밖은 자른다 — 걸친 봉이 없으면 `first > last`다. */
@@ -38,16 +41,20 @@ export const visibleBars = (
 /**
  * 표시 기간의 기본 보기: 그 기간에 걸친 첫 봉 ~ 마지막 봉을 꼭 맞게 넣고, 마지막 봉이 계열의 끝(최신 봉)이면
  * 오른쪽에 미래 봉 여백을 둔다(최신 봉 오른쪽 정렬). 과거 구간을 고른 날짜 기간은 여백 없이 끝 봉에서 끝난다.
- * 기간에 걸친 봉이 없으면 null.
+ * 폭은 확대·축소와 같은 한도 안이다 — 봉이 몇 개뿐인 기간은 오른쪽 끝을 둔 채 최소 칸 수로 넓힌다. 기간에 걸친
+ * 봉이 없으면 null.
  */
 export const defaultViewport = (
   candles: readonly ChartCandleBody[],
-  range: { start: string; end: string },
+  range: DateRange,
 ): ChartViewport | null => {
   const shown = visibleRange(candles, range);
   if (shown === null) return null;
   const margin = shown.last === candles.length - 1 ? futureBars(shown.last - shown.first + 1) : 0;
-  return { from: shown.first - 0.5, to: shown.last + 0.5 + margin };
+  const to = shown.last + 0.5 + margin;
+  const { min, max } = spanLimits(candles.length);
+  const span = Math.min(Math.max(to - (shown.first - 0.5), min), max);
+  return keepSeriesInView({ from: to - span, to }, candles.length);
 };
 
 /** 한쪽 끝의 빈칸이 보기 창의 절반을 넘지 않게 좌우로 민다(폭은 그대로). */
@@ -90,7 +97,7 @@ export const panViewport = (view: ChartViewport, bars: number, count: number): C
 export const viewportRange = (
   view: ChartViewport,
   candles: readonly ChartCandleBody[],
-): { start: string; end: string } | null => {
+): DateRange | null => {
   const { first, last } = visibleBars(view, candles.length);
   return first > last ? null : { start: candles[first].start, end: candles[last].end };
 };

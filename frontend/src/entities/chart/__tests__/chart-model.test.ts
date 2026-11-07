@@ -16,6 +16,7 @@ import {
   spreadLabels,
   steppedPrice,
   stockChartSearch,
+  switchSeries,
   viewportRange,
   visibleBars,
   visibleRange,
@@ -104,14 +105,28 @@ describe("chart viewport", () => {
   it("right-aligns the latest bar with a future margin and leaves past ranges unpadded", () => {
     // 1-14~1-30: 봉 1~3, 마지막이 최신 봉이라 미래 3칸(적어도 3봉)
     expect(defaultViewport(WEEKS, { start: "2025-01-14", end: "2025-01-30" })).toEqual({ from: 0.5, to: 6.5 });
-    // 1-06~1-15: 봉 0~1, 과거 구간이라 여백 없음
-    expect(defaultViewport(WEEKS, { start: "2025-01-06", end: "2025-01-15" })).toEqual({ from: -0.5, to: 1.5 });
+    // 1-06~1-15: 봉 0~1, 과거 구간이라 여백 없음 — 두 봉뿐이라 오른쪽 끝(1.5)을 둔 채 최소 폭(계열 4봉)으로 넓힌다
+    expect(defaultViewport(WEEKS, { start: "2025-01-06", end: "2025-01-15" })).toEqual({ from: -2.5, to: 1.5 });
     expect(defaultViewport(WEEKS, { start: "2025-02-01", end: "2025-03-01" })).toBeNull();
   });
 
   it("zooms around the cursor so the bar under it stays put", () => {
     // 40 ~ 80(40칸), 커서 1/4 자리(봉 50) — 반으로 확대하면 20칸이고 봉 50은 여전히 1/4 자리
     expect(zoomViewport({ from: 40, to: 80 }, 0.5, 0.25, 100)).toEqual({ from: 45, to: 65 });
+  });
+
+  it("widens a few-bar range to the minimum span", () => {
+    // 봉 100개 중 봉 40~41(이틀)만 걸친 기간 → 오른쪽 끝 41.5를 둔 채 10칸
+    const daily = Array.from({ length: 100 }, (_, index) => {
+      const day = new Date(Date.UTC(2024, 0, 1 + index)).toISOString().slice(0, 10);
+      return candle(day, day);
+    });
+    expect(defaultViewport(daily, { start: daily[40].start, end: daily[41].start })).toEqual({ from: 31.5, to: 41.5 });
+  });
+
+  it("never lets the widest zoom be narrower than the default view on a short series", () => {
+    // 봉 8개: 1.25배(10칸)보다 기본 보기(8봉 + 미래 3칸 = 11칸)가 넓다 — 축소 휠이 확대로 뒤집히지 않는다
+    expect(zoomViewport({ from: -0.5, to: 10.5 }, 1.5, 0.5, 8)).toEqual({ from: -0.5, to: 10.5 });
   });
 
   it("limits the zoom between ten bars and 1.25 times the series", () => {
@@ -175,20 +190,23 @@ describe("dateTicks", () => {
     const month = String((index % 12) + 1).padStart(2, "0");
     return candle(`${year}-${month}-01`, `${year}-${month}-28`);
   });
+  // 그림 칸 폭 = 전체 폭 - 가격 축 84px
+  const scaleOf = (from: number, to: number, plotWidth: number) =>
+    chartScale({ candles: months, view: { from, to }, width: plotWidth + 84, height: 228 });
 
-  it("thins to whole years when many years share a narrow plot", () => {
-    // 봉 간격 2px: 60달(120px)이 처음으로 64px를 넘는다 → 5년마다, 해만 쓴다
-    expect(dateTicks(months, { first: 0, last: 119, step: 2 }, 64)).toEqual([
-      { index: 0, label: "2015" },
-      { index: 60, label: "2020" },
+  it("thins to whole years when many years share a narrow plot and drops ticks cut at the edges", () => {
+    // 120봉을 240px에: 봉 간격 2px, 60달(120px)이 처음으로 64px를 넘는다 → 5년마다 해만.
+    // 2015(x 1)는 왼쪽 끝 22px 안이라 잘리므로 빼고 2020(x 121)만 남는다
+    expect(dateTicks(months, scaleOf(-0.5, 119.5, 240), 64)).toEqual([
+      { index: 60, x: 121, label: "2020" },
     ]);
   });
 
   it("keeps months with the year on January and the first tick when bars are wide", () => {
-    // 봉 간격 30px: 3달(90px)마다
-    expect(dateTicks(months, { first: 10, last: 16, step: 30 }, 64)).toEqual([
-      { index: 12, label: "2016.01" },
-      { index: 15, label: "04" },
+    // 봉 10~16을 210px에: 봉 간격 30px, 3달(90px)마다
+    expect(dateTicks(months, scaleOf(9.5, 16.5, 210), 64)).toEqual([
+      { index: 12, x: 75, label: "2016.01" },
+      { index: 15, x: 165, label: "04" },
     ]);
   });
 });
@@ -344,6 +362,18 @@ describe("stockChartSearch", () => {
     expect(stockChartSearch({ start: "2024-05-01", end: "2024-03-01", period: "6m" })).toMatchObject({
       period: "6m",
       start: undefined,
+    });
+  });
+});
+
+describe("switchSeries", () => {
+  it("drops a zoomed date range when the timeframe or instrument changes and keeps the period button", () => {
+    // 일봉에서 확대한 열흘 구간이 월봉에 물려 가면 봉 하나짜리 보기가 된다 — 고른 기간(1년)의 기본 보기로 연다
+    const zoomed = { kind: "index" as const, code: "KOSPI", tf: "day" as const, period: "1y" as const, start: "2025-10-16", end: "2025-10-30" };
+    expect(switchSeries(zoomed, { tf: "month" })).toEqual({ ...zoomed, tf: "month", start: undefined, end: undefined });
+    expect(displayRange(switchSeries(zoomed, { kind: "stock", code: "005930" }), "2025-10-30")).toEqual({
+      start: "2024-10-30",
+      end: "2025-10-30",
     });
   });
 });

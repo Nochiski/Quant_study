@@ -1,4 +1,4 @@
-import type { PlacedLabel } from "../model/label-layout";
+import type { LevelLabel } from "../model/label-layout";
 import type { LineTone } from "../model/line-tone";
 import { segmentPath, shadedBands, type LevelSegment } from "../model/line-geometry";
 
@@ -6,7 +6,7 @@ type ChartLineShapeProps = {
   segments: readonly LevelSegment[];
   tone: LineTone;
   /** 배치를 마친 레벨 라벨(`segmentLabels` → `placeLevelLabels`). 여러 선의 라벨을 함께 밀어내므로 밖에서 받는다. */
-  labels: readonly PlacedLabel[];
+  labels: readonly LevelLabel[];
   /** 고른 선은 두꺼운 반투명 테두리로 강조한다. */
   selected?: boolean;
   /** 미리보기(그리는 중·끄는 중)는 점선 없이 옅게 그린다. */
@@ -73,6 +73,8 @@ export const ChartLineShape = ({
           className="chart-line__hit"
           d={all}
           aria-hidden="true"
+          // 선 위 더블클릭은 차트의 "기본 보기로 되돌림"(빈 곳 더블클릭)으로 번지지 않게 한다
+          onDoubleClick={(event) => event.stopPropagation()}
           onPointerEnter={() => onHover?.(true)}
           onPointerLeave={() => onHover?.(false)}
           onClick={(event) => {

@@ -9,17 +9,18 @@ import {
 } from "react";
 
 import {
+  chartScale,
   defaultViewport,
   panViewport,
   viewportRange,
   wheelZoomFactor,
   zoomViewport,
   type ChartCandleBody,
+  type ChartScale,
   type ChartViewport,
+  type DateRange,
 } from "../../../entities/chart";
 import { useCommittedRef } from "../../../shared/lib/react";
-
-type DateRange = { start: string; end: string };
 
 /** 보기를 바꾸고 이만큼 멈추면 보이는 날짜 구간을 주소·날짜 칸에 쓴다(ms). */
 const RANGE_WRITE_DELAY_MS = 300;
@@ -39,8 +40,9 @@ type ChartNavigationInput = {
   range: DateRange | null;
   /** 되돌릴 기본 보기의 기간(고른 기간 버튼, 없으면 기본 기간). */
   baseRange: DateRange | null;
-  /** 그림 칸 폭(px). 끌기·가로 스크롤의 px를 봉 수로 바꾼다. */
-  plotWidth: number;
+  /** 차트 SVG의 크기(px). 보기 창과 함께 좌표 변환(`chartScale`)을 만들고, 끌기·스크롤의 px를 그 봉 폭으로 바꾼다. */
+  width: number;
+  height: number;
   /** 빈 곳 끌기로 옮길 수 있는가(선택 도구일 때). 그리기 도구 중에는 끌기가 점 찍기와 겹치므로 끈다. */
   canDrag: boolean;
   /** 보기가 멈춘 뒤의 날짜 구간. null은 기본 보기로 되돌렸다는 뜻이다(주소의 날짜를 지운다). */
@@ -65,7 +67,7 @@ const keyOf = (series: string, range: DateRange) => `${series}|${range.start}|${
  *
  * - 휠 = 커서 자리 중심 확대·축소, 가로 스크롤·Shift+휠 = 이동, 선택 도구에서 빈 곳 끌기 = 이동, 더블클릭 = 기본
  *   보기. 차트에 초점이 있으면 +/=·− 확대·축소, ←/→ 이동, Home/0 기본 보기.
- * - 휠·끌기는 rAF 한 번으로 묶어 상태를 바꾼다.
+ * - 휠·끌기는 rAF 한 번으로 묶어 상태를 바꾼다. 그림 칸과 봉 폭은 `chartScale` 하나에서 읽는다(다시 재지 않는다).
  * - 보기가 멈추면(`RANGE_WRITE_DELAY_MS`) 보이는 날짜 구간을 `onRange`로 넘긴다 — 주소(replace)와 날짜 칸이 그
  *   값을 갖고, 그 주소가 돌아와도 보기를 다시 만들지 않는다. 기간 버튼·날짜 칸·뒤로 가기처럼 주소가 다른 기간으로
  *   바뀌면 그 기간의 기본 보기를 새로 만든다.
@@ -75,7 +77,8 @@ export const useChartNavigation = ({
   series,
   range,
   baseRange,
-  plotWidth,
+  width,
+  height,
   canDrag,
   onRange,
 }: ChartNavigationInput) => {
@@ -99,9 +102,13 @@ export const useChartNavigation = ({
   }
   const viewport = view?.viewport ?? null;
   const count = candles?.length ?? 0;
+  const scale: ChartScale | null =
+    candles !== undefined && viewport !== null && width > 0
+      ? chartScale({ candles, view: viewport, width, height })
+      : null;
 
   // 타이머·rAF·native 리스너는 React 밖에서 불린다 — 그때의 값은 commit과 같은 시점의 ref로 읽는다
-  const latest = useCommittedRef({ view, candles, series, baseRange, plotWidth, onRange });
+  const latest = useCommittedRef({ view, candles, series, baseRange, scale, onRange });
   const writeTimer = useRef<number | null>(null);
   const frame = useRef<number | null>(null);
   const wheel = useRef({ dx: 0, zoom: 0, anchor: 1 });
@@ -156,10 +163,7 @@ export const useChartNavigation = ({
     latest.current.onRange(null);
   };
 
-  const stepPx = () => {
-    const current = latest.current.view?.viewport;
-    return current ? latest.current.plotWidth / Math.max(current.to - current.from, 1e-9) : 1;
-  };
+  const stepPx = () => latest.current.scale?.step ?? 1;
 
   // 한 프레임에 모인 끌기·가로 스크롤·휠 확대를 한 번에 적용한다(따로 부르면 뒤 것이 앞 것을 덮는다)
   const flushFrame = () => {
@@ -177,6 +181,11 @@ export const useChartNavigation = ({
       let next = dragging !== null && dragBars !== null ? panViewport(dragging.viewport, dragBars, total) : current;
       if (scrollBars !== 0) next = panViewport(next, scrollBars, total);
       if (pending.zoom !== 0) next = zoomViewport(next, wheelZoomFactor(pending.zoom), pending.anchor, total);
+      // 끄는 중이면 기준을 이 보기·이 자리로 옮긴다 — 끄는 동안 휠로 확대한 것이 다음 끌기 계산에 덮이지 않는다
+      if (dragging !== null && dragX.current !== null) {
+        dragging.viewport = next;
+        dragging.x = dragX.current;
+      }
       return next;
     });
   };
@@ -187,9 +196,10 @@ export const useChartNavigation = ({
   // 휠: 페이지 스크롤 대신 차트를 확대·축소·이동한다. 페이지 스크롤을 막아야 해서 passive가 아닌 native 리스너를
   // 차트 SVG가 붙을 때 한 번 달고(ref 콜백의 정리 함수로 뗀다), 판정은 commit 시점의 ref 함수가 한다.
   const onWheel = (event: WheelEvent, element: SVGSVGElement) => {
-    if (viewport === null) return;
+    if (scale === null) return;
     event.preventDefault();
-    const unit = event.deltaMode === 1 ? LINE_PX : event.deltaMode === 2 ? plotWidth : 1;
+    const { plot } = scale;
+    const unit = event.deltaMode === 1 ? LINE_PX : event.deltaMode === 2 ? plot.right - plot.left : 1;
     const dx = event.deltaX * unit;
     const dy = event.deltaY * unit;
     const pending = wheel.current;
@@ -197,7 +207,8 @@ export const useChartNavigation = ({
     else if (Math.abs(dx) > Math.abs(dy)) pending.dx += dx;
     else {
       pending.zoom += dy;
-      pending.anchor = (event.clientX - element.getBoundingClientRect().left) / Math.max(plotWidth, 1);
+      const x = event.clientX - element.getBoundingClientRect().left;
+      pending.anchor = (x - plot.left) / (plot.right - plot.left);
     }
     schedule();
   };
@@ -222,6 +233,11 @@ export const useChartNavigation = ({
   const onPointerMove = (event: PointerEvent<SVGSVGElement>) => {
     const dragging = drag.current;
     if (dragging === null || dragging.pointerId !== event.pointerId) return;
+    // 단추를 놓았는데 놓기(pointerup)를 못 받았다(칸 밖에서 놓음 등) — 끌기를 끝낸다
+    if (event.buttons === 0) {
+      endPan(event);
+      return;
+    }
     if (!dragging.moved) {
       if (Math.abs(event.clientX - dragging.x) < DRAG_THRESHOLD) return;
       dragging.moved = true;
@@ -260,7 +276,12 @@ export const useChartNavigation = ({
   };
 
   return {
-    viewport,
+    /** 지금 보기의 좌표 변환. 보일 봉이 없거나(빈 기간) 폭을 재기 전이면 null. */
+    scale,
+    /** 보기 창이 없다 — 표시 기간에 걸친 봉이 없다(상장 전 구간 등). */
+    empty: candles !== undefined && range !== null && viewport === null,
+    /** 고른 기간의 기본 보기로 되돌린다(빈 기간 안내의 되돌리기 버튼도 쓴다). */
+    reset,
     /** 끌어서 옮기는 중(커서 모양). */
     panning,
     svgProps: {
@@ -274,6 +295,7 @@ export const useChartNavigation = ({
         suppressClick.current = false;
         event.stopPropagation();
       },
+      // 선·손잡이의 더블클릭은 그쪽에서 멈춘다(stopPropagation) — 여기 오는 것은 빈 곳이다
       onDoubleClick: () => {
         if (canDrag) reset();
       },
@@ -282,4 +304,3 @@ export const useChartNavigation = ({
   };
 };
 
-export type ChartNavigation = ReturnType<typeof useChartNavigation>;

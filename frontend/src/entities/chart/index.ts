@@ -43,14 +43,16 @@ export {
   chartTargetOf,
   completedCandles,
   displayRange,
+  hasCustomRange,
   monthsBefore,
   stockChartSearch,
+  switchSeries,
   visibleRange,
   type ChartPeriod,
+  type DateRange,
   type StockChartSearch,
 } from "./model/chart-search";
 export {
-  MIN_VISIBLE_BARS,
   defaultViewport,
   panViewport,
   viewportRange,
@@ -64,7 +66,6 @@ export {
   placeLevelLabels,
   spreadLabels,
   type LevelLabel,
-  type PlacedLabel,
 } from "./model/label-layout";
 export {
   chartErrorSentence,

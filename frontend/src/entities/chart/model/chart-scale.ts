@@ -149,42 +149,45 @@ export const priceTicks = (min: number, max: number, count: number): number[] =>
   return ticks;
 };
 
-export type DateTick = { index: number; label: string };
+export type DateTick = { index: number; x: number; label: string };
+
+/** 날짜 눈금 글자(가운데 정렬)가 그림 칸 양 끝에서 잘리지 않을 만큼의 여백(px). */
+const DATE_TICK_EDGE = 22;
 
 /**
  * 날짜 눈금: 보이는 봉 중 달이 바뀌는 첫 봉. 칸이 좁으면 `minGap`(px) 이상 떨어지게 1·3·6·12·24·60·120달 간격으로
  * 솎는다(여러 해를 한 칸에 넣도록 축소했을 때도 글자가 겹치지 않는다). 해가 바뀌는 눈금과 첫 눈금은 `2025.01`, 나머지는
- * `07`처럼 달만 쓰고, 해 단위로 솎을 때(12달 이상)는 `2025`처럼 해만 쓴다.
+ * `07`처럼 달만 쓰고, 해 단위로 솎을 때(12달 이상)는 `2025`처럼 해만 쓴다. 그림 칸 양 끝에서 글자가 잘릴 눈금은 뺀다.
  */
 export const dateTicks = (
   candles: readonly ChartCandleBody[],
-  scale: Pick<ChartScale, "first" | "last" | "step">,
+  scale: Pick<ChartScale, "first" | "last" | "step" | "plot" | "xOfIndex">,
   minGap: number,
 ): DateTick[] => {
+  // 달이 바뀌는 봉: 시작일의 `YYYY-MM` 글자만 견주고, 숫자는 눈금 후보에서만 읽는다
   const starts: { index: number; year: number; month: number }[] = [];
   for (let index = scale.first; index <= scale.last; index += 1) {
-    const [year, month] = candles[index].start.split("-").map(Number);
-    const previous = index > 0 ? candles[index - 1].start.split("-").map(Number) : null;
-    if (previous === null || previous[0] !== year || previous[1] !== month)
-      starts.push({ index, year, month });
+    const start = candles[index].start;
+    if (index > 0 && candles[index - 1].start.slice(0, 7) === start.slice(0, 7)) continue;
+    starts.push({ index, year: Number(start.slice(0, 4)), month: Number(start.slice(5, 7)) });
   }
-  const months = starts.length;
   const span = Math.max(scale.last - scale.first + 1, 1);
-  const barsPerMonth = months > 0 ? span / months : span;
+  const barsPerMonth = starts.length > 0 ? span / starts.length : span;
   const stride = [1, 3, 6, 12, 24, 60, 120].find((m) => m * barsPerMonth * scale.step >= minGap) ?? 120;
+  const { plot } = scale;
   return starts
     .filter((tick) => (tick.year * 12 + tick.month - 1) % stride === 0)
+    .map((tick) => ({ ...tick, x: scale.xOfIndex(tick.index) }))
+    .filter((tick) => tick.x >= plot.left + DATE_TICK_EDGE && tick.x <= plot.right - DATE_TICK_EDGE)
     .map((tick, order) => {
       const month = String(tick.month).padStart(2, "0");
-      // 첫 눈금에는 해를 붙여 어느 해인지 읽히게 한다
-      return {
-        index: tick.index,
-        label:
-          stride >= 12
-            ? String(tick.year)
-            : tick.month === 1 || order === 0
-              ? `${tick.year}.${month}`
-              : month,
-      };
+      // 첫 눈금(잘리지 않고 남은 것)에는 해를 붙여 어느 해인지 읽히게 한다
+      const label =
+        stride >= 12
+          ? String(tick.year)
+          : tick.month === 1 || order === 0
+            ? `${tick.year}.${month}`
+            : month;
+      return { index: tick.index, x: tick.x, label };
     });
 };

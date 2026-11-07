@@ -6,15 +6,14 @@ import {
   CHART_LINE_MUTATION_KEY,
   CandlePlot,
   DEFAULT_TIMEFRAME,
-  PRICE_AXIS_WIDTH,
   chartCandlesQuery,
   chartErrorSentence,
   chartLinesQuery,
-  chartScale,
   chartTargetOf,
   completedCandles,
   displayRange,
   formatPrice,
+  hasCustomRange,
   levelSegments,
   lineTone,
   timeframeLabel,
@@ -23,6 +22,7 @@ import {
   type ChartInstrumentBody,
   type ChartLineBody,
   type ChartTarget,
+  type DateRange,
   type StockChartSearch,
   type Timeframe,
 } from "../../../entities/chart";
@@ -92,8 +92,6 @@ const ChartHead = ({
   );
 };
 
-type DateRange = { start: string; end: string };
-
 type ChartBodyProps = {
   target: ChartTarget;
   search: StockChartSearch;
@@ -152,19 +150,18 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
   const range = context ? displayRange(search, context.as_of) : null;
   // 되돌릴 기본 보기: 고른 기간 버튼(없으면 기본 기간)을 기준일에서 센 기간
   const baseRange = context ? displayRange({ period: search.period }, context.as_of) : null;
+  const height = chartHeight(width);
   const navigation = useChartNavigation({
     candles,
     series: `${target.kind}|${target.code}|${timeframe}`,
     range,
     baseRange,
-    plotWidth: Math.max(width - PRICE_AXIS_WIDTH, 1),
+    width,
+    height,
     canDrag: drawing.state.tool === "select",
     onRange: onViewRange,
   });
-  const viewport = navigation.viewport;
-  const height = chartHeight(width);
-  const scale =
-    candles && viewport && width > 0 ? chartScale({ candles, view: viewport, width, height }) : null;
+  const scale = navigation.scale;
   const lines = linesQuery.data?.lines ?? [];
   const lastCompleted = candlesQuery.data?.last_completed ?? null;
   // 응답이 같으면 같은 배열 — 고른 선 카드의 봉 날짜 목록(수천 개)이 다시 그려지지 않는다
@@ -235,10 +232,16 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
               <p className="stock-chart__state" role="status">
                 {t("chart.loading")}
               </p>
-            ) : viewport === null ? (
-              <p className="stock-chart__state" role="status">
-                {t("chart.empty.range")}
-              </p>
+            ) : navigation.empty ? (
+              <div className="stock-chart__state">
+                <p role="status">{t("chart.empty.range")}</p>
+                {/* 상장 전 구간처럼 날짜 칸이 봉 없는 기간이면 고른 기간 버튼의 기본 보기로 돌아간다 */}
+                {hasCustomRange(search) ? (
+                  <Button size="small" onClick={navigation.reset}>
+                    {t("chart.empty.reset")}
+                  </Button>
+                ) : null}
+              </div>
             ) : scale !== null && candles && instrument ? (
               <svg
                 className={`stock-chart__svg${navigation.panning ? " stock-chart__svg--panning" : ""}`}

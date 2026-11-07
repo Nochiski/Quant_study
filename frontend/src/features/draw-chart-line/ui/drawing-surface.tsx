@@ -13,7 +13,7 @@ import {
   type ChartPointBody,
   type ChartScale,
   type InstrumentKind,
-  type PlacedLabel,
+  type LevelLabel,
   type Timeframe,
 } from "../../../entities/chart";
 import { useCommittedRef } from "../../../shared/lib/react";
@@ -134,7 +134,7 @@ export const DrawingSurface = ({
     drag === null && preview.drawing !== null && state.tool !== "select"
       ? levelSegments(preview.drawing.paths, true, scale)
       : null;
-  const labelsByOwner = new Map<string, PlacedLabel[]>();
+  const labelsByOwner = new Map<string, LevelLabel[]>();
   placeLevelLabels(
     [
       ...shapes.flatMap(({ line, segments }) =>
@@ -220,6 +220,7 @@ export const DrawingSurface = ({
                   drawing.startDrag(selected, index);
                 }}
                 onClick={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
               />
             );
           })

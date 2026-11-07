@@ -48,7 +48,7 @@ const shownRange = async (page: Page) => {
 };
 
 test(
-  "US-DM-20 휠·끌기·키보드로 코스피 일봉을 확대·이동하면 날짜 칸이 따라오고 더블클릭·Home이 고른 기간으로 되돌린다",
+  "US-DM-20 휠·끌기·키보드로 코스피 일봉을 확대·이동하면 날짜 칸이 따라오고 더블클릭·Home·주기 변경·빈 기간 안내가 고른 기간으로 되돌린다",
   { tag: ["@story", "@US-DM-20"] },
   async ({ page }) => {
     await clearLines();
@@ -78,7 +78,7 @@ test(
     expect(barsIn(zoomed)).toBeLessThan(barsIn(base) * 0.7);
     await expect(page).toHaveURL(new RegExp(`start=${zoomed.start}`, "u"));
     // 보이는 구간은 화면 낭독기에도 알린다
-    await expect(page.getByText(`보이는 구간 ${zoomed.start} ~ ${zoomed.end}`)).toBeAttached();
+    await expect(page.locator('[aria-live="polite"]').getByText(`보이는 구간 ${zoomed.start} ~ ${zoomed.end}`)).toBeAttached();
 
     // 확대는 이력을 쌓지 않는다: 뒤로 가기는 앞 조건(주봉)으로, 앞으로 가기는 확대한 일봉으로
     await page.goBack();
@@ -95,7 +95,20 @@ test(
     await page.mouse.up();
     await expect.poll(async () => (await shownRange(page)).start < zoomed.start).toBe(true);
 
-    // 더블클릭: 고른 기간(2년)으로 돌아간다
+    // 그리기 도구 중에는 끌어도 옮겨지지 않는다(끌기는 점 찍기다). 찍힌 점은 Esc로 버린다
+    const panned = await shownRange(page);
+    await page.getByRole("button", { name: "피보나치 되돌림" }).click();
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(from.x + 240, from.y, { steps: 8 });
+    await page.mouse.up();
+    await page.keyboard.press("Escape");
+    // 주소 쓰기는 멈춘 뒤 300ms에 간다 — 그보다 넉넉히 기다려도 날짜 칸은 그대로다
+    await page.waitForTimeout(700);
+    expect(await shownRange(page)).toEqual(panned);
+    await page.getByRole("button", { name: "선택·이동" }).click();
+
+    // 빈 곳 더블클릭: 고른 기간(2년)으로 돌아간다
     const empty = await plotPoint(chart, 0.5, 0.5);
     await page.mouse.dblclick(empty.x, empty.y);
     await expect(twoYears).toHaveAttribute("aria-pressed", "true");
@@ -113,11 +126,33 @@ test(
     await page.keyboard.press("Home");
     await expect(twoYears).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => shownRange(page)).toEqual(base);
+
+    // 열 봉 남짓까지 확대한 채 월봉으로 바꾸면 날짜가 따라가지 않고 고른 기간(2년)의 기본 보기로 열린다
+    await page.mouse.move(centre.x, centre.y);
+    for (let step = 0; step < 10; step += 1) {
+      await page.mouse.wheel(0, -460);
+      // 휠은 한 프레임에 모아 한 번에 2배까지만 확대한다 — 프레임을 넘겨 가며 굴린다
+      await page.waitForTimeout(40);
+    }
+    await expect.poll(async () => barsIn(await shownRange(page))).toBeLessThanOrEqual(12);
+    await conditions.getByRole("button", { name: "월봉" }).click();
+    await expect(page.getByRole("group", { name: "코스피 월봉 캔들 차트와 선" })).toBeVisible();
+    await expect(twoYears).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => shownRange(page)).toEqual(base);
+
+    // 봉이 없는 기간(연습용 원천의 첫 봉 2023-01-02보다 앞)은 빈 안내의 버튼으로 고른 기간에 돌아간다
+    const before = new URLSearchParams({ ...KOSPI, tf: "day", period: "2y", start: "2020-01-02", end: "2020-06-30" });
+    await page.goto(`/research/chart?${before.toString()}`);
+    await expect(page.getByText("이 기간에는 봉이 없어요.", { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: "고른 기간으로 돌아가기" }).click();
+    await expect(chart).toBeVisible();
+    await expect(twoYears).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => shownRange(page)).toEqual(base);
   },
 );
 
 test(
-  "US-DM-20 오른쪽 축 배지는 현재가와 고른 선의 레벨만 보인다",
+  "US-DM-20 오른쪽 축 배지는 현재가와 고른 선(없으면 포인터를 올린 선)의 레벨만 보인다",
   { tag: ["@story", "@US-DM-20"] },
   async ({ page }) => {
     await clearLines();
@@ -158,5 +193,13 @@ test(
     expect(await badges.count()).toBeGreaterThan(2);
     await retracement.click();
     await expect(badges).toHaveCount(1);
+
+    // 고른 선이 없을 때 선에 포인터를 올리면 그 선의 레벨 배지가 생긴다(수평선 = 글자 라벨이 없는 선)
+    const hlineHit = chart.locator(".chart-line").filter({ hasNot: page.locator("text") }).locator(".chart-line__hit");
+    const hitBox = await hlineHit.boundingBox();
+    if (hitBox === null) throw new Error("hline has no bounding box");
+    await page.mouse.move(hitBox.x + hitBox.width - 12, hitBox.y + hitBox.height / 2);
+    await expect(chart.locator(".chart-badge--mine")).toHaveCount(1);
+    await expect(chart.locator(".chart-badge--mine")).toHaveText(price);
   },
 );

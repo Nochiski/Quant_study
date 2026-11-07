@@ -15,8 +15,6 @@ type CandlePlotProps = {
 };
 
 const DATE_TICK_GAP = 64;
-// 날짜 눈금 글자(가운데 정렬)가 그림 칸 양 끝에서 잘리지 않을 만큼의 여백(px)
-const DATE_TICK_EDGE = 22;
 const PRICE_TICK_SPACING = 56;
 
 /**
@@ -78,16 +76,11 @@ export const CandlePlot = ({ candles, scale, instrumentKind, height, current }: 
         ))}
       </g>
       <g className="chart-plot__tick chart-plot__tick--date">
-        {dateTicks(candles, scale, DATE_TICK_GAP)
-          .filter((tick) => {
-            const x = scale.xOfIndex(tick.index);
-            return x >= plot.left + DATE_TICK_EDGE && x <= plot.right - DATE_TICK_EDGE;
-          })
-          .map((tick) => (
-            <text key={tick.index} x={scale.xOfIndex(tick.index)} y={height - 8}>
-              {tick.label}
-            </text>
-          ))}
+        {dateTicks(candles, scale, DATE_TICK_GAP).map((tick) => (
+          <text key={tick.index} x={tick.x} y={height - 8}>
+            {tick.label}
+          </text>
+        ))}
       </g>
       <g clipPath={`url(#${clipId})`}>
         <path className="chart-plot__wick chart-plot__wick--up" d={groups.up[0]} />

@@ -29,11 +29,11 @@ export const spreadLabels = (
   return result;
 };
 
-/** 선 위 레벨 라벨 하나: 어느 선(`owner`)의 무슨 글자를 선 위 어느 점(`x`·`y`)에 붙이는가. */
+/**
+ * 선 위 레벨 라벨 하나: 어느 선(`owner`)의 무슨 글자를 어디에 두는가. 배치 전(`segmentLabels`)에는 `x`·`y`가 선 위
+ * 점이고, 배치 뒤(`placeLevelLabels`)에는 글자 왼쪽 끝과 바닥선이다.
+ */
 export type LevelLabel = { owner: string; key: string; text: string; x: number; y: number };
-
-/** 그려질 라벨(같은 모양): `x`는 글자 왼쪽 끝, `y`는 글자 바닥선이다. */
-export type PlacedLabel = LevelLabel;
 
 // 12px 모노스페이스 글자 한 자의 폭과 라벨 줄 간격(px). 글자 폭은 겹침 판정에만 쓰는 어림값이다.
 const CHAR_WIDTH = 7.4;
@@ -65,7 +65,7 @@ export const labelAnchor = (
  * 끝을 넘으면 안쪽으로). 가로로 겹치는 라벨끼리는 세로로 `spreadLabels`처럼 밀어내 줄 간격을 둔다. 돌려주는
  * 순서는 입력 순서 그대로다.
  */
-export const placeLevelLabels = (labels: readonly LevelLabel[], plot: PlotBox): PlacedLabel[] => {
+export const placeLevelLabels = (labels: readonly LevelLabel[], plot: PlotBox): LevelLabel[] => {
   const top = plot.top + LABEL_ASCENT;
   const bottom = plot.bottom - LABEL_DESCENT;
   const boxes = labels.map((label) => {

@@ -260,6 +260,17 @@
   text-align: center;
 }
 
+/* 빈 기간 안내 안의 문장과 되돌리기 버튼 */
+div.stock-chart__state {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+}
+
+div.stock-chart__state p {
+  margin: 0;
+}
+
 .stock-chart__foot {
   display: grid;
   gap: var(--space-2);

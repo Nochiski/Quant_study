@@ -1483,6 +1483,12 @@ export type ChartChannelCandidateBody = {
  * ChartChannelsBody
  */
 export type ChartChannelsBody = {
+  /**
+   * Anchor Choices
+   *
+   * 첫 점(`first_anchor`)으로 고를 수 있는 점 — 구간 안에서 구간 끝까지 확정된 그 방향의 피벗(up: 저점, down: 고점).
+   */
+  anchor_choices: Array<ChartPivotBody>;
   anchor_issue: AnchorIssue | null;
   /**
    * Anchor Issue Message
@@ -1521,6 +1527,12 @@ export type ChartConfluenceBody = {
    * 낮은 가격부터.
    */
   groups: Array<ChartConfluenceGroupBody>;
+  /**
+   * Rules
+   *
+   * 중첩을 세는 규칙 문장(backend가 완성).
+   */
+  rules: Array<string>;
   /**
    * Skipped Line Ids
    *
@@ -1976,11 +1988,11 @@ export type ChartRegimeBody = {
    */
   ends_near_extreme: boolean;
   /**
-   * Pivots
+   * Pivot Rule
    *
-   * 구간 안에서 구간 끝까지 확정된 후보용 피벗(채널 첫 점 고르기 목록).
+   * 피벗 확정 규칙 문장(backend가 완성).
    */
-  pivots: Array<ChartPivotBody>;
+  pivot_rule: string;
   reason: RegimeReason | null;
   /**
    * Rules
@@ -2173,6 +2185,12 @@ export type ChartZonesBody = {
   basis: string;
   context: ChartContextBody;
   record: ChartAutoRecordBody;
+  /**
+   * Rules
+   *
+   * 묶기·접촉·구분·생긴 날 규칙 문장(backend가 완성).
+   */
+  rules: Array<string>;
   timeframe: Timeframe;
   window: ChartWindowBody;
   /**

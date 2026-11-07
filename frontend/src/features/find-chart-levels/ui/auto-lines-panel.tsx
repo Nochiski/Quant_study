@@ -4,8 +4,6 @@ import {
   formatPrice,
   lineIssueLabel,
   regimeVerdictLabel,
-  timeframeLabel,
-  trendDirectionLabel,
   type ChartInstrumentBody,
   type ChartLineBody,
   type DateRange,
@@ -15,7 +13,7 @@ import { t, tFill } from "../../../shared/config";
 import { Button } from "../../../shared/ui";
 import { autoRows, type AutoRow } from "../model/auto-rows";
 import type { FinderTool } from "../model/finder-panel";
-import { lineEvidence } from "../model/line-evidence";
+import { autoLineTitle, zoneBounds } from "../model/line-evidence";
 import type { LevelFinder } from "../model/use-level-finder";
 
 type AutoLinesPanelProps = {
@@ -77,21 +75,7 @@ export const AutoLinesPanel = ({
   const price = (value: number) => formatPrice(value, instrument.kind);
   const { dispatch } = finder;
 
-  const rowTitle = (row: AutoRow) => {
-    const [first] = row.lines;
-    const evidence = lineEvidence(row.lines, null);
-    const body =
-      row.kind === "hline"
-        ? tFill("chart.finder.zones.row", { count: row.lines.length })
-        : evidence.direction === null
-          ? t(`chart.finder.kind.${row.kind}`)
-          : tFill("chart.finder.channel.row", {
-              direction: trendDirectionLabel(evidence.direction),
-            });
-    return first.timeframe === timeframe
-      ? body
-      : `${body} · ${timeframeLabel(first.timeframe)}`;
-  };
+  const rowTitle = (row: AutoRow) => autoLineTitle(row.lines, timeframe);
   const rowDetail = (row: AutoRow) => {
     const [first] = row.lines;
     const auto = first.auto;
@@ -224,10 +208,8 @@ export const AutoLinesPanel = ({
                   {expanded ? (
                     <ul className="auto-lines__zones">
                       {row.lines.map((line) => {
-                        const prices = line.anchors.map(
-                          (anchor) => anchor.price,
-                        );
-                        const range = `${price(Math.min(...prices))}–${price(Math.max(...prices))}`;
+                        const { low, high } = zoneBounds(line);
+                        const range = `${price(low)}–${price(high)}`;
                         return (
                           <li key={line.line_id}>
                             <label>

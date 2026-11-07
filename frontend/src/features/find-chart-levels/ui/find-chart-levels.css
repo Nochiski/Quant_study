@@ -144,6 +144,11 @@
   border-top: 1px solid var(--border);
 }
 
+/* 아래 줄의 알림은 단추 위 한 줄을 다 쓴다 */
+.finder-panel__foot > :not(button) {
+  flex-basis: 100%;
+}
+
 /* 패널 안의 절 */
 .finder-section {
   display: grid;

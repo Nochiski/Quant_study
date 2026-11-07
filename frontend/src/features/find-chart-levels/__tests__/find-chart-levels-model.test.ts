@@ -10,7 +10,14 @@ import {
 } from "../model/analysis-window";
 import { autoRows } from "../model/auto-rows";
 import { finderReducer, INITIAL_PANEL, type FinderPanel } from "../model/finder-panel";
-import { changeFromCurrent, lineEvidence, recreateSeed } from "../model/line-evidence";
+import {
+  autoLineTitle,
+  changeFromCurrent,
+  lineEvidence,
+  recreateSeed,
+  strengthText,
+  zoneBounds,
+} from "../model/line-evidence";
 
 const bar = (start: string, end = start): ChartCandleBody => ({
   start,
@@ -45,15 +52,23 @@ describe("analysis window edges", () => {
     expect(moveWindowEdge({ start: 0, end: 0 }, "end", 3, 1)).toEqual({ start: 0, end: 0 });
   });
 
-  it("moves an edge one bar per arrow key and ten with Shift", () => {
+  it("moves an edge one bar per arrow key, ten with Shift, and to its limit with Home/End", () => {
     expect(nudgeWindowEdge({ start: 1, end: 4 }, "end", "ArrowLeft", false, 6)).toEqual({ start: 1, end: 3 });
     expect(nudgeWindowEdge({ start: 12, end: 40 }, "start", "ArrowRight", true, 50)).toEqual({ start: 22, end: 40 });
+    expect(nudgeWindowEdge({ start: 1, end: 4 }, "start", "Home", false, 6)).toEqual({ start: 0, end: 4 });
+    expect(nudgeWindowEdge({ start: 1, end: 4 }, "end", "End", false, 6)).toEqual({ start: 1, end: 5 });
+    // 끝 테두리의 Home은 시작 바로 뒤 봉까지만(구간은 두 봉 이상)
+    expect(nudgeWindowEdge({ start: 1, end: 4 }, "end", "Home", false, 6)).toEqual({ start: 1, end: 2 });
     expect(nudgeWindowEdge({ start: 1, end: 4 }, "start", "Enter", false, 6)).toBeNull();
   });
 
   it("maps response dates to bars and back to the bar start dates sent in requests", () => {
     expect(barWindowOf(WEEKS, { start: "2025-01-13", end: "2025-02-03" })).toEqual({ start: 1, end: 4 });
-    expect(barWindowOf(WEEKS, { start: "2025-01-14", end: "2025-02-03" })).toBeNull();
+    // 직접 넣은 주 중간 날짜(수요일)·주말은 그 날짜가 든 주봉이다(서버 `index_of`처럼) — 음영이 사라지지 않는다
+    expect(barWindowOf(WEEKS, { start: "2025-01-15", end: "2025-02-08" })).toEqual({ start: 1, end: 4 });
+    // 첫 봉 앞이거나 마지막 봉의 끝(2025-02-14 금) 뒤면 봉이 없다
+    expect(barWindowOf(WEEKS, { start: "2025-01-01", end: "2025-02-03" })).toBeNull();
+    expect(barWindowOf(WEEKS, { start: "2025-01-13", end: "2025-02-15" })).toBeNull();
     expect(windowDates(WEEKS, { start: 1, end: 4 })).toEqual({ start: "2025-01-13", end: "2025-02-03" });
     // 화면 기간: 보이는 완성 봉의 첫·마지막 봉 시작일
     expect(visibleWindow(WEEKS.slice(2, 5))).toEqual({ start: "2025-01-20", end: "2025-02-03" });
@@ -81,6 +96,24 @@ describe("finder panel", () => {
     expect(draft(picked)?.candidate).toBe(2);
     const sensitivity = finderReducer(picked, { type: "edit", input: { candidateSensitivity: 1.5 } });
     expect(draft(sensitivity)).toMatchObject({ candidate: 0, candidateSensitivity: 1.5, firstAnchor: "2025-01-13" });
+  });
+
+  it("opens with the first-point mode when the seed has a first point, and counts only hand edits as changed", () => {
+    expect(draft(opened)).toMatchObject({ anchorMode: "first", paramsTouched: false });
+    // 다시 만들기로 채운 저장 민감도는 바꾼 값이 아니다
+    const seeded = finderReducer(INITIAL_PANEL, {
+      type: "openCreate",
+      tool: "fib_channel",
+      seed: { candidateSensitivity: 1, structureSensitivity: 2 },
+      returnKey: "k",
+    });
+    expect(draft(seeded)).toMatchObject({ anchorMode: "auto", paramsTouched: false });
+    expect(draft(finderReducer(seeded, { type: "edit", input: { candidateSensitivity: 1.5 } }))?.paramsTouched).toBe(true);
+    // 세 점 자동으로 돌아가면 첫 점을 비운다
+    expect(draft(finderReducer(opened, { type: "edit", input: { anchorMode: "auto" } }))).toMatchObject({
+      anchorMode: "auto",
+      firstAnchor: null,
+    });
   });
 
   it("forgets the first point when the window or direction changes — it was picked from that window", () => {
@@ -205,6 +238,19 @@ describe("line evidence", () => {
   it("reads no change when the current price is missing", () => {
     expect(changeFromCurrent(110, null)).toBeNull();
     expect(changeFromCurrent(110, 100)).toBeCloseTo(10);
+  });
+
+  it("names a row and formats its numbers one way everywhere", () => {
+    expect(autoLineTitle([channel], "week")).toBe("하락 채널");
+    expect(autoLineTitle([channel], "day")).toBe("하락 채널 · 주봉");
+    expect(autoLineTitle([line({ kind: "hline" }), line({ kind: "hline" })], "week")).toBe("수평 지지·저항 구간 · 2곳");
+    expect(strengthText(-1.754)).toBe("−1.75");
+    expect(strengthText(4.11)).toBe("+4.11");
+    expect(strengthText(null)).toBe("—");
+    expect(zoneBounds(line({ anchors: [{ bar_date: "2025-01-06", price: 2017 }, { bar_date: "2025-01-06", price: 1990 }] }))).toEqual({
+      low: 1990,
+      high: 2017,
+    });
   });
 });
 

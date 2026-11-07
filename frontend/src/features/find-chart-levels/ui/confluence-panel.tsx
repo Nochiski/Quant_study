@@ -2,6 +2,7 @@ import { useId } from "react";
 
 import {
   formatPrice,
+  levelText,
   lineKindLabel,
   lineTitle,
   lineTone,
@@ -33,7 +34,6 @@ type ConfluencePanelProps = {
   current: number | null;
 };
 
-const levelText = (level: number) => String(Number(level.toFixed(3)));
 
 /**
  * 중첩 근거: 서로 다른 종류 2개 이상이 덮는 가격대(서버 `/confluence` 응답 그대로)마다 교집합·현재가 대비·종류·겹친 선,
@@ -82,14 +82,13 @@ export const ConfluencePanel = ({
         />
         {t("chart.finder.confluence.includeMine")}
       </label>
-      <p className="finder-note">{t("chart.finder.confluence.sameKind")}</p>
       {error ? <FinderFailure error={error} /> : null}
       {confluence ? (
-        <p className="finder-note">
-          {tFill("chart.finder.confluence.basis", {
-            tol: Number((confluence.tolerance * 100).toFixed(3)),
-          })}
-        </p>
+        <ul className="finder-list">
+          {confluence.rules.map((rule) => (
+            <li key={rule}>{rule}</li>
+          ))}
+        </ul>
       ) : null}
       {confluence !== undefined && groups.length === 0 ? (
         <p className="finder-note">{t("chart.finder.confluence.empty")}</p>

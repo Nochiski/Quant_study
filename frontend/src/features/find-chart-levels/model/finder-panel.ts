@@ -1,9 +1,4 @@
-import type {
-  DateRange,
-  LineKind,
-  SwingChoice,
-  TrendDirection,
-} from "../../../entities/chart";
+import type { DateRange, LineKind, SwingChoice, TrendDirection } from "../../../entities/chart";
 
 /**
  * 자동 찾기 패널(생성 패널 3종·근거·중첩)의 화면 상태와 상태 바꾸기 규칙의 owner. 서버 응답(판정·후보)은 담지 않고
@@ -16,6 +11,9 @@ import type {
 /** 채널 방향 고르기: 추천을 따름(서버 판정이 정한다), 직접 고른 방향, 그리지 않음. */
 export type DirectionChoice = "recommended" | TrendDirection | "none";
 
+/** 채널 기준점 정하는 법: 세 점 모두 자동, 첫 점은 내가 고르기. */
+export type AnchorMode = "auto" | "first";
+
 /**
  * 생성 패널의 입력. 값이 null이면 서버 기본값이다(민감도·묶는 폭·최소 접촉은 응답 `record.params`가 실제 값을 보인다).
  * `window`가 null이면 채널은 서버 기본 판정 구간(가운데 제안 칩)이다.
@@ -24,8 +22,11 @@ export type FinderDraft = {
   window: DateRange | null;
   candidateSensitivity: number | null;
   structureSensitivity: number | null;
+  /** 이 패널에서 파라미터 칸을 고쳤는가("바꾼 값 있음" 표시). 다시 만들기로 채운 저장 값은 고친 것이 아니다. */
+  paramsTouched: boolean;
   /** 채널 */
   direction: DirectionChoice;
+  anchorMode: AnchorMode;
   firstAnchor: string | null;
   /** 되돌림 */
   swing: SwingChoice;
@@ -34,9 +35,9 @@ export type FinderDraft = {
   /** 수평 구간 */
   widthAtr: number | null;
   minTouches: number | null;
-  /** 고른 채널 후보 자리(순위순 index). */
+  /** 고른 채널 후보 자리(순위순 index). 결과가 바뀌면 0으로 돌아간다. */
   candidate: number;
-  /** 수평 구간 결과 중 뺀 구간의 자리(기본은 모두 추가). */
+  /** 수평 구간 결과 중 뺀 구간의 자리(기본은 모두 추가). 결과가 바뀌면 비운다. */
   excludedZones: readonly number[];
 };
 
@@ -44,7 +45,9 @@ export const DEFAULT_DRAFT: FinderDraft = {
   window: null,
   candidateSensitivity: null,
   structureSensitivity: null,
+  paramsTouched: false,
   direction: "recommended",
+  anchorMode: "auto",
   firstAnchor: null,
   swing: "range_extremes",
   levels: null,
@@ -66,18 +69,11 @@ export type FinderPanel =
 
 export const INITIAL_PANEL: FinderPanel = { view: "layers", focusKey: null };
 
-/** 입력 중 고칠 수 있는 칸(고른 후보 자리 제외). */
-export type DraftInput = Partial<
-  Omit<FinderDraft, "candidate" | "excludedZones">
->;
+/** 입력 중 고칠 수 있는 칸(고른 후보 자리·고친 표시 제외). */
+export type DraftInput = Partial<Omit<FinderDraft, "candidate" | "excludedZones" | "paramsTouched">>;
 
 export type FinderAction =
-  | {
-      type: "openCreate";
-      tool: FinderTool;
-      seed?: Partial<FinderDraft>;
-      returnKey: string;
-    }
+  | { type: "openCreate"; tool: FinderTool; seed?: Partial<FinderDraft>; returnKey: string }
   | { type: "openEvidence"; lineIds: readonly string[]; returnKey: string }
   | { type: "openConfluence"; returnKey: string }
   | { type: "close" }
@@ -87,27 +83,35 @@ export type FinderAction =
   | { type: "pickCandidate"; index: number }
   | { type: "toggleZone"; index: number };
 
-/**
- * 입력이 바뀌면 결과(후보 순위·찾은 구간)가 새로 오므로 고른 후보는 1순위로, 뺀 구간은 비운다. 판정 구간을 바꾸면 첫
- * 점도 비운다 — 첫 점은 그 구간 안의 확정 피벗 목록에서 고른 것이라 다른 구간에서는 `outside_window`가 된다.
- */
-const edited = (draft: FinderDraft, input: DraftInput): FinderDraft => ({
-  ...draft,
-  ...input,
-  firstAnchor:
-    input.firstAnchor !== undefined
-      ? input.firstAnchor
-      : input.window !== undefined || input.direction !== undefined
-        ? null
-        : draft.firstAnchor,
-  candidate: 0,
-  excludedZones: [],
-});
+const PARAM_FIELDS = ["candidateSensitivity", "structureSensitivity", "widthAtr", "minTouches"] as const;
 
-export const finderReducer = (
-  panel: FinderPanel,
-  action: FinderAction,
-): FinderPanel => {
+/**
+ * 입력이 바뀌면 결과(후보 순위·찾은 구간)가 새로 오므로 고른 후보는 1순위로, 뺀 구간은 비운다. 판정 구간·방향을 바꾸면
+ * 첫 점도 비운다 — 첫 점은 그 구간·방향의 확정 피벗 목록에서 고른 것이라 다른 입력에서는 `not_a_pivot`·`outside_window`가
+ * 된다. 세 점 자동으로 돌아가면 첫 점을 비운다.
+ */
+const edited = (draft: FinderDraft, input: DraftInput): FinderDraft => {
+  const anchorMode = input.anchorMode ?? draft.anchorMode;
+  const firstAnchor =
+    anchorMode === "auto"
+      ? null
+      : input.firstAnchor !== undefined
+        ? input.firstAnchor
+        : input.window !== undefined || input.direction !== undefined
+          ? null
+          : draft.firstAnchor;
+  return {
+    ...draft,
+    ...input,
+    anchorMode,
+    firstAnchor,
+    paramsTouched: draft.paramsTouched || PARAM_FIELDS.some((field) => input[field] !== undefined),
+    candidate: 0,
+    excludedZones: [],
+  };
+};
+
+export const finderReducer = (panel: FinderPanel, action: FinderAction): FinderPanel => {
   switch (action.type) {
     case "openCreate":
       return {
@@ -116,33 +120,25 @@ export const finderReducer = (
         draft: {
           ...DEFAULT_DRAFT,
           ...action.seed,
+          anchorMode: action.seed?.firstAnchor ? "first" : "auto",
+          paramsTouched: false,
           candidate: 0,
           excludedZones: [],
         },
         returnKey: action.returnKey,
       };
     case "openEvidence":
-      return {
-        view: "evidence",
-        lineIds: action.lineIds,
-        returnKey: action.returnKey,
-      };
+      return { view: "evidence", lineIds: action.lineIds, returnKey: action.returnKey };
     case "openConfluence":
       return { view: "confluence", returnKey: action.returnKey };
     case "close":
-      return panel.view === "layers"
-        ? panel
-        : { view: "layers", focusKey: panel.returnKey };
+      return panel.view === "layers" ? panel : { view: "layers", focusKey: panel.returnKey };
     case "reset":
       return INITIAL_PANEL;
     case "edit":
-      return panel.view === "create"
-        ? { ...panel, draft: edited(panel.draft, action.input) }
-        : panel;
+      return panel.view === "create" ? { ...panel, draft: edited(panel.draft, action.input) } : panel;
     case "pickCandidate":
-      return panel.view === "create"
-        ? { ...panel, draft: { ...panel.draft, candidate: action.index } }
-        : panel;
+      return panel.view === "create" ? { ...panel, draft: { ...panel.draft, candidate: action.index } } : panel;
     case "toggleZone": {
       if (panel.view !== "create") return panel;
       const excluded = panel.draft.excludedZones;

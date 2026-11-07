@@ -1,7 +1,8 @@
 import type { ChartLevelPathBody, InstrumentKind } from "../../../shared/api";
 import { formatPrice } from "./chart-price";
 import type { ChartScale, PlotBox } from "./chart-scale";
-import { labelAnchor, type LevelLabel } from "./label-layout";
+import { labelAnchor, placeLevelLabels, type LevelLabel } from "./label-layout";
+import type { LineTone } from "./line-tone";
 
 /**
  * 레벨 선을 그릴 점(서버 응답 `paths`) → px 선분. 설계 문서 6장 계약: 화면은 `start`·`end` 두 점을 날짜 축
@@ -101,7 +102,8 @@ export const formedSegments = (
 export const segmentPath = (segment: LevelSegment): string =>
   `M${point(segment.x1, segment.y1)}L${point(segment.x2, segment.y2)}`;
 
-const levelText = (level: number): string => String(Number(level.toFixed(3)));
+/** 레벨 r의 표기(0.618, 1.618 — 꼬리 자리를 떼고 소수 셋째 자리까지). 라벨·표·문장이 같은 표기를 쓴다. */
+export const levelText = (level: number): string => String(Number(level.toFixed(3)));
 
 /**
  * 선 하나의 레벨 라벨 자리(배치 전): 레벨 선은 "r (가격)", 수평선·띠는 메모(없으면 라벨 없음). 가격은 기준 봉의 화면
@@ -124,3 +126,32 @@ export const segmentLabels = (
       ? []
       : [{ owner, key: `${owner}-${segment.level ?? "h"}-${index}`, text, x: at.x, y: at.y }];
   });
+
+/**
+ * 저장 선이 아닌 그림(아직 저장하지 않은 자동 후보 미리보기). 저장 선과 같은 그리기·라벨 배치를 거친다 — 누를 자리는
+ * 없다.
+ */
+export type ChartOverlayLine = {
+  owner: string;
+  tone: LineTone;
+  segments: readonly LevelSegment[];
+  /** 생긴 날 자리 x(그 앞은 옅게). */
+  formedX?: number;
+};
+
+/**
+ * 선 여러 개(저장 선·미리보기)의 레벨 라벨을 한 벌로 배치해 선(`owner`)별로 묶는다 — 가까운 자리의 라벨은 어느 선의
+ * 것이든 서로 밀어낸다.
+ */
+export const placeLineLabels = (
+  lines: readonly { owner: string; segments: readonly LevelSegment[]; memo?: string }[],
+  instrumentKind: InstrumentKind,
+  plot: PlotBox,
+): Map<string, LevelLabel[]> => {
+  const byOwner = new Map<string, LevelLabel[]>();
+  placeLevelLabels(
+    lines.flatMap((line) => segmentLabels(line.owner, line.segments, line.memo, instrumentKind, plot)),
+    plot,
+  ).forEach((label) => byOwner.set(label.owner, [...(byOwner.get(label.owner) ?? []), label]));
+  return byOwner;
+};

@@ -80,6 +80,8 @@ test(
     );
     await expect(layers.getByRole("button", { name: "최근 120봉 · 기본" })).toHaveAttribute("aria-pressed", "true");
     await expect(windowFields(page).start).toHaveValue(regime.window.start);
+    // 판정 구간은 차트 위 음영이다(그림 장식이라 CSS로 본다)
+    await expect(chart.locator(".analysis-window__band")).toBeVisible();
     await expect(layers.getByText(regime.sentence)).toBeVisible();
     await expect(layers.getByText(`일봉 ${regime.window.bars}개`)).toBeVisible();
     await layers.getByText("판정 규칙").click();
@@ -132,7 +134,10 @@ test(
 
     // 첫 점은 판정 응답의 확정 고점 목록에서 고른다 — 후보는 모두 그 점에서 시작한다
     await layers.getByRole("radio", { name: "첫 점은 내가 고르기" }).check();
-    await layers.getByLabel("첫 점 · 구간 안의 확정 고점").selectOption("2024-11-06");
+    // 첫 점 목록은 채널 응답(그 방향의 확정 피벗)이다 — 하락 채널이라 고점만 있다
+    const firstPoint = layers.getByLabel("첫 점 · 구간 안의 확정 피벗");
+    await expect(firstPoint.locator("option").nth(1)).toHaveText(/^고점 /u);
+    await firstPoint.selectOption("2024-11-06");
     const candidates = layers.getByRole("radio", { name: /^후보 \d+ · / });
     await expect(candidates.first()).toBeVisible();
     for (const name of await candidates.evaluateAll((items) => items.map((item) => item.parentElement?.textContent ?? "")))
@@ -184,6 +189,8 @@ test(
     const [top] = zones.zones;
     await expect(layers.getByRole("rowheader", { name: `${indexPrice(top.low)}–${indexPrice(top.high)}` })).toBeVisible();
     await expect(layers.getByText(zones.basis)).toBeVisible();
+    // 묶기·접촉·구분 규칙 문장도 서버 응답 그대로다
+    for (const rule of zones.rules) await expect(layers.getByText(rule)).toBeVisible();
     // 한 구간을 빼고 나머지를 추가한다
     await picks.first().uncheck();
     await layers.getByRole("button", { name: "고른 구간 차트에 추가" }).click();
@@ -259,6 +266,9 @@ test(
     await page.getByRole("group", { name: "분석 방식" }).getByRole("button", { name: "수동 그리기" }).click();
     await expect(layers.getByText("수동 그리기 중에는 자동 후보를 가려 둬요.", { exact: false })).toBeVisible();
     await expect(retracementRow).toHaveCount(0);
+    // 차트에도 자동 선이 없다(내 선으로 복사한 되돌림만 남는다)
+    await expect(chart.locator('[class*="chart-line--auto-"]')).toHaveCount(0);
+    await expect(chart.locator(".chart-line--mine")).toHaveCount(1);
   },
 );
 
@@ -326,6 +336,7 @@ test(
     await expect(group).toContainText("· 자동 · 레벨 0.5");
     await expect(layers.getByText("내 선은 내가 보고 그은 것이라", { exact: false })).toBeVisible();
     await expect(layers.getByText("서로 독립된 증거가 아니에요", { exact: false })).toBeVisible();
+    await expect(layers.getByText("서로 다른 종류 2개 이상이 덮는 가격대만 중첩이에요.", { exact: false })).toBeVisible();
     // 차트 오른쪽 잉크 괄호(그림 장식이라 CSS로 센다)
     await expect(chart.locator(".confluence-bracket")).not.toHaveCount(0);
 

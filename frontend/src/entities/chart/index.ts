@@ -91,8 +91,11 @@ export {
 export {
   formedSegments,
   levelSegments,
+  levelText,
+  placeLineLabels,
   segmentLabels,
   shadedBands,
+  type ChartOverlayLine,
   type LevelSegment,
 } from "./model/line-geometry";
 export { CANDLE_FIELDS, snapToCandle, type CandleField } from "./model/magnet";

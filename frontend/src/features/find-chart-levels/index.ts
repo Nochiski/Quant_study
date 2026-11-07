@@ -4,8 +4,8 @@
  */
 export { useLevelFinder, type LevelFinder } from "./model/use-level-finder";
 export { visibleWindow } from "./model/analysis-window";
+export { previewOverlays } from "./model/use-finder-results";
 export { AnalysisWindowOverlay } from "./ui/analysis-window-overlay";
 export { AutoLinesPanel } from "./ui/auto-lines-panel";
 export { ConfluenceBrackets } from "./ui/confluence-brackets";
 export { FinderPanels } from "./ui/finder-panels";
-export { PreviewLines } from "./ui/preview-lines";

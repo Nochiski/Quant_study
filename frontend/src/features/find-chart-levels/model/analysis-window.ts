@@ -30,14 +30,14 @@ export const moveWindowEdge = (
     const start = Math.min(Math.max(at, 0), window.end - (MIN_WINDOW_BARS - 1));
     return { ...window, start: Math.max(start, 0) };
   }
-  const end = Math.max(
-    Math.min(at, count - 1),
-    window.start + (MIN_WINDOW_BARS - 1),
-  );
+  const end = Math.max(Math.min(at, count - 1), window.start + (MIN_WINDOW_BARS - 1));
   return { ...window, end: Math.min(end, count - 1) };
 };
 
-/** 키보드 이동: ←/→ 한 봉, Shift는 `LARGE_STEP_BARS`봉. 그 밖의 키는 null(처리하지 않음). */
+/**
+ * 키보드 이동(slider 관례): ←/→ 한 봉, Shift는 `LARGE_STEP_BARS`봉, Home/End는 그 테두리가 갈 수 있는 끝까지.
+ * 그 밖의 키는 null(처리하지 않음).
+ */
 export const nudgeWindowEdge = (
   window: BarWindow,
   edge: WindowEdge,
@@ -45,34 +45,35 @@ export const nudgeWindowEdge = (
   shift: boolean,
   count: number,
 ): BarWindow | null => {
+  if (key === "Home") return moveWindowEdge(window, edge, 0, count);
+  if (key === "End") return moveWindowEdge(window, edge, count - 1, count);
   const step = shift ? LARGE_STEP_BARS : 1;
-  const delta =
-    key === "ArrowLeft" ? -step : key === "ArrowRight" ? step : null;
+  const delta = key === "ArrowLeft" ? -step : key === "ArrowRight" ? step : null;
   if (delta === null) return null;
   return moveWindowEdge(window, edge, window[edge] + delta, count);
 };
 
-/** 봉 시작일 → 완성 봉 index. 응답의 구간 날짜는 봉 시작일이다. 없으면 -1. */
-const indexOfStart = (
-  completed: readonly ChartCandleBody[],
-  date: string,
-): number => completed.findIndex((candle) => candle.start === date);
-
-/** 응답 구간(봉 시작일 양 끝) → 완성 봉 index 구간. 봉을 찾지 못하면 null. */
-export const barWindowOf = (
-  completed: readonly ChartCandleBody[],
-  range: DateRange,
-): BarWindow | null => {
-  const start = indexOfStart(completed, range.start);
-  const end = indexOfStart(completed, range.end);
-  return start < 0 || end < 0 ? null : { start, end };
+/**
+ * 날짜 → 그 날짜가 든 완성 봉 index(서버 `ChartSeries.index_of`처럼). 봉 사이 휴장일·주 중간 날짜는 그 앞 봉(그 기간의
+ * 봉)이고, 첫 봉 전이거나 마지막 완성 봉의 끝 뒤면 -1이다. 첫날이 휴장이라 봉 시작일이 늦은 주·달의 그 날짜는 앞
+ * 봉으로 읽힌다 — 서버가 맞춘 응답 구간이 오면 그것을 쓰므로 그동안만의 어림이다.
+ */
+const indexHolding = (completed: readonly ChartCandleBody[], date: string): number => {
+  let found = -1;
+  for (let index = 0; index < completed.length && completed[index].start <= date; index += 1) found = index;
+  if (found === completed.length - 1 && found >= 0 && date > completed[found].end) return -1;
+  return found;
 };
 
-/** 완성 봉 index 구간 → 요청에 실을 날짜(그 봉의 시작일). */
-export const windowDates = (
-  completed: readonly ChartCandleBody[],
-  window: BarWindow,
-): DateRange => ({
+/** 구간 날짜 → 완성 봉 index 구간(각 날짜가 든 봉). 봉을 찾지 못하면 null. */
+export const barWindowOf = (completed: readonly ChartCandleBody[], range: DateRange): BarWindow | null => {
+  const start = indexHolding(completed, range.start);
+  const end = indexHolding(completed, range.end);
+  return start < 0 || end < 0 || start > end ? null : { start, end };
+};
+
+/** 완성 봉 index 구간 → 요청에 실을 날짜(그 봉의 시작일). 테두리 낭독·툴팁도 이 날짜를 쓴다(날짜 칸과 같다). */
+export const windowDates = (completed: readonly ChartCandleBody[], window: BarWindow): DateRange => ({
   start: completed[window.start].start,
   end: completed[window.end].start,
 });
@@ -81,9 +82,5 @@ export const windowDates = (
  * 생성 패널의 기본 분석 구간: 지금 화면에 보이는 완성 봉(되돌림·수평 구간은 "기본값은 화면 기간"). 보이는 완성 봉이
  * `MIN_WINDOW_BARS`보다 적으면 null(서버 기본 구간).
  */
-export const visibleWindow = (
-  visible: readonly ChartCandleBody[],
-): DateRange | null =>
-  visible.length < MIN_WINDOW_BARS
-    ? null
-    : { start: visible[0].start, end: visible[visible.length - 1].start };
+export const visibleWindow = (visible: readonly ChartCandleBody[]): DateRange | null =>
+  visible.length < MIN_WINDOW_BARS ? null : { start: visible[0].start, end: visible[visible.length - 1].start };

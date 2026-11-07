@@ -2,6 +2,7 @@ import { useId } from "react";
 
 import {
   formatPrice,
+  levelText,
   lineKindLabel,
   swingChoiceLabel,
   timeframeLabel,
@@ -12,12 +13,11 @@ import {
   type Timeframe,
 } from "../../../entities/chart";
 import { t, tFill } from "../../../shared/config";
-import { Button } from "../../../shared/ui";
 import { changeFromCurrent } from "../model/line-evidence";
 import { useAddCandidates } from "../model/use-add-candidates";
 import { PREVIEW_REF } from "../model/use-finder-results";
 import type { LevelFinder } from "../model/use-level-finder";
-import { FinderFailure, WindowFields } from "./finder-fields";
+import { CreateFooter, FinderFailure, WindowFields } from "./finder-fields";
 import { FinderPanelFrame } from "./finder-panel-frame";
 import { percentText } from "./percent-text";
 
@@ -34,16 +34,10 @@ type CreateRetracementPanelProps = {
   confluence: ChartConfluenceBody | undefined;
 };
 
-const SWINGS: readonly SwingChoice[] = [
-  "range_extremes",
-  "latest_major",
-  "latest_confirmed",
-];
-
-const levelText = (level: number) => String(Number(level.toFixed(3)));
+const SWINGS: readonly SwingChoice[] = ["range_extremes", "latest_major", "latest_confirmed"];
 
 /**
- * 피보나치 되돌림 만들기: 분석 구간 → 기준 스윙(서버가 고른 두 확정 피벗) → 레벨 → 결과 표(레벨마다 이번 주 가격,
+ * 피보나치 되돌림 만들기: 분석 구간 → 기준 스윙(서버가 고른 두 확정 피벗) → 레벨 → 결과 표(레벨마다 이번 주기 가격,
  * 응답 `end.price`) → 중첩(서버 중첩 응답 중 이 미리보기가 든 것) → 차트에 추가.
  */
 export const CreateRetracementPanel = ({
@@ -64,54 +58,33 @@ export const CreateRetracementPanel = ({
   const found = results.retracement.data;
   const drawing = found?.drawing ?? null;
   const price = (value: number) => formatPrice(value, instrument.kind);
-  const levels =
-    draft.levels ?? drawing?.paths.map((path) => path.level ?? 0) ?? [];
+  const levels = draft.levels ?? drawing?.paths.map((path) => path.level ?? 0) ?? [];
   const setLevel = (level: number, on: boolean) => {
-    const next = on
-      ? [...levels, level]
-      : levels.filter((item) => item !== level);
-    if (next.length > 0)
-      dispatch({
-        type: "edit",
-        input: { levels: [...next].sort((a, b) => a - b) },
-      });
+    const next = on ? [...levels, level] : levels.filter((item) => item !== level);
+    if (next.length > 0) dispatch({ type: "edit", input: { levels: [...next].sort((a, b) => a - b) } });
   };
   const ref = `${PREVIEW_REF}retracement`;
-  const overlaps = (confluence?.groups ?? []).filter((group) =>
-    group.members.some((member) => member.ref === ref),
-  );
+  const overlaps = (confluence?.groups ?? []).filter((group) => group.members.some((member) => member.ref === ref));
 
-  // 저장 중에도 단추를 끄지 않는다(꺼지면 초점을 잃는다) — 겹친 누르기만 받지 않는다
   const add = async () => {
-    if (adding.pending) return;
     const preview = results.previews.find((item) => item.key === "retracement");
-    if (
-      preview !== undefined &&
-      found !== undefined &&
-      (await adding.add([preview], found.record))
-    )
-      close();
+    if (!results.ready || preview === undefined || found === undefined) return;
+    if ((await adding.add([preview], found.record))?.failed === 0) close();
   };
 
   return (
     <FinderPanelFrame
       title={t("chart.finder.retracement.title")}
-      subtitle={tFill("chart.finder.previewing", {
-        name: instrument.name,
-        timeframe: timeframeLabel(timeframe),
-      })}
+      subtitle={tFill("chart.finder.previewing", { name: instrument.name, timeframe: timeframeLabel(timeframe) })}
       onClose={close}
       footer={
-        <>
-          <Button
-            tone="primary"
-            disabled={drawing === null}
-            onClick={() => void add()}
-          >
-            {t("chart.finder.add")}
-          </Button>
-          <Button onClick={close}>{t("chart.finder.cancel")}</Button>
-        </>
+        <CreateFooter
+          addLabel={t("chart.finder.add")}
+          canAdd={results.ready && drawing !== null}
+          onAdd={() => void add()}
+          onClose={close}
+          adding={adding}
+        />
       }
     >
       <WindowFields
@@ -133,9 +106,7 @@ export const CreateRetracementPanel = ({
             />
             <span>
               <strong>{swingChoiceLabel(swing)}</strong>
-              <span className="finder-choice__meta">
-                {t(`chart.finder.retracement.swing.${swing}`)}
-              </span>
+              <span className="finder-choice__meta">{t(`chart.finder.retracement.swing.${swing}`)}</span>
             </span>
           </label>
         ))}
@@ -164,22 +135,15 @@ export const CreateRetracementPanel = ({
           <input
             type="checkbox"
             checked={draft.extendRight}
-            onChange={(event) =>
-              dispatch({
-                type: "edit",
-                input: { extendRight: event.target.checked },
-              })
-            }
+            onChange={(event) => dispatch({ type: "edit", input: { extendRight: event.target.checked } })}
           />
           {t("chart.card.extend")}
         </label>
       </fieldset>
 
-      <section className="finder-section" aria-labelledby={`${id}-result`}>
+      <section className="finder-section" aria-labelledby={`${id}-result`} aria-busy={!results.ready}>
         <h3 id={`${id}-result`}>{t("chart.finder.result")}</h3>
-        {results.retracement.isError ? (
-          <FinderFailure error={results.retracement.error} />
-        ) : null}
+        {results.retracement.isError ? <FinderFailure error={results.retracement.error} /> : null}
         {found?.message ? <p className="finder-note">{found.message}</p> : null}
         {drawing === null ? null : (
           <>
@@ -201,13 +165,9 @@ export const CreateRetracementPanel = ({
               <tbody>
                 {drawing.paths.map((path) => (
                   <tr key={path.level ?? "h"}>
-                    <th scope="row">
-                      {path.level === null ? "—" : levelText(path.level)}
-                    </th>
+                    <th scope="row">{path.level === null ? "—" : levelText(path.level)}</th>
                     <td>{price(path.end.price)}</td>
-                    <td>
-                      {percentText(changeFromCurrent(path.end.price, current))}
-                    </td>
+                    <td>{percentText(changeFromCurrent(path.end.price, current))}</td>
                   </tr>
                 ))}
               </tbody>
@@ -227,11 +187,8 @@ export const CreateRetracementPanel = ({
             })}
           </p>
         ))}
-        {overlaps.length > 0 && confluence ? (
-          <p className="finder-note">{confluence.caution}</p>
-        ) : null}
+        {overlaps.length > 0 && confluence ? <p className="finder-note">{confluence.caution}</p> : null}
       </section>
-      {adding.error ? <FinderFailure error={adding.error} /> : null}
     </FinderPanelFrame>
   );
 };

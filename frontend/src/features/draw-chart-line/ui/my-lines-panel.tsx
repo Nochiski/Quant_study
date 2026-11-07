@@ -71,7 +71,7 @@ export const MyLinesPanel = ({
   const title = (line: ChartLineBody) => lineTitle(line, instrument.kind, timeframe);
   const remove = (line: ChartLineBody) => {
     // 지우는 요청이 나가 있으면(Delete 연타) 받지 않는다
-    if (!removal.removeLine(line, title(line))) return;
+    if (!removal.removeLine([line], title(line))) return;
     const index = mine.findIndex((item) => item.line_id === line.line_id);
     const neighbour = mine[index + 1] ?? mine[index - 1];
     focusAfterChange.current = neighbour?.line_id ?? "";

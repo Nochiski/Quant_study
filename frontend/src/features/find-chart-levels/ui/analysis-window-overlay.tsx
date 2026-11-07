@@ -1,10 +1,6 @@
 import { useState, type KeyboardEvent, type PointerEvent } from "react";
 
-import type {
-  ChartCandleBody,
-  ChartScale,
-  DateRange,
-} from "../../../entities/chart";
+import type { ChartCandleBody, ChartScale, DateRange } from "../../../entities/chart";
 import { t } from "../../../shared/config";
 import {
   barWindowOf,
@@ -19,44 +15,35 @@ type AnalysisWindowOverlayProps = {
   scale: ChartScale;
   /** 지금 주기의 완성 봉 전부(구간은 이 안에서만 고른다). */
   completed: readonly ChartCandleBody[];
-  /** 지금 구간(봉 시작일 양 끝). 없으면 그리지 않는다. */
+  /** 지금 구간(서버가 맞춘 응답 구간, 기다리는 동안은 고친 날짜). 없으면 그리지 않는다. */
   window: DateRange | null;
   onChange: (window: DateRange) => void;
+  /** 테두리에 초점이 있을 때 Esc — 패널의 Esc와 같이 패널을 닫는다. */
+  onEscape: () => void;
 };
 
 const EDGES: readonly WindowEdge[] = ["start", "end"];
 const GRIP_HEIGHT = 28;
-const HIT_WIDTH = 14;
+// 테두리 손잡이를 누를 수 있는 폭(px) — 포인터 목표 크기 24px 이상
+const HIT_WIDTH = 24;
 
 /**
  * 메인 차트 위 판정·분석 구간: 음영과 좌우 테두리 손잡이(role=slider). 끌면 봉 단위로 붙고 끄는 동안 날짜 툴팁이 뜨며,
- * 놓는 순간 구간을 바꿔 다시 판정한다. 초점에서 ←/→ 한 봉, Shift는 열 봉. 차트 줌·이동 키·끌기로 번지지 않게 멈춘다.
+ * 놓는 순간 구간을 바꿔 다시 판정한다. 초점에서 ←/→ 한 봉, Shift는 열 봉, Home/End는 끝까지, Esc는 패널 닫기. 차트
+ * 줌·이동 키·끌기로 번지지 않게 멈춘다. 낭독·툴팁 날짜는 날짜 칸과 같은 봉 시작일이다.
  */
-export const AnalysisWindowOverlay = ({
-  scale,
-  completed,
-  window,
-  onChange,
-}: AnalysisWindowOverlayProps) => {
-  const [drag, setDrag] = useState<{
-    edge: WindowEdge;
-    window: BarWindow;
-    from: BarWindow;
-  } | null>(null);
+export const AnalysisWindowOverlay = ({ scale, completed, window, onChange, onEscape }: AnalysisWindowOverlayProps) => {
+  const [drag, setDrag] = useState<{ edge: WindowEdge; window: BarWindow; from: BarWindow } | null>(null);
   const resting = window === null ? null : barWindowOf(completed, window);
   const shown = drag?.window ?? resting;
   if (shown === null || resting === null) return null;
   const { plot, step } = scale;
   const count = completed.length;
+  const dates = windowDates(completed, shown);
   const edgeX = (edge: WindowEdge, bars: BarWindow) =>
-    edge === "start"
-      ? scale.xOfIndex(bars.start) - step / 2
-      : scale.xOfIndex(bars.end) + step / 2;
-  const edgeDate = (edge: WindowEdge, bars: BarWindow) =>
-    edge === "start" ? completed[bars.start].start : completed[bars.end].end;
+    edge === "start" ? scale.xOfIndex(bars.start) - step / 2 : scale.xOfIndex(bars.end) + step / 2;
   const commit = (next: BarWindow, before: BarWindow) => {
-    if (next.start !== before.start || next.end !== before.end)
-      onChange(windowDates(completed, next));
+    if (next.start !== before.start || next.end !== before.end) onChange(windowDates(completed, next));
   };
 
   const pointerIndex = (event: PointerEvent<SVGGElement>, edge: WindowEdge) => {
@@ -86,16 +73,12 @@ export const AnalysisWindowOverlay = ({
             className="analysis-window__edge"
             role="slider"
             tabIndex={0}
-            aria-label={t(
-              edge === "start"
-                ? "chart.finder.window.startEdge"
-                : "chart.finder.window.endEdge",
-            )}
+            aria-label={t(edge === "start" ? "chart.finder.window.startEdge" : "chart.finder.window.endEdge")}
             aria-orientation="horizontal"
             aria-valuemin={0}
             aria-valuemax={count - 1}
             aria-valuenow={shown[edge]}
-            aria-valuetext={edgeDate(edge, shown)}
+            aria-valuetext={dates[edge]}
             data-active={drag?.edge === edge ? "true" : undefined}
             onPointerDown={(event) => {
               if (event.button !== 0) return;
@@ -106,17 +89,8 @@ export const AnalysisWindowOverlay = ({
             }}
             onPointerMove={(event) => {
               if (drag === null || drag.edge !== edge) return;
-              const next = moveWindowEdge(
-                drag.window,
-                edge,
-                pointerIndex(event, edge),
-                count,
-              );
-              if (
-                next.start !== drag.window.start ||
-                next.end !== drag.window.end
-              )
-                setDrag({ ...drag, window: next });
+              const next = moveWindowEdge(drag.window, edge, pointerIndex(event, edge), count);
+              if (next.start !== drag.window.start || next.end !== drag.window.end) setDrag({ ...drag, window: next });
             }}
             onPointerUp={(event) => {
               if (drag === null) return;
@@ -128,13 +102,13 @@ export const AnalysisWindowOverlay = ({
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
             onKeyDown={(event: KeyboardEvent<SVGGElement>) => {
-              const next = nudgeWindowEdge(
-                resting,
-                edge,
-                event.key,
-                event.shiftKey,
-                count,
-              );
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                onEscape();
+                return;
+              }
+              const next = nudgeWindowEdge(resting, edge, event.key, event.shiftKey, count);
               if (next === null) return;
               event.preventDefault();
               event.stopPropagation();
@@ -148,10 +122,7 @@ export const AnalysisWindowOverlay = ({
               width={HIT_WIDTH}
               height={plot.bottom - plot.top}
             />
-            <path
-              className="analysis-window__line"
-              d={`M${x.toFixed(1)} ${plot.top}V${plot.bottom}`}
-            />
+            <path className="analysis-window__line" d={`M${x.toFixed(1)} ${plot.top}V${plot.bottom}`} />
             <rect
               className="analysis-window__grip"
               x={x - 4}
@@ -160,13 +131,8 @@ export const AnalysisWindowOverlay = ({
               height={GRIP_HEIGHT}
               rx={3}
             />
-            <text
-              className="analysis-window__tip"
-              x={x}
-              y={plot.top + 14}
-              textAnchor="middle"
-            >
-              {edgeDate(edge, shown)}
+            <text className="analysis-window__tip" x={x} y={plot.top + 14} textAnchor="middle">
+              {dates[edge]}
             </text>
           </g>
         );

@@ -1,16 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import {
   chartLineCreateBody,
   chartRegimeQuery,
   chosenByLabel,
   formatPrice,
+  levelText,
   lineKindLabel,
   regimeVerdictLabel,
   structureLabel,
   timeframeLabel,
-  trendDirectionLabel,
   useCreateChartLine,
   windowSourceLabel,
   type ChartInstrumentBody,
@@ -20,12 +20,7 @@ import {
 } from "../../../entities/chart";
 import { t, tFill } from "../../../shared/config";
 import { Button } from "../../../shared/ui";
-import {
-  changeFromCurrent,
-  lineEvidence,
-  recreateSeed,
-  toolOf,
-} from "../model/line-evidence";
+import { autoLineTitle, changeFromCurrent, lineEvidence, recreateSeed, strengthText } from "../model/line-evidence";
 import type { LevelFinder } from "../model/use-level-finder";
 import { FinderFailure } from "./finder-fields";
 import { FinderPanelFrame } from "./finder-panel-frame";
@@ -41,34 +36,23 @@ type LineEvidencePanelProps = {
   current: number | null;
 };
 
-const levelText = (level: number) => String(Number(level.toFixed(3)));
-const signed = (value: number) =>
-  `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(2)}`;
-
 /**
- * 자동 선의 근거: 기준점·생긴 날·판정(그때 = 저장 기록, 오늘 = 지금 기본 구간의 서버 판정)·알고리즘·이번 주 레벨·읽을
- * 때 주의·저장 구조, "내 선으로 복사"(`auto_copied` — 기준점을 고칠 수 있는 내 선)와 "조건 바꿔 다시 만들기"(같은 구간·
- * 방향·파라미터로 생성 패널). 값은 모두 저장 선 응답과 판정 응답이다.
+ * 자동 선의 근거: 기준점·생긴 날·판정(그때 = 저장 기록, 지금 = 같은 주기 기본 구간의 서버 판정)·이번 주기 레벨·
+ * 알고리즘·읽을 때 주의·저장 구조, "내 선으로 복사"(`auto_copied` — 기준점을 고칠 수 있는 내 선)와 "조건 바꿔 다시
+ * 만들기"(같은 구간·방향·파라미터로 생성 패널). 값은 모두 저장 선 응답과 판정 응답이다.
  */
-export const LineEvidencePanel = ({
-  finder,
-  lines,
-  target,
-  timeframe,
-  instrument,
-  current,
-}: LineEvidencePanelProps) => {
+export const LineEvidencePanel = ({ finder, lines, target, timeframe, instrument, current }: LineEvidencePanelProps) => {
   const id = useId();
   const { panel, dispatch } = finder;
   const create = useCreateChartLine();
-  const [copied, setCopied] = useState(false);
+  // 복사 연타 막기 — 부르는 순간 세운다(변이 상태는 다음 렌더에야 바뀐다). 단추는 끄지 않는다(초점을 잃는다).
+  const copying = useRef(false);
+  const [copied, setCopied] = useState<{ saved: number; total: number } | null>(null);
   const first = lines[0] as ChartLineBody | undefined;
   const isChannel = first?.kind === "fib_channel";
   const today = useQuery(
     chartRegimeQuery(
-      isChannel && first !== undefined
-        ? { kind: target.kind, code: target.code, timeframe: first.timeframe }
-        : null,
+      isChannel && first !== undefined ? { kind: target.kind, code: target.code, timeframe: first.timeframe } : null,
     ),
   );
   if (panel.view !== "evidence" || first === undefined) return null;
@@ -76,27 +60,19 @@ export const LineEvidencePanel = ({
   const evidence = lineEvidence(lines, current);
   const record = evidence.record;
   const price = (value: number) => formatPrice(value, instrument.kind);
-  const title =
-    first.kind === "hline"
-      ? tFill("chart.finder.zones.row", { count: lines.length })
-      : evidence.direction === null
-        ? t(`chart.finder.kind.${first.kind}`)
-        : tFill("chart.finder.channel.row", {
-            direction: trendDirectionLabel(evidence.direction),
-          });
   const sameTimeframe = first.timeframe === timeframe;
 
-  // 단추를 끄지 않고 겹친 누르기만 받지 않는다 — 꺼진 단추는 초점을 잃어 패널의 Esc가 닿지 않는다
   const copy = async () => {
-    if (create.isPending) return;
-    const results = await Promise.allSettled(
-      lines.map((line) =>
-        create.mutateAsync(
-          chartLineCreateBody(line, { source: "auto_copied" }),
-        ),
-      ),
-    );
-    setCopied(results.every((result) => result.status === "fulfilled"));
+    if (copying.current) return;
+    copying.current = true;
+    try {
+      const results = await Promise.allSettled(
+        lines.map((line) => create.mutateAsync(chartLineCreateBody(line, { source: "auto_copied" }))),
+      );
+      setCopied({ saved: results.filter((result) => result.status === "fulfilled").length, total: lines.length });
+    } finally {
+      copying.current = false;
+    }
   };
   const stored = lines.map((line) => ({
     kind: line.kind,
@@ -110,29 +86,18 @@ export const LineEvidencePanel = ({
 
   return (
     <FinderPanelFrame
-      title={title}
-      subtitle={tFill("chart.finder.evidence.subtitle", {
-        name: instrument.name,
-        timeframe: timeframeLabel(first.timeframe),
-      })}
+      title={autoLineTitle(lines, timeframe)}
+      subtitle={tFill("chart.finder.evidence.subtitle", { name: instrument.name, timeframe: timeframeLabel(first.timeframe) })}
       onClose={close}
       footer={
         <>
-          <Button
-            tone="primary"
-            onClick={() => void copy()}
-          >
+          <Button tone="primary" onClick={() => void copy()}>
             {t("chart.finder.evidence.copy")}
           </Button>
           <Button
             disabled={!sameTimeframe}
             onClick={() =>
-              dispatch({
-                type: "openCreate",
-                tool: toolOf(first),
-                seed: recreateSeed(first),
-                returnKey: panel.returnKey,
-              })
+              dispatch({ type: "openCreate", tool: first.kind, seed: recreateSeed(first), returnKey: panel.returnKey })
             }
           >
             {t("chart.finder.evidence.recreate")}
@@ -140,17 +105,17 @@ export const LineEvidencePanel = ({
         </>
       }
     >
-      {copied ? (
-        <p className="finder-note" role="status">
-          {t("chart.finder.evidence.copied")}
+      {copied === null ? null : (
+        <p className={copied.saved === copied.total ? "finder-note" : "finder-warning"} role="status">
+          {copied.saved === copied.total
+            ? t("chart.finder.evidence.copied")
+            : tFill("chart.finder.partial", { failed: copied.total - copied.saved, total: copied.total })}
         </p>
-      ) : null}
+      )}
       {create.error ? <FinderFailure error={create.error} /> : null}
       {sameTimeframe ? null : (
         <p className="finder-note">
-          {tFill("chart.finder.evidence.otherTimeframe", {
-            timeframe: timeframeLabel(first.timeframe),
-          })}
+          {tFill("chart.finder.evidence.otherTimeframe", { timeframe: timeframeLabel(first.timeframe) })}
         </p>
       )}
 
@@ -161,31 +126,25 @@ export const LineEvidencePanel = ({
             <dt>{t("chart.finder.evidence.window")}</dt>
             <dd>
               {`${record.regime_window_start ?? "—"} ~ ${record.regime_window_end ?? "—"}`}
-              {record.window_source
-                ? ` · ${windowSourceLabel(record.window_source)}`
-                : ""}
+              {record.window_source ? ` · ${windowSourceLabel(record.window_source)}` : ""}
             </dd>
             <dt>{t("chart.finder.evidence.then")}</dt>
             <dd>
               {regimeVerdictLabel(record.regime.verdict)}
-              {record.regime.strength === null
-                ? ""
-                : ` · S ${signed(record.regime.strength)}`}
+              {record.regime.strength === null ? "" : ` · S ${strengthText(record.regime.strength)}`}
               {` · ${structureLabel(record.regime.structure)}`}
               {record.chosen_by ? ` · ${chosenByLabel(record.chosen_by)}` : ""}
             </dd>
             <dt>{t("chart.finder.evidence.today")}</dt>
             <dd>
               {today.data
-                ? `${tFill("chart.finder.evidence.todayWindow", { bars: today.data.window.bars })} ${regimeVerdictLabel(today.data.verdict)}${today.data.strength === null ? "" : ` · S ${signed(today.data.strength)}`}`
+                ? `${tFill("chart.finder.evidence.todayWindow", { bars: today.data.window.bars })} ${regimeVerdictLabel(today.data.verdict)}${today.data.strength === null ? "" : ` · S ${strengthText(today.data.strength)}`}`
                 : today.isError
                   ? t("chart.finder.error")
                   : t("chart.finder.loading")}
             </dd>
           </dl>
-          {today.data ? (
-            <p className="finder-note">{today.data.sentence}</p>
-          ) : null}
+          {today.data ? <p className="finder-note">{today.data.sentence}</p> : null}
         </section>
       ) : null}
 
@@ -213,9 +172,7 @@ export const LineEvidencePanel = ({
           <p className="finder-note">
             {evidence.created === null
               ? t("chart.finder.evidence.noCreated")
-              : tFill("chart.finder.evidence.created", {
-                  date: evidence.created,
-                })}
+              : tFill("chart.finder.evidence.created", { date: evidence.created })}
           </p>
         </section>
       ) : null}
@@ -236,16 +193,11 @@ export const LineEvidencePanel = ({
                 <tr key={zone.lineId}>
                   <th scope="row">{`${price(zone.low)}–${price(zone.high)}`}</th>
                   <td>{zone.formed ?? "—"}</td>
-                  <td>
-                    {percentText(
-                      changeFromCurrent((zone.low + zone.high) / 2, current),
-                    )}
-                  </td>
+                  <td>{percentText(changeFromCurrent((zone.low + zone.high) / 2, current))}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="finder-note">{t("chart.finder.evidence.zoneFormed")}</p>
         </section>
       ) : null}
 
@@ -254,9 +206,7 @@ export const LineEvidencePanel = ({
           <h3 id={`${id}-levels`}>
             {t("chart.finder.evidence.levels")}
             <span className="finder-section__meta">
-              {tFill("chart.finder.evidence.levelsAt", {
-                date: evidence.levels[0].barDate,
-              })}
+              {tFill("chart.finder.evidence.levelsAt", { date: evidence.levels[0].barDate })}
             </span>
           </h3>
           <table className="finder-table">
@@ -270,9 +220,7 @@ export const LineEvidencePanel = ({
             <tbody>
               {evidence.levels.map((level) => (
                 <tr key={level.level ?? "h"}>
-                  <th scope="row">
-                    {level.level === null ? "—" : levelText(level.level)}
-                  </th>
+                  <th scope="row">{level.level === null ? "—" : levelText(level.level)}</th>
                   <td>{price(level.price)}</td>
                   <td>{percentText(level.changePct)}</td>
                 </tr>
@@ -294,9 +242,7 @@ export const LineEvidencePanel = ({
       <section className="finder-section" aria-labelledby={`${id}-caution`}>
         <h3 id={`${id}-caution`}>{t("chart.finder.evidence.caution")}</h3>
         <ul className="finder-list">
-          {isChannel ? (
-            <li>{t("chart.finder.evidence.caution.width")}</li>
-          ) : null}
+          {isChannel ? <li>{t("chart.finder.evidence.caution.width")}</li> : null}
           <li>{t("chart.finder.evidence.caution.formed")}</li>
           <li>{t("chart.finder.evidence.caution.signal")}</li>
         </ul>
@@ -304,9 +250,7 @@ export const LineEvidencePanel = ({
 
       <details className="finder-section finder-details">
         <summary>{t("chart.finder.evidence.stored")}</summary>
-        <pre className="finder-mono finder-pre">
-          {JSON.stringify(stored.length === 1 ? stored[0] : stored, null, 2)}
-        </pre>
+        <pre className="finder-mono finder-pre">{JSON.stringify(stored.length === 1 ? stored[0] : stored, null, 2)}</pre>
         <p className="finder-note">{t("chart.finder.evidence.storedNote")}</p>
       </details>
     </FinderPanelFrame>

@@ -17,8 +17,8 @@ export const recreateChartLine = (line: ChartLineBody): CreateChartLineBody => c
 export const UNDO_LIMIT = 20;
 export type UndoStack = readonly (readonly CreateChartLineBody[])[];
 
-export const pushUndo = (stack: UndoStack, lines: ChartLineBody | readonly ChartLineBody[]): UndoStack =>
-  [...stack, ("line_id" in lines ? [lines] : lines).map(recreateChartLine)].slice(-UNDO_LIMIT);
+export const pushUndo = (stack: UndoStack, lines: readonly ChartLineBody[]): UndoStack =>
+  [...stack, lines.map(recreateChartLine)].slice(-UNDO_LIMIT);
 
 export const popUndo = (stack: UndoStack): [readonly CreateChartLineBody[] | null, UndoStack] =>
   stack.length === 0 ? [null, stack] : [stack[stack.length - 1], stack.slice(0, -1)];

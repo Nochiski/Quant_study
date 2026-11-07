@@ -7,7 +7,8 @@ import {
 } from "../../../entities/chart";
 import { failureReason } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
-import { FailureNotice } from "../../../shared/ui";
+import { Button, FailureNotice } from "../../../shared/ui";
+import type { useAddCandidates } from "../model/use-add-candidates";
 
 type WindowFieldsProps = {
   /** 지금 구간(응답 구간 또는 고친 값). 응답 전이면 null. */
@@ -152,4 +153,35 @@ export const FinderFailure = ({ error }: { error: unknown }) => (
     message={chartErrorSentence(error)}
     reason={failureReason(error)}
   />
+);
+
+type CreateFooterProps = {
+  addLabel: string;
+  /** 지금 결과로 추가할 수 있는가(결과가 지금 입력의 것이고 고른 것이 있다). */
+  canAdd: boolean;
+  onAdd: () => void;
+  onClose: () => void;
+  adding: Pick<ReturnType<typeof useAddCandidates>, "lastOutcome" | "error">;
+};
+
+/**
+ * 생성 패널 3종의 아래 줄: 일부만 저장된 묶음 알림, 저장 실패, 추가·취소 단추. 저장 중에도 단추를 끄지 않는다 —
+ * 꺼진 단추는 초점을 잃어 패널의 Esc가 닿지 않는다(겹친 누르기는 `useAddCandidates`가 막는다).
+ */
+export const CreateFooter = ({ addLabel, canAdd, onAdd, onClose, adding }: CreateFooterProps) => (
+  <>
+    {adding.lastOutcome !== null && adding.lastOutcome.failed > 0 ? (
+      <p className="finder-warning" role="status">
+        {tFill("chart.finder.partial", {
+          failed: adding.lastOutcome.failed,
+          total: adding.lastOutcome.failed + adding.lastOutcome.saved,
+        })}
+      </p>
+    ) : null}
+    {adding.error ? <FinderFailure error={adding.error} /> : null}
+    <Button tone="primary" disabled={!canAdd} onClick={onAdd}>
+      {addLabel}
+    </Button>
+    <Button onClick={onClose}>{t("chart.finder.cancel")}</Button>
+  </>
 );

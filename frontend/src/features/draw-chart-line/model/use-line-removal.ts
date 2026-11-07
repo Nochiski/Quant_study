@@ -44,11 +44,10 @@ export const useLineRemoval = (target: ChartTarget) => {
    * 지운다(선 하나, 또는 함께 지울 묶음 — 자동 수평 구간 한 벌). 묶음은 되돌리기 한 번에 함께 되살아난다. 이미 지우는
    * 중이면 받지 않고 false. 묶음 중 일부만 지워졌으면 지워진 것만 되돌리기에 쌓는다.
    */
-  const removeLine = (target: ChartLineBody | readonly ChartLineBody[], title: string): boolean => {
+  const removeLine = (group: readonly ChartLineBody[], title: string): boolean => {
     if (removing.current) return false;
     removing.current = true;
     const requested = scopeKey;
-    const group = "line_id" in target ? [target] : target;
     Promise.allSettled(group.map((line) => remove.mutateAsync(line)))
       .then((results) => {
         const removed = group.filter((_, index) => results[index].status === "fulfilled");

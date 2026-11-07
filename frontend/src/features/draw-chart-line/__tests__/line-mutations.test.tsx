@@ -169,10 +169,10 @@ describe("useLineRemoval", () => {
 
     let accepted: boolean[] = [];
     act(() => {
-      accepted = [result.current.removeLine(line("a"), "a")];
+      accepted = [result.current.removeLine([line("a")], "a")];
     });
     act(() => {
-      accepted.push(result.current.removeLine(line("b"), "b"));
+      accepted.push(result.current.removeLine([line("b")], "b"));
     });
 
     expect(accepted).toEqual([true, false]);
@@ -193,7 +193,7 @@ describe("useLineRemoval", () => {
     });
 
     act(() => {
-      result.current.removeLine(line("a"), "a");
+      result.current.removeLine([line("a")], "a");
     });
     await waitFor(() => expect(result.current.canUndo).toBe(true));
 
@@ -222,7 +222,7 @@ describe("useLineRemoval", () => {
     });
 
     act(() => {
-      result.current.removeLine(line("a"), "a");
+      result.current.removeLine([line("a")], "a");
     });
     rerender({ target: { kind: "stock", code: "practice:005930" } });
     await waitFor(() => expect(answered).toBe(true));

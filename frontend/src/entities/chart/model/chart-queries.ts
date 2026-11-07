@@ -132,7 +132,11 @@ const analysisKey = <Q extends SeriesQuery>(name: string, query: Q | null) =>
 
 const ANALYSIS_OPTIONS = { staleTime: Infinity, retry: false } as const;
 
-/** 판정 구간의 국면 판정(문장·제안 칩·첫 점 피벗 목록·판정 규칙 문장 포함). 구간이 없으면 서버 기본 구간이다. */
+// 응답 타입마다 함수를 따로 둔다 — 제네릭 factory는 TanStack의 placeholder 유니온(값 | 함수)이 제네릭 응답 타입에서
+// 좁혀지지 않아 typecheck를 지나지 못한다. 키·재시도·잠깐 보이기 규칙은 `analysisKey`·`ANALYSIS_OPTIONS`·
+// `sameSeriesPlaceholder` 하나씩이 정한다.
+
+/** 판정 구간의 국면 판정(문장·제안 칩·판정 규칙·피벗 규칙 문장 포함). 구간이 없으면 서버 기본 구간이다. */
 export const chartRegimeQuery = (query: ChartRegimeQuery | null) => {
   const key = analysisKey("regime", query);
   return queryOptions({
@@ -143,6 +147,7 @@ export const chartRegimeQuery = (query: ChartRegimeQuery | null) => {
   });
 };
 
+/** 채널 후보(첫 점 후보 `anchor_choices` 포함). */
 export const chartChannelsQuery = (query: ChartChannelsQuery | null) => {
   const key = analysisKey("channels", query);
   return queryOptions({

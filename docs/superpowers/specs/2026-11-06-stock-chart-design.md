@@ -247,9 +247,11 @@ regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_
   중첩(POST), 선 CRUD. 요청·응답 가격은 모두 화면 가격이고 서버가 ÷k·×k 한다. 중첩의 저장 선은 서버가 `visible`인 것만
   고르고(보이기는 저장 칸이다), 요청에는 저장하지 않은 보이는 선(자동 후보)만 싣는다 — 저장한 후보는 요청에 다시 싣지
   않는다(실어도 ref = line_id인 요청 선은 빠진다). 요청 `include_mine`(기본 참)이 거짓이면 저장 선 중 내 선(source ≠ auto)을
-  빼고 자동 선만 넣는다 — 중첩 패널의 "내 선도 넣기" 토글이 보이기 저장 칸을 바꾸지 않게 한다(PR4). 국면 판정 응답은 채널
-  첫 점 고르기 목록 `pivots`(구간 안에서 구간 끝까지 확정된 후보용 피벗)와 판정 규칙 설명 문장 `rules`(domain
-  `_wording.REGIME_RULES`)를 싣는다(PR4). 분석 파라미터 범위는 domain 값 타입 하나가 검사해 `chart.params.invalid`로
+  빼고 자동 선만 넣는다 — 중첩 패널의 "내 선도 넣기" 토글이 보이기 저장 칸을 바꾸지 않게 한다(PR4). 채널 첫 점 후보는
+  `/channels` 응답 `anchor_choices`(domain `first_anchor_choices` — 그 방향의 확정 피벗, `find_channels`가 첫 점을 검사하는
+  같은 목록)다. 화면이 보이는 규칙 문장은 domain `_wording`이 상수를 인용해 완성해 응답에 싣는다: regime `rules`·
+  `pivot_rule`, zones `rules`, confluence `rules`(PR4). 같은 기준점의 자동 선을 다시 저장하면 새로 만들지 않고 있는
+  선을 준다 — 묶음 추가를 다시 보내도 같은 띠가 두 줄 생기지 않는다(손으로 그은 선은 그대로 새 선). 분석 파라미터 범위는 domain 값 타입 하나가 검사해 `chart.params.invalid`로
   거절한다(HTTP 스키마에 같은 범위를 두지 않는다). 저장 띠(자동 수평 구간)는 기준점
   둘인 수평선(`hline`)이다. 거절은 404·422 `{code, message}`이고 요청 칸 검증 실패도 `chart.request_invalid`다.
 
@@ -287,7 +289,8 @@ https://claude.ai/artifact/9Bp8mU4PSWvnWLarnccunV 의 보드 "채널 표시".
 자동 후보 칸은 저장한 자동 선을 만든 것마다 한 줄(수평 구간은 같은 기록의 띠 묶음 → 구간별 토글)로 보이고, 생성 패널은
 응답 `drawing`을 미리보기로 그린 뒤 `drawing.anchors`·`record`를 그대로 저장한다. 채널 방향 출처(`chosen_by`)는 응답 기록이
 정하고 화면은 다시 판정하지 않는다. 판정 구간 테두리 끌기는 완성 봉 index로 붙이고 요청에는 그 봉의 시작일을 싣는다.
-근거 패널의 "그때" 판정은 저장 기록, "지금" 판정은 같은 주기의 기본 구간 `/regime` 응답이다. 묶음 지우기는 되돌리기 한
+새 판정·후보가 오기 전(앞 응답을 잠깐 보이는 동안)에는 추천 방향을 비우고 후보 고르기·추가를 막는다 —
+앞 구간의 추천으로 새 구간 채널을 물으면 방향 출처가 "직접 고름"으로 기록된다. 근거 패널의 "그때" 판정은 저장 기록, "지금" 판정은 같은 주기의 기본 구간 `/regime` 응답이다. 묶음 지우기는 되돌리기 한
 번에 함께 되살린다.
 
 `pages/research-stock-chart` · `widgets/stock-chart`(차트 그리기·레이어 칸 조합) · `features/draw-chart-line`(수동 그리기·

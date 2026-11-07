@@ -42,7 +42,7 @@ import {
   AutoLinesPanel,
   ConfluenceBrackets,
   FinderPanels,
-  PreviewLines,
+  previewOverlays,
   useLevelFinder,
   visibleWindow,
 } from "../../../features/find-chart-levels";
@@ -358,16 +358,16 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                     instrumentKind={instrument.kind}
                     timeframe={timeframe}
                     lines={shownLines}
+                    // 미리보기 후보는 저장 선과 같은 그리기·라벨 배치에 넣는다(라벨끼리 밀어낸다)
+                    overlays={creating ? previewOverlays(finder.results.previews, scale) : []}
                   />
-                  {creating ? (
-                    <PreviewLines previews={finder.results.previews} scale={scale} instrumentKind={instrument.kind} />
-                  ) : null}
                   {creating ? (
                     <AnalysisWindowOverlay
                       scale={scale}
                       completed={completed}
                       window={finder.results.window}
                       onChange={(window) => finder.dispatch({ type: "edit", input: { window } })}
+                      onEscape={() => finder.dispatch({ type: "close" })}
                     />
                   ) : null}
                   {mode === "auto" && confluence.data ? (

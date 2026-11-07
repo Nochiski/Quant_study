@@ -96,8 +96,8 @@ const anchorRoles = (line: ChartLineBody, direction: TrendDirection | null): Mes
 };
 
 /**
- * 근거 표시 모델. `lines`는 한 줄의 선들(첫 선이 대표 — 묶음은 같은 기록을 공유한다). `current`는 현재가(계열 마지막
- * 봉 종가).
+ * 근거 표시 모델. `lines`는 한 줄의 선들(첫 선이 대표 — 묶음은 같은 기록을 공유한다). `current`는 현재가(응답 머리
+ * `context.current_price`).
  */
 export const lineEvidence = (lines: readonly ChartLineBody[], current: number | null): LineEvidence => {
   const [first] = lines;

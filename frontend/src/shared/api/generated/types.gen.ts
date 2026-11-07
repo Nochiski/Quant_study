@@ -1654,6 +1654,12 @@ export type ChartContextBody = {
    * 원장의 최신 거래일(진행 중 봉 판정의 기준일).
    */
   as_of: string;
+  /**
+   * Current Price
+   *
+   * 현재가 — 기준일까지 원장 마지막 일봉 종가(화면 가격). 보이는 캔들 범위와 무관하다. 일봉이 없으면 null.
+   */
+  current_price: number | null;
   instrument: ChartInstrumentBody;
   /**
    * Notice
@@ -2168,6 +2174,9 @@ export type ChartZoneBody = {
    * Members
    */
   members: Array<ChartPivotBody>;
+  /**
+   * 현재가(기준일 종가) 기준 구분. 판정 구간을 과거로 옮겨도 지금 가격으로 정한다.
+   */
   side: ZoneSide;
   /**
    * Touches

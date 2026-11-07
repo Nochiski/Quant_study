@@ -108,6 +108,7 @@ from strategy_workbench.domain.chart_analysis.facade.levels import (
     find_zones,
     first_anchor_choices,
     retracement_pivots,
+    zone_side,
 )
 from strategy_workbench.domain.chart_analysis.facade.line_record import (
     ALGORITHM_VERSION,
@@ -393,6 +394,8 @@ class StockChartService:
         span, view = _window(series, timeframe, window)
         params = _domain_params(ZoneParams(), width_atr=width_atr, min_touches=min_touches)
         scale = loaded.scale
+        # 현재가(`ChartContext.current_price`)를 구간과 같은 저장 가격 공간에서 비교한다
+        current = loaded.daily[-1].close
         zones = tuple(
             ZoneView(
                 drawing=_drawing(series, scale, LineKind.HLINE, zone_anchors(zone)),
@@ -401,6 +404,7 @@ class StockChartService:
                 high=scale.to_display(zone.high),
                 formed=series.bar_date(zone.formed_index),
                 members=_pivots(series, scale, zone.members),
+                side=zone_side(zone, current),
             )
             for zone in find_zones(series, span, params)
         )
@@ -648,8 +652,12 @@ class StockChartService:
         scale = DisplayScale(1.0)
         if ref.kind is InstrumentKind.STOCK and bars and history.last_actual_close is not None:
             scale = DisplayScale.from_last_close(history.last_actual_close, bars[-1].close)
+        current = scale.to_display(bars[-1].close) if bars else None
         return _Loaded(
-            ChartContext(instrument, as_of, self._practice, self._notice()), ref, scale, bars
+            ChartContext(instrument, as_of, self._practice, self._notice(), current),
+            ref,
+            scale,
+            bars,
         )
 
     def _frame(self, loaded: _Loaded, timeframe: Timeframe, params: SwingParams) -> _Frame | None:

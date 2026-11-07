@@ -2685,6 +2685,18 @@
             "title": "As Of",
             "type": "string"
           },
+          "current_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "현재가 — 기준일까지 원장 마지막 일봉 종가(화면 가격). 보이는 캔들 범위와 무관하다. 일봉이 없으면 null.",
+            "title": "Current Price"
+          },
           "instrument": {
             "$ref": "#/components/schemas/ChartInstrumentBody"
           },
@@ -2708,7 +2720,8 @@
           "instrument",
           "as_of",
           "practice_data",
-          "notice"
+          "notice",
+          "current_price"
         ],
         "title": "ChartContextBody",
         "type": "object"
@@ -3578,7 +3591,8 @@
             "type": "array"
           },
           "side": {
-            "$ref": "#/components/schemas/ZoneSide"
+            "$ref": "#/components/schemas/ZoneSide",
+            "description": "현재가(기준일 종가) 기준 구분. 판정 구간을 과거로 옮겨도 지금 가격으로 정한다."
           },
           "touches": {
             "title": "Touches",

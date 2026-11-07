@@ -15,7 +15,7 @@ from strategy_workbench.domain.chart_analysis.facade.geometry import (
     RetracementGeometry,
     TrendLine,
 )
-from strategy_workbench.domain.chart_analysis.facade.levels import HorizontalZone, ZoneSide
+from strategy_workbench.domain.chart_analysis.facade.levels import HorizontalZone
 from strategy_workbench.domain.chart_analysis.facade.line_record import LineKind
 
 from ._chart_analysis_fixtures import series_with
@@ -80,7 +80,7 @@ def test_retracement_bands_leave_out_anchor_levels_zero_and_one() -> None:
 
 
 def test_horizontal_line_and_zone_bands() -> None:
-    zone = HorizontalZone((), 99.0, 101.0, 2, 5, 0, 0, ZoneSide.STRADDLE)
+    zone = HorizontalZone((), 99.0, 101.0, 2, 5, 0, 0)
 
     assert bands_of(SERIES, 100.0, ref="h") == (PriceBand(HL, 100.0, 100.0, "h"),)
     assert bands_of(SERIES, zone, ref="z") == (PriceBand(HL, 99.0, 101.0, "z"),)

@@ -10,8 +10,8 @@ type CandlePlotProps = {
   scale: ChartScale;
   instrumentKind: InstrumentKind;
   height: number;
-  /** 현재가 점선을 그을 봉. 위젯이 한 번 정해 점선·배지·머리에 같은 값을 넘긴다. */
-  current: ChartCandleBody | undefined;
+  /** 현재가(응답 머리 `context.current_price`). 점선을 이 가격에 긋고, 없으면 긋지 않는다. */
+  current: number | null;
 };
 
 const DATE_TICK_GAP = 64;
@@ -96,10 +96,10 @@ export const CandlePlot = ({ candles, scale, instrumentKind, height, current }: 
             />
           </>
         )}
-        {current === undefined ? null : (
+        {current === null ? null : (
           <path
             className="chart-plot__current"
-            d={`M${plot.left} ${scale.yOfPrice(current.close).toFixed(1)}H${plot.right}`}
+            d={`M${plot.left} ${scale.yOfPrice(current).toFixed(1)}H${plot.right}`}
           />
         )}
       </g>

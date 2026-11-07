@@ -53,6 +53,7 @@ const setup = (lines: ChartLineBody[]) => {
       instrument: { kind: "index", code: KOSPI.code, name: "코스피", group: "KOSPI", tick_steps: [] },
       as_of: "2025-10-30",
       practice_data: true,
+      current_price: 2500,
       notice: null,
     },
     lines,

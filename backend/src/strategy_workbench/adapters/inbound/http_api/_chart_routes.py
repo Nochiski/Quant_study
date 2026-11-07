@@ -145,6 +145,13 @@ class ChartContextBody:
     as_of: Annotated[date, Field(description="원장의 최신 거래일(진행 중 봉 판정의 기준일).")]
     practice_data: bool
     notice: str | None
+    current_price: Annotated[
+        float | None,
+        Field(
+            description="현재가 — 기준일까지 원장 마지막 일봉 종가(화면 가격). 보이는 캔들 범위와 "
+            "무관하다. 일봉이 없으면 null."
+        ),
+    ]
 
 
 @dataclass(frozen=True)
@@ -341,7 +348,13 @@ class ChartZoneBody:
     formed: Annotated[date, Field(description="구간이 생긴 봉의 날짜. 그 앞은 옅게 그린다.")]
     held: int
     broken: int
-    side: ZoneSide
+    side: Annotated[
+        ZoneSide,
+        Field(
+            description="현재가(기준일 종가) 기준 구분. 판정 구간을 과거로 옮겨도 "
+            "지금 가격으로 정한다."
+        ),
+    ]
     members: list[ChartPivotBody]
 
 
@@ -510,7 +523,11 @@ def _instrument(item: ChartInstrument) -> ChartInstrumentBody:
 
 def _context(context: ChartContext) -> ChartContextBody:
     return ChartContextBody(
-        _instrument(context.instrument), context.as_of, context.practice_data, context.notice
+        _instrument(context.instrument),
+        context.as_of,
+        context.practice_data,
+        context.notice,
+        context.current_price,
     )
 
 
@@ -689,7 +706,7 @@ def _zones(view: ZonesView) -> ChartZonesBody:
                 formed=z.formed,
                 held=z.zone.held,
                 broken=z.zone.broken,
-                side=z.zone.side,
+                side=z.side,
                 members=[_pivot(p) for p in z.members],
             )
             for z in view.zones

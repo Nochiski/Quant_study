@@ -22,6 +22,7 @@ from strategy_workbench.domain.chart_analysis.facade.levels import (
     HorizontalZone,
     SwingChoice,
     TrendDirection,
+    ZoneSide,
 )
 from strategy_workbench.domain.chart_analysis.facade.line_record import (
     LineKind,
@@ -34,12 +35,18 @@ from strategy_workbench.domain.chart_analysis.facade.series import PivotKind
 
 @dataclass(frozen=True)
 class ChartContext:
-    """응답 공통 머리. `as_of`는 원장 최신 확정 거래일, `notice`는 연습용 데이터 안내다."""
+    """응답 공통 머리. `as_of`는 원장 최신 확정 거래일, `notice`는 연습용 데이터 안내다.
+
+    `current_price`는 현재가의 owner다 — 기준일까지 원장 마지막 일봉 종가(화면 가격)이고, 일봉이
+    없으면 None이다. 수평 구간의 저항·지지 구분과 화면의 "현재가 대비"·현재가 선이 모두 이 값
+    하나를 쓴다.
+    """
 
     instrument: ChartInstrument
     as_of: date
     practice_data: bool
     notice: str | None
+    current_price: float | None
 
 
 @dataclass(frozen=True)
@@ -178,6 +185,8 @@ class ZoneView:
     high: float
     formed: date
     members: tuple[PivotPoint, ...]
+    # 현재가(기준일 종가) 기준 구분 — 판정 구간 끝이 아니다(domain `zone_side`).
+    side: ZoneSide
 
 
 @dataclass(frozen=True)

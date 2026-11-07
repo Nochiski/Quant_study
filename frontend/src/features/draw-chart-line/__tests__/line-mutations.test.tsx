@@ -178,7 +178,7 @@ describe("useLineRemoval", () => {
 
     expect(accepted).toEqual([true, false]);
     await waitFor(() =>
-      expect(result.current.notice).toEqual({ kind: "deleted", title: "a", lost: 0, undoable: true }),
+      expect(result.current.notice).toEqual({ kind: "deleted", title: "a", lost: false, undoable: true }),
     );
     expect(deletes).toBe(1);
     expect(result.current.canUndo).toBe(true);
@@ -203,7 +203,7 @@ describe("useLineRemoval", () => {
       result.current.removeLine([broken], "a");
     });
     await waitFor(() =>
-      expect(result.current.notice).toEqual({ kind: "deleted", title: "a", lost: 1, undoable: false }),
+      expect(result.current.notice).toEqual({ kind: "deleted", title: "a", lost: true, undoable: false }),
     );
     expect(result.current.canUndo).toBe(false);
     expect(result.current.undo()).toBe(false);
@@ -213,12 +213,12 @@ describe("useLineRemoval", () => {
       result.current.removeLine([line("b"), line("c", { issue: "anchor_order" })], "b");
     });
     await waitFor(() =>
-      expect(result.current.notice).toEqual({ kind: "deleted", title: "b", lost: 1, undoable: true }),
+      expect(result.current.notice).toEqual({ kind: "deleted", title: "b", lost: true, undoable: true }),
     );
     act(() => {
       result.current.undo();
     });
-    await waitFor(() => expect(result.current.notice).toEqual({ kind: "restored" }));
+    await waitFor(() => expect(result.current.notice).toEqual({ kind: "restored", title: "b" }));
     expect(creates).toBe(1);
   });
 

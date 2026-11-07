@@ -158,7 +158,7 @@ export const SelectedLineCard = ({
                     type="checkbox"
                     checked={on}
                     // 마지막 하나는 끌 수 없다 — 빈 레벨 목록은 그릴 선이 없다(서버도 거절한다)
-                    disabled={(on && levels.length === 1) || line.issue !== null}
+                    disabled={on && levels.length === 1}
                     onChange={(event) => setLevel(level, event.target.checked)}
                   />
                   {String(level)}

@@ -15,6 +15,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 
+from strategy_workbench.application.stock_chart._lines import same_price
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_drawings import ParamValue
 from strategy_workbench.domain.chart_analysis.facade.geometry import Anchor
 from strategy_workbench.domain.chart_analysis.facade.levels import (
@@ -172,6 +173,6 @@ def created_index(
 def same(left: Sequence[Anchor], right: Sequence[Anchor]) -> bool:
     """같은 봉·같은 가격(화면 ↔ 저장 왕복의 마지막 자리 차이는 같다고 본다)."""
     return len(left) == len(right) and all(
-        a.index == b.index and math.isclose(a.price, b.price, rel_tol=1e-9)
+        a.index == b.index and same_price(a.price, b.price)
         for a, b in zip(left, right, strict=True)
     )

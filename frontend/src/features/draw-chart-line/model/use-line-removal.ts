@@ -9,10 +9,10 @@ import {
 import { useCommittedRef } from "../../../shared/lib/react";
 import { isTextEntry, popUndo, pushUndo, type UndoStack } from "./line-edit";
 
-/** `lost` = 되돌리기에 쌓지 못한 선 수(지금 그릴 수 없는 선), `undoable` = 이 지우기를 되돌릴 수 있는가. */
+/** `lost` = 지금 그릴 수 없어 되돌리기에 쌓지 못한 선이 있는가, `undoable` = 이 지우기를 되돌릴 수 있는가. */
 export type RemovalNotice =
-  | { kind: "deleted"; title: string; lost: number; undoable: boolean }
-  | { kind: "restored" };
+  | { kind: "deleted"; title: string; lost: boolean; undoable: boolean }
+  | { kind: "restored"; title: string };
 
 /**
  * 선 지우기와 되돌리기. 지우면 같은 내용으로 다시 만들 본문을 쌓아 두고(로컬 UI 상태), 되돌리기 알림의 버튼이나
@@ -59,11 +59,11 @@ export const useLineRemoval = (target: ChartTarget) => {
         const removed = group.filter((_, index) => results[index].status === "fulfilled");
         if (removed.length === 0 || scopeRef.current !== requested) return;
         const restorable = removed.filter((line) => line.issue === null);
-        if (restorable.length > 0) setStack((current) => pushUndo(current, restorable));
+        if (restorable.length > 0) setStack((current) => pushUndo(current, restorable, title));
         setNotice({
           kind: "deleted",
           title,
-          lost: removed.length - restorable.length,
+          lost: restorable.length < removed.length,
           undoable: restorable.length > 0,
         });
       })
@@ -77,16 +77,16 @@ export const useLineRemoval = (target: ChartTarget) => {
   const restoring = useRef(false);
 
   const undo = (): boolean => {
-    const [group, rest] = popUndo(stack);
-    if (group === null || restoring.current) return false;
+    const [entry, rest] = popUndo(stack);
+    if (entry === null || restoring.current) return false;
     restoring.current = true;
     setStack(rest);
-    Promise.allSettled(group.map((body) => create.mutateAsync(body)))
+    Promise.allSettled(entry.bodies.map((body) => create.mutateAsync(body)))
       .then((results) => {
         // 되살리지 못한 것은 다시 해 볼 수 있게 돌려 둔다
-        const failed = group.filter((_, index) => results[index].status === "rejected");
-        if (failed.length > 0) setStack((current) => [...current, failed]);
-        else setNotice({ kind: "restored" });
+        const failed = entry.bodies.filter((_, index) => results[index].status === "rejected");
+        if (failed.length > 0) setStack((current) => [...current, { title: entry.title, bodies: failed }]);
+        else setNotice({ kind: "restored", title: entry.title });
       })
       .finally(() => {
         restoring.current = false;

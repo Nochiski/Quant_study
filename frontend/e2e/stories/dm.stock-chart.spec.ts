@@ -123,7 +123,7 @@ test(
     await expect(layers.getByText("아직 그은 선이 없어요.", { exact: false })).toBeVisible();
     // 되돌리기 버튼
     await page.getByRole("button", { name: "되돌리기 (Ctrl+Z)" }).click();
-    await expect(page.getByText("지운 선을 되살렸어요.")).toBeVisible();
+    await expect(page.getByText(`지운 선을 되살렸어요: ${raisedName}`)).toBeVisible();
     await expect(layers.getByRole("button", { name: raisedName, exact: true })).toBeVisible();
     // Ctrl+Z
     await layers.getByRole("button", { name: `${raisedName} 지우기` }).click();

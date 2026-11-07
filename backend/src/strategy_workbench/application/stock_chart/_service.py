@@ -30,6 +30,7 @@ from strategy_workbench.application.stock_chart._lines import (
     geometry,
     paths,
     resolve,
+    stored_anchors,
     unmoved,
 )
 from strategy_workbench.application.stock_chart._provenance import (
@@ -581,10 +582,10 @@ class StockChartService:
         current = self._owned(line_id)
         loaded = self._load(current.instrument)
         kept = current.content.anchors
-        if unmoved(kept, edit.anchors, loaded.scale):
-            # 기준점을 옮기지 않은 수정(보이기·메모·잠금·레벨)은 기준점을 다시 해석하지 않는다
-            # — 원장이 바뀌어 지금 그릴 수 없는 선(`issue`)도 숨기고 메모를 고칠 수 있어야 한다
-            check_shape(current.kind, kept, edit.levels)
+        if unmoved(kept, stored_anchors(edit.anchors, loaded.scale)):
+            # 기준점을 옮기지 않은 수정(보이기·메모·잠금·레벨·연장)은 기준점을 다시 해석하지
+            # 않는다 — 원장이 바뀌어 지금 그릴 수 없는 선(`issue`)도 숨기고 고칠 수 있어야 한다
+            check_levels(edit.levels)
             line = self._drawings.update_content(line_id, self._content(kept, edit), self._now())
             return self._line_view(loaded, line)
         frame = self._required_frame(loaded, current.timeframe)
@@ -716,7 +717,7 @@ class StockChartService:
     ) -> tuple[LineGeometry, tuple[LineAnchor, ...], tuple[Anchor, ...]]:
         """화면 좌표 기준점을 검사해 (기하, 봉 시작일로 맞춘 저장 기준점, 봉 index 기준점)으로."""
         series = frame.series
-        anchors = tuple(LineAnchor(p.bar_date, loaded.scale.to_stored(p.price)) for p in points)
+        anchors = stored_anchors(points, loaded.scale)
         check_shape(kind, anchors, levels)
         indexed = resolve(series, anchors)
         if isinstance(indexed, date):

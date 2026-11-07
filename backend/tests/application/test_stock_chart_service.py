@@ -655,6 +655,38 @@ def test_a_line_that_can_no_longer_be_drawn_can_still_be_hidden_but_not_moved() 
     assert moved.value.code == "chart.line.anchor_outside_series"
 
 
+def test_an_auto_line_that_can_no_longer_be_drawn_can_still_be_hidden() -> None:
+    # 자동 되돌림을 저장한 뒤 원장이 나중 기준점 앞에서 끝나면(정정·상장폐지) 그릴 수 없다.
+    # 기준점이 그대로인 숨기기는 자동 선의 기준점 고정 검사에 걸리지 않는다
+    drawings = FakeDrawings()
+    swing = _service(drawings).retracement(UPTREND, Timeframe.DAY, SwingChoice.LATEST_CONFIRMED)
+    assert swing.drawing is not None
+    anchors = swing.drawing.anchors
+    _service(drawings).create_line(
+        ChartLineDraft(
+            UPTREND,
+            Timeframe.DAY,
+            LineKind.FIB_RETRACEMENT,
+            LineSource.AUTO,
+            LineEdit(anchors),
+            swing.record,
+        )
+    )
+    prices = FakePrices()
+    full = prices.history[UPTREND]
+    last_anchor = max(a.bar_date for a in anchors)
+    prices.history[UPTREND] = ChartHistory(
+        tuple(bar for bar in full.bars if bar.session < last_anchor), full.last_actual_close
+    )
+    service = _service(drawings, prices)
+    (listed,) = service.lines(UPTREND).lines
+    assert listed.issue is LineIssue.ANCHOR_OUTSIDE_SERIES
+
+    hidden = service.update_line(listed.line.line_id, LineEdit(listed.anchors, visible=False))
+
+    assert (hidden.issue, hidden.line.content.visible) == (LineIssue.ANCHOR_OUTSIDE_SERIES, False)
+
+
 def test_current_price_is_the_last_ledger_close_whatever_candle_range() -> None:
     # 과거 범위만 보여도 현재가는 기준일까지 마지막 일봉 종가(화면 가격 143 × k 0.5)다
     view = _service().candles(STOCK, Timeframe.DAY, date(2025, 9, 1), date(2025, 9, 30))

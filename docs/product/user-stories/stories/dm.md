@@ -803,6 +803,8 @@
 - Given 그은 선, When 새로고침하거나 다른 화면에 갔다 돌아오면, Then 선이 그대로 있다.
 - Given 목록의 수평선 이름에 초점, When ↑를 한 번 누르면, Then 보이는 가격이 한 호가(지수 0.01) 오른다. When Delete를
   누르거나 지우기 버튼을 누르면, Then "선을 지웠어요" 알림이 뜨고, 알림의 되돌리기 버튼이나 Ctrl+Z가 같은 선을 되살린다.
+  원장이 바뀌어 지금 그릴 수 없는 선(목록에 사유가 보이는 선)도 보이기·메모·잠금·레벨은 고칠 수 있고, 그런 선을 지우면
+  알림이 되돌릴 수 없다고 바로 말한다. 되살리면 알림이 되살린 선 이름을 보인다(#700).
 - Given 마우스를 쓰지 않는다, When "좌표로 추가"에서 도구와 기준점마다 봉 날짜·붙일 값(시·고·저·종가)·가격을 고르고
   추가를 누르면, Then 같은 선이 생기고 고른 선 카드가 열리며 초점이 새 선 이름으로 간다.
 - Given 고른 선 카드, When 메모를 넣고 바로 잠금을 누르고 레벨 하나와 오른쪽 연장을 끄면, Then 새로고침 뒤에도 네 가지가
@@ -812,7 +814,8 @@
 - 비고: e2e가 보지 않는 기준은 단위 테스트가 본다 — Shift+↑/↓ 1%와 호가 눈금 맞춤·0 이하 금지
   (`frontend/src/entities/chart/__tests__/chart-model.test.ts` steppedPrice), 연달아 고친 두 칸이 모두 남는 것·키보드
   이동이 앞 이동이 저장된 가격에서 세는 것·끌기 저장 실패에도 끌기가 풀리는 것·지우기 연타·종목을 바꾸면 되돌리기가
-  비는 것(`frontend/src/features/draw-chart-line/__tests__/line-mutations.test.tsx`), 미리보기 음영·연장의 선분 계산
+  비는 것·그릴 수 없는 선은 되돌리기에 쌓지 않는 것(`frontend/src/features/draw-chart-line/__tests__/line-mutations.test.tsx`),
+  그릴 수 없는 선의 보이기·메모 수정(`backend/tests/application/test_stock_chart_service.py`), 미리보기 음영·연장의 선분 계산
   (`chart-model.test.ts` levelSegments). 그리는 동안의 서버 미리보기 화면은 손으로 확인했다. 레벨 가격·채널 기하·기준점
   정규화·호가표·등락률은 서버가 소유한다(`backend/tests/domain/test_chart_analysis_*`,
   `backend/tests/integration/test_stock_chart_http_api.py`). 자동 찾기 모드는 PR4(US-CS 스토리)다.

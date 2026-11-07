@@ -82,6 +82,25 @@ def check_shape(
     check_levels(levels)
 
 
+def same_price(left: float, right: float) -> bool:
+    """같은 저장 가격 — 화면 ↔ 저장 왕복의 마지막 자리 차이는 같다고 본다. 한 호가(지수 0.01 =
+    상대 약 2e-6)보다 훨씬 좁아 실제 이동은 놓치지 않는다."""
+    return math.isclose(left, right, rel_tol=1e-9)
+
+
+def stored_anchors(points: Sequence[ChartPoint], scale: DisplayScale) -> tuple[LineAnchor, ...]:
+    """화면 좌표 기준점 → 저장 기준점(가격 ÷k, 날짜는 그대로)."""
+    return tuple(LineAnchor(p.bar_date, scale.to_stored(p.price)) for p in points)
+
+
+def unmoved(stored: Sequence[LineAnchor], edited: Sequence[LineAnchor]) -> bool:
+    """편집한 기준점이 저장된 기준점과 같은 봉 날짜·같은 가격인가."""
+    return len(stored) == len(edited) and all(
+        s.bar_date == e.bar_date and same_price(s.price, e.price)
+        for s, e in zip(stored, edited, strict=True)
+    )
+
+
 def resolve(series: ChartSeries, anchors: Sequence[LineAnchor]) -> tuple[Anchor, ...] | date:
     """기준점 날짜 → 그 주기 완성 봉 index. 계열 밖 날짜가 있으면 그 첫 날짜를 돌려준다."""
     resolved: list[Anchor] = []

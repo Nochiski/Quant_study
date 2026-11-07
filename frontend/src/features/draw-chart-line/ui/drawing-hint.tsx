@@ -4,7 +4,7 @@ import { failureReason } from "../../../shared/api";
 import { Button, FailureNotice } from "../../../shared/ui";
 import { STEP_HINTS, type DrawingState } from "../model/drawing";
 import type { ChartDrawing } from "../model/use-chart-drawing";
-import type { useLineRemoval } from "../model/use-line-removal";
+import type { RemovalNotice, useLineRemoval } from "../model/use-line-removal";
 
 const hintKey = (state: DrawingState): MessageKey =>
   state.tool === "select"
@@ -42,6 +42,12 @@ export const DrawingHint = ({ drawing }: { drawing: ChartDrawing }) => {
   );
 };
 
+const noticeKey = (notice: RemovalNotice): MessageKey => {
+  if (notice.kind === "restored") return "chart.undo.restored";
+  if (!notice.lost) return "chart.undo.deleted";
+  return notice.undoable ? "chart.undo.deletedPartial" : "chart.undo.deletedLost";
+};
+
 /** 지운 뒤의 되돌리기 알림. Ctrl+Z도 같은 일을 한다(`useLineRemoval`). */
 export const UndoNotice = ({ removal }: { removal: ReturnType<typeof useLineRemoval> }) => {
   const { notice } = removal;
@@ -51,11 +57,9 @@ export const UndoNotice = ({ removal }: { removal: ReturnType<typeof useLineRemo
       {notice === null ? null : (
         <>
           <span className="undo-notice__text">
-            {notice.kind === "deleted"
-              ? tFill("chart.undo.deleted", { title: notice.title })
-              : t("chart.undo.restored")}
+            {tFill(noticeKey(notice), { title: notice.title })}
           </span>
-          {notice.kind === "deleted" && removal.canUndo ? (
+          {notice.kind === "deleted" && notice.undoable && removal.canUndo ? (
             <Button size="small" tone="ghost" className="undo-notice__undo" onClick={() => removal.undo()}>
               {t("chart.undo.action")}
             </Button>

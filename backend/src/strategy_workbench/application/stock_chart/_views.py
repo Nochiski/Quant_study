@@ -111,7 +111,8 @@ class PivotPoint:
 @dataclass(frozen=True)
 class RegimeView:
     """판정 값은 domain `judgement` 그대로이고, 피벗만 화면 좌표(`structure_highs`·`_lows`)로
-    옮긴다."""
+    옮긴다. `pivots`는 구간 안에서 구간 끝까지 확정된 후보용 피벗(채널 첫 점을 고르는 목록)이고
+    `rules`는 판정 규칙 설명 문장(domain `REGIME_RULES`)이다."""
 
     context: ChartContext
     timeframe: Timeframe
@@ -122,6 +123,8 @@ class RegimeView:
     structure_lows: tuple[PivotPoint, ...]
     sentence: str
     warnings: tuple[str, ...]
+    pivots: tuple[PivotPoint, ...] = ()
+    rules: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

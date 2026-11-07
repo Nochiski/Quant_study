@@ -2623,6 +2623,12 @@
       "ChartConfluenceRequestBody": {
         "description": "저장 선 중 보이는 것은 서버가 넣는다. `lines`에는 저장하지 않은 보이는 선(자동 후보)만\n싣는다 — 저장한 후보를 다시 실으면(ref = line_id) 그 요청 선은 빠진다.",
         "properties": {
+          "include_mine": {
+            "default": true,
+            "description": "거짓이면 저장 선 중 내 선(source ≠ auto)을 빼고 자동 선만 넣는다.",
+            "title": "Include Mine",
+            "type": "boolean"
+          },
           "instrument_code": {
             "minLength": 1,
             "title": "Instrument Code",
@@ -3230,6 +3236,14 @@
             "title": "Ends Near Extreme",
             "type": "boolean"
           },
+          "pivots": {
+            "description": "구간 안에서 구간 끝까지 확정된 후보용 피벗(채널 첫 점 고르기 목록).",
+            "items": {
+              "$ref": "#/components/schemas/ChartPivotBody"
+            },
+            "title": "Pivots",
+            "type": "array"
+          },
           "reason": {
             "anyOf": [
               {
@@ -3239,6 +3253,14 @@
                 "type": "null"
               }
             ]
+          },
+          "rules": {
+            "description": "판정 규칙 설명 문장(backend가 완성).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Rules",
+            "type": "array"
           },
           "sentence": {
             "description": "판정 한 문장(backend가 완성).",
@@ -3319,7 +3341,9 @@
           "starts_near_extreme",
           "ends_near_extreme",
           "warnings",
-          "channel_direction"
+          "channel_direction",
+          "pivots",
+          "rules"
         ],
         "title": "ChartRegimeBody",
         "type": "object"

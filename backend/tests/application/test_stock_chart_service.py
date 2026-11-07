@@ -234,7 +234,15 @@ def test_window_dates_map_to_the_bar_that_holds_them() -> None:
 
 def test_channel_direction_records_whether_the_user_followed_the_recommendation() -> None:
     service = _service()
-    assert service.regime(UPTREND, Timeframe.DAY).judgement.channel_direction is TrendDirection.UP
+    regime = service.regime(UPTREND, Timeframe.DAY)
+    assert regime.judgement.channel_direction is TrendDirection.UP
+    # 첫 점 고르기 목록: 구간 안에서 구간 끝까지 확정된 후보용 피벗
+    assert regime.pivots
+    assert all(
+        regime.window.start <= p.bar_date and p.confirmed_date <= regime.window.end
+        for p in regime.pivots
+    )
+    assert any("0.73" in rule for rule in regime.rules)
 
     followed = service.channels(UPTREND, Timeframe.DAY, TrendDirection.UP)
     overridden = service.channels(UPTREND, Timeframe.DAY, TrendDirection.DOWN)
@@ -399,6 +407,8 @@ def test_confluence_reads_visible_saved_lines_and_inline_candidates() -> None:
     assert error.value.code == "chart.confluence.duplicate_ref"
     # 저장한 후보를 다시 실으면(ref = line_id) 두 번 세지 않는다 — 혼자 남은 수평선은 중첩이 없다
     assert service.confluence(STOCK, (replace(candidate, ref=shown),)).groups == ()
+    # 내 선을 빼면(include_mine=False) 손으로 그은 수평선이 빠져 되돌림 혼자라 중첩이 없다
+    assert service.confluence(STOCK, (candidate,), include_mine=False).groups == ()
 
 
 def test_search_ranks_index_name_then_ticker_then_exact_name_then_contains() -> None:

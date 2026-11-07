@@ -55,6 +55,25 @@ def _plain(value: float) -> str:
     return f"{value:g}"
 
 
+def _regime_rules() -> tuple[str, ...]:
+    flat, trend, box_max = _plain(FLAT_STRENGTH), _plain(TREND_STRENGTH), _plain(BOX_RATIO_MAX)
+    return (
+        "강도 S = ln(끝 종가 ÷ 시작 종가) ÷ (봉별 로그수익률 표준편차 × √(봉 수 − 1))예요. "
+        "순변화가 같은 기간의 흔들림보다 몇 배 큰지라 봉 수가 달라도 뜻이 같아요.",
+        "박스 비율 B = (구간 최고가 − 최저가) ÷ (구간 끝 ATR(14) × √봉 수)예요.",
+        f"봉이 {MIN_REGIME_BARS}개보다 적거나 가격이 움직이지 않으면 판정할 수 없어요.",
+        f"|S| < {flat}이면 B ≤ {box_max}일 때 박스권(채널 대신 수평 구간 권장), "
+        "아니면 방향 미확인(구간을 나눠 보세요)이에요.",
+        f"{flat} ≤ |S| < {trend}이면 보류예요(방향은 있지만 약해요).",
+        f"|S| ≥ {trend}이고 큰 스윙의 확정 고점 2·저점 2가 같은 방향(HH·HL 또는 LH·LL)이면 "
+        "상승·하락, 아니면 보류예요.",
+    )
+
+
+# 판정 규칙 접힘 설명(채널 생성 패널). 임계를 이 노드의 상수에서 그대로 인용한다.
+REGIME_RULES = _regime_rules()
+
+
 def anchor_issue_message(issue: AnchorIssue) -> str:
     return _ANCHOR_ISSUE_MESSAGES[issue]
 

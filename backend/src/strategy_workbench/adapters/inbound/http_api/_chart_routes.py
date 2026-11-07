@@ -273,6 +273,11 @@ class ChartRegimeBody:
     channel_direction: Annotated[
         TrendDirection | None, Field(description="추천 채널 방향. 상승·하락 판정만 있다.")
     ]
+    pivots: Annotated[
+        list[ChartPivotBody],
+        Field(description="구간 안에서 구간 끝까지 확정된 후보용 피벗(채널 첫 점 고르기 목록)."),
+    ]
+    rules: Annotated[list[str], Field(description="판정 규칙 설명 문장(backend가 완성).")]
 
 
 @dataclass(frozen=True)
@@ -476,6 +481,10 @@ class ChartConfluenceRequestBody:
     instrument_code: Annotated[str, Field(min_length=1)]
     lines: list[ChartConfluenceLineBody]
     tolerance: float = DEFAULT_CONFLUENCE_TOLERANCE
+    include_mine: Annotated[
+        bool,
+        Field(description="거짓이면 저장 선 중 내 선(source ≠ auto)을 빼고 자동 선만 넣는다."),
+    ] = True
 
 
 # ── 변환 ─────────────────────────────────────────────────────────────────────
@@ -615,6 +624,8 @@ def _regime(view: RegimeView) -> ChartRegimeBody:
         ends_near_extreme=view.judgement.ends_near_extreme,
         warnings=list(view.warnings),
         channel_direction=view.judgement.channel_direction,
+        pivots=[_pivot(p) for p in view.pivots],
+        rules=list(view.rules),
     )
 
 
@@ -892,7 +903,13 @@ def register_chart_routes(app: FastAPI, service: StockChartService) -> None:
             )
             for line in body.lines
         )
-        return _confluence(guarded(lambda: service.confluence(ref, lines, body.tolerance)))
+        return _confluence(
+            guarded(
+                lambda: service.confluence(
+                    ref, lines, body.tolerance, include_mine=body.include_mine
+                )
+            )
+        )
 
     @router.post("/lines/preview", operation_id="previewChartLine", responses=responses)
     def preview_line(body: ChartLinePreviewBody) -> ChartDrawingBody:

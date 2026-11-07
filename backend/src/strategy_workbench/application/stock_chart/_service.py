@@ -133,6 +133,7 @@ from strategy_workbench.domain.chart_analysis.facade.wording import (
     CONFLUENCE_CAUTION,
     ENDS_NEAR_EXTREME_WARNING,
     NO_SWING_MESSAGE,
+    REGIME_RULES,
     STARTS_NEAR_EXTREME_WARNING,
     ZONE_BASIS,
     anchor_issue_message,
@@ -286,6 +287,8 @@ class StockChartService:
             structure_lows=_pivots(series, loaded.scale, judgement.structure_lows),
             sentence=regime_sentence(judgement),
             warnings=_warnings(judgement),
+            pivots=_pivots(series, loaded.scale, series.confirmed_in(span)),
+            rules=REGIME_RULES,
         )
 
     def channels(
@@ -415,8 +418,14 @@ class StockChartService:
         ref: InstrumentRef,
         lines: Sequence[ConfluenceLine] = (),
         tolerance: float = DEFAULT_CONFLUENCE_TOLERANCE,
+        *,
+        include_mine: bool = True,
     ) -> ConfluenceView:
         """보이는 선(저장 선 중 `visible`인 것 + 요청에 실은 저장 안 한 선)의 중첩.
+
+        `include_mine`이 거짓이면 저장 선 중 내 선(손으로 그었거나 복사한 선 — `source`가 auto가
+        아닌 것)은 빼고 자동 선만 넣는다. 보이기는 저장 칸이라 "내 선 빼고 보기"를 위해 선을 숨겨
+        저장하지 않게 하려는 칸이다.
 
         보이기는 저장 칸이라 저장 선은 서버가 고른다. 요청 ref가 저장 선 id와 같으면(저장한 후보를
         다시 실었다) 그 요청 선은 빼서 두 번 세지 않는다. 계산은 저장 좌표에서 하고(비율 넓히기라
@@ -433,7 +442,8 @@ class StockChartService:
         bands: list[PriceBand] = []
         skipped: list[str] = []
         for line in saved:
-            if not line.content.visible:
+            mine = line.source is not LineSource.AUTO
+            if not line.content.visible or (mine and not include_mine):
                 continue
             frame = self._frame(loaded, line.timeframe, SwingParams())
             resolved = (

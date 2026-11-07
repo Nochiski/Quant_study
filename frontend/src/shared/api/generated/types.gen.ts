@@ -1610,6 +1610,12 @@ export type ChartConfluenceMemberBody = {
  */
 export type ChartConfluenceRequestBody = {
   /**
+   * Include Mine
+   *
+   * 거짓이면 저장 선 중 내 선(source ≠ auto)을 빼고 자동 선만 넣는다.
+   */
+  include_mine?: boolean;
+  /**
    * Instrument Code
    */
   instrument_code: string;
@@ -1969,7 +1975,19 @@ export type ChartRegimeBody = {
    * Ends Near Extreme
    */
   ends_near_extreme: boolean;
+  /**
+   * Pivots
+   *
+   * 구간 안에서 구간 끝까지 확정된 후보용 피벗(채널 첫 점 고르기 목록).
+   */
+  pivots: Array<ChartPivotBody>;
   reason: RegimeReason | null;
+  /**
+   * Rules
+   *
+   * 판정 규칙 설명 문장(backend가 완성).
+   */
+  rules: Array<string>;
   /**
    * Sentence
    *

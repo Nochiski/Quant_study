@@ -230,11 +230,45 @@
   user-select: none;
 }
 
+/* 키보드 줌·이동의 Tab 정지. 포인터로 눌러 생긴 초점에는 테두리를 그리지 않는다 */
+.stock-chart__svg:focus {
+  outline: none;
+}
+
+.stock-chart__svg:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 빈 곳을 끌어 옮기는 중 — 선·캡처 칸의 커서보다 앞선다 */
+.stock-chart__svg--panning,
+.stock-chart__svg--panning * {
+  cursor: grabbing;
+}
+
+.stock-chart__keys {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  line-height: 1.5;
+}
+
 .stock-chart__state {
   margin: 0;
   padding: var(--space-6) var(--space-4);
   color: var(--text-muted);
   text-align: center;
+}
+
+/* 빈 기간 안내 안의 문장과 되돌리기 버튼 */
+div.stock-chart__state {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+}
+
+div.stock-chart__state p {
+  margin: 0;
 }
 
 .stock-chart__foot {

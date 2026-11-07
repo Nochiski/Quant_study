@@ -1,5 +1,7 @@
-import type { ChartLevelPathBody } from "../../../shared/api";
-import type { ChartScale } from "./chart-scale";
+import type { ChartLevelPathBody, InstrumentKind } from "../../../shared/api";
+import { formatPrice } from "./chart-price";
+import type { ChartScale, PlotBox } from "./chart-scale";
+import { labelAnchor, type LevelLabel } from "./label-layout";
 
 /**
  * 레벨 선을 그릴 점(서버 응답 `paths`) → px 선분. 설계 문서 6장 계약: 화면은 `start`·`end` 두 점을 날짜 축
@@ -73,3 +75,27 @@ export const shadedBands = (segments: readonly LevelSegment[]): ShadedBand[] =>
 
 export const segmentPath = (segment: LevelSegment): string =>
   `M${point(segment.x1, segment.y1)}L${point(segment.x2, segment.y2)}`;
+
+const levelText = (level: number): string => String(Number(level.toFixed(3)));
+
+/**
+ * 선 하나의 레벨 라벨 자리(배치 전): 레벨 선은 "r (가격)", 수평선·띠는 메모(없으면 라벨 없음). 가격은 기준 봉의 화면
+ * 가격(응답 `start.price`)이다. 그림 칸을 지나지 않는 선분은 라벨을 달지 않는다.
+ */
+export const segmentLabels = (
+  owner: string,
+  segments: readonly LevelSegment[],
+  memo: string | undefined,
+  instrumentKind: InstrumentKind,
+  plot: PlotBox,
+): LevelLabel[] =>
+  segments.flatMap((segment, index) => {
+    const text =
+      segment.level === null
+        ? memo || null
+        : `${levelText(segment.level)} (${formatPrice(segment.startPrice, instrumentKind)})`;
+    const at = text === null ? null : labelAnchor(segment, plot);
+    return text === null || at === null
+      ? []
+      : [{ owner, key: `${owner}-${segment.level ?? "h"}-${index}`, text, x: at.x, y: at.y }];
+  });

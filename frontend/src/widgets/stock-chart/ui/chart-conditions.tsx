@@ -5,7 +5,10 @@ import {
   CHART_TIMEFRAMES,
   DEFAULT_PERIOD,
   DEFAULT_TIMEFRAME,
+  hasCustomRange,
+  switchSeries,
   type ChartInstrumentBody,
+  type DateRange,
   type StockChartSearch,
 } from "../../../entities/chart";
 import { t } from "../../../shared/config";
@@ -14,7 +17,7 @@ import { InstrumentSearch } from "./instrument-search";
 type ChartConditionsProps = {
   search: StockChartSearch;
   /** 지금 보이는 표시 기간(기간 버튼이면 기준일에서 센 날짜). 캔들을 받기 전에는 null. */
-  range: { start: string; end: string } | null;
+  range: DateRange | null;
   onSearch: (next: StockChartSearch) => void;
 };
 
@@ -24,14 +27,16 @@ type ChartConditionsProps = {
  */
 export const ChartConditions = ({ search, range, onSearch }: ChartConditionsProps) => {
   const id = useId();
-  const custom = search.start !== undefined && search.end !== undefined;
+  const custom = hasCustomRange(search);
   const period = search.period ?? DEFAULT_PERIOD;
   const timeframe = search.tf ?? DEFAULT_TIMEFRAME;
+  // 종목·주기를 바꾸면 날짜(앞 계열의 줌 구간)는 비우고 기간 버튼만 남긴다
   const pick = (instrument: ChartInstrumentBody) =>
-    onSearch({ ...search, kind: instrument.kind, code: instrument.code });
+    onSearch(switchSeries(search, { kind: instrument.kind, code: instrument.code }));
   const setDate = (edge: "start" | "end", value: string) => {
     if (range === null || value === "") return;
-    onSearch({ ...search, period: undefined, ...range, [edge]: value });
+    // 기간 버튼(`period`)은 남긴다 — 날짜가 앞서고, 기본 보기로 되돌릴 때 그 기간을 쓴다
+    onSearch({ ...search, ...range, [edge]: value });
   };
   return (
     <div className="chart-conditions" role="group" aria-label={t("chart.conditions.label")}>
@@ -89,7 +94,7 @@ export const ChartConditions = ({ search, range, onSearch }: ChartConditionsProp
               type="button"
               aria-pressed={timeframe === item}
               aria-label={t(`chart.timeframe.${item}`)}
-              onClick={() => onSearch({ ...search, tf: item })}
+              onClick={() => onSearch(switchSeries(search, { tf: item }))}
             >
               {t(`chart.timeframe.short.${item}`)}
             </button>

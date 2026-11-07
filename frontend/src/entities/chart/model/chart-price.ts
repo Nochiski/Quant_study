@@ -34,10 +34,12 @@ export const priceInputValue = (price: number, kind: InstrumentKind): string =>
 /** 한 호가 표를 실은 대상(응답 `ChartInstrumentBody`). 표의 owner는 backend domain `_price_tick.py`다. */
 export type TickedInstrument = Pick<ChartInstrumentBody, "kind" | "tick_steps">;
 
-/** 그 가격의 한 호가 — 응답 표(`tick_steps`)에서 읽기만 한다. 표가 비면 표시 자릿수의 한 칸이다. */
+/**
+ * 그 가격의 한 호가 — 응답 표(`tick_steps`)에서 읽기만 한다. 표의 마지막 칸은 위 끝이 없어(`below = null`, backend
+ * 계약) 어느 가격이든 한 칸에 걸린다.
+ */
 export const priceTick = (instrument: TickedInstrument, price: number): number =>
-  instrument.tick_steps.find((step) => step.below === null || price < step.below)?.tick ??
-  (instrument.kind === "index" ? 0.01 : 1);
+  instrument.tick_steps.find((step) => step.below === null || price < step.below)!.tick;
 
 /** 호가 눈금 위로 맞춘 값(`units`는 가격 ÷ 호가). 눈금 위의 값이 부동소수 오차로 0.9999…가 되지 않게 자른다. */
 const gridUnits = (price: number, tick: number): number => Number((price / tick).toFixed(6));

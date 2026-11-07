@@ -14,12 +14,18 @@ export const DEFAULT_PERIOD: ChartPeriod = "2y";
 
 const PERIOD_MONTHS: Record<ChartPeriod, number> = { "6m": 6, "1y": 12, "2y": 24, "5y": 60 };
 
+/** 표시 기간 하나(`YYYY-MM-DD`, 양 끝 포함). */
+export type DateRange = { start: string; end: string };
+
 export type StockChartSearch = {
   kind?: InstrumentKind;
   code?: string;
   tf?: Timeframe;
   period?: ChartPeriod;
-  /** 직접 고른 표시 기간(`YYYY-MM-DD`). 둘 다 있어야 하고 시작 ≤ 끝이다. 있으면 `period`보다 앞선다. */
+  /**
+   * 직접 고르거나 줌·이동으로 정한 표시 기간(`YYYY-MM-DD`). 둘 다 있어야 하고 시작 ≤ 끝이다. 있으면 `period`보다
+   * 앞서고, `period`는 기본 보기로 되돌릴 기간으로 남는다.
+   */
   start?: string;
   end?: string;
 };
@@ -45,7 +51,7 @@ export const stockChartSearch = (search: Record<string, unknown>): StockChartSea
   return {
     ...(kind !== undefined && code !== undefined ? { kind, code } : {}),
     tf: oneOf(CHART_TIMEFRAMES, search.tf),
-    period: custom ? undefined : oneOf(CHART_PERIODS, search.period),
+    period: oneOf(CHART_PERIODS, search.period),
     start: custom ? start : undefined,
     end: custom ? end : undefined,
   };
@@ -67,14 +73,25 @@ export const monthsBefore = (date: string, months: number): string => {
   return target.toISOString().slice(0, 10);
 };
 
-/** 표시 기간. 기간 버튼은 기준일(`asOf`, 원장의 최신 확정 거래일)에서 거꾸로 센다 — 오늘 달력이 아니다. */
-export const displayRange = (
+/** 날짜 칸(또는 줌·이동)이 정한 기간이 있는가 — 있으면 기간 버튼(`period`)보다 앞선다. 판정은 이 하나다. */
+export const hasCustomRange = (
   search: StockChartSearch,
-  asOf: string,
-): { start: string; end: string } =>
-  search.start !== undefined && search.end !== undefined
+): search is StockChartSearch & DateRange => search.start !== undefined && search.end !== undefined;
+
+/** 표시 기간. 기간 버튼은 기준일(`asOf`, 원장의 최신 확정 거래일)에서 거꾸로 센다 — 오늘 달력이 아니다. */
+export const displayRange = (search: StockChartSearch, asOf: string): DateRange =>
+  hasCustomRange(search)
     ? { start: search.start, end: search.end }
     : { start: monthsBefore(asOf, PERIOD_MONTHS[search.period ?? DEFAULT_PERIOD]), end: asOf };
+
+/**
+ * 종목·주기를 바꾼 주소. 날짜(줌·이동 결과 포함)는 그 계열의 봉 구간이라 다른 계열에 물려 가지 않게 비우고, 기간
+ * 버튼만 남긴다 — 새 계열은 그 기간의 기본 보기로 열린다.
+ */
+export const switchSeries = (
+  search: StockChartSearch,
+  change: Pick<StockChartSearch, "kind" | "code" | "tf">,
+): StockChartSearch => ({ ...search, ...change, start: undefined, end: undefined });
 
 /**
  * 표시 기간에 걸친 봉의 index 범위(포함). 봉 기간(`start`~`end`)이 표시 기간과 하루라도 겹치면 보인다. 겹치는
@@ -82,7 +99,7 @@ export const displayRange = (
  */
 export const visibleRange = (
   candles: readonly ChartCandleBody[],
-  range: { start: string; end: string },
+  range: DateRange,
 ): { first: number; last: number } | null => {
   const first = candles.findIndex((candle) => candle.end >= range.start);
   if (first < 0 || candles[first].start > range.end) return null;

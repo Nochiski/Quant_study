@@ -1,3 +1,5 @@
+import { useId } from "react";
+
 import type { ChartCandleBody, InstrumentKind } from "../../../shared/api";
 import { formatPrice } from "../model/chart-price";
 import { dateTicks, priceTicks, type ChartScale } from "../model/chart-scale";
@@ -18,9 +20,11 @@ const PRICE_TICK_SPACING = 56;
 /**
  * 캔들과 축. 상승(종가 ≥ 시가)은 `--return-up`, 하락은 `--return-down`이고 진행 중 봉(`in_progress`)은 속을
  * 비워 끝나지 않은 봉임을 보인다. 봉은 방향·진행 여부별로 path 하나씩 묶어 그린다(봉 수천 개도 요소 몇 개).
+ * 보기 창(줌·이동)에 걸친 봉만 path로 만들고, 가장자리에 걸친 봉·현재가 선은 그림 칸으로 잘라 축을 덮지 않는다.
  */
 export const CandlePlot = ({ candles, scale, instrumentKind, height, current }: CandlePlotProps) => {
   const { plot } = scale;
+  const clipId = useId();
   const body = Math.max(1, Math.min(scale.step * 0.6, 14));
   const groups = { up: ["", ""], down: ["", ""], live: ["", ""] };
   for (let index = scale.first; index <= scale.last; index += 1) {
@@ -44,11 +48,16 @@ export const CandlePlot = ({ candles, scale, instrumentKind, height, current }: 
   );
   return (
     <g className="chart-plot" aria-hidden="true">
+      <defs>
+        <clipPath id={clipId}>
+          <rect x={plot.left} y={plot.top} width={plot.right - plot.left} height={plot.bottom - plot.top} />
+        </clipPath>
+      </defs>
       <rect
         className="chart-plot__future"
-        x={scale.futureLeft}
+        x={Math.max(scale.futureLeft, plot.left)}
         y={plot.top}
-        width={Math.max(plot.right - scale.futureLeft, 0)}
+        width={Math.max(plot.right - Math.max(scale.futureLeft, plot.left), 0)}
         height={plot.bottom - plot.top}
       />
       <path
@@ -68,30 +77,32 @@ export const CandlePlot = ({ candles, scale, instrumentKind, height, current }: 
       </g>
       <g className="chart-plot__tick chart-plot__tick--date">
         {dateTicks(candles, scale, DATE_TICK_GAP).map((tick) => (
-          <text key={tick.index} x={scale.xOfIndex(tick.index)} y={height - 8}>
+          <text key={tick.index} x={tick.x} y={height - 8}>
             {tick.label}
           </text>
         ))}
       </g>
-      <path className="chart-plot__wick chart-plot__wick--up" d={groups.up[0]} />
-      <path className="chart-plot__body chart-plot__body--up" d={groups.up[1]} />
-      <path className="chart-plot__wick chart-plot__wick--down" d={groups.down[0]} />
-      <path className="chart-plot__body chart-plot__body--down" d={groups.down[1]} />
-      {live === null ? null : (
-        <>
-          <path className={`chart-plot__wick chart-plot__wick--${live}`} d={groups.live[0]} />
+      <g clipPath={`url(#${clipId})`}>
+        <path className="chart-plot__wick chart-plot__wick--up" d={groups.up[0]} />
+        <path className="chart-plot__body chart-plot__body--up" d={groups.up[1]} />
+        <path className="chart-plot__wick chart-plot__wick--down" d={groups.down[0]} />
+        <path className="chart-plot__body chart-plot__body--down" d={groups.down[1]} />
+        {live === null ? null : (
+          <>
+            <path className={`chart-plot__wick chart-plot__wick--${live}`} d={groups.live[0]} />
+            <path
+              className={`chart-plot__body chart-plot__body--live chart-plot__body--live-${live}`}
+              d={groups.live[1]}
+            />
+          </>
+        )}
+        {current === undefined ? null : (
           <path
-            className={`chart-plot__body chart-plot__body--live chart-plot__body--live-${live}`}
-            d={groups.live[1]}
+            className="chart-plot__current"
+            d={`M${plot.left} ${scale.yOfPrice(current.close).toFixed(1)}H${plot.right}`}
           />
-        </>
-      )}
-      {current === undefined ? null : (
-        <path
-          className="chart-plot__current"
-          d={`M${plot.left} ${scale.yOfPrice(current.close).toFixed(1)}H${plot.right}`}
-        />
-      )}
+        )}
+      </g>
     </g>
   );
 };

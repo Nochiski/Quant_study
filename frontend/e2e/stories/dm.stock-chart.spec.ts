@@ -205,7 +205,7 @@ test(
     await expect(card.getByLabel("잠금 (끌어도 안 움직임)")).not.toBeChecked();
     await expect(chart.locator(".drawing-surface__handle")).toHaveCount(2);
 
-    // 손잡이 끌기: 나중 점을 오른쪽으로 끌어 놓으면 그 자리로 저장된다
+    // 손잡이 끌기: 나중 점을 왼쪽으로 끌어 놓으면 그 자리로 저장된다
     const before = (await retracement.textContent()) ?? "";
     const handle = chart.locator(".drawing-surface__handle").nth(1);
     const box = await handle.boundingBox();

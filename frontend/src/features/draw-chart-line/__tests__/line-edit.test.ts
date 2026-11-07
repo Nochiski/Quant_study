@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { chartLineEdit, type ChartLineBody } from "../../../entities/chart";
 import { ANCHOR_NAMES } from "../model/anchor-draft";
-import { CLICKS_PER_LINE, completedAnchors, drawingReducer, INITIAL_DRAWING } from "../model/drawing";
+import {
+  CLICKS_PER_LINE,
+  STEP_HINTS,
+  completedAnchors,
+  drawingReducer,
+  INITIAL_DRAWING,
+} from "../model/drawing";
 import { UNDO_LIMIT, nudgedAnchors, popUndo, pushUndo, recreateChartLine } from "../model/line-edit";
 
 const line = (id: string, values: Partial<ChartLineBody> = {}): ChartLineBody => ({
@@ -85,10 +91,12 @@ describe("nudgedAnchors", () => {
   });
 });
 
-describe("anchor names", () => {
-  it("name one row per click of each tool", () => {
-    for (const kind of Object.keys(CLICKS_PER_LINE) as (keyof typeof CLICKS_PER_LINE)[])
+describe("anchor names and step hints", () => {
+  it("name one row and one hint per click of each tool", () => {
+    for (const kind of Object.keys(CLICKS_PER_LINE) as (keyof typeof CLICKS_PER_LINE)[]) {
       expect(ANCHOR_NAMES[kind], kind).toHaveLength(CLICKS_PER_LINE[kind]);
+      expect(STEP_HINTS[kind], kind).toHaveLength(CLICKS_PER_LINE[kind]);
+    }
   });
 });
 

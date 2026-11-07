@@ -1,4 +1,4 @@
-import { useLayoutEffect, useReducer, useState } from "react";
+import { useLayoutEffect, useReducer, useRef, useState } from "react";
 
 import {
   useCreateChartLine,
@@ -16,8 +16,12 @@ import { completedAnchors, drawingReducer, INITIAL_DRAWING } from "./drawing";
 import { isTextEntry } from "./line-edit";
 import { useLinePreview } from "./use-line-preview";
 
-/** 끄는 중인 선: 원래 선과 지금 손잡이로 옮긴 기준점. 놓은 뒤 저장 응답이 올 때까지 `committing`이다. */
+/**
+ * 끄는 중인 선: 원래 선과 지금 손잡이로 옮긴 기준점. 놓은 뒤 저장 응답이 올 때까지 `committing`이다. `serial`은
+ * 끌기마다 새 번호라, 같은 손잡이를 다시 끌 때 앞 끌기의 미리보기를 잔상으로 보이지 않는다.
+ */
 export type LineDrag = {
+  serial: number;
   line: ChartLineBody;
   anchorIndex: number;
   anchors: readonly ChartPointBody[];
@@ -43,6 +47,9 @@ export const useChartDrawing = (target: ChartTarget, timeframe: Timeframe) => {
   const [state, dispatch] = useReducer(drawingReducer, INITIAL_DRAWING);
   const [hover, setHover] = useState<ChartPointBody | null>(null);
   const [drag, setDrag] = useState<LineDrag | null>(null);
+  const dragSerial = useRef(0);
+  // 포인터를 올린 저장 선(고른 선이 없을 때 오른쪽 축 배지가 이 선의 레벨을 보인다)
+  const [hoverLineId, setHoverLineId] = useState<string | null>(null);
   const scopeKey = `${target.kind}|${target.code}|${timeframe}`;
   const [scope, setScope] = useState(scopeKey);
   if (scope !== scopeKey) {
@@ -51,6 +58,7 @@ export const useChartDrawing = (target: ChartTarget, timeframe: Timeframe) => {
     dispatch({ type: "reset" });
     setHover(null);
     setDrag(null);
+    setHoverLineId(null);
   }
   const create = useCreateChartLine();
   const update = useUpdateChartLine();
@@ -83,7 +91,7 @@ export const useChartDrawing = (target: ChartTarget, timeframe: Timeframe) => {
       : drawingDraft;
   const gesture =
     drag !== null
-      ? `drag:${drag.line.line_id}:${drag.anchorIndex}`
+      ? `drag:${drag.serial}`
       : `draw:${scopeKey}:${tool}:${state.points.map((point) => point.bar_date).join(",")}`;
   const preview = useLinePreview(draft, gesture);
 
@@ -110,8 +118,10 @@ export const useChartDrawing = (target: ChartTarget, timeframe: Timeframe) => {
   const edit = (line: ChartLineBody, patch: ChartLinePatch) =>
     settle(update.mutateAsync({ line, patch }));
 
-  const startDrag = (line: ChartLineBody, anchorIndex: number) =>
-    setDrag({ line, anchorIndex, anchors: line.anchors, committing: false });
+  const startDrag = (line: ChartLineBody, anchorIndex: number) => {
+    dragSerial.current += 1;
+    setDrag({ serial: dragSerial.current, line, anchorIndex, anchors: line.anchors, committing: false });
+  };
 
   const moveDrag = (point: ChartPointBody) =>
     setDrag((current) =>
@@ -157,6 +167,8 @@ export const useChartDrawing = (target: ChartTarget, timeframe: Timeframe) => {
     dispatch,
     hover,
     setHover,
+    hoverLineId,
+    setHoverLineId,
     drag,
     preview,
     place,

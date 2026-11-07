@@ -16,7 +16,7 @@ export type RemovalNotice = { kind: "deleted"; title: string } | { kind: "restor
  * Ctrl+Z(⌘Z)가 마지막에 지운 선을 다시 만든다. 다시 만든 선은 새 id를 받는다.
  *
  * - 쌓기와 알림은 그 종목의 것이다 — 다른 종목으로 넘어가면 비운다(다른 종목 화면에서 앞 종목의 선을 되살리지
- *   않는다).
+ *   않는다). 지우기 응답이 종목을 바꾼 뒤에 와도 새 종목의 쌓기에 넣지 않는다(요청 때의 종목과 견준다).
  * - 지우는 요청이 나가 있는 동안 다음 지우기는 받지 않는다(Delete 키 연타). 결과 처리는 `mutateAsync`의 약속으로
  *   해서 겹친 호출이 앞 호출의 처리를 덮지 않는다.
  * - 키 리스너는 한 번만 달고 지금 쌓인 것은 commit과 같은 시점의 ref로 읽는다(`frontend-react-effects.md`).
@@ -32,6 +32,8 @@ export const useLineRemoval = (target: ChartTarget) => {
     setStack([]);
     setNotice(null);
   }
+  // 응답(약속) 처리는 React 밖에서 불린다 — 그때의 종목은 commit과 같은 시점의 ref로 읽는다
+  const scopeRef = useCommittedRef(scopeKey);
   const remove = useDeleteChartLine();
   const create = useCreateChartLine();
   // 지우는 요청이 나가 있는가. 변이 상태(`isPending`)는 다음 렌더에야 바뀌어 같은 틈의 연타를 못 막으므로
@@ -42,10 +44,12 @@ export const useLineRemoval = (target: ChartTarget) => {
   const removeLine = (line: ChartLineBody, title: string): boolean => {
     if (removing.current) return false;
     removing.current = true;
+    const requested = scopeKey;
     remove
       .mutateAsync(line)
       .then(
         () => {
+          if (scopeRef.current !== requested) return;
           setStack((current) => pushUndo(current, line));
           setNotice({ kind: "deleted", title });
         },

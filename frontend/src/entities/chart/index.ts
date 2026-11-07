@@ -43,13 +43,30 @@ export {
   chartTargetOf,
   completedCandles,
   displayRange,
+  hasCustomRange,
   monthsBefore,
   stockChartSearch,
+  switchSeries,
   visibleRange,
   type ChartPeriod,
+  type DateRange,
   type StockChartSearch,
 } from "./model/chart-search";
-export { spreadLabels } from "./model/label-layout";
+export {
+  defaultViewport,
+  panViewport,
+  viewportRange,
+  visibleBars,
+  wheelZoomFactor,
+  zoomViewport,
+  type ChartViewport,
+} from "./model/chart-viewport";
+export {
+  labelAnchor,
+  placeLevelLabels,
+  spreadLabels,
+  type LevelLabel,
+} from "./model/label-layout";
 export {
   chartErrorSentence,
   lineIssueLabel,
@@ -57,7 +74,7 @@ export {
   lineTitle,
   timeframeLabel,
 } from "./model/line-copy";
-export { levelSegments, shadedBands, type LevelSegment } from "./model/line-geometry";
+export { levelSegments, segmentLabels, shadedBands, type LevelSegment } from "./model/line-geometry";
 export { CANDLE_FIELDS, snapToCandle, type CandleField } from "./model/magnet";
 export { AxisBadges, type AxisBadge } from "./ui/axis-badges";
 export { CandlePlot } from "./ui/candle-plot";

@@ -1,6 +1,7 @@
 """알고리즘 버전 묶음: 자동 선 결과를 바꾸는 규칙 상수를 바꾸면 `ALGORITHM_VERSION`도 올린다(4.7).
 
-이 표가 깨지면 규칙을 바꾼 것이다. 버전을 올리고 표를 새 값으로 고친다.
+이 표가 깨지면 규칙을 바꾼 것이다. 버전을 올리고 표를 새 값으로 고친다. 상수가 아닌 로직 변경은
+`tests/application/test_chart_analysis_golden.py`가 찾기 결과로 잡는다.
 """
 
 from __future__ import annotations

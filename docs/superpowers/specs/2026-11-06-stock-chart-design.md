@@ -230,7 +230,8 @@ regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_
 - `kind`·`source`(`LineSource`)·`window_source`·`chosen_by` 어휘와 `algorithm@version` 값의 owner는 domain `_line_record`(facade
   `line_record`)다. `algorithm@version`에는 `ALGORITHM_VERSION`(지금 `chart_analysis@1`)을 그대로 저장하고, 판정 규칙·B\*·
   피벗·채널·수평 구간·중첩 규칙(기본 파라미터 포함)을 바꾸면 올린다. `test_chart_analysis_version.py`가 규칙 상수를 이
-  값과 함께 고정해, 상수를 바꾸고 버전을 그대로 두면 깨진다.
+  값과 함께 고정해, 상수를 바꾸고 버전을 그대로 두면 깨진다. 로직(피벗 확정·후보 순위·제안 구간·수평 띠 기준 봉 등) 변경은
+  `tests/application/test_chart_analysis_golden.py`가 고정 seed 계열의 일·주·월 찾기 결과를 버전과 함께 묶어 잡는다(#702).
 
 **좌표 계약**
 - 선은 만든 주기(`timeframe`)를 저장하고, 기하(채널 기울기·레벨 가격·되돌림)는 **그 주기 계열의 완성 봉 index**에서

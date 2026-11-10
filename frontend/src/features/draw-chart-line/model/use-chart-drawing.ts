@@ -152,7 +152,7 @@ export const useChartDrawing = (
    * 차트(SVG)에 초점이 있을 때의 키: 고른 내 선을 Delete·Backspace로 지운다(트레이딩뷰 관례, 되돌리기는 Ctrl+Z).
    * 차트 안의 다른 초점(판정 구간 손잡이)에서 올라온 키·수정키 조합·끄는 중은 받지 않는다. 처리했으면 true.
    */
-  const chartKey = (event: ReactKeyboardEvent<SVGSVGElement>, lines: readonly ChartLineBody[]): boolean => {
+  const onChartKeyDown = (event: ReactKeyboardEvent<SVGSVGElement>, lines: readonly ChartLineBody[]): boolean => {
     if (event.key !== "Delete" && event.key !== "Backspace") return false;
     if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || drag !== null)
       return false;
@@ -224,7 +224,7 @@ export const useChartDrawing = (
     save,
     edit,
     remove,
-    chartKey,
+    onChartKeyDown,
     startDrag,
     moveDrag,
     endDrag,

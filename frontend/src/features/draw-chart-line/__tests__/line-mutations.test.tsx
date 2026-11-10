@@ -195,14 +195,14 @@ describe("line edits", () => {
     act(() => result.current.dispatch({ type: "select", lineId: "a" }));
 
     // 차트 안의 다른 초점(판정 구간 손잡이)·수정키 조합·다른 키는 받지 않는다
-    expect(result.current.chartKey(key({ target: slider }), [line("a")])).toBe(false);
-    expect(result.current.chartKey(key({ ctrlKey: true }), [line("a")])).toBe(false);
-    expect(result.current.chartKey(key({ key: "ArrowLeft" }), [line("a")])).toBe(false);
+    expect(result.current.onChartKeyDown(key({ target: slider }), [line("a")])).toBe(false);
+    expect(result.current.onChartKeyDown(key({ ctrlKey: true }), [line("a")])).toBe(false);
+    expect(result.current.onChartKeyDown(key({ key: "ArrowLeft" }), [line("a")])).toBe(false);
     expect(removed).toEqual([]);
 
     let handled = false;
     act(() => {
-      handled = result.current.chartKey(key({ key: "Backspace" }), [line("a")]);
+      handled = result.current.onChartKeyDown(key({ key: "Backspace" }), [line("a")]);
     });
     expect(handled).toBe(true);
     expect(removed).toEqual([expect.stringMatching(/^a:수평선 /u)]);
@@ -210,6 +210,6 @@ describe("line edits", () => {
 
     // 자동 선은 묶음 단위로 자동 후보 칸에서 지운다
     act(() => result.current.dispatch({ type: "select", lineId: "z" }));
-    expect(result.current.chartKey(key({}), [auto])).toBe(false);
+    expect(result.current.onChartKeyDown(key({}), [auto])).toBe(false);
   });
 });

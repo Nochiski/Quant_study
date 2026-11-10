@@ -136,10 +136,11 @@ export const DrawingSurface = ({
     const point = pointAt(pointer(event));
     if (point === null) return;
     const placed = drawing.place(point);
-    if (placed === "ignored") return;
-    // 칸 밖에서 놓아도 놓기를 받는다
-    event.currentTarget.setPointerCapture(event.pointerId);
+    // 앞 선을 저장하는 중이라 받지 않은 누르기도 그리기 누르기다 — 누르는 동안 저장이 끝나도 그 click이 새 선의
+    // 고르기를 풀지 않는다
     press.current = { kind: "draw", x: event.clientX, y: event.clientY, continues: placed === "added" };
+    // 칸 밖에서 놓아도 놓기를 받는다
+    if (placed !== "ignored") event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   // 선 손잡이·수평선 몸통 잡기. 차트 이동(pan)으로 번지지 않게 멈추고 포인터를 붙잡는다.
@@ -147,14 +148,16 @@ export const DrawingSurface = ({
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     press.current = { kind: "grab", x: event.clientX, y: event.clientY, moved: false };
+    // 누르기 전에 예약된 움직임(누르기 직전 자리)은 버린다 — 그 프레임이 문턱을 거치지 않고 선을 옮기면 안 된다
+    pending.current = null;
     drawing.startDrag(line, grip);
   };
 
   const onPointerUp = (event: PointerEvent<SVGGElement>) => {
     const pressed = press.current;
+    // 잡기는 놓으면 끝이다(Esc로 끌기를 버린 뒤여도). 문턱을 넘지 않은 잡기는 옮긴 것이 없어 endDrag가 저장하지 않는다
+    if (pressed?.kind === "grab") press.current = null;
     if (drag !== null) {
-      // 문턱을 넘지 않은 잡기는 옮긴 것이 없어 저장하지 않는다(endDrag가 같은 기준점이면 그냥 놓는다)
-      if (pressed?.kind === "grab") press.current = null;
       drawing.endDrag();
       return;
     }
@@ -216,7 +219,9 @@ export const DrawingSurface = ({
         drawing.abandonDrag();
       }}
       onLostPointerCapture={() => {
-        // 놓기(pointerup)가 먼저 와서 저장 중이면 그대로 둔다 — 놓지 못하고 잃은 끌기만 되돌린다
+        // 놓기(pointerup)가 먼저 와서 저장 중이면 그대로 둔다 — 놓지 못하고 잃은 끌기만 되돌린다. 그리기 누르기 기록은
+        // 뒤따르는 click이 쓰므로 잡기 기록만 지운다
+        if (press.current?.kind === "grab") press.current = null;
         if (drag !== null && !drag.committing) drawing.abandonDrag();
       }}
       onPointerLeave={() => (state.tool === "select" ? undefined : drawing.setHover(null))}

@@ -342,7 +342,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                 {...navigation.svgProps}
                 // 고른 선 지우기 키가 먼저고, 아니면 줌·이동 키다
                 onKeyDown={(event) => {
-                  if (!drawing.chartKey(event, shownLines)) navigation.svgProps.onKeyDown(event);
+                  if (!drawing.onChartKeyDown(event, shownLines)) navigation.svgProps.onKeyDown(event);
                 }}
               >
                 <defs>

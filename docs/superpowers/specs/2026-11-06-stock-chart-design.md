@@ -262,8 +262,9 @@ regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_
   않는다(실어도 ref = line_id인 요청 선은 빠진다). 요청 `include_mine`(기본 참)이 거짓이면 저장 선 중 내 선(source ≠ auto)을
   빼고 자동 선만 넣는다 — 중첩 패널의 "내 선도 넣기" 토글이 보이기 저장 칸을 바꾸지 않게 한다(PR4). 채널 첫 점 후보는
   `/channels` 응답 `anchor_choices`(domain `first_anchor_choices` — 그 방향의 확정 피벗, `find_channels`가 첫 점을 검사하는
-  같은 목록)다. 화면이 보이는 규칙 문장은 domain `_wording`이 상수를 인용해 완성해 응답에 싣는다: regime `rules`·
-  `pivot_rule`, zones `rules`, confluence `rules`(PR4). 저장 내용이 완전히 같은 자동 선(주기·종류·기준점·레벨·
+  같은 목록)다. 화면이 보이는 규칙 문장은 domain `_wording`(facade `wording`)이 상수를 인용해 완성해 응답에 싣는다 —
+  어느 응답 칸에 실리는지는 그 모듈의 함수가 owner다. 화면 문구로 두는 것은 고정 원칙(룩어헤드 없음·기준점 역할)과
+  화면 동작 안내뿐이다. 저장 내용이 완전히 같은 자동 선(주기·종류·기준점·레벨·
   연장·메모·잠금·자동 기록 전부, 보이기만 다를 수 있다)을 다시 저장하면 새로 만들지 않고 있는 선을 주고, 숨겨 둔
   선이면 다시 보이게 한다 — 묶음 추가를 다시 보내도 같은 띠가 두 줄 생기지 않는다. 하나라도 다르면(레벨·조건을 바꿔
   다시 만든 선) 새 선이고, 손으로 그은 선·복사본은 늘 새 선이다. 분석 파라미터 범위는 domain 값 타입 하나가 검사해 `chart.params.invalid`로
@@ -331,5 +332,5 @@ https://claude.ai/artifact/9Bp8mU4PSWvnWLarnccunV 의 보드 "채널 표시".
 3. **#696 frontend 기본** — 내비·route·차트·수동 그리기·마그넷·저장·되돌리기·키보드 + DM 스토리·e2e.
 4. **#697 확대·이동** — 트레이딩뷰식 줌·이동·축 배지(US-DM-20). 처음 계획에는 없었다.
 5. **#698 frontend 자동** — 생성 패널 3종·판정 구간·근거·중첩 + CS 스토리·e2e.
-6. 트랙 끝 — 도메인 전체 + frontend/backend 경계 리뷰(#699~#704). 후속 PR: #705(현재가 기준 구분), #706(그릴 수 없는
-   선 수정·되돌리기), #709(자동 기록 서버 검증), #711(알고리즘 golden), 그 뒤 owner 정리·slice 경계.
+6. 트랙 끝 — 도메인 전체 + frontend/backend 경계 리뷰(#699~#704). 머지한 후속 PR: #705(현재가 기준 구분), #706(그릴 수
+   없는 선 수정·되돌리기), #709(자동 기록 서버 검증). 진행 중: #711(알고리즘 golden), #712(owner 정리), 그 뒤 slice 경계(#704).

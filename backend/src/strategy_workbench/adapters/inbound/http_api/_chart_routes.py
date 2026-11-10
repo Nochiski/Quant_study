@@ -192,7 +192,7 @@ class ChartWindowBody:
 class ChartWindowSuggestionBody:
     bars: int
     start: date
-    end: date
+    end: Annotated[date, Field(description="모든 칩이 같은 날 — 마지막 완성 봉의 시작일.")]
     default: bool
 
 
@@ -367,7 +367,7 @@ class ChartRetracementBody:
     record: ChartAutoRecordBody
     swing_rules: Annotated[
         list[ChartSwingRuleBody],
-        Field(description="기준 스윙마다 어떤 두 점을 고르는지(서버 문장, 고르기 칸 순서)."),
+        Field(description="기준 스윙마다 어떤 두 점을 고르는지(서버 문장)."),
     ]
 
 

@@ -48,10 +48,12 @@ class InstrumentRef:
     code: str
 
 
-# 종목 `ChartInstrument.group`의 어휘(포트 계약) — 보통주·우선주·ETF·ETN. 원천은 자기 증권 종류를
-# 이 낱말로 옮겨 싣고(원장 `security.sec_type`은 같은 낱말이다), 그 밖의 종류는 원천 낱말 그대로다.
-# 차례는 이름 검색의 같은 순위 안 순서다(`rank_instruments`).
-STOCK_GROUPS: tuple[str, ...] = ("common", "preferred", "etf", "etn")
+# 종목 `ChartInstrument.group`의 어휘(포트 계약) 중 검색 순위를 가진 낱말 — 보통주·우선주·ETF.
+# 원천은 자기 증권 종류를 이 낱말로 싣는다. 원장 `security.sec_type`(어휘는
+# `database/src/equity/rules_s01.py`의 `SEC_TYPE_VOCAB`)은 같은 낱말이라 duckdb 원천은 그대로
+# 싣고, 그 밖의 종류(리츠·외국주·DR 등)도 원장 낱말 그대로다. 차례는 이름 검색의 같은 순위 안
+# 순서다(`rank_instruments`).
+STOCK_GROUPS: tuple[str, ...] = ("common", "preferred", "etf")
 
 
 @dataclass(frozen=True)

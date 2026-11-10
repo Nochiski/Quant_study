@@ -522,24 +522,24 @@ def test_search_ranks_index_name_then_ticker_then_exact_name_then_contains() -> 
 
 
 class _FundPrices(FakePrices):
-    """이름이 같은 순위로 걸리는 리츠·ETN·ETF 셋."""
+    """이름이 같은 순위로 걸리는 리츠·ETF·우선주 셋."""
 
     def chart_instruments(self) -> tuple[ChartInstrument, ...]:
         return tuple(
             ChartInstrument(InstrumentRef(InstrumentKind.STOCK, code), name, group)
             for code, name, group in (
                 ("900001", "가상 A리츠", "reit"),  # 이름은 ETF·ETN보다 앞이다
-                ("900002", "가상 ETN", "etn"),
+                ("900002", "가상 B우", "preferred"),
                 ("900003", "가상 ETF", "etf"),
             )
         )
 
 
-def test_search_orders_etn_after_etf_and_before_other_kinds() -> None:
-    # 같은 순위(이름 포함) 안에서 포트 어휘 차례(… ETF → ETN) 뒤에 그 밖의 종류가 온다
+def test_search_orders_by_the_port_group_vocabulary_then_other_kinds() -> None:
+    # 같은 순위(이름 포함) 안에서 포트 어휘 차례(우선주 → ETF) 뒤에 그 밖의 종류(리츠)가 온다
     found = _service(prices=_FundPrices()).search("가상").instruments
 
-    assert [item.ref.code for item in found] == ["900003", "900002", "900001"]
+    assert [item.ref.code for item in found] == ["900002", "900003", "900001"]
 
 
 class _EmptyLedger(FakePrices):

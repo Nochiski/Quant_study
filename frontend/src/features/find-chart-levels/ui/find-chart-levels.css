@@ -337,6 +337,8 @@
 }
 
 .finder-choice__meta {
+  /* 서버 문장(기준 스윙 설명)이 오기 전에도 한 줄 자리를 잡아 고르기 칸이 밀리지 않는다 */
+  min-height: 1.5em;
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-size-small);

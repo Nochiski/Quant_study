@@ -2117,7 +2117,7 @@ export type ChartRetracementBody = {
   /**
    * Swing Rules
    *
-   * 기준 스윙마다 어떤 두 점을 고르는지(서버 문장, 고르기 칸 순서).
+   * 기준 스윙마다 어떤 두 점을 고르는지(서버 문장).
    */
   swing_rules: Array<ChartSwingRuleBody>;
   timeframe: Timeframe;
@@ -2184,6 +2184,8 @@ export type ChartWindowSuggestionBody = {
   default: boolean;
   /**
    * End
+   *
+   * 모든 칩이 같은 날 — 마지막 완성 봉의 시작일.
    */
   end: string;
   /**

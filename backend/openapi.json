@@ -3524,7 +3524,7 @@
             "$ref": "#/components/schemas/SwingChoice"
           },
           "swing_rules": {
-            "description": "기준 스윙마다 어떤 두 점을 고르는지(서버 문장, 고르기 칸 순서).",
+            "description": "기준 스윙마다 어떤 두 점을 고르는지(서버 문장).",
             "items": {
               "$ref": "#/components/schemas/ChartSwingRuleBody"
             },
@@ -3635,6 +3635,7 @@
             "type": "boolean"
           },
           "end": {
+            "description": "모든 칩이 같은 날 — 마지막 완성 봉의 시작일.",
             "format": "date",
             "title": "End",
             "type": "string"

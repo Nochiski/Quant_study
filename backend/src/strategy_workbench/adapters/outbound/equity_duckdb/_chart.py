@@ -42,8 +42,9 @@ from ._specs import ADJ_TABLE, INDEX_TABLE, PRICE_TABLE, SECURITY_TABLE
 
 # 지수 코드 `<index_class>:<index_name>`의 구분자. 시장 구분(KOSPI·KOSDAQ)에는 없는 글자다.
 INDEX_CODE_SEP = ":"
-# 원장 `security.sec_type` 중 상장지수상품 호가표(`TickTable.FUND`)를 쓰는 값. 원장 어휘는
-# 이 어댑터만 읽고, 위로는 호가표 enum으로만 넘긴다.
+# 원장 `security.sec_type` 중 상장지수상품 호가표(`TickTable.FUND`)를 쓰는 값(호가표는 enum으로
+# 넘긴다). `sec_type` 낱말 자체는 `ChartInstrument.group`으로 그대로 올라간다 — 포트
+# `STOCK_GROUPS`가 같은 낱말이다.
 FUND_SEC_TYPES = frozenset({"etf", "etn"})
 # 지수 일봉으로 쓸 수 있는 행 — 네 값이 모두 있고 양수다. 목록과 이력이 같은 판정을 쓴다(봉이 하나도
 # 없는 지수는 목록에 싣지 않는다 — 원장에 행만 있고 값이 비거나 0인 지수가 있다).

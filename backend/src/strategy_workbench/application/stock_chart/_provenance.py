@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import date
 
 from strategy_workbench.application.stock_chart._lines import same_price
@@ -58,7 +58,8 @@ def zone_anchors(zone: HorizontalZone) -> tuple[Anchor, Anchor]:
     return Anchor(start, zone.low), Anchor(start, zone.high)
 
 
-# 종류별 찾기가 쓰는 도구 칸(`AutoParams.fits`). 피벗 민감도 둘은 모든 종류에 있다.
+# 종류별 찾기가 쓰는 도구 칸(`AutoParams.fits`, 필드 이름). 피벗 민감도 둘은 모든 종류에 있다.
+_SENSITIVITIES = {"candidate_sensitivity", "structure_sensitivity"}
 _TOOL_PARAMS = {
     LineKind.FIB_CHANNEL: {"direction"},
     LineKind.FIB_RETRACEMENT: {"swing"},
@@ -81,17 +82,10 @@ class AutoParams:
     def fits(self, kind: LineKind) -> bool:
         """이 종류의 찾기가 쓰는 도구 칸이 모두 있고 다른 도구의 칸은 없는가. 채널은 방향(첫 점은
         없어도 된다), 되돌림은 기준 스윙, 수평 구간은 묶는 폭·최소 접촉이다."""
+        # 칸 이름은 필드 이름이다(`to_params` 키와 같다). 민감도 둘은 모든 종류에 있다
         present = {
-            name
-            for name, value in (
-                ("direction", self.direction),
-                ("first_anchor", self.first_anchor),
-                ("swing", self.swing),
-                ("width_atr", self.width_atr),
-                ("min_touches", self.min_touches),
-            )
-            if value is not None
-        }
+            f.name for f in fields(self) if getattr(self, f.name) is not None
+        } - _SENSITIVITIES
         return present - {"first_anchor"} == _TOOL_PARAMS[kind] and (
             "first_anchor" not in present or kind is LineKind.FIB_CHANNEL
         )

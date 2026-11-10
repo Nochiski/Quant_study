@@ -81,8 +81,8 @@ export const AutoLinesPanel = ({
     const auto = first.auto;
     if (row.kind === "hline")
       return tFill("chart.finder.zones.rowMeta", {
-        k: String(auto?.params.width_atr ?? "—"),
-        touches: String(auto?.params.min_touches ?? "—"),
+        k: String(auto?.params?.width_atr ?? "—"),
+        touches: String(auto?.params?.min_touches ?? "—"),
       });
     if (row.kind === "fib_retracement")
       return tFill("chart.finder.retracement.rowMeta", {

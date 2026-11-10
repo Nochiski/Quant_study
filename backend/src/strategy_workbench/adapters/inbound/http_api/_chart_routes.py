@@ -12,11 +12,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from datetime import date, datetime
-from enum import Enum
 from typing import Annotated, Any, Literal, TypeVar
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, status
-from pydantic import Field
+from pydantic import ConfigDict, Field, TypeAdapter
 
 from strategy_workbench.application.stock_chart.facade.chart import (
     MAX_CHANNEL_CANDIDATES,
@@ -216,7 +215,10 @@ class ChartRegimeRecordBody:
 class ChartAutoParamsBody:
     """자동 기록의 파라미터(application `AutoParams`와 같은 칸). 피벗 민감도 둘은 모든 도구에
     있고, 채널은 방향·첫 점, 되돌림은 기준 스윙, 수평 구간은 묶는 폭·최소 접촉을 쓴다. 칸이
-    빠지거나 다른 도구의 칸이 섞인 기록은 저장할 때 `chart.line.auto_record`로 거절된다."""
+    빠지거나 다른 도구의 칸이 섞인 기록은 저장할 때 `chart.line.auto_record`로, 모르는 칸은
+    `chart.request_invalid`로 거절된다."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
 
     candidate_sensitivity: float | None = None
     structure_sensitivity: float | None = None
@@ -233,7 +235,10 @@ class ChartAutoRecordBody:
     구간 출처는 저장할 때 서버가 다시 계산한다(요청 값은 쓰지 않는다)."""
 
     algorithm_version: str
-    params: ChartAutoParamsBody
+    params: Annotated[
+        ChartAutoParamsBody | None,
+        Field(description="이 판의 형식으로 읽히지 않는 저장 기록이면 null(조건을 알 수 없다)."),
+    ]
     regime_window_start: date | None = None
     regime_window_end: date | None = None
     regime: ChartRegimeRecordBody | None = None
@@ -574,7 +579,7 @@ def _record_body(record: AutoRecord) -> ChartAutoRecordBody:
     window = record.regime_window
     parsed = AutoParams.read(record.params)
     params = (
-        ChartAutoParamsBody()
+        None
         if parsed is None
         else ChartAutoParamsBody(**{f.name: getattr(parsed, f.name) for f in fields(parsed)})
     )
@@ -591,15 +596,18 @@ def _record_body(record: AutoRecord) -> ChartAutoRecordBody:
     )
 
 
+_PARAMS_WIRE = TypeAdapter(ChartAutoParamsBody)
+
+
 def _record(body: ChartAutoRecordBody) -> AutoRecord:
     start, end = body.regime_window_start, body.regime_window_end
     regime = body.regime
     # 칸 이름은 `AutoParams` 필드 이름 그대로다(저장 기록의 키). 빈 칸은 싣지 않는다
-    params: Mapping[str, ParamValue] = {
-        f.name: _param_value(getattr(body.params, f.name))
-        for f in fields(body.params)
-        if getattr(body.params, f.name) is not None
-    }
+    params: Mapping[str, ParamValue] = (
+        {}
+        if body.params is None
+        else _PARAMS_WIRE.dump_python(body.params, mode="json", exclude_none=True)
+    )
     return AutoRecord(
         algorithm_version=body.algorithm_version,
         params=params,
@@ -610,16 +618,6 @@ def _record(body: ChartAutoRecordBody) -> AutoRecord:
         chosen_by=body.chosen_by,
         window_source=body.window_source,
     )
-
-
-def _param_value(value: object) -> ParamValue:
-    if isinstance(value, Enum):
-        return str(value.value)
-    if isinstance(value, date):
-        return value.isoformat()
-    if isinstance(value, int | float):
-        return value
-    raise TypeError(f"auto params field outside the wire vocabulary — value={value!r}")
 
 
 def _points(points: Sequence[ChartPointBody]) -> tuple[ChartPoint, ...]:

@@ -217,10 +217,14 @@ regime_window · regime(verdict, S, structure) · chosen_by(recommendation|user_
 - 자동 선의 생긴 날(`created`)도 파생값이다. 저장한 판정 구간·민감도·도구 파라미터로 같은 찾기를 다시 돌려 기준점이
   같은 후보의 확정 봉을 응답에 싣는다(`application/stock_chart/_provenance.py`). 기준점을 옮긴 복사본과, 저장한
   `algorithm@version`이 지금 `ALGORITHM_VERSION`과 다른 기록은 null이다(다른 판의 규칙으로 다시 찾지 않는다).
-- 자동 기록은 서버가 정본이다(#701). 저장(`auto`·`auto_copied`)할 때 서버가 기록의 파라미터·판정 구간으로 같은 찾기를 다시
-  돌려 기준점이 그 결과(후보)인지 보고, 아니면 `chart.line.auto_record`로 거절한다. 다른 버전의 기록, 읽히지 않거나 모르는
-  칸·빠진 칸·다른 도구의 칸(`AutoParams.fits`)이 있는 파라미터, 판정 구간이 없거나 계열 밖인 기록도 같다. 국면
-  (`regime`)·방향 출처(`chosen_by`, 채널만)·구간 출처(`window_source`)는 요청 값을 믿지 않고 서버가 다시 계산해 저장한다.
+- 자동 기록은 서버가 정본이다(#701). 저장(`auto`·`auto_copied`)할 때 다른 버전의 기록, 읽히지 않거나 모르는 칸·빠진 칸·
+  다른 도구의 칸(`AutoParams.fits`)이 있는 파라미터, 판정 구간이 없거나 계열 밖인 기록은 `chart.line.auto_record`로
+  거절한다(HTTP는 모르는 칸을 `chart.request_invalid`로 먼저 막는다). 자동 선(`auto`)은 그 파라미터·구간으로 같은 찾기를
+  다시 돌려 기준점이 그 결과(후보)인지도 본다. 복사본(`auto_copied`)은 기준점을 옮길 수 있는 선이라 후보는 대조하지 않는다
+  (옮긴 복사본을 지운 뒤 되돌리기도 저장된다). 국면(`regime`)·방향 출처(`chosen_by`, 채널만)는 서버가 다시 계산해 저장한다.
+  구간 출처(`window_source`)는 판정 구간이 지금 마지막 완성 봉에서 끝나면 서버가 정하고, 그보다 앞서 끝나면(기준일이 지난
+  기록의 되살리기·복사) 요청 값을 따르되 preset은 그 끝에서 잰 제안 칩 구간일 때만 받는다.
+- 이 판의 형식으로 읽히지 않는 저장 기록의 `params`는 응답에서 null이다(조건을 지어내지 않는다).
 - 선의 수정·삭제도 모드(연습 `practice:` 접두 / 실데이터)를 지킨다 — 다른 모드 대상의 선은 `chart.line.not_found`다.
 
 - `kind`·`source`(`LineSource`)·`window_source`·`chosen_by` 어휘와 `algorithm@version` 값의 owner는 domain `_line_record`(facade

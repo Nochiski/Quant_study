@@ -250,14 +250,14 @@ export const CreateChannelPanel = ({ finder, target, timeframe, instrument }: Cr
         <ParamField
           label={t("chart.finder.params.candidate")}
           value={draft.candidateSensitivity}
-          serverValue={(record?.params.candidate_sensitivity ?? null)}
+          serverValue={record?.params?.candidate_sensitivity ?? null}
           step={0.1}
           onCommit={(value) => dispatch({ type: "edit", input: { candidateSensitivity: value } })}
         />
         <ParamField
           label={t("chart.finder.params.structure")}
           value={draft.structureSensitivity}
-          serverValue={(record?.params.structure_sensitivity ?? null)}
+          serverValue={record?.params?.structure_sensitivity ?? null}
           step={0.1}
           onCommit={(value) => dispatch({ type: "edit", input: { structureSensitivity: value } })}
         />

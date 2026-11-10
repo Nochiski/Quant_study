@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import date
 from pathlib import Path
 from typing import Any, Protocol
@@ -344,8 +345,49 @@ def test_auto_params_wire_fields_are_the_application_record_keys() -> None:
 
     from strategy_workbench.adapters.inbound.http_api._chart_routes import ChartAutoParamsBody
     from strategy_workbench.application.stock_chart.facade.chart import AutoParams
+    from strategy_workbench.domain.chart_analysis.facade.levels import SwingChoice, TrendDirection
 
-    assert [f.name for f in fields(ChartAutoParamsBody)] == [f.name for f in fields(AutoParams)]
+    names = [f.name for f in fields(AutoParams)]
+    assert [f.name for f in fields(ChartAutoParamsBody)] == names
+    every = AutoParams(
+        1.0, 2.0, TrendDirection.UP, date(2025, 1, 2), SwingChoice.LATEST_MAJOR, 0.5, 2
+    )
+    assert list(every.to_params()) == names
+
+
+def test_unknown_auto_params_are_rejected_and_unreadable_saved_records_read_as_null(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "research.sqlite3"
+    client = TestClient(build_http_app(research_db_path=db))
+    zones = _strict(
+        client.get(f"{BASE}/zones", params={**SAMSUNG, "timeframe": "day", "min_touches": "1"})
+    )
+    body = {
+        "instrument_kind": "stock",
+        "instrument_code": "practice:005930",
+        "timeframe": "day",
+        "kind": "hline",
+        "source": "auto",
+        "anchors": zones["zones"][0]["drawing"]["anchors"],
+    }
+    record = zones["record"]
+    unknown = {**record, "params": {**record["params"], "anything": "x"}}
+    rejected = client.post(f"{BASE}/lines", json={**body, "auto": unknown})
+    assert (rejected.status_code, rejected.json()["detail"]["code"]) == (
+        422,
+        "chart.request_invalid",
+    )
+    saved = _strict(client.post(f"{BASE}/lines", json={**body, "auto": record}))
+    assert saved["auto"]["params"] == record["params"]
+    # 이 판의 형식으로 읽히지 않는 옛 저장 행은 조건을 지어내지 않고 null로 보인다
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "UPDATE chart_drawing SET params_json = ? WHERE line_id = ?",
+            ('{"candidate_sensitivity": 1.0}', saved["line_id"]),
+        )
+    (listed,) = _strict(client.get(f"{BASE}/lines", params=SAMSUNG))["lines"]
+    assert listed["auto"]["params"] is None
 
 
 def test_real_data_candles_show_actual_prices(tmp_path: Path) -> None:

@@ -586,7 +586,59 @@ def test_auto_lines_keep_their_anchors_and_report_when_they_formed() -> None:
         )
     )
     assert copy.created == swing.created
-    assert service.update_line(copy.line.line_id, LineEdit(moved)).created is None
+    moved_copy = service.update_line(copy.line.line_id, LineEdit(moved))
+    assert moved_copy.created is None
+    # 옮긴 복사본을 지우고 되돌리면(같은 내용으로 다시 만들기) 다시 저장된다 — 복사본은 후보를
+    # 대조하지 않는다
+    service.delete_line(copy.line.line_id)
+    restored = service.create_line(
+        ChartLineDraft(
+            UPTREND,
+            Timeframe.DAY,
+            LineKind.FIB_RETRACEMENT,
+            LineSource.AUTO_COPIED,
+            LineEdit(moved_copy.anchors),
+            moved_copy.line.auto,
+        )
+    )
+    assert (restored.line.content.anchors, restored.created) == (
+        moved_copy.line.content.anchors,
+        None,
+    )
+
+
+def test_a_preset_record_saved_after_the_ledger_moves_on_stays_preset() -> None:
+    # 어제 제안 칩 그대로 만든 기록을 오늘(완성 봉이 하나 는 뒤) 되살리거나 복사해도 그때의
+    # 출처를 지킨다. 칩 길이가 아닌 구간의 preset 주장은 받지 않는다
+    yesterday = FakePrices()
+    full = yesterday.history[UPTREND]
+    yesterday.history[UPTREND] = ChartHistory(full.bars[:-1], full.last_actual_close)
+    swing = _service(prices=yesterday).retracement(
+        UPTREND, Timeframe.DAY, SwingChoice.LATEST_CONFIRMED
+    )
+    assert swing.drawing is not None and swing.record.window_source is WindowSource.PRESET
+    anchors = swing.drawing.anchors
+    service = _service()
+
+    def save(record: AutoRecord) -> WindowSource | None:
+        line = service.create_line(
+            ChartLineDraft(
+                UPTREND,
+                Timeframe.DAY,
+                LineKind.FIB_RETRACEMENT,
+                LineSource.AUTO_COPIED,
+                LineEdit(anchors),
+                record,
+            )
+        ).line
+        assert line.auto is not None
+        return line.auto.window_source
+
+    assert save(swing.record) is WindowSource.PRESET
+    assert swing.record.regime_window is not None
+    start, end = swing.record.regime_window
+    shorter = replace(swing.record, regime_window=(SESSIONS[SESSIONS.index(start) + 1], end))
+    assert save(shorter) is WindowSource.USER
 
 
 def test_analysis_parameter_ranges_are_checked_by_the_domain() -> None:

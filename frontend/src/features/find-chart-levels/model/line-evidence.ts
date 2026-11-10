@@ -53,7 +53,7 @@ export const zoneBounds = (line: Pick<ChartLineBody, "anchors">): { low: number;
 };
 
 const channelDirection = (line: ChartLineBody): TrendDirection | null =>
-  line.kind === "fib_channel" ? (line.auto?.params.direction ?? null) : null;
+  line.kind === "fib_channel" ? (line.auto?.params?.direction ?? null) : null;
 
 /**
  * 자동 후보 한 줄(근거 패널 제목 포함)의 이름: 수평 구간 "· N곳", 채널은 방향, 되돌림은 종류. 다른 주기로 만든 줄이면

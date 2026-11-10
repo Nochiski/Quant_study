@@ -146,9 +146,6 @@ EXCLUDED_CRIT_PREFIXES: tuple[str, ...] = (
     # 주말 보강판(weekend_supplement.sh — N-45) — 정규 판과 섞지 않는 별도 판이라 정규 체인 판정 밖이다(휴일 줄은
     # 직전 거래일에 귀속되므로 세면 정규 판이 멀쩡한 D 가 실패가 된다)
     "주말 보강판 ",
-    # KIS 관심 등록 · HTS 조회 순위 스냅숏(N-66 — scripts/kis_rank.sh · watchdog.sh kis_rank) — 대안데이터 raw 수집이라
-    # 점수 경로 밖이다(stage 편입 전)
-    "kis_rank ", "watchdog: HH:MM 까지 KIS 순위 스냅숏",
 )
 _YMD_RE = re.compile(r"^\d{8}$")
 _WEEKDAY = "월화수목금토일"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 워치독 — 예정 시각까지 체인 보고가 없거나 실패면 crit. 플랜 v2 Task A.4 / 결정 V2-7(조용한 실패 금지).
-#   사용: scripts/watchdog.sh <evening_ledger|evening_build|morning_build|wics_weekly|postclose_board|evening_board|kis_rank>
+#   사용: scripts/watchdog.sh <evening_ledger|evening_build|morning_build|wics_weekly|postclose_board|evening_board>
 #   예정 크론(서버 TZ=UTC. 등록은 오케스트레이터가 한다):
 #     50 12 * * 1-5 cd ~/quant-ledger && scripts/watchdog.sh evening_ledger   # 21:50 KST (결정 11: 키움 저녁 수집 21:05)
 #     55 14 * * 1-5 cd ~/quant-ledger && scripts/watchdog.sh evening_build    # 23:55 KST (F-11 10-06·10-07: 빌드가 거래일마다 약 2분씩 길어져 23:30 → 23:55, 10-02 종료 23:02. 자정을 넘기면 안 된다 — TODAY 가 다음 날이 되어 정상 판을 '오늘 것이 아니다'로 찍고, 금요일 판은 토요일 휴장 판정으로 건너뛴다(10-07 00:00 실측). D02: 빌드 시작 한도 21:45 + stage 실측 43~66분 + equity 9~11분 = 상한 23:06. 옛 23:00 은 한도에 시작한 정상 판을 오탐했다)
@@ -15,8 +15,6 @@
 #     evening_board(D13 · N-62) 는 저녁 판(postclose_chain.sh evening) 런 로그를 본다. 시각은 서버 전용 크론 줄에만 둔다(받는
 #     시각 — 저장소 크론표·코드에 적지 않는다). 그날 close stage 가 ok 인 날만 판정하고(아니면 판이 없는 날 — 정상, 경보는 close
 #     몫), 갈래 1(사용자 10-29): 저녁 판 단계가 없거나 아직 running 이면 warn(늦음 — 기다렸다 늦게 보낸다), failed 면 crit
-#     45 11 * * 1-5 cd ~/quant-ledger && scripts/watchdog.sh kis_rank         # 20:45 KST(N-66) — KIS 순위 스냅숏 오늘 ok 슬롯을
-#     TR 마다 센다(판정 daily.kis_rank.summarize 한 곳): 25 중 23 미만 warn · 어느 TR 이든 0 또는 원장 파일 없음 · 판독 불가 crit
 #   판정 근거는 체인이 남긴 산출물뿐이다 — 원장·API 를 건드리지 않으므로 raw 락도 잡지 않는다.
 #   휴장일(오늘 KST)은 info 후 rc 0. 스코어 워치독은 페이즈 C 에서 case 에 추가한다.
 set -uo pipefail
@@ -24,7 +22,7 @@ cd "$HOME/quant-ledger"
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 export QL_ENV="$HOME/quant-ledger/.env"   # 비밀 파일 고정(RG-C7-4) — 배포 rsync --delete 밖, 바깥 값·옛 시스템 파일을 쓰지 않는다
 PY=.venv/bin/python
-CHECK="${1:?usage: watchdog.sh <evening_ledger|evening_build|morning_build|wics_weekly|postclose_board|evening_board|kis_rank>}"
+CHECK="${1:?usage: watchdog.sh <evening_ledger|evening_build|morning_build|wics_weekly|postclose_board|evening_board>}"
 case "$CHECK" in
   evening_ledger) TITLE_OK="watchdog evening_ledger 정상"; TITLE_BAD="watchdog: 21:50 까지 저녁 원장 보고 없음/실패" ;;
   evening_build)  TITLE_OK="watchdog evening_build 정상";  TITLE_BAD="watchdog: 23:55 까지 잠정판 보고 없음/실패" ;;
@@ -32,8 +30,7 @@ case "$CHECK" in
   wics_weekly)    TITLE_OK="watchdog wics_weekly 정상";    TITLE_BAD="watchdog: 토 11:30 까지 WICS 주간 스냅샷 없음/불완전" ;;
   postclose_board) TITLE_OK="watchdog postclose_board 정상"; TITLE_BAD="watchdog: 16:30 까지 장 마감 수집·stage 보고 없음/실패" ;;
   evening_board)  TITLE_OK="watchdog evening_board 정상";  TITLE_BAD="watchdog: 저녁 판 실패" ;;
-  kis_rank)       TITLE_OK="watchdog kis_rank 정상";       TITLE_BAD="watchdog: 20:45 까지 KIS 순위 스냅숏 없음/판독 불가" ;;
-  *) echo "unknown check: $CHECK (allowed: evening_ledger, evening_build, morning_build, wics_weekly, postclose_board, evening_board, kis_rank)" >&2; exit 2 ;;
+  *) echo "unknown check: $CHECK (allowed: evening_ledger, evening_build, morning_build, wics_weekly, postclose_board, evening_board)" >&2; exit 2 ;;
 esac
 TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
 # 오늘이 거래일인가 — 캘린더를 못 읽으면 1(거래일)로 본다. 조용히 넘어가는 쪽이 아니라 판정하는 쪽으로 기운다.
@@ -56,7 +53,7 @@ if [ "$CHECK" = morning_build ]; then
   postclose_conf_load
 fi
 # 판정은 파이썬이 한다(jq 없음). 1줄 = 알림 제목에 붙일 시각, 2줄~ = 본문. rc 0 = 정상, 1 = 이상.
-# evening_board 만 rc 5 = 늦음(warn — 갈래 1, 아직 도는 저녁 판). kis_rank 의 rc 5 = 슬롯 부족(warn).
+# evening_board 만 rc 5 = 늦음(warn — 갈래 1, 아직 도는 저녁 판).
 # morning_build 의 발송 장부 검사(B-57)만 rc 3 = 발송 기록 없음, 4 = 발송 여부 판정 불가 — 아래에서
 # crit 제목을 확정 빌드 실패와 가른다.
 OUT=$($PY - "$CHECK" "$TODAY" "$CUTOVER" <<'PY'
@@ -360,14 +357,6 @@ if check == "evening_board":
         stamp = ""
     out(stamp, f"T={today} {summary}{fell}", 0)
 
-if check == "kis_rank":
-    # KIS 관심 등록 · HTS 조회 순위 스냅숏(N-66) — 오늘 격자 슬롯 중 ok 슬롯 수. 판정은 수집기 모듈 한 곳이다
-    from pathlib import Path
-
-    from daily import kis_rank
-    s = kis_rank.summarize(Path("data/raw/kis_rank.db"), today_d)
-    out("", f"{s.line()} | 로그 logs/cron_kis_rank.log", {"ok": 0, "warn": 5, "crit": 1}[s.status.value])
-
 out("", f"판정 로직이 없는 check: {check}", 1)
 PY
 )
@@ -383,10 +372,6 @@ if [ "$RC" -eq 0 ]; then
 fi
 if [ "$CHECK" = evening_board ] && [ "$RC" -eq 5 ]; then   # 갈래 1 — 늦음은 warn 만(기다렸다 늦게 보낸다)
   scripts/notify.sh warn "watchdog: 저녁 판 아직 진행 중" "$BODY"
-  exit 1
-fi
-if [ "$CHECK" = kis_rank ] && [ "$RC" -eq 5 ]; then   # 슬롯 일부만 받음 — 0 이 아니면 warn(N-66)
-  scripts/notify.sh warn "watchdog: KIS 순위 스냅숏 슬롯 부족" "$BODY"
   exit 1
 fi
 case "$RC" in   # 발송 장부 검사(B-57) — 확정 빌드는 정상이므로 제목을 따로 단다

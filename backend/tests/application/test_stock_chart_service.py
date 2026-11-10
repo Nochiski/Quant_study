@@ -463,6 +463,12 @@ def test_saving_the_same_auto_line_again_returns_the_saved_one() -> None:
     shown = service.create_line(retracement).line
     assert (shown.line_id, shown.content.visible) == (first, True)
     assert len(drawings.lines) == 1
+    # 화면 ↔ 저장 왕복으로 가격 마지막 자리가 다른 본문도 같은 선이다
+    nudged = LineEdit(
+        tuple(replace(a, price=math.nextafter(a.price, math.inf)) for a in retracement.edit.anchors)
+    )
+    assert service.create_line(replace(retracement, edit=nudged)).line.line_id == first
+    assert len(drawings.lines) == 1
     # 레벨만·연장만·파라미터만 다르면 새 선이다(옛 선을 고치지 않는다).
     # 민감도를 바꿔도 기준점은 같다
     loose = service.retracement(

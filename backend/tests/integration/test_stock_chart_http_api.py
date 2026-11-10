@@ -301,6 +301,42 @@ def test_preview_returns_the_drawing_without_saving(tmp_path: Path) -> None:
     )
 
 
+def test_re_adding_auto_zones_after_a_sqlite_round_trip_keeps_one_line_each(tmp_path: Path) -> None:
+    # 묶음 추가를 부분 실패 뒤 다시 보낸다 — 저장소(SQLite)에서 읽어 온 선과 같은 본문이면 합친다.
+    # 두 번째 요청은 저장 응답의 화면 기준점(÷k·×k 왕복을 거친 값)을 그대로 싣는다
+    db = tmp_path / "research.sqlite3"
+    client = TestClient(build_http_app(research_db_path=db))
+    zones = _strict(
+        client.get(f"{BASE}/zones", params={**SAMSUNG, "timeframe": "day", "min_touches": "1"})
+    )
+    assert zones["zones"], "practice series has no zones to save"
+
+    def save(anchors: list[dict[str, object]]) -> tuple[list[dict[str, object]], str]:
+        response = client.post(
+            f"{BASE}/lines",
+            json={
+                "instrument_kind": "stock",
+                "instrument_code": "practice:005930",
+                "timeframe": "day",
+                "kind": "hline",
+                "source": "auto",
+                "anchors": anchors,
+                "auto": zones["record"],
+            },
+        )
+        assert response.status_code == 201, response.text
+        body = _strict(response)
+        return body["anchors"], body["line_id"]
+
+    first = [save(zone["drawing"]["anchors"]) for zone in zones["zones"]]
+    # 앱을 새로 띄워 저장소에서 다시 읽은 뒤 같은 묶음을 다시 보낸다
+    client = TestClient(build_http_app(research_db_path=db))
+    again = [save(anchors) for anchors, _ in first]
+    assert [line_id for _, line_id in again] == [line_id for _, line_id in first]
+    listed = _strict(client.get(f"{BASE}/lines", params=SAMSUNG))["lines"]
+    assert len(listed) == len(zones["zones"])
+
+
 def test_real_data_candles_show_actual_prices(tmp_path: Path) -> None:
     pytest.importorskip("duckdb", reason="backend optional extra `equity`")
     from tests.test_adapters_equity_duckdb_chart import _raw, build_chart_root

@@ -664,8 +664,12 @@ class StockChartService:
         (알고리즘·파라미터·판정 구간·판정·방향 출처) 전부가 같고 보이기만 다를 수 있다.
 
         묶음 추가를 다시 보내도(부분 실패 뒤 재시도) 같은 띠가 두 줄 생기지 않게 그 선을 돌려준다.
-        하나라도 다르면 None — 레벨이나 조건을 바꿔 다시 만든 선은 새 선이다."""
-        shown = replace(content, visible=True)
+        하나라도 다르면 None — 레벨이나 조건을 바꿔 다시 만든 선은 새 선이다. 기준점은 저장 ↔
+        화면 왕복의 마지막 자리 차이를 같다고 보는 `unmoved`로 견준다(편집과 같은 규칙)."""
+
+        def rest(c: ChartLineContent) -> ChartLineContent:
+            return replace(c, anchors=(), visible=True)
+
         return next(
             (
                 line
@@ -674,7 +678,8 @@ class StockChartService:
                 and line.timeframe is draft.timeframe
                 and line.kind is draft.kind
                 and line.auto == draft.auto
-                and replace(line.content, visible=True) == shown
+                and unmoved(line.content.anchors, content.anchors)
+                and rest(line.content) == rest(content)
             ),
             None,
         )

@@ -10,8 +10,8 @@ from strategy_workbench.domain.chart_analysis.facade.regime import (
     RegimeVerdict,
     Structure,
 )
-from strategy_workbench.domain.chart_analysis.facade.series import Window
-from strategy_workbench.domain.chart_analysis.facade.wording import regime_sentence
+from strategy_workbench.domain.chart_analysis.facade.series import SwingParams, Window
+from strategy_workbench.domain.chart_analysis.facade.wording import regime_rules, regime_sentence
 
 
 def _judgement(
@@ -64,3 +64,10 @@ def test_each_verdict_gets_its_sentence(
     assert all(part in sentence for part in expected), sentence
     if judgement.verdict is RegimeVerdict.UNDECIDABLE:
         assert "S=" not in sentence and "B=" not in sentence
+
+
+def test_regime_rules_quote_the_atr_period_of_the_series() -> None:
+    # 박스 비율 문장의 ATR 기간은 박아 둔 14가 아니라 이번 계열의 값이다
+    (box,) = (rule for rule in regime_rules(SwingParams(atr_period=20)) if "박스 비율" in rule)
+
+    assert "ATR(20)" in box

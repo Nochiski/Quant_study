@@ -138,12 +138,12 @@ from strategy_workbench.domain.chart_analysis.facade.wording import (
     CONFLUENCE_CAUTION,
     ENDS_NEAR_EXTREME_WARNING,
     NO_SWING_MESSAGE,
-    REGIME_RULES,
     STARTS_NEAR_EXTREME_WARNING,
     ZONE_BASIS,
     anchor_issue_message,
     confluence_rules,
     pivot_rule,
+    regime_rules,
     regime_sentence,
     zone_rules,
 )
@@ -307,7 +307,7 @@ class StockChartService:
             structure_lows=_pivots(series, loaded.scale, judgement.structure_lows),
             sentence=regime_sentence(judgement),
             warnings=_warnings(judgement),
-            rules=REGIME_RULES,
+            rules=regime_rules(series.params),
             pivot_rule=pivot_rule(series.params),
         )
 

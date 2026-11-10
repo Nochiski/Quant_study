@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import {
+  DRAG_THRESHOLD_PX,
   chartScale,
   defaultViewport,
   panViewport,
@@ -24,8 +25,6 @@ import { useCommittedRef } from "../../../shared/lib/react";
 
 /** 보기를 바꾸고 이만큼 멈추면 보이는 날짜 구간을 주소·날짜 칸에 쓴다(ms). */
 const RANGE_WRITE_DELAY_MS = 300;
-/** 이만큼(px) 움직여야 끌기로 본다 — 그보다 짧으면 누르기(선 고르기·빈 곳 누르기)다. */
-const DRAG_THRESHOLD = 3;
 /** 키보드 한 번의 확대 배율과 이동 비율(보이는 봉 칸 수에 대한). */
 const KEY_ZOOM = 1.25;
 const KEY_PAN_RATIO = 0.1;
@@ -239,7 +238,7 @@ export const useChartNavigation = ({
       return;
     }
     if (!dragging.moved) {
-      if (Math.abs(event.clientX - dragging.x) < DRAG_THRESHOLD) return;
+      if (Math.abs(event.clientX - dragging.x) < DRAG_THRESHOLD_PX) return;
       dragging.moved = true;
       // 끌기로 보이고 나서야 포인터를 붙잡는다 — 그 전에 붙잡으면 누르기(click)가 선에 가지 않는다
       event.currentTarget.setPointerCapture(event.pointerId);

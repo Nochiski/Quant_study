@@ -1,6 +1,7 @@
-import { useEffect, useRef, type MouseEvent } from "react";
+import { useEffect, useRef, type MouseEvent, type PointerEvent } from "react";
 
 import {
+  DRAG_THRESHOLD_PX,
   ChartLineShape,
   levelSegments,
   lineTone,
@@ -17,10 +18,27 @@ import {
 } from "../../../entities/chart";
 import { useCommittedRef } from "../../../shared/lib/react";
 import { isDraggable } from "../model/line-edit";
-import type { ChartDrawing } from "../model/use-chart-drawing";
+import type { ChartDrawing, DragGrip } from "../model/use-chart-drawing";
 
 // 그리는 중인 미리보기 선의 라벨 주인 이름(저장 선 id와 겹치지 않는다)
 const DRAFT = "draft";
+
+/** 그림 칸 기준 포인터 자리와, 이번 움직임에서 마그넷을 반대로 쓰는가(Ctrl·⌘을 누르는 중). */
+type Pointer = { x: number; y: number; flipMagnet: boolean };
+
+/**
+ * 지금 누르고 있는 것(client 좌표의 누른 자리와 함께).
+ * - `draw`: 그리기 도구로 점을 찍었다. `continues`면 선이 아직 안 끝나 끌어 놓은 자리가 다음 점이다. 뒤따르는 click은
+ *   이 누르기의 끝이라 고르기 풀기로 보지 않는다 — 누르는 동안 저장이 끝나 선택 도구로 돌아와 있을 수 있다.
+ * - `grab`: 선 손잡이·수평선 몸통을 잡았다. 문턱(`DRAG_THRESHOLD_PX`)을 넘기 전에는 옮기지 않는다(`moved`) — 고르려고
+ *   누르다 떨린 손이 선을 옮겨 저장하지 않는다.
+ */
+type Press =
+  | { kind: "draw"; x: number; y: number; continues: boolean }
+  | { kind: "grab"; x: number; y: number; moved: boolean };
+
+const movedFrom = (press: Press, event: MouseEvent<SVGElement>) =>
+  Math.hypot(event.clientX - press.x, event.clientY - press.y) >= DRAG_THRESHOLD_PX;
 
 type DrawingSurfaceProps = {
   drawing: ChartDrawing;
@@ -37,8 +55,9 @@ type DrawingSurfaceProps = {
 };
 
 /**
- * 차트 위 그리기 칸: 포인터가 가리키는 봉·가격(마그넷이면 그 봉의 시·고·저·종가 중 가장 가까운 값), 도구별 점
- * 찍기, 저장 선 고르기와 손잡이 끌기. 미리보기는 서버 응답(`drawing.preview`)의 두 점을 그대로 잇는다.
+ * 차트 위 그리기 칸: 포인터가 가리키는 봉·가격(마그넷이면 그 봉의 시·고·저·종가 중 가장 가까운 값, Ctrl·⌘을 누르는
+ * 동안은 반대), 도구별 점 찍기(클릭을 거듭하거나 누른 채 끌어 놓기), 저장 선 고르기와 손잡이·수평선 몸통 끌기.
+ * 미리보기는 서버 응답(`drawing.preview`)의 두 점을 그대로 잇는다.
  *
  * 포인터 움직임은 rAF 한 번으로 묶어 상태를 바꾼다 — 서버 미리보기 호출은 그 위에서 다시 잠깐 멈춘 초안만 간다.
  * 레벨 라벨은 보이는 선 전부를 한 번에 배치한다 — 가까운 자리의 라벨끼리 밀어내고 그림 칸 안으로 들인다.
@@ -55,28 +74,35 @@ export const DrawingSurface = ({
 }: DrawingSurfaceProps) => {
   const { state, dispatch, hover, drag, preview } = drawing;
   const frame = useRef<number | null>(null);
-  const pending = useRef<{ x: number; y: number } | null>(null);
+  const pending = useRef<Pointer | null>(null);
+  const press = useRef<Press | null>(null);
   const { plot } = scale;
   // 기준점을 둘 수 있는 마지막 봉(진행 중 봉은 기준점이 될 수 없다 — 서버도 거절한다)
   const anchorLimit = Math.min(completedCount - 1, scale.last);
 
-  const pointAt = (x: number, y: number): ChartPointBody | null => {
+  const pointAt = ({ x, y, flipMagnet }: Pointer): ChartPointBody | null => {
     if (anchorLimit < scale.first) return null;
     const index = Math.min(Math.max(scale.indexAtX(x), scale.first), anchorLimit);
     const candle = candles[index];
     const raw = scale.priceAtY(Math.min(Math.max(y, plot.top), plot.bottom));
-    const price = state.magnet ? snapToCandle(candle, raw).price : roundPrice(raw, instrumentKind);
+    const price =
+      state.magnet !== flipMagnet ? snapToCandle(candle, raw).price : roundPrice(raw, instrumentKind);
     return { bar_date: candle.start, price };
   };
 
-  const local = (event: MouseEvent<SVGElement>) => {
+  // Ctrl(⌘)을 누르는 동안은 마그넷을 반대로 쓴다(트레이딩뷰 관례)
+  const pointer = (event: MouseEvent<SVGElement>): Pointer => {
     const box = (event.currentTarget.ownerSVGElement ?? event.currentTarget).getBoundingClientRect();
-    return { x: event.clientX - box.left, y: event.clientY - box.top };
+    return {
+      x: event.clientX - box.left,
+      y: event.clientY - box.top,
+      flipMagnet: event.ctrlKey || event.metaKey,
+    };
   };
 
   // rAF 콜백은 React 밖에서 불린다 — 그때의 도구·끌기 상태는 commit과 같은 시점의 ref로 읽는다.
-  const moveTo = useCommittedRef((x: number, y: number) => {
-    const point = pointAt(x, y);
+  const moveTo = useCommittedRef((at: Pointer) => {
+    const point = pointAt(at);
     if (point === null) return;
     if (drag !== null) drawing.moveDrag(point);
     else if (state.tool !== "select") drawing.setHover(point);
@@ -89,28 +115,64 @@ export const DrawingSurface = ({
   );
 
   const onPointerMove = (event: MouseEvent<SVGGElement>) => {
-    pending.current = local(event);
+    const pressed = press.current;
+    if (pressed?.kind === "grab" && !pressed.moved) {
+      if (!movedFrom(pressed, event)) return;
+      pressed.moved = true;
+    }
+    pending.current = pointer(event);
     if (frame.current !== null) return;
     frame.current = requestAnimationFrame(() => {
       frame.current = null;
       const at = pending.current;
-      if (at !== null) moveTo.current(at.x, at.y);
+      if (at !== null) moveTo.current(at);
     });
   };
 
-  const onPointerUp = () => {
-    if (drag !== null) drawing.endDrag();
+  // 그리기 도구는 누르는 순간 점을 찍는다 — 눌렀다 놓기(클릭)를 거듭해도, 누른 채 끌어 놓아도 같은 선이 된다.
+  const onPointerDown = (event: PointerEvent<SVGGElement>) => {
+    press.current = null;
+    if (state.tool === "select" || drag !== null || event.button !== 0) return;
+    const point = pointAt(pointer(event));
+    if (point === null) return;
+    const placed = drawing.place(point);
+    // 앞 선을 저장하는 중이라 받지 않은 누르기도 그리기 누르기다 — 누르는 동안 저장이 끝나도 그 click이 새 선의
+    // 고르기를 풀지 않는다
+    press.current = { kind: "draw", x: event.clientX, y: event.clientY, continues: placed === "added" };
+    // 칸 밖에서 놓아도 놓기를 받는다
+    if (placed !== "ignored") event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const onClick = (event: MouseEvent<SVGGElement>) => {
-    if (drag !== null) return;
-    if (state.tool === "select") {
-      dispatch({ type: "select", lineId: null });
+  // 선 손잡이·수평선 몸통 잡기. 차트 이동(pan)으로 번지지 않게 멈추고 포인터를 붙잡는다.
+  const grab = (event: PointerEvent<SVGElement>, line: ChartLineBody, grip: DragGrip) => {
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    press.current = { kind: "grab", x: event.clientX, y: event.clientY, moved: false };
+    // 누르기 전에 예약된 움직임(누르기 직전 자리)은 버린다 — 그 프레임이 문턱을 거치지 않고 선을 옮기면 안 된다
+    pending.current = null;
+    drawing.startDrag(line, grip);
+  };
+
+  const onPointerUp = (event: PointerEvent<SVGGElement>) => {
+    const pressed = press.current;
+    // 잡기는 놓으면 끝이다(Esc로 끌기를 버린 뒤여도). 문턱을 넘지 않은 잡기는 옮긴 것이 없어 endDrag가 저장하지 않는다
+    if (pressed?.kind === "grab") press.current = null;
+    if (drag !== null) {
+      drawing.endDrag();
       return;
     }
-    const at = local(event);
-    const point = pointAt(at.x, at.y);
+    // 끌었다 놓았다: 누른 점이 선을 끝내지 않았으면 놓은 자리가 다음 점이다(Esc로 그만둔 뒤면 찍은 점이 없다)
+    if (pressed?.kind !== "draw" || !pressed.continues || state.points.length === 0 || !movedFrom(pressed, event))
+      return;
+    const point = pointAt(pointer(event));
     if (point !== null) drawing.place(point);
+  };
+
+  const onClick = () => {
+    const pressed = press.current;
+    press.current = null;
+    if (pressed?.kind === "draw") return;
+    if (drag === null && state.tool === "select") dispatch({ type: "select", lineId: null });
   };
 
   const selected = lines.find((line) => line.line_id === state.selectedId) ?? null;
@@ -149,11 +211,17 @@ export const DrawingSurface = ({
   return (
     <g
       className={`drawing-surface drawing-surface--${state.tool === "select" ? "select" : "draw"}`}
+      onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={drawing.abandonDrag}
+      onPointerCancel={() => {
+        press.current = null;
+        drawing.abandonDrag();
+      }}
       onLostPointerCapture={() => {
-        // 놓기(pointerup)가 먼저 와서 저장 중이면 그대로 둔다 — 놓지 못하고 잃은 끌기만 되돌린다
+        // 놓기(pointerup)가 먼저 와서 저장 중이면 그대로 둔다 — 놓지 못하고 잃은 끌기만 되돌린다. 그리기 누르기 기록은
+        // 뒤따르는 click이 쓰므로 잡기 기록만 지운다
+        if (press.current?.kind === "grab") press.current = null;
         if (drag !== null && !drag.committing) drawing.abandonDrag();
       }}
       onPointerLeave={() => (state.tool === "select" ? undefined : drawing.setHover(null))}
@@ -178,6 +246,12 @@ export const DrawingSurface = ({
           onSelect={
             state.tool === "select"
               ? () => dispatch({ type: "select", lineId: line.line_id })
+              : undefined
+          }
+          // 수평선은 몸통 어디를 잡아도 가격을 옮긴다 — 기준점 손잡이는 선의 왼쪽 끝이라 화면 밖일 수 있다
+          onGrab={
+            state.tool === "select" && line.kind === "hline" && isDraggable(line, timeframe)
+              ? (event) => grab(event, line, "body")
               : undefined
           }
           onHover={(over) =>
@@ -226,11 +300,7 @@ export const DrawingSurface = ({
                 cy={at.y}
                 r={6}
                 aria-hidden="true"
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  drawing.startDrag(selected, index);
-                }}
+                onPointerDown={(event) => grab(event, selected, index)}
                 onClick={(event) => event.stopPropagation()}
                 onDoubleClick={(event) => event.stopPropagation()}
               />

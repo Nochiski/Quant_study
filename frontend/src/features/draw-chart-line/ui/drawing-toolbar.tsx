@@ -33,7 +33,14 @@ const Icon = ({ d }: { d: string }) => (
  * 48px 열의 세로 도구 막대. 버튼마다 접근 이름과 초점에서도 뜨는 툴팁이 있다. 막대는 Tab 정지 하나(로빙
  * tabindex — 지금 도구 버튼)이고 ↑/↓·Home/End로 버튼 사이를 옮긴다(마그넷 포함).
  */
-export const DrawingToolbar = ({ drawing }: { drawing: ChartDrawing }) => {
+export const DrawingToolbar = ({
+  drawing,
+  onPick,
+}: {
+  drawing: ChartDrawing;
+  /** 도구를 골랐다. 도구 바꾸기와 분석 방식 전환(그리기 도구면 수동 그리기)은 위젯이 함께 한다. */
+  onPick: (tool: DrawingTool) => void;
+}) => {
   const { state, dispatch } = drawing;
   // Tab이 들어올 버튼(도구 넷 + 마그넷 = 다섯 칸의 순서). 처음엔 지금 도구다.
   const [stop, setStop] = useState<number | null>(null);
@@ -72,7 +79,7 @@ export const DrawingToolbar = ({ drawing }: { drawing: ChartDrawing }) => {
             aria-label={t(TOOL_LABELS[tool])}
             aria-pressed={state.tool === tool}
             tabIndex={tabStop === index ? 0 : -1}
-            onClick={() => dispatch({ type: "pickTool", tool })}
+            onClick={() => onPick(tool)}
           >
             <Icon d={TOOL_ICONS[tool]} />
           </button>

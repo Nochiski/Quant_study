@@ -14,6 +14,8 @@ import { visibleBars, type ChartViewport } from "./chart-viewport";
 export const PRICE_AXIS_WIDTH = 84;
 export const DATE_AXIS_HEIGHT = 28;
 const PLOT_TOP = 12;
+/** 누른 자리에서 이만큼(px) 넘게 움직여야 끌기다 — 그보다 작은 손떨림은 누르기(클릭)로 본다. 이동·그리기·선 끌기가 함께 쓴다. */
+export const DRAG_THRESHOLD_PX = 3;
 const PRICE_PADDING = 0.06;
 
 export type PlotBox = { left: number; top: number; right: number; bottom: number };

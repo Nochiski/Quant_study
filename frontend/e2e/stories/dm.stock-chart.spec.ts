@@ -26,9 +26,12 @@ const clearLines = async () => {
 };
 
 /**
- * 코스피 주봉 차트를 연다(내비 → 종목 검색 → 결과). 고르면 초점이 차트 제목으로 간다. 화면은 자동 찾기로 열리므로 손으로
- * 그으려면 머리의 "수동 그리기"로 바꾼다(그때 도구 막대가 나온다).
+ * 코스피 주봉 차트를 연다(내비 → 종목 검색 → 결과). 고르면 초점이 차트 제목으로 간다. 화면은 자동 찾기로 열리지만 도구
+ * 막대는 늘 보이고, 그리기 도구를 고르면 수동 그리기로 넘어간다.
  */
+const modeButton = (page: Page, name: "자동 찾기" | "수동 그리기") =>
+  page.getByRole("group", { name: "분석 방식" }).getByRole("button", { name });
+
 const openKospi = async (page: Page): Promise<Locator> => {
   await page.goto("/");
   await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link", { name: "개별종목차트" }).click();
@@ -38,7 +41,7 @@ const openKospi = async (page: Page): Promise<Locator> => {
   await expect(page.getByRole("heading", { level: 2, name: "코스피 · 주봉" })).toBeFocused();
   const chart = page.getByRole("group", { name: "코스피 주봉 캔들 차트와 선" });
   await expect(chart).toBeVisible();
-  await page.getByRole("group", { name: "분석 방식" }).getByRole("button", { name: "수동 그리기" }).click();
+  await expect(modeButton(page, "자동 찾기")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("toolbar", { name: "그리기 도구" })).toBeVisible();
   return chart;
 };
@@ -78,8 +81,9 @@ test(
     await page.goBack();
     await expect(conditions.getByRole("button", { name: "2년" })).toHaveAttribute("aria-pressed", "true");
 
-    // 수평선: 도구를 고르고 차트를 한 번 누른다
+    // 수평선: 도구를 고르면(자동 찾기 중이어도) 수동 그리기로 넘어가고, 차트를 한 번 누른다
     await page.getByRole("button", { name: "수평 지지·저항선" }).click();
+    await expect(modeButton(page, "수동 그리기")).toHaveAttribute("aria-pressed", "true");
     await clickPlot(page, chart, 0.45, 0.3);
     const layers = page.getByRole("complementary", { name: "레이어" });
     const hline = layers.getByRole("button", { name: /^수평선 [\d,.]+$/u });
@@ -134,6 +138,39 @@ test(
     await expect(layers.getByRole("button", { name: raisedName, exact: true })).toBeVisible();
     await expect(status).toHaveText("코스피에 그린 선 1개 · 자동 저장됨");
 
+    // 수평선은 몸통 어디를 잡아 끌어도 가격만 옮긴다 — 선이 시작하는 봉 날짜는 그대로다
+    const body = await chart.locator(".chart-line__hit--grab").boundingBox();
+    if (body === null) throw new Error("horizontal line has no hit area");
+    // 고르려고 누르다 1px 떨린 손은 선을 옮기지 않는다(끌기 문턱) — 고르기만 된다
+    await page.mouse.move(body.x + body.width * 0.8, body.y + body.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(body.x + body.width * 0.8, body.y + body.height / 2 + 1);
+    await page.mouse.up();
+    await expect(layers.getByRole("button", { name: raisedName, exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.mouse.move(body.x + body.width * 0.8, body.y + body.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(body.x + body.width * 0.8, body.y + body.height / 2 + 60, { steps: 6 });
+    await page.mouse.up();
+    const movedName = layers.getByRole("button", { name: /^수평선 [\d,.]+$/u });
+    await expect(movedName).not.toHaveText(raisedName);
+    await expect(movedName).toHaveAttribute("aria-pressed", "true");
+    await expect(card.getByRole("group", { name: "기준점" }).getByLabel("봉(날짜)")).toHaveValue(barDate);
+
+    // Ctrl을 누르는 동안은 마그넷이 꺼진다 — 누른 자리의 가격(봉의 시·고·저·종가가 아닌 값)으로 그어진다
+    await page.getByRole("button", { name: "수평 지지·저항선" }).click();
+    await page.keyboard.down("Control");
+    await clickPlot(page, chart, 0.6, 0.45);
+    await page.keyboard.up("Control");
+    const freeCard = layers.getByRole("region", { name: "고른 선 · 수평선" });
+    const freeAnchor = freeCard.getByRole("group", { name: "기준점" });
+    const freeDate = await freeAnchor.getByLabel("봉(날짜)").inputValue();
+    const freePrice = Number(await freeAnchor.getByLabel("가격").inputValue());
+    const freeCandle = candles.find((candle) => candle.start === freeDate);
+    expect(freeCandle).toBeDefined();
+    const snapped = [freeCandle!.open, freeCandle!.high, freeCandle!.low, freeCandle!.close];
+    expect(snapped.map((value) => value.toFixed(2))).not.toContain(freePrice.toFixed(2));
+    await expect(status).toHaveText("코스피에 그린 선 2개 · 자동 저장됨");
+
     // 좌표로 되돌림 추가 — 키보드만 쓴다. 더하면 새 선 이름으로 초점이 간다.
     await layers.getByRole("button", { name: "좌표로 추가" }).focus();
     await page.keyboard.press("Enter");
@@ -152,32 +189,58 @@ test(
     // 레벨은 서버 기본(되돌림 0~1)이 그려지고 라벨은 "r (가격)"이다
     await expect(layers.getByRole("checkbox", { name: "0.618" })).toBeChecked();
     await expect(chart.getByText(/^0\.618 \([\d,.]+\)$/u)).toBeVisible();
-    await expect(status).toHaveText("코스피에 그린 선 2개 · 자동 저장됨");
+    await expect(status).toHaveText("코스피에 그린 선 3개 · 자동 저장됨");
   },
 );
 
 test(
-  "US-DM-19 마우스로 되돌림·채널을 긋고 카드에서 메모·잠금·레벨·연장을 고치며, 손잡이를 끌어 옮기고 다른 주기에서는 손잡이가 없다",
+  "US-DM-19 마우스로 되돌림(끌어서)·채널을 긋고 차트에서 Delete로 지웠다 되살리며, 카드에서 메모·잠금·레벨·연장을 고치고 손잡이를 끌어 옮기고 다른 주기에서는 손잡이가 없다",
   { tag: ["@story", "@US-DM-19"] },
   async ({ page }) => {
     await clearLines();
     const chart = await openKospi(page);
     const layers = page.getByRole("complementary", { name: "레이어" });
 
-    // 되돌림: 두 점(먼저 = 레벨 1, 나중 = 레벨 0)
+    // 되돌림: 두 점(먼저 = 레벨 1, 나중 = 레벨 0). 먼저 점에서 누른 채 끌어 나중 점에서 놓는다
     await page.getByRole("button", { name: "피보나치 되돌림" }).click();
-    await clickPlot(page, chart, 0.3, 0.2);
-    await clickPlot(page, chart, 0.7, 0.8);
+    const from = await plotPoint(chart, 0.3, 0.2);
+    const to = await plotPoint(chart, 0.7, 0.8);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 8 });
+    // 끄는 동안 십자선이 축에 찍힐 가격·봉 날짜를 보인다(포인터 전용 장식이라 CSS로 찾는다)
+    const cursorLabels = chart.locator(".drawing-cursor-labels text");
+    await expect(cursorLabels.nth(0)).toHaveText(/^[\d,]+\.\d{2}$/u);
+    await expect(cursorLabels.nth(1)).toHaveText(/^\d{4}-\d{2}-\d{2}$/u);
+    await expect(chart.getByText(/^0\.382 \([\d,.]+\)$/u)).toBeVisible();
+    await page.mouse.up();
     const retracement = layers.getByRole("button", { name: /^되돌림 \S+ → \S+$/u });
     await expect(retracement).toHaveAttribute("aria-pressed", "true");
-    await expect(chart.getByText(/^0\.382 \([\d,.]+\)$/u)).toBeVisible();
+    const drawn = (await retracement.textContent()) ?? "";
+    // 선택 도구로 돌아오면 축 라벨이 사라진다
+    await expect(cursorLabels).toHaveCount(0);
+
+    // 차트에서 고른 선은 Delete로 지우고 Ctrl+Z로 되살린다 — 마우스로 그은 뒤 초점은 이미 차트에 있다
+    await expect(chart).toBeFocused();
+    await page.keyboard.press("Delete");
+    await expect(page.getByText(`선을 지웠어요: ${drawn}`)).toBeVisible();
+    await expect(retracement).toHaveCount(0);
+    await page.keyboard.press("Control+z");
+    await expect(layers.getByRole("button", { name: drawn, exact: true })).toBeVisible();
 
     // 채널: 기준선 두 점 + 폭 기준점. 채널 기본 레벨은 1.618 확장을 포함한다
     await page.getByRole("button", { name: "피보나치 채널" }).click();
     await clickPlot(page, chart, 0.15, 0.6);
     await clickPlot(page, chart, 0.55, 0.4);
-    await clickPlot(page, chart, 0.35, 0.1);
-    await expect(layers.getByRole("button", { name: /^채널 \S+부터$/u })).toHaveAttribute("aria-pressed", "true");
+    // 마지막 점은 누른 채 저장이 끝나기를 기다렸다 놓는다 — 그 누르기의 끝(click)이 새 선의 고르기를 풀지 않는다
+    const last = await plotPoint(chart, 0.35, 0.1);
+    await page.mouse.move(last.x, last.y);
+    await page.mouse.down();
+    const channel = layers.getByRole("button", { name: /^채널 \S+부터$/u });
+    await expect(channel).toHaveAttribute("aria-pressed", "true");
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    await expect(channel).toHaveAttribute("aria-pressed", "true");
     await expect(chart.getByText(/^1\.618 \([\d,.-]+\)$/u)).toBeVisible();
 
     // 카드: 메모를 넣고 곧바로 잠금을 눌러도 둘 다 남는다(칸 전체 PUT이 차례대로 간다), 레벨·연장 끄기

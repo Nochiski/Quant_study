@@ -85,6 +85,18 @@
   fill: var(--text);
 }
 
+/* 십자선 날짜 라벨(그리기 도구) — 가격 라벨은 오른쪽 축의 내 선 배지(AxisBadges)를 그대로 쓴다 */
+.drawing-cursor-labels > rect {
+  fill: var(--text);
+}
+
+.drawing-cursor-labels > text {
+  fill: var(--surface-panel);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+  font-variant-numeric: tabular-nums;
+}
+
 .drawing-surface__handle {
   fill: var(--surface-panel);
   stroke: var(--accent);

@@ -193,3 +193,7 @@
   cursor: pointer;
   pointer-events: stroke;
 }
+
+.chart-line__hit--grab {
+  cursor: grab;
+}

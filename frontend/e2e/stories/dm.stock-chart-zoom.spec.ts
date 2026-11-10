@@ -22,14 +22,13 @@ const clearLines = async () => {
     await deleteChartLine({ client: apiClient, path: { line_id: line.line_id } });
 };
 
-/** 코스피 차트를 연다(내비 → 종목 검색 → 결과). 처음 주기는 주봉이다. 그리기 도구를 쓰려고 수동 그리기로 바꾼다. */
+/** 코스피 차트를 연다(내비 → 종목 검색 → 결과). 처음 주기는 주봉이다. 도구 막대는 자동 찾기에서도 보인다. */
 const openKospi = async (page: Page) => {
   await page.goto("/");
   await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link", { name: "개별종목차트" }).click();
   await page.getByRole("searchbox", { name: "종목" }).fill("코스피");
   await page.getByRole("button", { name: /^코스피 .*지수$/u }).click();
   await expect(page.getByRole("group", { name: "코스피 주봉 캔들 차트와 선" })).toBeVisible();
-  await page.getByRole("group", { name: "분석 방식" }).getByRole("button", { name: "수동 그리기" }).click();
 };
 
 /** 그림 칸 안의 비율 자리(오른쪽 가격 축 84px·위 12px·아래 날짜 축 28px를 뺀 칸). */
@@ -96,14 +95,18 @@ test(
     await page.mouse.up();
     await expect.poll(async () => (await shownRange(page)).start < zoomed.start).toBe(true);
 
-    // 그리기 도구 중에는 끌어도 옮겨지지 않는다(끌기는 점 찍기다). 찍힌 점은 Esc로 버린다
+    // 그리기 도구 중에는 끌어도 옮겨지지 않는다(끌기는 선 긋기다). 그은 선은 고른 채로 오니 Delete로 지운다
     const panned = await shownRange(page);
     await page.getByRole("button", { name: "피보나치 되돌림" }).click();
     await page.mouse.move(from.x, from.y);
     await page.mouse.down();
     await page.mouse.move(from.x + 240, from.y, { steps: 8 });
     await page.mouse.up();
-    await page.keyboard.press("Escape");
+    const layers = page.getByRole("complementary", { name: "레이어" });
+    const drawn = layers.getByRole("button", { name: /^되돌림 \S+ → \S+$/u });
+    await expect(drawn).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("Delete");
+    await expect(drawn).toHaveCount(0);
     // 주소 쓰기는 멈춘 뒤 300ms에 간다 — 그보다 넉넉히 기다려도 날짜 칸은 그대로다
     await page.waitForTimeout(700);
     expect(await shownRange(page)).toEqual(panned);

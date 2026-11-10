@@ -1,6 +1,8 @@
-import { useLayoutEffect, useReducer, useRef, useState } from "react";
+import { useLayoutEffect, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import {
+  lineTitle,
+  lineTone,
   useCreateChartLine,
   useUpdateChartLine,
   type ChartLineBody,
@@ -17,13 +19,18 @@ import { isTextEntry } from "../../../shared/lib/text-entry";
 import { useLinePreview } from "./use-line-preview";
 
 /**
+ * 끄는 손잡이: 기준점 하나(그 index), 또는 수평선 몸통(`body` — 기준 봉 날짜는 두고 가격만 옮긴다).
+ */
+export type DragGrip = number | "body";
+
+/**
  * 끄는 중인 선: 원래 선과 지금 손잡이로 옮긴 기준점. 놓은 뒤 저장 응답이 올 때까지 `committing`이다. `serial`은
  * 끌기마다 새 번호라, 같은 손잡이를 다시 끌 때 앞 끌기의 미리보기를 잔상으로 보이지 않는다.
  */
 export type LineDrag = {
   serial: number;
   line: ChartLineBody;
-  anchorIndex: number;
+  grip: DragGrip;
   anchors: readonly ChartPointBody[];
   committing: boolean;
 };
@@ -36,14 +43,20 @@ const sameAnchors = (left: readonly ChartPointBody[], right: readonly ChartPoint
 const settle = (promise: Promise<unknown>) => promise.catch(() => undefined);
 
 /**
- * 수동 그리기 한 벌: 도구·찍은 점·고른 선(리듀서), 포인터가 가리키는 점, 끄는 중인 선, 미리보기, 만들기·고치기.
- * 저장 선 자체는 query cache가 갖고 여기서는 id와 지금 움직이는 좌표만 둔다.
+ * 수동 그리기 한 벌: 도구·찍은 점·고른 선(리듀서), 포인터가 가리키는 점, 끄는 중인 선, 미리보기, 만들기·고치기·지우기.
+ * 저장 선 자체는 query cache가 갖고 여기서는 id와 지금 움직이는 좌표만 둔다. 지우기와 되돌리기 쌓기는 위젯이 준
+ * `onRemove`(`features/remove-chart-line`)가 하고, 여기서는 지운 선의 고르기만 푼다.
  *
  * 종목이나 주기가 바뀌면 찍은 점·고른 선·끌기를 비운다 — 점의 날짜는 그 주기 봉의 날짜라 다른 계열에서 뜻이 없다.
  * 저장 결과 처리는 요청마다 붙이는 콜백이 아니라 `mutateAsync`의 약속으로 한다 — 한 훅의 `mutate`를 겹쳐 부르면
  * 앞 호출의 콜백이 버려진다.
  */
-export const useChartDrawing = (target: ChartTarget, timeframe: Timeframe) => {
+export const useChartDrawing = (
+  target: ChartTarget,
+  timeframe: Timeframe,
+  /** 선 지우기(되돌리기에 쌓는다). 이미 지우는 중이면 false. */
+  onRemove: (lines: readonly ChartLineBody[], title: string) => boolean,
+) => {
   const [state, dispatch] = useReducer(drawingReducer, INITIAL_DRAWING);
   const [hover, setHover] = useState<ChartPointBody | null>(null);
   const [drag, setDrag] = useState<LineDrag | null>(null);
@@ -106,21 +119,53 @@ export const useChartDrawing = (target: ChartTarget, timeframe: Timeframe) => {
     }
   };
 
-  /** 차트를 눌렀다: 점을 더하고, 선이 끝나면 저장한다. */
-  const place = (point: ChartPointBody) => {
-    if (state.tool === "select" || create.isPending) return;
+  /**
+   * 차트를 눌렀다: 점을 더하고(`added`), 선이 끝나면 저장한다(`finished`). 선택 도구이거나 앞 선을 저장하는 중이면
+   * 받지 않는다(`ignored`).
+   */
+  const place = (point: ChartPointBody): "added" | "finished" | "ignored" => {
+    if (state.tool === "select" || create.isPending) return "ignored";
     const anchors = completedAnchors(state, point);
-    if (anchors === null) dispatch({ type: "addPoint", point });
-    else void save(state.tool, anchors);
+    if (anchors === null) {
+      dispatch({ type: "addPoint", point });
+      return "added";
+    }
+    void save(state.tool, anchors);
+    return "finished";
   };
 
   /** 저장 선 고치기. 요청은 한 줄로 차례대로 가고 본문은 차례가 왔을 때의 최신 선에서 만든다. */
   const edit = (line: ChartLineBody, patch: ChartLinePatch) =>
     settle(update.mutateAsync({ line, patch }));
 
-  const startDrag = (line: ChartLineBody, anchorIndex: number) => {
+  /**
+   * 지운다(선 하나, 또는 함께 지울 묶음 — 자동 수평 구간 한 벌). 받았으면(이미 지우는 중이 아니면) 고른 선이 그
+   * 안에 있을 때 고르기를 풀고 true.
+   */
+  const remove = (group: readonly ChartLineBody[], title: string): boolean => {
+    if (!onRemove(group, title)) return false;
+    if (group.some((line) => line.line_id === state.selectedId)) dispatch({ type: "select", lineId: null });
+    return true;
+  };
+
+  /**
+   * 차트(SVG)에 초점이 있을 때의 키: 고른 내 선을 Delete·Backspace로 지운다(트레이딩뷰 관례, 되돌리기는 Ctrl+Z).
+   * 차트 안의 다른 초점(판정 구간 손잡이)에서 올라온 키·수정키 조합·끄는 중은 받지 않는다. 처리했으면 true.
+   */
+  const onChartKeyDown = (event: ReactKeyboardEvent<SVGSVGElement>, lines: readonly ChartLineBody[]): boolean => {
+    if (event.key !== "Delete" && event.key !== "Backspace") return false;
+    if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || drag !== null)
+      return false;
+    const line = lines.find((item) => item.line_id === state.selectedId);
+    if (line === undefined || lineTone(line) !== "mine") return false;
+    event.preventDefault();
+    remove([line], lineTitle(line, target.kind, timeframe));
+    return true;
+  };
+
+  const startDrag = (line: ChartLineBody, grip: DragGrip) => {
     dragSerial.current += 1;
-    setDrag({ serial: dragSerial.current, line, anchorIndex, anchors: line.anchors, committing: false });
+    setDrag({ serial: dragSerial.current, line, grip, anchors: line.anchors, committing: false });
   };
 
   const moveDrag = (point: ChartPointBody) =>
@@ -130,7 +175,11 @@ export const useChartDrawing = (target: ChartTarget, timeframe: Timeframe) => {
         : {
             ...current,
             anchors: current.anchors.map((anchor, index) =>
-              index === current.anchorIndex ? point : anchor,
+              current.grip === "body"
+                ? { bar_date: anchor.bar_date, price: point.price }
+                : index === current.grip
+                  ? point
+                  : anchor,
             ),
           },
     );
@@ -174,6 +223,8 @@ export const useChartDrawing = (target: ChartTarget, timeframe: Timeframe) => {
     place,
     save,
     edit,
+    remove,
+    onChartKeyDown,
     startDrag,
     moveDrag,
     endDrag,

@@ -32,6 +32,7 @@ export {
 } from "./model/chart-price";
 export {
   DATE_AXIS_HEIGHT,
+  DRAG_THRESHOLD_PX,
   PRICE_AXIS_WIDTH,
   barAtOrBefore,
   chartScale,

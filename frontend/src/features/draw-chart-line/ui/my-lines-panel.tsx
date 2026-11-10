@@ -18,8 +18,7 @@ import { SelectedLineCard } from "./selected-line-card";
 
 type MyLinesPanelProps = {
   drawing: ChartDrawing;
-  /** 지우기(되돌리기 쌓기는 위젯이 준 `features/remove-chart-line`이 한다). 이미 지우는 중이면 false. */
-  onRemove: (lines: readonly ChartLineBody[], title: string) => boolean;
+  /** 지우는 요청이 나가 있다(지우기 버튼을 막는다). */
   removing: boolean;
   instrument: ChartInstrumentBody;
   /** 그 대상의 저장 선 전부. 목록에는 내 선만 두고, 고른 선 카드는 차트에서 고른 자동 선도 연다. */
@@ -38,7 +37,6 @@ type MyLinesPanelProps = {
  */
 export const MyLinesPanel = ({
   drawing,
-  onRemove,
   removing,
   instrument,
   lines,
@@ -73,11 +71,10 @@ export const MyLinesPanel = ({
   const title = (line: ChartLineBody) => lineTitle(line, instrument.kind, timeframe);
   const remove = (line: ChartLineBody) => {
     // 지우는 요청이 나가 있으면(Delete 연타) 받지 않는다
-    if (!onRemove([line], title(line))) return;
+    if (!drawing.remove(line)) return;
     const index = mine.findIndex((item) => item.line_id === line.line_id);
     const neighbour = mine[index + 1] ?? mine[index - 1];
     focusAfterChange.current = neighbour?.line_id ?? "";
-    if (drawing.state.selectedId === line.line_id) drawing.dispatch({ type: "select", lineId: null });
   };
 
   const onNameKey = (event: KeyboardEvent<HTMLButtonElement>, line: ChartLineBody) => {

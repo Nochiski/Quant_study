@@ -1,3 +1,5 @@
+import type { PointerEvent } from "react";
+
 import type { LevelLabel } from "../model/label-layout";
 import type { LineTone } from "../model/line-tone";
 import { formedSegments, segmentPath, shadedBands, type LevelSegment } from "../model/line-geometry";
@@ -20,6 +22,8 @@ type ChartLineShapeProps = {
   onSelect?: () => void;
   /** 포인터가 누를 자리에 올라왔다(true)·떠났다(false). 오른쪽 축 배지가 고른 선이 없을 때 이 선을 보인다. */
   onHover?: (over: boolean) => void;
+  /** 누를 자리를 누르기 시작했다 — 선 몸통 끌기. 넘기면 누를 자리 커서가 위아래 끌기 모양이 된다. */
+  onGrab?: (event: PointerEvent<SVGPathElement>) => void;
 };
 
 /**
@@ -35,6 +39,7 @@ export const ChartLineShape = ({
   formedX,
   onSelect,
   onHover,
+  onGrab,
 }: ChartLineShapeProps) => {
   const className = [
     "chart-line",
@@ -81,13 +86,14 @@ export const ChartLineShape = ({
       </g>
       {onSelect === undefined ? null : (
         <path
-          className="chart-line__hit"
+          className={onGrab === undefined ? "chart-line__hit" : "chart-line__hit chart-line__hit--grab"}
           d={all}
           aria-hidden="true"
           // 선 위 더블클릭은 차트의 "기본 보기로 되돌림"(빈 곳 더블클릭)으로 번지지 않게 한다
           onDoubleClick={(event) => event.stopPropagation()}
           onPointerEnter={() => onHover?.(true)}
           onPointerLeave={() => onHover?.(false)}
+          onPointerDown={onGrab}
           onClick={(event) => {
             // 차트 빈 곳 누르기(고른 것 풀기)로 번지지 않게 한다
             event.stopPropagation();

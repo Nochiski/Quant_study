@@ -29,6 +29,7 @@ import {
   type Timeframe,
 } from "../../../entities/chart";
 import {
+  DrawingCursorLabels,
   DrawingHint,
   DrawingSurface,
   DrawingToolbar,
@@ -170,8 +171,8 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
   const width = useElementWidth(box);
   const candlesQuery = useQuery(chartCandlesQuery(target, timeframe));
   const linesQuery = useQuery(chartLinesQuery(target));
-  const drawing = useChartDrawing(target, timeframe);
   const removal = useLineRemoval(target);
+  const drawing = useChartDrawing(target, timeframe, removal.removeLine);
   const finder = useLevelFinder(target, timeframe);
   const [mode, setMode] = useState<ChartMode>("auto");
   // 중첩에 내 선도 넣는가 — 요청 칸이라 선의 보이기 저장 칸을 바꾸지 않는다
@@ -263,8 +264,9 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
   };
   const creating = panel.view === "create";
   // 포인터를 올린 선은 선택 도구일 때만 본다(그리기 도구로 바꾸면 선의 누를 자리가 사라져 떠남이 오지 않는다)
+  const selectedLine = shownLines.find((line) => line.line_id === drawing.state.selectedId);
   const badgeLine =
-    shownLines.find((line) => line.line_id === drawing.state.selectedId) ??
+    selectedLine ??
     (drawing.state.tool === "select"
       ? shownLines.find((line) => line.line_id === drawing.hoverLineId)
       : undefined);
@@ -295,8 +297,15 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
           </p>
         ) : null}
         <div className="stock-chart__frame">
-          {/* 도구 막대 자리는 두 방식 모두 비워 둬서 차트가 튀지 않는다 */}
-          <div className="stock-chart__tools">{mode === "manual" ? <DrawingToolbar drawing={drawing} /> : null}</div>
+          {/* 도구 막대는 두 방식 모두 보인다(트레이딩뷰처럼 늘 왼쪽) — 자동 찾기 중에 그리기 도구를 고르면 수동 그리기로 넘어간다 */}
+          <div className="stock-chart__tools">
+            <DrawingToolbar
+              drawing={drawing}
+              onDrawTool={() => {
+                if (mode === "auto") changeMode("manual");
+              }}
+            />
+          </div>
           <div className="stock-chart__plot" ref={box}>
             {candlesQuery.isPending ? (
               <p className="stock-chart__state" role="status">
@@ -331,6 +340,19 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                 // 키보드 줌·이동(+/−·←/→·Home)을 받는 Tab 정지
                 tabIndex={0}
                 {...navigation.svgProps}
+                onKeyDown={(event) => {
+                  // 차트에서 고른 내 선은 Delete·Backspace로 지운다(트레이딩뷰 관례, Ctrl+Z로 되돌린다)
+                  if (
+                    (event.key === "Delete" || event.key === "Backspace") &&
+                    selectedLine !== undefined &&
+                    lineTone(selectedLine) === "mine"
+                  ) {
+                    event.preventDefault();
+                    drawing.remove(selectedLine);
+                    return;
+                  }
+                  navigation.svgProps.onKeyDown(event);
+                }}
               >
                 <defs>
                   <clipPath id={clipId}>
@@ -384,6 +406,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                     instrument.kind,
                   )}
                 />
+                <DrawingCursorLabels drawing={drawing} scale={scale} instrumentKind={instrument.kind} />
               </svg>
             ) : null}
           </div>
@@ -464,7 +487,6 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
           <>
             <MyLinesPanel
               drawing={drawing}
-              onRemove={removal.removeLine}
               removing={removal.removing}
               instrument={instrument}
               lines={lines}

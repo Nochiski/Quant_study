@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import math
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -546,13 +545,15 @@ class StockChartService:
         )
 
     def create_line(self, draft: ChartLineDraft) -> ChartLineView:
-        _check_record(draft.kind, draft.source, draft.auto)
+        _check_record(draft.source, draft.auto)
         loaded = self._load(draft.instrument)
         frame = self._required_frame(loaded, draft.timeframe)
         _, stored, _ = self._shape(
             loaded, frame, draft.kind, draft.edit.anchors, draft.edit.levels, "draft"
         )
         content = self._content(stored, draft.edit)
+        if draft.auto is not None:
+            draft = replace(draft, auto=self._verified_record(loaded, draft, stored))
         if draft.source is LineSource.AUTO:
             same_line = self._same_auto_line(draft, content)
             if same_line is not None:
@@ -603,6 +604,60 @@ class StockChartService:
         content = self._content(stored, edit)
         line = self._drawings.update_content(line_id, content, self._now())
         return self._line_view(loaded, line)
+
+    def _verified_record(
+        self, loaded: _Loaded, draft: ChartLineDraft, stored: tuple[LineAnchor, ...]
+    ) -> AutoRecord:
+        """자동 기록을 서버가 다시 만든다. 저장할 파라미터·판정 구간으로 같은 찾기를 돌려 기준점이
+        그 결과(후보)인지 보고, 판정·방향 출처·구간 출처는 요청 값을 믿지 않고 계산한다 — 기록은
+        국면 분류 연계의 출처라 서버가 정본이다. 맞지 않으면 `chart.line.auto_record`로 거절한다."""
+        auto = draft.auto
+        if auto is None:
+            raise RuntimeError(f"verified record needs an auto record — kind={draft.kind.value}")
+
+        def reject(reason: str) -> ChartRequestError:
+            return ChartRequestError(
+                "chart.line.auto_record",
+                f"auto record does not reproduce this line — {reason} kind={draft.kind.value} "
+                f"timeframe={draft.timeframe.value} params={dict(auto.params)} "
+                f"window={auto.regime_window} anchors="
+                f"{[(a.bar_date.isoformat(), a.price) for a in stored]}",
+            )
+
+        params = AutoParams.read(auto.params)
+        if params is None or params.to_params() != dict(auto.params):
+            raise reject("params unreadable or carry unknown keys —")
+        if not params.fits(draft.kind):
+            raise reject("params belong to another tool —")
+        if auto.regime_window is None:
+            raise reject("window missing —")
+        frame = self._frame(loaded, draft.timeframe, params.swing_params)
+        if frame is None:
+            raise reject("no completed candles —")
+        series = frame.series
+        start, end = (series.index_of(day) for day in auto.regime_window)
+        if start is None or end is None or start > end:
+            raise reject("window outside completed candles —")
+        window = Window(start, end)
+        indexed = resolve(series, stored)
+        if (
+            isinstance(indexed, date)
+            or created_index(series, window, draft.kind, indexed, params) is None
+        ):
+            raise reject("anchors are not a candidate of this search —")
+        regime, chosen = None, None
+        if draft.kind is LineKind.FIB_CHANNEL and params.direction is not None:
+            judgement = judge_regime(series, window)
+            regime = RegimeRecord(judgement.verdict, judgement.strength, judgement.structure)
+            chosen = chosen_by(judgement.channel_direction, params.direction)
+        return AutoRecord(
+            algorithm_version=ALGORITHM_VERSION,
+            params=params.to_params(),
+            regime_window=auto.regime_window,
+            regime=regime,
+            chosen_by=chosen,
+            window_source=_window_source(series, draft.timeframe, window),
+        )
 
     def _same_auto_line(self, draft: ChartLineDraft, content: ChartLineContent) -> ChartLine | None:
         """저장 내용이 완전히 같은 자동 선. 주기·종류·기준점·레벨·연장·메모·잠금·자동 기록
@@ -889,13 +944,21 @@ def _window(
                 f"window start after end — start={request.start} end={request.end}",
             )
         span = Window(start, end)
-    source = (
+    return span, WindowView(
+        series.bar_date(span.start),
+        series.bar_date(span.end),
+        span.bars,
+        _window_source(series, timeframe, span),
+    )
+
+
+def _window_source(series: ChartSeries, timeframe: Timeframe, span: Window) -> WindowSource:
+    """제안 칩 길이 그대로(마지막 완성 봉에서 끝남)면 `preset`, 아니면 `user`(끌기·날짜 입력·
+    화면 기간)."""
+    return (
         WindowSource.PRESET
         if any(span == w for _, w in _presets(series, timeframe))
         else WindowSource.USER
-    )
-    return span, WindowView(
-        series.bar_date(span.start), series.bar_date(span.end), span.bars, source
     )
 
 
@@ -994,40 +1057,18 @@ def _record(
     )
 
 
-def _check_record(kind: LineKind, source: LineSource, auto: AutoRecord | None) -> None:
-    """자동 기록은 자동 선에만 있고, 수치 칸은 유한해야 한다(NaN·inf는 저장·JSON이 받지 못한다)."""
+def _check_record(source: LineSource, auto: AutoRecord | None) -> None:
+    """자동 기록은 자동 선(`auto`·`auto_copied`)에만 있고 이 판의 알고리즘 기록이어야 한다. 기록의
+    내용(파라미터·구간·기준점)은 `_verified_record`가 같은 찾기를 다시 돌려 본다."""
     if (source is LineSource.MANUAL) != (auto is None):
         raise ChartRequestError(
             "chart.line.auto_record",
             f"auto record must be present exactly for auto lines — source={source.value} "
             f"auto={'present' if auto is not None else 'missing'}",
         )
-    if auto is None:
-        return
-    if auto.algorithm_version != ALGORITHM_VERSION:
+    if auto is not None and auto.algorithm_version != ALGORITHM_VERSION:
         raise ChartRequestError(
             "chart.line.auto_record",
             f"auto record from another algorithm version — got={auto.algorithm_version!r} "
             f"current={ALGORITHM_VERSION!r}",
-        )
-    # 판정(국면)과 방향 출처는 채널 추천의 기록이다 — 되돌림·수평 구간에는 없다
-    if kind is not LineKind.FIB_CHANNEL and (auto.regime is not None or auto.chosen_by is not None):
-        raise ChartRequestError(
-            "chart.line.auto_record",
-            f"regime and chosen_by belong to channel records only — kind={kind.value}",
-        )
-    bad = [
-        key
-        for key, value in auto.params.items()
-        if isinstance(value, float) and not math.isfinite(value)
-    ]
-    strength = None if auto.regime is None else auto.regime.strength
-    if bad or (strength is not None and not math.isfinite(strength)):
-        raise ChartRequestError(
-            "chart.line.auto_record",
-            f"auto record numbers must be finite — params={bad} regime_strength={strength}",
-        )
-    if auto.regime_window is not None and auto.regime_window[0] > auto.regime_window[1]:
-        raise ChartRequestError(
-            "chart.line.auto_record", f"regime window reversed — window={auto.regime_window}"
         )

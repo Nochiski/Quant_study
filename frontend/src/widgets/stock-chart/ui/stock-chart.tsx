@@ -27,15 +27,15 @@ import {
   type DateRange,
   type StockChartSearch,
   type Timeframe,
+  UndoNotice,
+  useLineRemoval,
 } from "../../../entities/chart";
 import {
   DrawingHint,
   DrawingSurface,
   DrawingToolbar,
   MyLinesPanel,
-  UndoNotice,
   useChartDrawing,
-  useLineRemoval,
 } from "../../../features/draw-chart-line";
 import {
   AnalysisWindowOverlay,

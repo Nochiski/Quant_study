@@ -813,8 +813,9 @@
   없고 카드에 "그 주기 화면에서 고쳐요"가 보인다.
 - 비고: e2e가 보지 않는 기준은 단위 테스트가 본다 — Shift+↑/↓ 1%와 호가 눈금 맞춤·0 이하 금지
   (`frontend/src/entities/chart/__tests__/chart-model.test.ts` steppedPrice), 연달아 고친 두 칸이 모두 남는 것·키보드
-  이동이 앞 이동이 저장된 가격에서 세는 것·끌기 저장 실패에도 끌기가 풀리는 것·지우기 연타·종목을 바꾸면 되돌리기가
-  비는 것·그릴 수 없는 선은 되돌리기에 쌓지 않는 것(`frontend/src/features/draw-chart-line/__tests__/line-mutations.test.tsx`),
+  이동이 앞 이동이 저장된 가격에서 세는 것·끌기 저장 실패에도 끌기가 풀리는 것
+  (`frontend/src/features/draw-chart-line/__tests__/line-mutations.test.tsx`), 지우기 연타·종목을 바꾸면 되돌리기가
+  비는 것·그릴 수 없는 선은 되돌리기에 쌓지 않는 것(`frontend/src/entities/chart/__tests__/line-removal.test.tsx`),
   그릴 수 없는 선의 보이기·메모 수정(`backend/tests/application/test_stock_chart_service.py`), 미리보기 음영·연장의 선분 계산
   (`chart-model.test.ts` levelSegments). 그리는 동안의 서버 미리보기 화면은 손으로 확인했다. 레벨 가격·채널 기하·기준점
   정규화·호가표·등락률은 서버가 소유한다(`backend/tests/domain/test_chart_analysis_*`,

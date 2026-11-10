@@ -7,13 +7,13 @@ import {
   type ChartCandleBody,
   type ChartInstrumentBody,
   type ChartLineBody,
+  type LineRemoval,
   type Timeframe,
 } from "../../../entities/chart";
 import { t, tFill } from "../../../shared/config";
 import { Button } from "../../../shared/ui";
 import { nudgedAnchors } from "../model/line-edit";
 import type { ChartDrawing } from "../model/use-chart-drawing";
-import type { LineRemoval } from "../model/use-line-removal";
 import { AddLineForm } from "./add-line-form";
 import { SelectedLineCard } from "./selected-line-card";
 

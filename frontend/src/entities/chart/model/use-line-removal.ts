@@ -1,13 +1,10 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-import {
-  useCreateChartLine,
-  useDeleteChartLine,
-  type ChartLineBody,
-  type ChartTarget,
-} from "../../../entities/chart";
+import type { ChartLineBody } from "../../../shared/api";
 import { useCommittedRef } from "../../../shared/lib/react";
-import { isTextEntry, popUndo, pushUndo, type UndoStack } from "./line-edit";
+import { isTextEntry } from "../../../shared/lib/text-entry";
+import { useCreateChartLine, useDeleteChartLine, type ChartTarget } from "./chart-queries";
+import { popUndo, pushUndo, type UndoStack } from "./undo-stack";
 
 /** `lost` = 지금 그릴 수 없어 되돌리기에 쌓지 못한 선이 있는가, `undoable` = 이 지우기를 되돌릴 수 있는가. */
 export type RemovalNotice =
@@ -15,7 +12,7 @@ export type RemovalNotice =
   | { kind: "restored"; title: string };
 
 /**
- * 선 지우기와 되돌리기. 지우면 같은 내용으로 다시 만들 본문을 쌓아 두고(로컬 UI 상태), 되돌리기 알림의 버튼이나
+ * 선 지우기와 되돌리기 — 수동 그리기(내가 그은 선)와 자동 찾기(자동 후보 칸)가 함께 쓴다. 지우면 같은 내용으로 다시 만들 본문을 쌓아 두고(로컬 UI 상태), 되돌리기 알림의 버튼이나
  * Ctrl+Z(⌘Z)가 마지막에 지운 선을 다시 만든다. 다시 만든 선은 새 id를 받는다.
  *
  * - 지금 그릴 수 없는 선(`issue`)은 쌓지 않는다 — 다시 만들기는 새 선처럼 기준점을 계열로 검사해 거절되므로, 쌓아

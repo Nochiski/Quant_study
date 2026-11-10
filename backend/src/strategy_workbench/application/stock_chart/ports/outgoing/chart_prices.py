@@ -19,6 +19,7 @@ from strategy_workbench.domain.chart_analysis.facade.price_tick import TickTable
 
 __all__ = [
     "PRACTICE_CODE_PREFIX",
+    "STOCK_GROUPS",
     "ChartHistory",
     "ChartInstrument",
     "ChartPricePort",
@@ -47,10 +48,17 @@ class InstrumentRef:
     code: str
 
 
+# 종목 `ChartInstrument.group`의 어휘(포트 계약) — 보통주·우선주·ETF·ETN. 원천은 자기 증권 종류를
+# 이 낱말로 옮겨 싣고(원장 `security.sec_type`은 같은 낱말이다), 그 밖의 종류는 원천 낱말 그대로다.
+# 차례는 이름 검색의 같은 순위 안 순서다(`rank_instruments`).
+STOCK_GROUPS: tuple[str, ...] = ("common", "preferred", "etf", "etn")
+
+
 @dataclass(frozen=True)
 class ChartInstrument:
     """목록의 한 줄. `name`은 화면 이름, `aliases`는 검색에만 쓰는 다른 이름(정식 이름 등),
-    `group`은 종목이면 증권 종류(`common`·`preferred`·`etf` …), 지수면 시장 구분(`KOSPI` …)이다.
+    `group`은 종목이면 증권 종류(`STOCK_GROUPS`, 그 밖은 원천 낱말), 지수면 시장 구분(`KOSPI`
+    …)이다.
     `tick_table`은 어느 호가표를 쓰는지다 — 원천이 증권 종류를 보고 정하고(상장지수상품이면 FUND),
     None이면 대상 종류의 기본(종목 STOCK, 지수 INDEX)이다. 화면은 이 칸만 읽고 `group` 글자로 호가를
     정하지 않는다."""

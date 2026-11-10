@@ -81,6 +81,7 @@ from strategy_workbench.application.stock_chart.ports.outgoing.chart_drawings im
 )
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_prices import (
     PRACTICE_CODE_PREFIX,
+    STOCK_GROUPS,
     ChartInstrument,
     ChartPricePort,
     InstrumentKind,
@@ -158,8 +159,8 @@ MAX_CHANNEL_CANDIDATES = 10
 MAX_MEMO_CHARS = 500
 # 묶은 계열 캐시의 칸 수(대상 × 주기 × 민감도). 넘치면 가장 오래 안 쓴 것부터 버린다.
 SERIES_CACHE_SIZE = 32
-# 이름 포함 검색의 같은 순위 안 순서: 지수 → 보통주 → 우선주 → ETF → 그 밖.
-_GROUP_ORDER = {"common": 0, "preferred": 1, "etf": 2}
+# 이름 포함 검색의 같은 순위 안 순서: 지수 → 포트 어휘 차례(보통주 → 우선주 → ETF → ETN) → 그 밖.
+_GROUP_ORDER = {group: rank for rank, group in enumerate(STOCK_GROUPS)}
 
 
 @dataclass(frozen=True, eq=False)

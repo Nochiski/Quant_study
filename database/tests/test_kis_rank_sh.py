@@ -92,6 +92,17 @@ def test_wrapper_maps_collector_rc_to_alert_level(tmp_path: Path, rc: int, level
         assert f"마지막 줄 rc={rc}" in r.notify[0]
 
 
+
+def test_wrapper_crit_body_carries_the_python_exception(tmp_path: Path) -> None:
+    """진행 줄을 찍은 뒤 예외로 죽으면 알림 본문은 예외여야 한다 — 파이프의 stdout 버퍼가 traceback 뒤에 비워지면
+    마지막 줄이 정상 진행 줄('ok rows=30')이 되어 crit 본문이 정상 수집처럼 보인다."""
+    code = "print('[kis_rank] 2026-11-11T11:00 top_interest 0001 ok rows=30'); raise RuntimeError('disk full')"
+    root = _root(tmp_path, f'#!/usr/bin/env bash\nexec "{sys.executable}" -c "{code}"\n')
+    r = _run(tmp_path, [str(root / "scripts/kis_rank.sh")])
+    assert r.rc == 1
+    assert [n.split("|", 1)[0] for n in r.notify] == ["crit"], (r.notify, r.out)
+    assert "RuntimeError: disk full" in r.notify[0]
+
 def test_wrapper_skips_when_the_previous_run_holds_the_lock(tmp_path: Path) -> None:
     root = _root(tmp_path, _fake_collector(0))
     marker = root / "ran.txt"

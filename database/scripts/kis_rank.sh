@@ -13,6 +13,9 @@ set -uo pipefail
 cd "$HOME/quant-ledger"
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 export QL_ENV="$HOME/quant-ledger/.env"   # 비밀 파일 고정(RG-C7-4) — 배포 rsync --delete 밖, 바깥 값·옛 시스템 파일을 쓰지 않는다
+# 진행 줄과 traceback 의 순서를 지킨다 — 파이프의 stdout 은 블록 버퍼라 종료 때 traceback 뒤에 비워져, 알림 본문(마지막 줄)이
+# 예외가 아니라 정상 진행 줄이 된다
+export PYTHONUNBUFFERED=1
 LOCK="${QL_KIS_RANK_LOCK:-/tmp/quant_ledger_kis_rank.lock}"
 exec 9>"$LOCK"
 if ! flock -n 9; then

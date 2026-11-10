@@ -89,6 +89,8 @@ def _q(db: Path, sql: str, args: tuple[object, ...] = ()) -> list[tuple[object, 
     (_kst("21:00"), None),
     # 크론은 UTC 다 — 08:30 KST 는 전날 23:30 UTC. 날짜를 UTC 로 보면 화요일 슬롯을 월요일로 판정한다
     (dt.datetime(2026, 11, 10, 23, 30, tzinfo=dt.UTC), "2026-11-11T08:30"),
+    # 일요일 23:30 UTC = 월요일 08:30 KST — 휴장을 UTC 날짜로 보면 매주 월요일 첫 슬롯을 잃는다
+    (dt.datetime(2026, 11, 15, 23, 30, tzinfo=dt.UTC), "2026-11-16T08:30"),
 ])
 def test_slot_is_the_kst_grid_slot_containing_now(now: dt.datetime, slot: str | None) -> None:
     got = kis_rank.pick_slot(now, CAL)
@@ -96,8 +98,12 @@ def test_slot_is_the_kst_grid_slot_containing_now(now: dt.datetime, slot: str | 
     assert got.status is (kis_rank.SlotStatus.OK if slot else kis_rank.SlotStatus.OUTSIDE)
 
 
-def test_holiday_is_skipped_by_kst_date() -> None:
-    got = kis_rank.pick_slot(_kst("10:00", dt.date(2026, 11, 12)), CAL)
+@pytest.mark.parametrize("now", [
+    _kst("10:00", dt.date(2026, 11, 12)),
+    dt.datetime(2026, 11, 11, 23, 30, tzinfo=dt.UTC),          # UTC 로는 거래일(11-11) — KST 로는 휴장 11-12 08:30
+])
+def test_holiday_is_skipped_by_kst_date(now: dt.datetime) -> None:
+    got = kis_rank.pick_slot(now, CAL)
     assert got.status is kis_rank.SlotStatus.HOLIDAY
     assert got.slot_kst is None
 
@@ -160,6 +166,7 @@ def test_rerun_calls_only_the_failed_target(api_mod, monkeypatch, tmp_path) -> N
                                 for r in _interest_rows(scope)], id="missing-column"),
     pytest.param(lambda scope: _interest_rows(scope, 29), id="29-rows"),
     pytest.param(lambda scope: [{**r, "new_fld": "1"} for r in _interest_rows(scope)], id="unknown-column"),
+    pytest.param(lambda scope: [], id="empty"),                 # rt_cd 0 인데 행 0 — 실패가 아니라 형태 이상
 ])
 def test_shape_change_is_crit_and_keeps_the_rows(api_mod, monkeypatch, tmp_path, bad) -> None:
     monkeypatch.setattr(api_mod, "kis", _fake_kis([], interest=bad))
@@ -186,6 +193,27 @@ def test_rerun_of_a_shape_slot_does_not_mix_a_second_response(api_mod, monkeypat
     assert res.rc == 0
     assert _q(db, "SELECT COUNT(*) FROM kis_top_interest WHERE scope='0001'") == [(29,)]
 
+
+
+def test_non_dict_rows_hidden_behind_a_full_count_are_shape(api_mod, monkeypatch, tmp_path) -> None:
+    """dict 행은 30개 그대로인데 배열에 다른 것이 섞였다 — 행 수만 보면 ok 로 통과한다."""
+    monkeypatch.setattr(api_mod, "kis", _fake_kis([], interest=lambda scope: [*_interest_rows(scope), "x"]))
+    res = kis_rank.run(tmp_path / "kis_rank.db", _kst("11:00"), CAL, clock=_clock())
+    assert res.status is kis_rank.SlotStatus.SHAPE and res.rc == 2
+
+
+def test_quota_after_backoff_is_warn_and_tries_every_target(api_mod, monkeypatch, tmp_path) -> None:
+    seen: list[str] = []
+
+    def kis(url: str, tr_id: str, params: dict[str, str]) -> dict[str, object]:
+        seen.append(url)
+        return {"rt_cd": "1", "msg_cd": "EGW00201", "msg1": "초당 거래건수를 초과하였습니다"}
+    monkeypatch.setattr(api_mod, "kis", kis)
+    db = tmp_path / "kis_rank.db"
+    res = kis_rank.run(db, _kst("11:00"), CAL, clock=_clock())
+    assert res.status is kis_rank.SlotStatus.FAILED and res.rc == 5
+    assert _q(db, "SELECT DISTINCT verdict FROM kis_rank_runs") == [("quota",)]
+    assert len(_q(db, "SELECT 1 FROM kis_rank_runs")) == 4     # 유량은 토큰과 달리 나머지 TR 도 부른다
 
 # ── 토큰 ─────────────────────────────────────────────────────────────────────
 
@@ -240,7 +268,6 @@ def _seed_runs(db: Path, ok_hts: int, ok_interest: int, broken_scope_slots: int 
 
 
 @pytest.mark.parametrize(("ok_hts", "ok_interest", "broken", "status"), [
-    (25, 25, 0, "ok"),
     (23, 25, 0, "ok"),                           # 23/25 까지 통과
     (22, 25, 0, "warn"),
     (25, 25, 3, "warn"),                         # 관심은 범위 3개가 다 ok 여야 그 슬롯이 ok — 25-3 = 22

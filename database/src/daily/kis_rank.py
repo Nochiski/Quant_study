@@ -255,6 +255,8 @@ def collect(con: sqlite3.Connection, slot: str, clock: Callable[[], dt.datetime]
         if res.verdict in ("ok", "empty"):
             received = clock().strftime(TS_FORMAT)
             probs = _shape_problems(target, res.rows)
+            if res.odd:                          # 행 수가 맞아도 배열에 dict 아닌 것이 섞였다
+                probs.append(f"normalize={res.odd}")
             verdict = Verdict.SHAPE if probs else Verdict.OK
             _store_rows(con, slot, target, res.rows, received)
             _record(con, slot, target, started=started, received=received, n_calls=res.n_calls,

@@ -15,6 +15,7 @@ import { autoRows, type AutoRow } from "../model/auto-rows";
 import type { FinderTool } from "../model/finder-panel";
 import { autoLineTitle, zoneBounds } from "../model/line-evidence";
 import type { LevelFinder } from "../model/use-level-finder";
+import { useLineVisibility } from "../model/use-line-visibility";
 
 type AutoLinesPanelProps = {
   finder: LevelFinder;
@@ -27,8 +28,6 @@ type AutoLinesPanelProps = {
   /** 보이는 선의 중첩 수(서버 응답, 아직 없으면 null)와 내 선 포함 여부. */
   confluenceCount: number | null;
   includeMine: boolean;
-  /** 보이기 저장 칸 바꾸기(묶음은 함께). */
-  onToggle: (lines: readonly ChartLineBody[], visible: boolean) => void;
   /** 지우기(묶음은 함께, 되돌리기 한 번에 함께 되살아난다). */
   onRemove: (lines: readonly ChartLineBody[], title: string) => void;
   removing: boolean;
@@ -64,13 +63,14 @@ export const AutoLinesPanel = ({
   manual,
   confluenceCount,
   includeMine,
-  onToggle,
   onRemove,
   removing,
   screenWindow,
 }: AutoLinesPanelProps) => {
   const id = useId();
   const [open, setOpen] = useState<readonly string[]>([]);
+  const visibility = useLineVisibility();
+  const onToggle = visibility.setVisible;
   const rows = autoRows(lines);
   const price = (value: number) => formatPrice(value, instrument.kind);
   const { dispatch } = finder;
@@ -108,6 +108,14 @@ export const AutoLinesPanel = ({
       ) : (
         <>
           <p className="finder-note">{t("chart.finder.list.basis")}</p>
+          {visibility.failed > 0 ? (
+            <p className="finder-warning" role="status">
+              {tFill("chart.finder.list.toggleFailed", { count: String(visibility.failed) })}{" "}
+              <Button size="small" tone="ghost" onClick={visibility.dismiss}>
+                {t("chart.undo.dismiss")}
+              </Button>
+            </p>
+          ) : null}
           {rows.length === 0 ? (
             <p className="finder-note">{t("chart.finder.list.empty")}</p>
           ) : null}

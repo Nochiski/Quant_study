@@ -481,7 +481,6 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
               manual={mode === "manual"}
               confluenceCount={confluence.data?.groups.length ?? null}
               includeMine={includeMine}
-              onToggle={(group, visible) => group.forEach((line) => void drawing.edit(line, { visible }))}
               onRemove={(group, title) => {
                 if (!removal.removeLine(group, title)) return;
                 if (group.some((line) => line.line_id === drawing.state.selectedId))

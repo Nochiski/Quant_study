@@ -542,6 +542,19 @@ def test_search_orders_etn_after_etf_and_before_other_kinds() -> None:
     assert [item.ref.code for item in found] == ["900003", "900002", "900001"]
 
 
+class _EmptyLedger(FakePrices):
+    def confirmed_session(self) -> date | None:
+        return None
+
+
+def test_a_ledger_without_a_confirmed_session_has_its_own_code() -> None:
+    # 원장에 확정일이 없는 것(차트를 열 수 없음)과 그 주기에 완성 봉이 없는 것은 다른 사유다
+    with pytest.raises(ChartRequestError) as error:
+        _service(prices=_EmptyLedger()).candles(STOCK, Timeframe.DAY)
+
+    assert error.value.code == "chart.ledger.no_confirmed_session"
+
+
 def test_unknown_instrument_is_not_found() -> None:
     with pytest.raises(InstrumentNotFoundError):
         _service().candles(InstrumentRef(InstrumentKind.STOCK, "999999"), Timeframe.DAY)

@@ -12,6 +12,7 @@ from typing import Literal
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_prices import InstrumentRef
 
 ChartErrorCode = Literal[
+    "chart.ledger.no_confirmed_session",
     "chart.series.no_completed_bars",
     "chart.window.incomplete",
     "chart.window.outside_series",

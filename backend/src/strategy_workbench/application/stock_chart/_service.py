@@ -743,7 +743,7 @@ class StockChartService:
         as_of = self._prices.confirmed_session()
         if as_of is None:
             raise ChartRequestError(
-                "chart.series.no_completed_bars",
+                "chart.ledger.no_confirmed_session",
                 f"ledger has no confirmed session — kind={ref.kind.value} code={ref.code}",
             )
         history = self._prices.chart_history(ref, as_of)

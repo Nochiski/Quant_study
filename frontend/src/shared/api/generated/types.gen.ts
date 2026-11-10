@@ -1729,6 +1729,7 @@ export type ChartErrorDetail = {
    * Code
    */
   code:
+    | "chart.ledger.no_confirmed_session"
     | "chart.series.no_completed_bars"
     | "chart.window.incomplete"
     | "chart.window.outside_series"

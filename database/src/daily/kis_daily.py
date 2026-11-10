@@ -32,7 +32,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import cast
@@ -93,6 +93,7 @@ class CallOutcome:
     code: str
     rows: tuple[dict[str, object], ...]
     n_calls: int
+    odd: str | None = None         # 응답 형태 이상 신호(`backfill_kis.normalize`) — 행은 살렸지만 모양이 예상 밖
 
 
 @dataclass(frozen=True)
@@ -122,40 +123,30 @@ def window(today: dt.date, days: int = WINDOW_DAYS) -> tuple[str, str]:
     return (today - dt.timedelta(days=days)).strftime("%Y%m%d"), today.strftime("%Y%m%d")
 
 
-def fetch_credit(ticker: str, d1: str, d2: str) -> CallOutcome:
-    """종목 1개 = 콜 1회. 재시도·토큰 재발급·유량 백오프는 `backfill_kis` 규칙을 그대로 쓴다.
+def call(url: str, tr: str, params: Mapping[str, str], out_key: str, label: str) -> CallOutcome:
+    """KIS 콜 1회. 재시도·토큰 재발급·유량 백오프는 `backfill_kis` 규칙을 그대로 쓴다.
 
+    신용잔고(`fetch_credit`)와 순위 스냅숏(`daily.kis_rank`)이 같이 쓴다 — 규칙을 한 곳에 둔다.
     토큰 만료(EGW00121·EGW00123)는 캐시를 버리고 **1회** 재발급 후 재시도한다. 그래도
-    만료면 조용히 넘기지 않고 verdict='token' 으로 올린다(호출부가 rc 2 로 만든다).
+    만료면 조용히 넘기지 않고 verdict='token' 으로 올린다(등급은 호출부가 정한다 — 신용잔고 rc 2 · 순위 rc 5).
     `api.kis()` 가 콜당 0.3초를 쉬므로 별도 PACE 는 두지 않는다(실측 2.71콜/s).
+    `label` 은 로그 줄에 붙이는 콜 식별자다(예: 'credit 005930 20260730~20260909').
     """
     # 지연 import — api·backfill_kis 는 import 시점에 kael .env 를 요구한다(api.py:14-21).
     # 자격증명이 없어도 --help·계획 출력은 살아 있어야 하므로 콜 직전에만 끌어온다.
     import api
-    from backfill_kis import (
-        QUOTA_RETRY,
-        RETRY_BASE,
-        RETRY_MAX,
-        SPEC,
-        classify,
-        normalize,
-    )
+    from backfill_kis import QUOTA_RETRY, RETRY_BASE, RETRY_MAX, classify, normalize
 
-    spec = SPEC[REQ_NAME]
-    # SPEC 은 값 타입이 섞인 평범한 dict 이라 호출·문자열 자리를 여기서 한 번만 좁힌다.
-    url, tr, out_key = str(spec["url"]), str(spec["tr"]), str(spec["out"])
-    make_params = cast("Callable[[str, str, str], dict[str, str]]", spec["params"])
     n_calls = 0
     token_retried = False
     for attempt in range(RETRY_MAX + 1):
         body: object = None
         status: int | None = 200
         try:
-            body = api.kis(url, tr, make_params(ticker, d1, d2))
+            body = api.kis(url, tr, dict(params))
         except Exception as e:  # noqa: BLE001  # reason: 네트워크·JSON 예외는 재시도 대상 — classify(None, ...) 의 'retry/exc' 규약으로 흡수한다
             status, body = None, None
-            print(f"    ! 콜 실패 — credit {ticker} {d1}~{d2} "
-                  f"{type(e).__name__}: {str(e)[:90]}")
+            print(f"    ! 콜 실패 — {label} {type(e).__name__}: {str(e)[:90]}")
         n_calls += 1
         if status is None or isinstance(body, dict):
             verdict, code = classify(status, body)
@@ -165,14 +156,14 @@ def fetch_credit(ticker: str, d1: str, d2: str) -> CallOutcome:
         if verdict == "ok":
             rows, odd = normalize(body, out_key)
             if odd:
-                print(f"    ? 응답 형태 이상({odd}) — credit {ticker} {d1}~{d2} rows={len(rows)}")
+                print(f"    ? 응답 형태 이상({odd}) — {label} rows={len(rows)}")
                 code = f"{code}/{odd}"
-            return CallOutcome("ok" if rows else "empty", code, tuple(rows), n_calls)
+            return CallOutcome("ok" if rows else "empty", code, tuple(rows), n_calls, odd)
         if verdict == "token":
             if token_retried:
                 return CallOutcome("token", code, (), n_calls)
             token_retried = True
-            print(f"    · 토큰 만료({code}) — 재발급 후 1회 재시도 (credit {ticker})")
+            print(f"    · 토큰 만료({code}) — 재발급 후 1회 재시도 ({label})")
             api._kis_tok = None
             try:
                 os.remove(api._KIS_CACHE)
@@ -184,11 +175,22 @@ def fetch_credit(ticker: str, d1: str, d2: str) -> CallOutcome:
         if verdict in ("retry", "quota") and attempt < cap:
             wait = max(RETRY_BASE * (2 ** attempt), 30.0) if verdict == "quota" \
                 else RETRY_BASE * (2 ** attempt)
-            print(f"    · {code} 재시도 {attempt + 1}/{cap} — {wait:.0f}초 (credit {ticker})")
+            print(f"    · {code} 재시도 {attempt + 1}/{cap} — {wait:.0f}초 ({label})")
             time.sleep(wait)
             continue
         return CallOutcome(verdict, code, (), n_calls)
     return CallOutcome("error", "retry_exhausted", (), n_calls)
+
+
+def fetch_credit(ticker: str, d1: str, d2: str) -> CallOutcome:
+    """종목 1개 = 콜 1회(`call`)."""
+    from backfill_kis import SPEC  # 지연 import 이유는 `call` 주석 참고
+
+    spec = SPEC[REQ_NAME]
+    # SPEC 은 값 타입이 섞인 평범한 dict 이라 호출·문자열 자리를 여기서 한 번만 좁힌다.
+    url, tr, out_key = str(spec["url"]), str(spec["tr"]), str(spec["out"])
+    make_params = cast("Callable[[str, str, str], dict[str, str]]", spec["params"])
+    return call(url, tr, make_params(ticker, d1, d2), out_key, f"credit {ticker} {d1}~{d2}")
 
 
 def _table_exists(con: sqlite3.Connection) -> bool:
@@ -236,7 +238,7 @@ def store_new_facts(con: sqlite3.Connection, ticker: str, d1: str, d2: str,
     """
     if not rows:
         return StoreOutcome(0, 0)
-    # 산식을 복제하지 않고 백필과 공유한다(지연 import 이유는 `fetch_credit` 주석 참고).
+    # 산식을 복제하지 않고 백필과 공유한다(지연 import 이유는 `call` 주석 참고).
     from backfill_dart import row_hash
 
     keys = sorted(set().union(*(set(r) for r in rows)) - {"status", "message"})
@@ -412,7 +414,7 @@ def run(con: sqlite3.Connection, *, date: str, gate_date: str, d1: str, d2: str,
     dry_run: 콜은 실제로 하되(--limit 만큼) 원장·runlog 에 쓰지 않는다. 게이트 수치는
     적재 전 원장 기준이라 판정 참고용이다(status 는 언제나 DRY_RUN, rc 0).
     """
-    from backfill_kis import QUOTA_STREAK  # 지연 import 이유는 `fetch_credit` 주석 참고
+    from backfill_kis import QUOTA_STREAK  # 지연 import 이유는 `call` 주석 참고
 
     targets = list(tickers[:limit] if limit else tickers)
     # 완료 게이트가 볼 "이번 런" 의 경계. `store_new_facts` 의 `collected_at` 과 같은 형식이라 문자열 비교로 족하다.

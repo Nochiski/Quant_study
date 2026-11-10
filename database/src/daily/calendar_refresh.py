@@ -117,7 +117,7 @@ def fetch_page(start: str) -> Page:
     """BASS_DT=start 로 1페이지를 받아 ① 검증한다. 같은 날 재시도는 하지 않는다.
 
     토큰 만료(EGW00121·EGW00123)만 캐시를 버리고 1회 재발급 후 다시 부른다 — 휴장 서비스에 닿기 전
-    게이트웨이 거절이다(`kis_daily.fetch_credit` 와 같은 규칙). 호출 판정 어휘는 `backfill_kis.classify`.
+    게이트웨이 거절이다(`kis_daily.call` 과 같은 규칙). 호출 판정 어휘는 `backfill_kis.classify`.
     """
     # 지연 import — api·backfill_kis 는 import 시점에 kael .env 를 요구한다(api.py:13-20).
     import api

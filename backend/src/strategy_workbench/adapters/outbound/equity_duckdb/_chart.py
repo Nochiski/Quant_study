@@ -45,6 +45,9 @@ INDEX_CODE_SEP = ":"
 # 원장 `security.sec_type` 중 상장지수상품 호가표(`TickTable.FUND`)를 쓰는 값. 원장 어휘는
 # 이 어댑터만 읽고, 위로는 호가표 enum으로만 넘긴다.
 FUND_SEC_TYPES = frozenset({"etf", "etn"})
+# 지수 일봉으로 쓸 수 있는 행 — 네 값이 모두 있고 양수다. 목록과 이력이 같은 판정을 쓴다(봉이 하나도
+# 없는 지수는 목록에 싣지 않는다 — 원장에 행만 있고 값이 비거나 0인 지수가 있다).
+INDEX_BAR_OK = "open_idx > 0 AND high_idx > 0 AND low_idx > 0 AND close_idx > 0"
 
 
 def _number(value: object, label: str) -> float:
@@ -92,7 +95,8 @@ def chart_instruments(adapter: EquityDuckdbAdapter) -> tuple[ChartInstrument, ..
         if INDEX_TABLE in tables:
             rows = con.execute(
                 "SELECT DISTINCT index_class, index_name "
-                f"FROM {adapter._source(INDEX_TABLE)} ORDER BY 1, 2"  # noqa: SLF001
+                f"FROM {adapter._source(INDEX_TABLE)} "  # noqa: SLF001
+                f"WHERE {INDEX_BAR_OK} ORDER BY 1, 2"
             ).fetchall()
             items += [
                 ChartInstrument(
@@ -125,7 +129,7 @@ def _index_history(adapter: EquityDuckdbAdapter, code: str, end: date) -> ChartH
             "SELECT date, open_idx, high_idx, low_idx, close_idx "
             f"FROM {adapter._source(INDEX_TABLE)} "  # noqa: SLF001
             "WHERE index_class = ? AND index_name = ? AND date <= ? "
-            "AND open_idx > 0 AND high_idx > 0 AND low_idx > 0 AND close_idx > 0 ORDER BY date",
+            f"AND {INDEX_BAR_OK} ORDER BY date",
             [index_class, name, end],
         ).fetchall()
         known = (

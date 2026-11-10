@@ -31,8 +31,7 @@ FIXED = 'export QL_ENV="$HOME/quant-ledger/.env"'
 # 체인 안에서는 부모와 같은 값이라 해가 없다.
 ENTRY_POINTS = ("daily_ledger.sh", "daily_build.sh", "daily_evening.sh", "build_evening.sh",
                 "watchdog.sh", "backup_raw.sh", "gc.sh", "wics_weekly.sh", "postclose_chain.sh",
-                "model_daily.sh", "daily_wise.sh", "dart_company_gap.sh", "weekend_supplement.sh",
-                "kis_rank.sh")
+                "model_daily.sh", "daily_wise.sh", "dart_company_gap.sh", "weekend_supplement.sh")
 
 
 def _sentinel_home(tmp_path: Path) -> Path:

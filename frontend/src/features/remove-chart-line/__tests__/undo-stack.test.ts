@@ -1,28 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { UNDO_LIMIT, popUndo, pushUndo, recreateChartLine, type ChartLineBody } from "..";
-
-const line = (id: string, values: Partial<ChartLineBody> = {}): ChartLineBody => ({
-  line_id: id,
-  instrument_kind: "stock",
-  instrument_code: "practice:005930",
-  timeframe: "week",
-  kind: "hline",
-  source: "manual",
-  anchors: [{ bar_date: "2025-03-03", price: 12_345 }],
-  levels: null,
-  extend_right: false,
-  memo: "지지",
-  locked: false,
-  visible: false,
-  auto: null,
-  created: null,
-  created_at: "2026-11-06T00:00:00Z",
-  updated_at: "2026-11-06T00:00:00Z",
-  issue: null,
-  paths: [],
-  ...values,
-});
+import { UNDO_LIMIT, popUndo, pushUndo, recreateChartLine } from "..";
+import { chartLineFixture as line } from "../../../shared/testing/chart-line";
 
 describe("undo stack", () => {
   it("recreates the last deleted line first with the same content and no id", () => {

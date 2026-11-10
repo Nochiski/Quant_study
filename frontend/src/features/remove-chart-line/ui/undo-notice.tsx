@@ -1,9 +1,9 @@
 import { failureReason } from "../../../shared/api";
 import { t, tFill, type MessageKey } from "../../../shared/config";
 import { Button, FailureNotice } from "../../../shared/ui";
-import { chartErrorSentence } from "../model/line-copy";
+import { chartErrorSentence } from "../../../entities/chart";
 import type { LineRemoval, RemovalNotice } from "../model/use-line-removal";
-import "./chart.css";
+import "./remove-chart-line.css";
 
 const noticeKey = (notice: RemovalNotice): MessageKey => {
   if (notice.kind === "restored") return "chart.undo.restored";

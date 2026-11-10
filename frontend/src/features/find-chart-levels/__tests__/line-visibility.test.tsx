@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { HttpResponse, http } from "msw";
+import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
 import type { ReactNode } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -13,31 +13,10 @@ import {
   type ChartTarget,
 } from "../../../entities/chart";
 import { useLineVisibility } from "../model/use-line-visibility";
+import { chartLineFixture as line } from "../../../shared/testing/chart-line";
 
 const API = "http://localhost:8000/api/v1/stock-chart";
 const KOSPI: ChartTarget = { kind: "index", code: "practice:KOSPI:코스피" };
-
-const line = (id: string, values: Partial<ChartLineBody> = {}): ChartLineBody => ({
-  line_id: id,
-  instrument_kind: "index",
-  instrument_code: KOSPI.code,
-  timeframe: "week",
-  kind: "hline",
-  source: "manual",
-  anchors: [{ bar_date: "2025-03-03", price: 2_500 }],
-  levels: null,
-  extend_right: true,
-  memo: "",
-  locked: false,
-  visible: true,
-  auto: null,
-  created: null,
-  created_at: "2026-11-06T00:00:00Z",
-  updated_at: "2026-11-06T00:00:00Z",
-  issue: null,
-  paths: [],
-  ...values,
-});
 
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -82,16 +61,45 @@ describe("useLineVisibility", () => {
       http.get(`${API}/lines`, () => HttpResponse.json({ lines: [] })),
     );
     const { wrapper } = setup([line("a"), line("b")]);
-    const { result } = renderHook(() => useLineVisibility(), { wrapper });
+    const { result } = renderHook(() => useLineVisibility(KOSPI), { wrapper });
 
     act(() => {
       result.current.setVisible([line("a"), line("b")], false);
     });
 
-    await waitFor(() => expect(result.current.failed).toBe(1));
+    // 실패 1개와 서버 사유(코드에 맞는 문장을 고를 오류)를 함께 든다
+    await waitFor(() => expect(result.current.failure?.count).toBe(1));
+    expect(result.current.failure?.error).toBeInstanceOf(Error);
     act(() => {
       result.current.dismiss();
     });
-    expect(result.current.failed).toBe(0);
+    expect(result.current.failure).toBeNull();
   });
+
+  it("drops the notice when another instrument opens and ignores answers that arrive after it", async () => {
+    // 늦게 거절되는 앞 종목의 응답이 새 종목 화면의 알림으로 새지 않는다
+    server.use(
+      http.put(`${API}/lines/:id`, async () => {
+        await delay(30);
+        return HttpResponse.json(
+          { detail: { code: "chart.line.not_found", message: "line not found" } },
+          { status: 404 },
+        );
+      }),
+      http.get(`${API}/lines`, () => HttpResponse.json({ lines: [] })),
+    );
+    const { wrapper } = setup([line("a")]);
+    const { result, rerender } = renderHook(({ target }) => useLineVisibility(target), {
+      wrapper,
+      initialProps: { target: KOSPI },
+    });
+
+    act(() => {
+      result.current.setVisible([line("a")], false);
+    });
+    rerender({ target: { kind: "stock", code: "practice:005930" } });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(result.current.failure).toBeNull();
+});
 });

@@ -1,4 +1,8 @@
-"""자동 기록 조립·검사의 owner — 후보 응답의 기록, 판정 기록, 저장 전 출처·버전 검사."""
+"""자동 기록 조립의 owner — 후보 응답의 기록, 판정 기록, 저장 전 출처·버전 형식 검사.
+
+기록이 기준점을 재현하는지는 서비스 `_verified_record`가, 파라미터 칸은
+`_provenance.AutoParams`가 본다.
+"""
 
 from __future__ import annotations
 

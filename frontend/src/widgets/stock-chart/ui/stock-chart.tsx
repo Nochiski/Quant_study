@@ -27,8 +27,6 @@ import {
   type DateRange,
   type StockChartSearch,
   type Timeframe,
-  UndoNotice,
-  useLineRemoval,
 } from "../../../entities/chart";
 import {
   DrawingHint,
@@ -37,6 +35,7 @@ import {
   MyLinesPanel,
   useChartDrawing,
 } from "../../../features/draw-chart-line";
+import { UndoNotice, useLineRemoval } from "../../../features/remove-chart-line";
 import {
   AnalysisWindowOverlay,
   AutoLinesPanel,
@@ -465,7 +464,8 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
           <>
             <MyLinesPanel
               drawing={drawing}
-              removal={removal}
+              onRemove={removal.removeLine}
+              removing={removal.removing}
               instrument={instrument}
               lines={lines}
               timeframe={timeframe}

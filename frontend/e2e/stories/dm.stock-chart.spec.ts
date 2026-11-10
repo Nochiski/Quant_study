@@ -128,6 +128,8 @@ test(
     // Ctrl+Z
     await layers.getByRole("button", { name: `${raisedName} 지우기` }).click();
     await expect(layers.getByText("아직 그은 선이 없어요.", { exact: false })).toBeVisible();
+    // 지우기 응답 뒤에야 되돌리기에 쌓인다 — 알림을 보고 누른다(목록이 먼저 비어도 쌓기 전일 수 있다)
+    await expect(page.getByText(`선을 지웠어요: ${raisedName}`)).toBeVisible();
     await page.keyboard.press("Control+z");
     await expect(layers.getByRole("button", { name: raisedName, exact: true })).toBeVisible();
     await expect(status).toHaveText("코스피에 그린 선 1개 · 자동 저장됨");

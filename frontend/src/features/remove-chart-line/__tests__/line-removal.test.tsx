@@ -5,32 +5,12 @@ import { setupServer } from "msw/node";
 import type { ReactNode } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { chartLinesQuery, useLineRemoval, type ChartLineBody, type ChartLinesBody, type ChartTarget } from "..";
+import { chartLinesQuery, type ChartLineBody, type ChartLinesBody, type ChartTarget } from "../../../entities/chart";
+import { useLineRemoval } from "..";
+import { chartLineFixture as line } from "../../../shared/testing/chart-line";
 
 const API = "http://localhost:8000/api/v1/stock-chart";
 const KOSPI: ChartTarget = { kind: "index", code: "practice:KOSPI:코스피" };
-
-const line = (id: string, values: Partial<ChartLineBody> = {}): ChartLineBody => ({
-  line_id: id,
-  instrument_kind: "index",
-  instrument_code: KOSPI.code,
-  timeframe: "week",
-  kind: "hline",
-  source: "manual",
-  anchors: [{ bar_date: "2025-03-03", price: 2_500 }],
-  levels: null,
-  extend_right: true,
-  memo: "",
-  locked: false,
-  visible: true,
-  auto: null,
-  created: null,
-  created_at: "2026-11-06T00:00:00Z",
-  updated_at: "2026-11-06T00:00:00Z",
-  issue: null,
-  paths: [],
-  ...values,
-});
 
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));

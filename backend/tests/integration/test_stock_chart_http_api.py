@@ -441,6 +441,10 @@ def test_real_data_lines_round_trip_through_the_display_scale(tmp_path: Path) ->
         },
     )
     assert created.status_code == 201, created.text
+    # 저장 행은 저장 공간(화면 ÷ k)이다 — 저장·읽기 양쪽에서 k를 빼먹는 대칭 오류도 여기서 걸린다
+    with sqlite3.connect(db) as connection:
+        (anchors_json,) = connection.execute("SELECT anchors_json FROM chart_drawing").fetchone()
+    assert json.loads(anchors_json) == [["2024-01-09", price / 0.5]]
     # 앱을 새로 띄워 저장소에서 다시 읽는다
     client = TestClient(
         build_http_app(equity_adapter="duckdb", equity_root=root, research_db_path=db)

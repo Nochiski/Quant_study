@@ -1,6 +1,7 @@
 import { useId, useState, type MouseEvent } from "react";
 
 import {
+  chartErrorSentence,
   formatPrice,
   lineIssueLabel,
   regimeVerdictLabel,
@@ -10,7 +11,8 @@ import {
   type Timeframe,
 } from "../../../entities/chart";
 import { t, tFill } from "../../../shared/config";
-import { Button } from "../../../shared/ui";
+import { failureReason } from "../../../shared/api";
+import { Button, FailureNotice } from "../../../shared/ui";
 import { autoRows, type AutoRow } from "../model/auto-rows";
 import type { FinderTool } from "../model/finder-panel";
 import { autoLineTitle, zoneBounds } from "../model/line-evidence";
@@ -69,7 +71,7 @@ export const AutoLinesPanel = ({
 }: AutoLinesPanelProps) => {
   const id = useId();
   const [open, setOpen] = useState<readonly string[]>([]);
-  const visibility = useLineVisibility();
+  const visibility = useLineVisibility({ kind: instrument.kind, code: instrument.code });
   const onToggle = visibility.setVisible;
   const rows = autoRows(lines);
   const price = (value: number) => formatPrice(value, instrument.kind);
@@ -108,14 +110,18 @@ export const AutoLinesPanel = ({
       ) : (
         <>
           <p className="finder-note">{t("chart.finder.list.basis")}</p>
-          {visibility.failed > 0 ? (
-            <p className="finder-warning" role="status">
-              {tFill("chart.finder.list.toggleFailed", { count: String(visibility.failed) })}{" "}
+          {visibility.failure === null ? null : (
+            <div className="finder-warning" role="status">
+              <FailureNotice
+                title={tFill("chart.finder.list.toggleFailed", { count: String(visibility.failure.count) })}
+                message={chartErrorSentence(visibility.failure.error)}
+                reason={failureReason(visibility.failure.error)}
+              />
               <Button size="small" tone="ghost" onClick={visibility.dismiss}>
                 {t("chart.undo.dismiss")}
               </Button>
-            </p>
-          ) : null}
+            </div>
+          )}
           {rows.length === 0 ? (
             <p className="finder-note">{t("chart.finder.list.empty")}</p>
           ) : null}

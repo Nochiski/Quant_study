@@ -7,7 +7,6 @@ import {
   type ChartCandleBody,
   type ChartInstrumentBody,
   type ChartLineBody,
-  type LineRemoval,
   type Timeframe,
 } from "../../../entities/chart";
 import { t, tFill } from "../../../shared/config";
@@ -19,7 +18,9 @@ import { SelectedLineCard } from "./selected-line-card";
 
 type MyLinesPanelProps = {
   drawing: ChartDrawing;
-  removal: LineRemoval;
+  /** 지우기(되돌리기 쌓기는 위젯이 준 `features/remove-chart-line`이 한다). 이미 지우는 중이면 false. */
+  onRemove: (lines: readonly ChartLineBody[], title: string) => boolean;
+  removing: boolean;
   instrument: ChartInstrumentBody;
   /** 그 대상의 저장 선 전부. 목록에는 내 선만 두고, 고른 선 카드는 차트에서 고른 자동 선도 연다. */
   lines: readonly ChartLineBody[];
@@ -37,7 +38,8 @@ type MyLinesPanelProps = {
  */
 export const MyLinesPanel = ({
   drawing,
-  removal,
+  onRemove,
+  removing,
   instrument,
   lines,
   timeframe,
@@ -71,7 +73,7 @@ export const MyLinesPanel = ({
   const title = (line: ChartLineBody) => lineTitle(line, instrument.kind, timeframe);
   const remove = (line: ChartLineBody) => {
     // 지우는 요청이 나가 있으면(Delete 연타) 받지 않는다
-    if (!removal.removeLine([line], title(line))) return;
+    if (!onRemove([line], title(line))) return;
     const index = mine.findIndex((item) => item.line_id === line.line_id);
     const neighbour = mine[index + 1] ?? mine[index - 1];
     focusAfterChange.current = neighbour?.line_id ?? "";
@@ -161,7 +163,7 @@ export const MyLinesPanel = ({
                   type="button"
                   className="my-lines__remove"
                   aria-label={tFill("chart.mine.remove", { title: name })}
-                  disabled={removal.removing}
+                  disabled={removing}
                   onClick={() => remove(line)}
                 >
                   <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor"

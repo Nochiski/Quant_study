@@ -1,9 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-import type { ChartLineBody } from "../../../shared/api";
+import { useCreateChartLine, useDeleteChartLine, type ChartLineBody, type ChartTarget } from "../../../entities/chart";
 import { useCommittedRef } from "../../../shared/lib/react";
 import { isTextEntry } from "../../../shared/lib/text-entry";
-import { useCreateChartLine, useDeleteChartLine, type ChartTarget } from "./chart-queries";
 import { popUndo, pushUndo, type UndoStack } from "./undo-stack";
 
 /** `lost` = 지금 그릴 수 없어 되돌리기에 쌓지 못한 선이 있는가, `undoable` = 이 지우기를 되돌릴 수 있는가. */

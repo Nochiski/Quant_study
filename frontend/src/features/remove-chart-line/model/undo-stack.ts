@@ -1,5 +1,4 @@
-import type { ChartLineBody, CreateChartLineBody } from "../../../shared/api";
-import { chartLineCreateBody } from "./chart-queries";
+import { chartLineCreateBody, type ChartLineBody, type CreateChartLineBody } from "../../../entities/chart";
 
 /** 지운 선을 같은 내용으로 다시 만드는 본문(되돌리기). 새 선은 새 id를 받는다. */
 export const recreateChartLine = (line: ChartLineBody): CreateChartLineBody => chartLineCreateBody(line);

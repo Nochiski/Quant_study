@@ -135,6 +135,3 @@ export type {
   Timeframe,
   TrendDirection,
 } from "../../shared/api";
-export { UNDO_LIMIT, popUndo, pushUndo, recreateChartLine, type UndoEntry, type UndoStack } from "./model/undo-stack";
-export { useLineRemoval, type LineRemoval, type RemovalNotice } from "./model/use-line-removal";
-export { UndoNotice } from "./ui/undo-notice";

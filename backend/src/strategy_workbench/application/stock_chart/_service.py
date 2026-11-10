@@ -9,13 +9,12 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
-from threading import Lock
-from typing import Generic, TypeVar
+from typing import TypeVar
 
+from strategy_workbench.application.stock_chart._cache import Lru
 from strategy_workbench.application.stock_chart._errors import (
     ChartRequestError,
     InstrumentNotFoundError,
@@ -41,6 +40,14 @@ from strategy_workbench.application.stock_chart._provenance import (
     same,
     zone_anchors,
 )
+from strategy_workbench.application.stock_chart._records import (
+    auto_params,
+    auto_record,
+    check_record,
+    present_params,
+    regime_record,
+)
+from strategy_workbench.application.stock_chart._search import rank_instruments
 from strategy_workbench.application.stock_chart._views import (
     DEFAULT_SWING,
     DEFAULT_WINDOW,
@@ -69,6 +76,11 @@ from strategy_workbench.application.stock_chart._views import (
     ZonesView,
     ZoneView,
 )
+from strategy_workbench.application.stock_chart._windows import (
+    presets,
+    resolve_window,
+    saved_window_source,
+)
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_drawings import (
     AutoRecord,
     ChartDrawingStore,
@@ -76,12 +88,9 @@ from strategy_workbench.application.stock_chart.ports.outgoing.chart_drawings im
     ChartLineContent,
     ChartLineNotFoundError,
     LineAnchor,
-    ParamValue,
-    RegimeRecord,
 )
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_prices import (
     PRACTICE_CODE_PREFIX,
-    STOCK_GROUPS,
     ChartInstrument,
     ChartPricePort,
     InstrumentKind,
@@ -115,10 +124,8 @@ from strategy_workbench.domain.chart_analysis.facade.levels import (
 )
 from strategy_workbench.domain.chart_analysis.facade.line_record import (
     ALGORITHM_VERSION,
-    ChosenBy,
     LineKind,
     LineSource,
-    WindowSource,
     chosen_by,
     levels_or_default,
 )
@@ -160,8 +167,6 @@ MAX_CHANNEL_CANDIDATES = 10
 MAX_MEMO_CHARS = 500
 # 묶은 계열 캐시의 칸 수(대상 × 주기 × 민감도). 넘치면 가장 오래 안 쓴 것부터 버린다.
 SERIES_CACHE_SIZE = 32
-# 이름 포함 검색의 같은 순위 안 순서: 지수 → 포트 어휘 차례(보통주 → 우선주 → ETF) → 그 밖.
-_GROUP_ORDER = {group: rank for rank, group in enumerate(STOCK_GROUPS)}
 
 
 @dataclass(frozen=True, eq=False)
@@ -192,30 +197,8 @@ class _Frame:
     in_progress: Candle | None
 
 
-_K = TypeVar("_K")
-_V = TypeVar("_V")
 _T = TypeVar("_T")
 _P = TypeVar("_P", SwingParams, ZoneParams)
-
-
-class _Lru(Generic[_K, _V]):
-    def __init__(self, size: int) -> None:
-        self._size = size
-        self._items: OrderedDict[_K, _V] = OrderedDict()
-        self._lock = Lock()
-
-    def get(self, key: _K, build: Callable[[], _V]) -> _V:
-        with self._lock:
-            if key in self._items:
-                self._items.move_to_end(key)
-                return self._items[key]
-        value = build()  # 같은 키를 두 스레드가 함께 만들어도 결과가 같다(포트가 같은 답을 준다)
-        with self._lock:
-            self._items[key] = value
-            self._items.move_to_end(key)
-            while len(self._items) > self._size:
-                self._items.popitem(last=False)
-        return value
 
 
 class StockChartService:
@@ -233,8 +216,8 @@ class StockChartService:
         self._practice = practice_data
         self._new_id = new_id
         self._now = now
-        self._loaded: _Lru[InstrumentRef, _Loaded] = _Lru(SERIES_CACHE_SIZE)
-        self._frames: _Lru[tuple[InstrumentRef, Timeframe, SwingParams], _Frame | None] = _Lru(
+        self._loaded: Lru[InstrumentRef, _Loaded] = Lru(SERIES_CACHE_SIZE)
+        self._frames: Lru[tuple[InstrumentRef, Timeframe, SwingParams], _Frame | None] = Lru(
             SERIES_CACHE_SIZE
         )
 
@@ -288,7 +271,7 @@ class StockChartService:
     ) -> RegimeView:
         loaded = self._load(ref)
         series = self._required_frame(loaded, timeframe, swing).series
-        span, view = _window(series, timeframe, window)
+        span, view = resolve_window(series, timeframe, window)
         judgement = judge_regime(series, span)
         return RegimeView(
             context=loaded.context,
@@ -301,7 +284,7 @@ class StockChartService:
                     series.bar_date(w.end),
                     bars == WINDOW_PRESETS[timeframe].default_bars,
                 )
-                for bars, w in _presets(series, timeframe)
+                for bars, w in presets(series, timeframe)
             ),
             judgement=judgement,
             structure_highs=_pivots(series, loaded.scale, judgement.structure_highs),
@@ -325,7 +308,7 @@ class StockChartService:
         check_levels(levels)
         loaded = self._load(ref)
         series = self._required_frame(loaded, timeframe, swing).series
-        span, view = _window(series, timeframe, window)
+        span, view = resolve_window(series, timeframe, window)
         judgement = judge_regime(series, span)
         if first_anchor is None:
             search = find_channels(series, span, direction)
@@ -354,12 +337,10 @@ class StockChartService:
             total_candidates=len(search.candidates),
             anchor_issue=issue,
             anchor_issue_message=None if issue is None else anchor_issue_message(issue),
-            record=_record(
+            record=auto_record(
                 view,
-                replace(
-                    _auto_params(series.params), direction=direction, first_anchor=first_anchor
-                ),
-                regime=_regime_record(judgement),
+                replace(auto_params(series.params), direction=direction, first_anchor=first_anchor),
+                regime=regime_record(judgement),
                 chosen=chosen_by(judgement.channel_direction, direction),
             ),
             anchor_choices=_pivots(
@@ -379,7 +360,7 @@ class StockChartService:
         check_levels(levels)
         loaded = self._load(ref)
         series = self._required_frame(loaded, timeframe, swing).series
-        span, view = _window(series, timeframe, window)
+        span, view = resolve_window(series, timeframe, window)
         pair = retracement_pivots(series, span, choice)
         return RetracementView(
             context=loaded.context,
@@ -393,7 +374,7 @@ class StockChartService:
             ),
             created=None if pair is None else series.bar_date(retracement_created(pair)),
             message=NO_SWING_MESSAGE if pair is None else None,
-            record=_record(view, replace(_auto_params(series.params), swing=choice)),
+            record=auto_record(view, replace(auto_params(series.params), swing=choice)),
             swing_rules=tuple((item, swing_choice_rule(item)) for item in SwingChoice),
         )
 
@@ -408,7 +389,7 @@ class StockChartService:
     ) -> ZonesView:
         loaded = self._load(ref)
         series = self._required_frame(loaded, timeframe, swing).series
-        span, view = _window(series, timeframe, window)
+        span, view = resolve_window(series, timeframe, window)
         params = _domain_params(ZoneParams(), width_atr=width_atr, min_touches=min_touches)
         scale = loaded.scale
         # 구간과 같은 저장 가격 공간에서 현재가와 비교한다
@@ -435,10 +416,10 @@ class StockChartService:
             zones=zones,
             basis=ZONE_BASIS,
             rules=zone_rules(params, series.params),
-            record=_record(
+            record=auto_record(
                 view,
                 replace(
-                    _auto_params(series.params),
+                    auto_params(series.params),
                     width_atr=params.width_atr,
                     min_touches=params.min_touches,
                 ),
@@ -558,7 +539,7 @@ class StockChartService:
         )
 
     def create_line(self, draft: ChartLineDraft) -> ChartLineView:
-        _check_record(draft.source, draft.auto)
+        check_record(draft.source, draft.auto)
         loaded = self._load(draft.instrument)
         frame = self._required_frame(loaded, draft.timeframe)
         _, stored, _ = self._shape(
@@ -627,7 +608,7 @@ class StockChartService:
         완성 봉 안이어야 한다. 자동 선(`auto`)은 그 파라미터·구간으로 같은 찾기를 다시 돌려 기준점이
         그 결과(후보)인지도 본다. 복사본(`auto_copied`)은 기준점을 옮길 수 있는 선이라 후보는
         대조하지 않는다 — 기록은 원본 자동 선의 출처다. 판정·방향 출처는 다시 계산하고 구간 출처는
-        `_saved_window_source`가 정한다. 맞지 않으면 `chart.line.auto_record`로 거절한다."""
+        `saved_window_source`가 정한다. 맞지 않으면 `chart.line.auto_record`로 거절한다."""
         auto = draft.auto
         if auto is None:
             raise RuntimeError(f"verified record needs an auto record — kind={draft.kind.value}")
@@ -646,7 +627,7 @@ class StockChartService:
         if replay is None:
             raise reject("params unreadable, or window missing or outside completed candles —")
         params, series, window = replay.params, replay.series, replay.window
-        if _present(params.to_params()) != _present(auto.params):
+        if present_params(params.to_params()) != present_params(auto.params):
             raise reject("params carry unknown keys —")
         if not params.fits(draft.kind):
             raise reject("params belong to another tool —")
@@ -660,15 +641,15 @@ class StockChartService:
         regime, chosen = None, None
         if draft.kind is LineKind.FIB_CHANNEL and params.direction is not None:
             judgement = judge_regime(series, window)
-            regime = _regime_record(judgement)
+            regime = regime_record(judgement)
             chosen = chosen_by(judgement.channel_direction, params.direction)
         view = WindowView(
             series.bar_date(window.start),
             series.bar_date(window.end),
             window.bars,
-            _saved_window_source(series, draft.timeframe, window, auto.window_source),
+            saved_window_source(series, draft.timeframe, window, auto.window_source),
         )
-        return _record(view, params, regime=regime, chosen=chosen)
+        return auto_record(view, params, regime=regime, chosen=chosen)
 
     def _replay(self, loaded: _Loaded, timeframe: Timeframe, auto: AutoRecord) -> _Replay | None:
         """저장한 자동 기록으로 찾기를 다시 돌릴 입력. 이 판의 기록이고 파라미터가 읽히며 판정
@@ -877,42 +858,6 @@ class StockChartService:
         return None if found is None else replay.series.bar_date(found)
 
 
-def rank_instruments(
-    instruments: Sequence[ChartInstrument], query: str
-) -> tuple[ChartInstrument, ...]:
-    """검색 순위: 지수명 정확 → 티커 정확 → 이름(정식 이름 포함) 정확 → 이름 포함. 대소문자 무시."""
-    needle = query.strip().casefold()
-    if not needle:
-        return ()
-
-    def names(item: ChartInstrument) -> tuple[str, ...]:
-        return tuple(name.casefold() for name in (item.name, *item.aliases))
-
-    def tier(item: ChartInstrument) -> int | None:
-        if item.ref.kind is InstrumentKind.INDEX and item.name.casefold() == needle:
-            return 0
-        code = item.ref.code.removeprefix(PRACTICE_CODE_PREFIX)
-        if item.ref.kind is InstrumentKind.STOCK and code.casefold() == needle:
-            return 1
-        if needle in names(item):
-            return 2
-        if any(needle in name for name in names(item)):
-            return 3
-        return None
-
-    ranked = [(t, item) for item in instruments if (t := tier(item)) is not None]
-    ranked.sort(
-        key=lambda pair: (
-            pair[0],
-            pair[1].ref.kind is not InstrumentKind.INDEX,
-            _GROUP_ORDER.get(pair[1].group or "", len(_GROUP_ORDER)),
-            pair[1].name,
-            pair[1].ref.code,
-        )
-    )
-    return tuple(item for _, item in ranked)
-
-
 def _domain_params(defaults: _P, **values: float | int | None) -> _P:
     """None이 아닌 값만 domain 기본값 위에 얹는다. 범위 검사는 domain 값 타입 하나가 한다."""
     return _domain_call(
@@ -926,84 +871,6 @@ def _domain_call(call: Callable[[], _T]) -> _T:
         return call()
     except ValueError as error:
         raise ChartRequestError("chart.params.invalid", str(error)) from error
-
-
-def _presets(series: ChartSeries, timeframe: Timeframe) -> tuple[tuple[int, Window], ...]:
-    """주기별 제안 칩 길이와 마지막 완성 봉에서 끝나는 그 구간."""
-    last = len(series.candles) - 1
-    return tuple(
-        (bars, Window.ending_at(last, bars)) for bars in WINDOW_PRESETS[timeframe].suggested_bars
-    )
-
-
-def _window(
-    series: ChartSeries, timeframe: Timeframe, request: WindowRequest
-) -> tuple[Window, WindowView]:
-    """구간 날짜 → 봉 index. 한쪽만 오면 거절한다(조용히 기본 구간으로 바꾸지 않는다)."""
-    last = len(series.candles) - 1
-    if request.start is None and request.end is None:
-        span = Window.ending_at(last, WINDOW_PRESETS[timeframe].default_bars)
-    elif request.start is None or request.end is None:
-        raise ChartRequestError(
-            "chart.window.incomplete",
-            f"window needs both start and end — start={request.start} end={request.end}",
-        )
-    else:
-        start, end = series.index_of(request.start), series.index_of(request.end)
-        if start is None or end is None:
-            raise ChartRequestError(
-                "chart.window.outside_series",
-                f"window date outside completed candles — start={request.start} "
-                f"end={request.end} first={series.bar_date(0)} last={series.bar_date(last)} "
-                f"timeframe={timeframe.value}",
-            )
-        if start > end:
-            raise ChartRequestError(
-                "chart.window.reversed",
-                f"window start after end — start={request.start} end={request.end}",
-            )
-        span = Window(start, end)
-    return span, WindowView(
-        series.bar_date(span.start),
-        series.bar_date(span.end),
-        span.bars,
-        _window_source(series, timeframe, span),
-    )
-
-
-def _present(params: Mapping[str, ParamValue]) -> dict[str, ParamValue]:
-    """값이 있는 칸만 — 빈 칸(None)을 싣든 빼든 같은 기록이다."""
-    return {key: value for key, value in params.items() if value is not None}
-
-
-def _saved_window_source(
-    series: ChartSeries, timeframe: Timeframe, span: Window, requested: WindowSource | None
-) -> WindowSource:
-    """저장할 기록의 구간 출처. 구간이 지금 마지막 완성 봉에서 끝나면 서버가 정한다
-    (`_window_source`). 그보다 앞서 끝나는 구간은 기준일이 지난 기록의 되살리기·복사라 그때의
-    출처(요청 값)를 따르되, preset은 그 끝에서 잰 제안 칩 구간(계열 앞에서 잘린 것 포함)일 때만
-    받는다."""
-    if span.end == len(series.candles) - 1:
-        return _window_source(series, timeframe, span)
-    chip = any(
-        span == Window.ending_at(span.end, bars)
-        for bars in WINDOW_PRESETS[timeframe].suggested_bars
-    )
-    return WindowSource.PRESET if requested is WindowSource.PRESET and chip else WindowSource.USER
-
-
-def _regime_record(judgement: RegimeJudgement) -> RegimeRecord:
-    return RegimeRecord(judgement.verdict, judgement.strength, judgement.structure)
-
-
-def _window_source(series: ChartSeries, timeframe: Timeframe, span: Window) -> WindowSource:
-    """제안 칩 길이 그대로(마지막 완성 봉에서 끝남)면 `preset`, 아니면 `user`(끌기·날짜 입력·
-    화면 기간)."""
-    return (
-        WindowSource.PRESET
-        if any(span == w for _, w in _presets(series, timeframe))
-        else WindowSource.USER
-    )
 
 
 def _warnings(judgement: RegimeJudgement) -> tuple[str, ...]:
@@ -1065,10 +932,6 @@ def _drawing(
     )
 
 
-def _auto_params(swing: SwingParams) -> AutoParams:
-    return AutoParams(swing.candidate_sensitivity, swing.structure_sensitivity)
-
-
 def _pivots(
     series: ChartSeries, scale: DisplayScale, pivots: Sequence[Pivot]
 ) -> tuple[PivotPoint, ...]:
@@ -1081,38 +944,3 @@ def _pivots(
         )
         for p in pivots
     )
-
-
-def _record(
-    view: WindowView,
-    params: AutoParams,
-    *,
-    regime: RegimeRecord | None = None,
-    chosen: ChosenBy | None = None,
-) -> AutoRecord:
-    """자동 후보의 기록 — 판정 구간과 파라미터(저장 요청에 그대로 싣는다)."""
-    return AutoRecord(
-        algorithm_version=ALGORITHM_VERSION,
-        params=params.to_params(),
-        regime_window=(view.start, view.end),
-        regime=regime,
-        chosen_by=chosen,
-        window_source=view.source,
-    )
-
-
-def _check_record(source: LineSource, auto: AutoRecord | None) -> None:
-    """자동 기록은 자동 선(`auto`·`auto_copied`)에만 있고 이 판의 알고리즘 기록이어야 한다. 기록의
-    내용(파라미터·구간, 자동 선은 기준점까지)은 `_verified_record`가 본다."""
-    if (source is LineSource.MANUAL) != (auto is None):
-        raise ChartRequestError(
-            "chart.line.auto_record",
-            f"auto record must be present exactly for auto lines — source={source.value} "
-            f"auto={'present' if auto is not None else 'missing'}",
-        )
-    if auto is not None and auto.algorithm_version != ALGORITHM_VERSION:
-        raise ChartRequestError(
-            "chart.line.auto_record",
-            f"auto record from another algorithm version — got={auto.algorithm_version!r} "
-            f"current={ALGORITHM_VERSION!r}",
-        )

@@ -188,6 +188,13 @@
     max-height: 100%;
     overflow-y: auto;
     overscroll-behavior: contain;
+    /* 스크롤바가 생겼다 사라지며 폭(→ 차트 높이)이 흔들리지 않게 자리를 늘 둔다 */
+    scrollbar-gutter: stable;
+  }
+
+  /* AI 창 런처가 우하단에 떠 있으면 그 높이만큼 바닥 여백을 두어 패널 맨 아래(차트에 추가)가 깔리지 않게 한다 */
+  .stock-chart__layers {
+    padding-bottom: calc(var(--space-4) + var(--floating-launcher-reserve, 0px));
   }
 
   .stock-chart__card {

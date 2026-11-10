@@ -384,7 +384,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                   />
                   {/* 미리보기 후보가 어느 점에서 그어졌는지(기준점) */}
                   {creating ? (
-                    <PreviewAnchors previews={finder.results.previews} scale={scale} candles={candles} />
+                    <PreviewAnchors previews={finder.results.previews} scale={scale} />
                   ) : null}
                   {creating ? (
                     <AnalysisWindowOverlay

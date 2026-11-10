@@ -136,6 +136,8 @@ test(
     const startBox = await startEdge.boundingBox();
     if (startBox === null) throw new Error("window edge has no bounding box");
     expect(Math.abs(startBox.x + startBox.width / 2 - pressX)).toBeLessThan(12);
+    // 선도 그어지지 않는다
+    expect(await savedLines()).toHaveLength(0);
 
     // 박스권 구간: 채널을 추천하지 않고(그리지 않음) 수평 구간을 권한다
     // 앞의 Shift+끌기로 끝이 박스권 시작보다 앞이라 끝부터 옮긴다(시작은 끝을 넘지 못한다)
@@ -161,6 +163,22 @@ test(
     await layers.getByRole("radio", { name: /^하락 채널/u }).check();
     await expect(layers.getByText("추천(하락 채널)과 다른 방향이에요.", { exact: false })).toHaveCount(0);
 
+    await expect(chart.locator(".preview-anchor text")).toHaveText(["고점 ①", "고점 ②", "폭 저점"]);
+    // 추천 채널 후보의 기준점이 찍혀 있다. 구간을 바꾸면 새 채널 응답이 오기 전까지 앞 구간의 채널 미리보기(기준점)는 지워진다
+    const channelsRoute = "**/api/v1/stock-chart/channels**";
+    await page.route(channelsRoute, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    const fallingEnd = chart.getByRole("slider", { name: "판정 구간 끝" });
+    await fallingEnd.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(chart.locator(".preview-anchor")).toHaveCount(0);
+    await page.unroute(channelsRoute);
+    await page.keyboard.press("ArrowRight");
+    await expect(windowFields(page).end).toHaveValue(FALLING.end);
+    await expect(chart.locator(".preview-anchor text")).toHaveText(["고점 ①", "고점 ②", "폭 저점"]);
+
     // 첫 점은 판정 응답의 확정 고점 목록에서 고른다 — 후보는 모두 그 점에서 시작한다
     await layers.getByRole("radio", { name: "첫 점은 내가 고르기" }).check();
     // 첫 점 목록은 채널 응답(그 방향의 확정 피벗)이다 — 하락 채널이라 고점만 있다
@@ -173,7 +191,7 @@ test(
       expect(name).toContain("2024-11-06 →");
     await expect(candidates.first()).toBeChecked();
     // 고른 후보가 어느 점에서 그어졌는지 차트에 기준점 세 개가 찍힌다(포인터 전용 그림이라 CSS로 본다)
-    await expect(chart.locator(".preview-anchor text")).toHaveText(["기준선 첫 점", "기준선 둘째 점", "폭 기준점"]);
+    await expect(chart.locator(".preview-anchor text")).toHaveText(["고점 ①", "고점 ②", "폭 저점"]);
 
     // 차트에 추가하면 패널이 닫히고 초점이 "채널" 버튼으로 돌아오며, 자동 후보 칸에 한 줄이 생긴다
     await layers.getByRole("button", { name: "차트에 추가 (새 줄로)" }).click();

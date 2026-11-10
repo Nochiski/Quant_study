@@ -1,11 +1,6 @@
 import { useState, type PointerEvent } from "react";
 
-import {
-  DRAG_THRESHOLD_PX,
-  type ChartCandleBody,
-  type ChartScale,
-  type DateRange,
-} from "../../../entities/chart";
+import { DRAG_THRESHOLD_PX, type ChartCandleBody, type ChartScale, type DateRange } from "../../../entities/chart";
 import { sweptWindow, windowDates, type BarWindow } from "./analysis-window";
 
 type Sweep = {
@@ -35,18 +30,12 @@ export const useWindowSweep = ({
 }) => {
   const [sweep, setSweep] = useState<Sweep | null>(null);
   const indexAt = (event: PointerEvent<SVGSVGElement>) =>
-    scale === null
-      ? 0
-      : scale.indexAtX(
-          event.clientX - event.currentTarget.getBoundingClientRect().left,
-        );
-  const owns = (event: PointerEvent<SVGSVGElement>) =>
-    sweep !== null && sweep.pointerId === event.pointerId;
+    scale === null ? 0 : scale.indexAtX(event.clientX - event.currentTarget.getBoundingClientRect().left);
+  const owns = (event: PointerEvent<SVGSVGElement>) => sweep !== null && sweep.pointerId === event.pointerId;
   // 누른 봉 ~ 이 포인터의 봉(문턱 전이면 null). 놓을 때도 놓은 자리로 다시 재서, 마지막 움직임이 아직 그려지지 않았거나
   // 끄는 중 줌이 바뀌었어도 놓은 봉까지다.
   const windowAt = (current: Sweep, event: PointerEvent<SVGSVGElement>) =>
-    current.window === null &&
-    Math.abs(event.clientX - current.x) < DRAG_THRESHOLD_PX
+    current.window === null && Math.abs(event.clientX - current.x) < DRAG_THRESHOLD_PX
       ? null
       : sweptWindow(current.from, indexAt(event), completed.length);
   const stop = () => setSweep(null);
@@ -56,14 +45,7 @@ export const useWindowSweep = ({
     window: sweep?.window ?? null,
     svgProps: {
       onPointerDownCapture: (event: PointerEvent<SVGSVGElement>) => {
-        if (
-          !enabled ||
-          scale === null ||
-          !event.shiftKey ||
-          event.button !== 0 ||
-          completed.length === 0
-        )
-          return;
+        if (!enabled || scale === null || !event.shiftKey || event.button !== 0 || completed.length === 0) return;
         event.stopPropagation();
         // 글자 고르기·초점 옮기기 같은 기본 동작도 막는다
         event.preventDefault();
@@ -84,10 +66,7 @@ export const useWindowSweep = ({
           return;
         }
         const next = windowAt(sweep, event);
-        if (
-          next?.start !== sweep.window?.start ||
-          next?.end !== sweep.window?.end
-        )
+        if (next?.start !== sweep.window?.start || next?.end !== sweep.window?.end)
           setSweep({ ...sweep, window: next });
       },
       onPointerUpCapture: (event: PointerEvent<SVGSVGElement>) => {

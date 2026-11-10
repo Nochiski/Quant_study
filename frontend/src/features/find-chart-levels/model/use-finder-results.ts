@@ -27,6 +27,8 @@ export type PreviewLine = {
   created: string | null;
   extendRight: boolean;
   levels: readonly number[] | null;
+  /** 채널 방향(기준점 이름·자리를 정한다). 채널이 아니면 null. */
+  direction: TrendDirection | null;
 };
 
 /** 중첩 응답·차트 그림에서 미리보기 후보를 가리키는 이름 앞머리(저장 선 id와 겹치지 않는다). */
@@ -109,7 +111,7 @@ export const useFinderResults = (target: ChartTarget, timeframe: Timeframe, pane
     ready = judged !== undefined && direction !== null && settled(channels);
     const picked = direction === null ? undefined : current(channels)?.candidates[draft.candidate];
     if (picked !== undefined)
-      previews.push({ key: "channel", kind: "fib_channel", drawing: picked.drawing, created: picked.created, extendRight: true, levels: null });
+      previews.push({ key: "channel", kind: "fib_channel", drawing: picked.drawing, created: picked.created, extendRight: true, levels: null, direction });
   } else if (tool === "fib_retracement" && draft !== null) {
     answered = retracement.data?.window ?? null;
     ready = settled(retracement);
@@ -123,13 +125,14 @@ export const useFinderResults = (target: ChartTarget, timeframe: Timeframe, pane
         created: shown?.created ?? null,
         extendRight: draft.extendRight,
         levels: draft.levels,
+        direction: null,
       });
   } else if (tool === "hline" && draft !== null) {
     answered = zones.data?.window ?? null;
     ready = settled(zones);
     current(zones)?.zones.forEach((zone, index) => {
       if (!draft.excludedZones.includes(index))
-        previews.push({ key: `zone-${index}`, kind: "hline", drawing: zone.drawing, created: zone.formed, extendRight: true, levels: null });
+        previews.push({ key: `zone-${index}`, kind: "hline", drawing: zone.drawing, created: zone.formed, extendRight: true, levels: null, direction: null });
     });
   }
   const anyQuery = tool === "fib_channel" ? regime : tool === "fib_retracement" ? retracement : zones;

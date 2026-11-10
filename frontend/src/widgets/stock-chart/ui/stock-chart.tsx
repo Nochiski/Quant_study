@@ -239,13 +239,11 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
     ),
   );
 
+  const creating = panel.view === "create";
+  // 판정·분석 구간 바꾸기(테두리 끌기·Shift+끌기 공통)
+  const editWindow = (window: DateRange) => finder.dispatch({ type: "edit", input: { window } });
   // 생성 패널이 열려 있으면 Shift+끌기로 판정·분석 구간을 새로 긋는다
-  const sweep = useWindowSweep({
-    scale,
-    completed,
-    enabled: panel.view === "create",
-    onChange: (window) => finder.dispatch({ type: "edit", input: { window } }),
-  });
+  const sweep = useWindowSweep({ scale, completed, enabled: creating, onChange: editWindow });
 
   if (candlesQuery.isError)
     return (
@@ -277,7 +275,6 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
     if (tool !== "select" && mode === "auto") changeMode("manual");
     drawing.dispatch({ type: "pickTool", tool });
   };
-  const creating = panel.view === "create";
   // 포인터를 올린 선은 선택 도구일 때만 본다(그리기 도구로 바꾸면 선의 누를 자리가 사라져 떠남이 오지 않는다)
   const badgeLine =
     shownLines.find((line) => line.line_id === drawing.state.selectedId) ??
@@ -390,7 +387,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                       completed={completed}
                       window={finder.results.window}
                       sweep={sweep.window}
-                      onChange={(window) => finder.dispatch({ type: "edit", input: { window } })}
+                      onChange={editWindow}
                       onEscape={() => finder.dispatch({ type: "close" })}
                     />
                   ) : null}

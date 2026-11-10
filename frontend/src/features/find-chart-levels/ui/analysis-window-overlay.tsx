@@ -32,7 +32,8 @@ const HIT_WIDTH = 24;
 /**
  * 메인 차트 위 판정·분석 구간: 음영과 좌우 테두리 손잡이(role=slider). 끌면 봉 단위로 붙고 끄는 동안 날짜 툴팁이 뜨며,
  * 놓는 순간 구간을 바꿔 다시 판정한다. 초점에서 ←/→ 한 봉, Shift는 열 봉, Home/End는 끝까지, Esc는 패널 닫기. 차트
- * 줌·이동 키·끌기로 번지지 않게 멈춘다. 낭독·툴팁 날짜는 날짜 칸과 같은 봉 시작일이다.
+ * 줌·이동 키·끌기로 번지지 않게 멈춘다. 낭독·툴팁 날짜는 날짜 칸과 같은 봉 시작일이다. Shift+끌기로 긋는 중인 구간
+ * (`sweep`)이 있으면 그것을 그린다.
  */
 export const AnalysisWindowOverlay = ({
   scale,
@@ -43,10 +44,10 @@ export const AnalysisWindowOverlay = ({
   onEscape,
 }: AnalysisWindowOverlayProps) => {
   const [drag, setDrag] = useState<{ edge: WindowEdge; window: BarWindow; from: BarWindow } | null>(null);
-  // 지금 구간이 아직 없어도(첫 응답 전·실패) Shift+끌기로 그은 구간은 그린다
-  const resting = (window === null ? null : barWindowOf(completed, window)) ?? sweep;
+  const resting = window === null ? null : barWindowOf(completed, window);
+  // 긋는 중인 구간이 확정 구간보다 앞선다. 확정 구간이 아직 없으면(첫 응답 전·실패) 긋는 중 음영만 그린다
   const shown = drag?.window ?? sweep ?? resting;
-  if (shown === null || resting === null) return null;
+  if (shown === null) return null;
   const { plot, step } = scale;
   const count = completed.length;
   const dates = windowDates(completed, shown);
@@ -75,6 +76,8 @@ export const AnalysisWindowOverlay = ({
         height={plot.bottom - plot.top}
       />
       {EDGES.map((edge) => {
+        // 테두리(slider)는 확정 구간이 있을 때만 — 끌기·키보드의 기준은 확정 구간이다
+        if (resting === null) return null;
         const x = edgeX(edge, shown);
         const middle = (plot.top + plot.bottom) / 2;
         return (

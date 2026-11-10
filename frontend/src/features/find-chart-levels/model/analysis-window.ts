@@ -1,7 +1,7 @@
 import { barAtOrBefore, type ChartCandleBody, type DateRange } from "../../../entities/chart";
 
 /**
- * 판정·분석 구간을 차트 위에서 고치는 규칙(테두리 끌기·키보드)의 owner. 구간은 완성 봉 index의 양 끝(포함)이고,
+ * 판정·분석 구간을 차트 위에서 고치는 규칙(테두리 끌기·키보드·Shift+끌기로 새로 긋기)의 owner. 구간은 완성 봉 index의 양 끝(포함)이고,
  * 요청에는 그 봉의 시작일을 싣는다 — 서버가 날짜를 그 날짜가 든 봉으로 옮긴다(`ChartSeries.index_of`). 판정의 최소
  * 봉 수(판정 불가 기준)는 서버 domain이 정하고 여기서는 다시 재지 않는다 — 구간은 시작 < 끝이면 된다.
  */

@@ -109,15 +109,20 @@ test(
     expect(dragged < nudged).toBe(true);
     await expect(startEdge).toHaveAttribute("aria-valuetext", dragged);
 
-    // Shift를 누른 채 차트를 끌면 누른 봉부터 놓은 봉까지가 새 판정 구간이다 — 차트는 옮겨지지 않는다
-    const plot = await chart.boundingBox();
-    if (plot === null) throw new Error("chart has no bounding box");
+    // Shift를 누른 채 차트를 끌면 누른 봉부터 놓은 봉까지가 새 판정 구간이다 — 끄는 동안 음영이 따라오고, 놓으면 판정이
+    // 다시 오며, 차트는 옮겨지지 않는다
+    const plot = await chart.locator(".drawing-surface__capture").boundingBox();
+    if (plot === null) throw new Error("plot has no bounding box");
     const sweepY = plot.y + plot.height / 2;
-    const viewBefore = await page.getByLabel("시작일").inputValue();
-    await page.mouse.move(plot.x + (plot.width - 84) * 0.25, sweepY);
+    const pressX = plot.x + plot.width * 0.25;
+    const endEdge = chart.getByRole("slider", { name: "판정 구간 끝" });
+    const endBefore = await endEdge.getAttribute("aria-valuetext");
+    const barsBefore = await layers.getByText(/^일봉 \d+개$/u).textContent();
+    await page.mouse.move(pressX, sweepY);
     await page.keyboard.down("Shift");
     await page.mouse.down();
-    await page.mouse.move(plot.x + (plot.width - 84) * 0.55, sweepY, { steps: 8 });
+    await page.mouse.move(plot.x + plot.width * 0.55, sweepY, { steps: 8 });
+    await expect(endEdge).not.toHaveAttribute("aria-valuetext", endBefore ?? "");
     await page.mouse.up();
     await page.keyboard.up("Shift");
     await expect.poll(() => windowFields(page).start.inputValue()).not.toBe(dragged);
@@ -125,8 +130,12 @@ test(
     expect(swept.start < swept.end).toBe(true);
     expect(swept.end < regime.window.end).toBe(true);
     await expect(startEdge).toHaveAttribute("aria-valuetext", swept.start);
-    await expect(chart.getByRole("slider", { name: "판정 구간 끝" })).toHaveAttribute("aria-valuetext", swept.end);
-    await expect(page.getByLabel("시작일")).toHaveValue(viewBefore);
+    await expect(endEdge).toHaveAttribute("aria-valuetext", swept.end);
+    await expect(layers.getByText(/^일봉 \d+개$/u)).not.toHaveText(barsBefore ?? "");
+    // 차트가 옮겨졌다면 누른 봉의 테두리가 누른 자리에서 벗어난다(날짜 칸 쓰기는 300ms 늦어 그것으로는 못 본다)
+    const startBox = await startEdge.boundingBox();
+    if (startBox === null) throw new Error("window edge has no bounding box");
+    expect(Math.abs(startBox.x + startBox.width / 2 - pressX)).toBeLessThan(12);
 
     // 박스권 구간: 채널을 추천하지 않고(그리지 않음) 수평 구간을 권한다
     // 앞의 Shift+끌기로 끝이 박스권 시작보다 앞이라 끝부터 옮긴다(시작은 끝을 넘지 못한다)

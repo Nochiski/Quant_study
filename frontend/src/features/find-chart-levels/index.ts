@@ -10,3 +10,4 @@ export { AnalysisWindowOverlay } from "./ui/analysis-window-overlay";
 export { AutoLinesPanel } from "./ui/auto-lines-panel";
 export { ConfluenceBrackets } from "./ui/confluence-brackets";
 export { FinderPanels } from "./ui/finder-panels";
+export { PreviewAnchors } from "./ui/preview-anchors";

@@ -172,6 +172,8 @@ test(
     for (const name of await candidates.evaluateAll((items) => items.map((item) => item.parentElement?.textContent ?? "")))
       expect(name).toContain("2024-11-06 →");
     await expect(candidates.first()).toBeChecked();
+    // 고른 후보가 어느 점에서 그어졌는지 차트에 기준점 세 개가 찍힌다(포인터 전용 그림이라 CSS로 본다)
+    await expect(chart.locator(".preview-anchor text")).toHaveText(["기준선 첫 점", "기준선 둘째 점", "폭 기준점"]);
 
     // 차트에 추가하면 패널이 닫히고 초점이 "채널" 버튼으로 돌아오며, 자동 후보 칸에 한 줄이 생긴다
     await layers.getByRole("button", { name: "차트에 추가 (새 줄로)" }).click();

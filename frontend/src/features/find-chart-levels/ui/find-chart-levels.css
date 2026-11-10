@@ -518,3 +518,29 @@
   gap: var(--space-2);
   font-size: var(--text-size-small);
 }
+
+/* 미리보기 후보의 기준점(점 + 이름). 색은 그 선의 색 역할과 같다. */
+.preview-anchor {
+  --anchor-ink: var(--chart-series-1);
+  pointer-events: none;
+}
+
+.preview-anchor--fib_retracement {
+  --anchor-ink: var(--chart-series-4);
+}
+
+.preview-anchor circle {
+  fill: var(--surface-panel);
+  stroke: var(--anchor-ink);
+  stroke-width: 2.5;
+}
+
+.preview-anchor text {
+  fill: var(--anchor-ink);
+  font-size: var(--text-size-small);
+  font-weight: var(--font-weight-label);
+  paint-order: stroke;
+  stroke: var(--surface-panel);
+  stroke-width: 3;
+  stroke-linejoin: round;
+}

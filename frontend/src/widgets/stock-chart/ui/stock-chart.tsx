@@ -43,6 +43,7 @@ import {
   AutoLinesPanel,
   ConfluenceBrackets,
   FinderPanels,
+  PreviewAnchors,
   previewOverlays,
   useLevelFinder,
   useWindowSweep,
@@ -381,6 +382,10 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                     // 미리보기 후보는 저장 선과 같은 그리기·라벨 배치에 넣는다(라벨끼리 밀어낸다)
                     overlays={creating ? previewOverlays(finder.results.previews, scale) : []}
                   />
+                  {/* 미리보기 후보가 어느 점에서 그어졌는지(기준점) */}
+                  {creating ? (
+                    <PreviewAnchors previews={finder.results.previews} scale={scale} candles={candles} />
+                  ) : null}
                   {creating ? (
                     <AnalysisWindowOverlay
                       scale={scale}

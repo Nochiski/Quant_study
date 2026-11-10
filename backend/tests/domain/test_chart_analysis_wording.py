@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from strategy_workbench.domain.chart_analysis.facade.levels import ZoneParams
 from strategy_workbench.domain.chart_analysis.facade.regime import (
     RegimeJudgement,
     RegimeReason,
@@ -11,7 +12,12 @@ from strategy_workbench.domain.chart_analysis.facade.regime import (
     Structure,
 )
 from strategy_workbench.domain.chart_analysis.facade.series import SwingParams, Window
-from strategy_workbench.domain.chart_analysis.facade.wording import regime_rules, regime_sentence
+from strategy_workbench.domain.chart_analysis.facade.wording import (
+    confluence_rules,
+    regime_rules,
+    regime_sentence,
+    zone_rules,
+)
 
 
 def _judgement(
@@ -71,3 +77,14 @@ def test_regime_rules_quote_the_atr_period_of_the_series() -> None:
     (box,) = (rule for rule in regime_rules(SwingParams(atr_period=20)) if "박스 비율" in rule)
 
     assert "ATR(20)" in box
+
+
+def test_zone_and_confluence_rules_quote_the_request_values() -> None:
+    # 묶는 폭·최소 접촉·ATR 기간·허용 폭은 이번 요청의 값을 인용한다(기본값을 박아 두지 않는다)
+    zones = " ".join(
+        zone_rules(ZoneParams(width_atr=0.75, min_touches=3), SwingParams(atr_period=20))
+    )
+    confluence = " ".join(confluence_rules(0.0125))
+
+    assert ("k=0.75" in zones, "3회 이상" in zones, "ATR(20)" in zones) == (True, True, True)
+    assert "±1.25%" in confluence

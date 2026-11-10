@@ -1,6 +1,7 @@
 import { useId, useState, type MouseEvent } from "react";
 
 import {
+  chartErrorSentence,
   formatPrice,
   lineIssueLabel,
   regimeVerdictLabel,
@@ -10,11 +11,13 @@ import {
   type Timeframe,
 } from "../../../entities/chart";
 import { t, tFill } from "../../../shared/config";
-import { Button } from "../../../shared/ui";
+import { failureReason } from "../../../shared/api";
+import { Button, FailureNotice } from "../../../shared/ui";
 import { autoRows, type AutoRow } from "../model/auto-rows";
 import type { FinderTool } from "../model/finder-panel";
 import { autoLineTitle, zoneBounds } from "../model/line-evidence";
 import type { LevelFinder } from "../model/use-level-finder";
+import { useLineVisibility } from "../model/use-line-visibility";
 
 type AutoLinesPanelProps = {
   finder: LevelFinder;
@@ -27,10 +30,8 @@ type AutoLinesPanelProps = {
   /** 보이는 선의 중첩 수(서버 응답, 아직 없으면 null)와 내 선 포함 여부. */
   confluenceCount: number | null;
   includeMine: boolean;
-  /** 보이기 저장 칸 바꾸기(묶음은 함께). */
-  onToggle: (lines: readonly ChartLineBody[], visible: boolean) => void;
-  /** 지우기(묶음은 함께, 되돌리기 한 번에 함께 되살아난다). */
-  onRemove: (lines: readonly ChartLineBody[], title: string) => void;
+  /** 지우기(묶음은 함께, 되돌리기 한 번에 함께 되살아난다). 이미 지우는 중이면 false(수동 칸과 같은 계약). */
+  onRemove: (lines: readonly ChartLineBody[], title: string) => boolean;
   removing: boolean;
   /** 지금 화면에 보이는 완성 봉 구간 — 되돌림·수평 구간 생성 패널의 기본 분석 구간("기본값은 화면 기간"). */
   screenWindow: DateRange | null;
@@ -64,13 +65,14 @@ export const AutoLinesPanel = ({
   manual,
   confluenceCount,
   includeMine,
-  onToggle,
   onRemove,
   removing,
   screenWindow,
 }: AutoLinesPanelProps) => {
   const id = useId();
   const [open, setOpen] = useState<readonly string[]>([]);
+  const visibility = useLineVisibility({ kind: instrument.kind, code: instrument.code });
+  const onToggle = visibility.setVisible;
   const rows = autoRows(lines);
   const price = (value: number) => formatPrice(value, instrument.kind);
   const { dispatch } = finder;
@@ -108,6 +110,18 @@ export const AutoLinesPanel = ({
       ) : (
         <>
           <p className="finder-note">{t("chart.finder.list.basis")}</p>
+          {visibility.failure === null ? null : (
+            <div className="finder-warning" role="status">
+              <FailureNotice
+                title={tFill("chart.finder.list.toggleFailed", { count: String(visibility.failure.count) })}
+                message={chartErrorSentence(visibility.failure.error)}
+                reason={failureReason(visibility.failure.error)}
+              />
+              <Button size="small" tone="ghost" onClick={visibility.dismiss}>
+                {t("chart.undo.dismiss")}
+              </Button>
+            </div>
+          )}
           {rows.length === 0 ? (
             <p className="finder-note">{t("chart.finder.list.empty")}</p>
           ) : null}

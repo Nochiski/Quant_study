@@ -1,10 +1,9 @@
 import { chartErrorSentence } from "../../../entities/chart";
-import { t, tFill, type MessageKey } from "../../../shared/config";
+import { t, type MessageKey } from "../../../shared/config";
 import { failureReason } from "../../../shared/api";
-import { Button, FailureNotice } from "../../../shared/ui";
+import { FailureNotice } from "../../../shared/ui";
 import { STEP_HINTS, type DrawingState } from "../model/drawing";
 import type { ChartDrawing } from "../model/use-chart-drawing";
-import type { RemovalNotice, useLineRemoval } from "../model/use-line-removal";
 
 const hintKey = (state: DrawingState): MessageKey =>
   state.tool === "select"
@@ -36,44 +35,6 @@ export const DrawingHint = ({ drawing }: { drawing: ChartDrawing }) => {
           title={t("chart.error.save")}
           message={chartErrorSentence(drawing.saveError)}
           reason={failureReason(drawing.saveError)}
-        />
-      )}
-    </div>
-  );
-};
-
-const noticeKey = (notice: RemovalNotice): MessageKey => {
-  if (notice.kind === "restored") return "chart.undo.restored";
-  if (!notice.lost) return "chart.undo.deleted";
-  return notice.undoable ? "chart.undo.deletedPartial" : "chart.undo.deletedLost";
-};
-
-/** 지운 뒤의 되돌리기 알림. Ctrl+Z도 같은 일을 한다(`useLineRemoval`). */
-export const UndoNotice = ({ removal }: { removal: ReturnType<typeof useLineRemoval> }) => {
-  const { notice } = removal;
-  if (notice === null && removal.error === null) return null;
-  return (
-    <div className="undo-notice" role="status">
-      {notice === null ? null : (
-        <>
-          <span className="undo-notice__text">
-            {tFill(noticeKey(notice), { title: notice.title })}
-          </span>
-          {notice.kind === "deleted" && notice.undoable && removal.canUndo ? (
-            <Button size="small" tone="ghost" className="undo-notice__undo" onClick={() => removal.undo()}>
-              {t("chart.undo.action")}
-            </Button>
-          ) : null}
-          <Button size="small" tone="ghost" className="undo-notice__undo" onClick={removal.dismissNotice}>
-            {t("chart.undo.dismiss")}
-          </Button>
-        </>
-      )}
-      {removal.error === null ? null : (
-        <FailureNotice
-          title={t("chart.error.save")}
-          message={chartErrorSentence(removal.error)}
-          reason={failureReason(removal.error)}
         />
       )}
     </div>

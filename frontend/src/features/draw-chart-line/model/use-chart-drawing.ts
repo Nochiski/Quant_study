@@ -13,7 +13,7 @@ import {
 } from "../../../entities/chart";
 import { useCommittedRef } from "../../../shared/lib/react";
 import { completedAnchors, drawingReducer, INITIAL_DRAWING } from "./drawing";
-import { isTextEntry } from "./line-edit";
+import { isTextEntry } from "../../../shared/lib/text-entry";
 import { useLinePreview } from "./use-line-preview";
 
 /**

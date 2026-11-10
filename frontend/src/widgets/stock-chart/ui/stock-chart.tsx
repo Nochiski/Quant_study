@@ -33,10 +33,9 @@ import {
   DrawingSurface,
   DrawingToolbar,
   MyLinesPanel,
-  UndoNotice,
   useChartDrawing,
-  useLineRemoval,
 } from "../../../features/draw-chart-line";
+import { UndoNotice, useLineRemoval } from "../../../features/remove-chart-line";
 import {
   AnalysisWindowOverlay,
   AutoLinesPanel,
@@ -465,7 +464,8 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
           <>
             <MyLinesPanel
               drawing={drawing}
-              removal={removal}
+              onRemove={removal.removeLine}
+              removing={removal.removing}
               instrument={instrument}
               lines={lines}
               timeframe={timeframe}
@@ -481,11 +481,12 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
               manual={mode === "manual"}
               confluenceCount={confluence.data?.groups.length ?? null}
               includeMine={includeMine}
-              onToggle={(group, visible) => group.forEach((line) => void drawing.edit(line, { visible }))}
               onRemove={(group, title) => {
-                if (!removal.removeLine(group, title)) return;
-                if (group.some((line) => line.line_id === drawing.state.selectedId))
+                // 자동 선은 수동 그리기의 고른 선일 수 있어(근거 패널에서 고름) 지우면 고르기를 푼다
+                const accepted = removal.removeLine(group, title);
+                if (accepted && group.some((line) => line.line_id === drawing.state.selectedId))
                   drawing.dispatch({ type: "select", lineId: null });
+                return accepted;
               }}
               removing={removal.removing}
               screenWindow={visibleWindow(visibleCompleted)}

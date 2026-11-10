@@ -417,6 +417,47 @@ def test_real_data_candles_show_actual_prices(tmp_path: Path) -> None:
     )
 
 
+def test_real_data_lines_round_trip_through_the_display_scale(tmp_path: Path) -> None:
+    # 실데이터 원천(k = 0.5)에서 화면 가격으로 그은 선을 저장 공간(÷k)으로 저장했다가 다시 읽으면
+    # 같은 화면 가격이다 — 연습 원천(k = 1)으로는 잡히지 않는 왕복이다
+    pytest.importorskip("duckdb", reason="backend optional extra `equity`")
+    from tests.test_adapters_equity_duckdb_chart import _raw, build_chart_root
+
+    root = build_chart_root(tmp_path / "root")
+    db = tmp_path / "research.sqlite3"
+    client = TestClient(
+        build_http_app(equity_adapter="duckdb", equity_root=root, research_db_path=db)
+    )
+    price = _raw(date(2024, 1, 9))
+    created = client.post(
+        f"{BASE}/lines",
+        json={
+            "instrument_kind": "stock",
+            "instrument_code": REAL_SAMSUNG["code"],
+            "timeframe": "day",
+            "kind": "hline",
+            "source": "manual",
+            "anchors": [{"bar_date": "2024-01-09", "price": price}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    # 저장 행은 저장 공간(화면 ÷ k)이다 — 저장·읽기 양쪽에서 k를 빼먹는 대칭 오류도 여기서 걸린다
+    with sqlite3.connect(db) as connection:
+        (anchors_json,) = connection.execute("SELECT anchors_json FROM chart_drawing").fetchone()
+    assert json.loads(anchors_json) == [["2024-01-09", price / 0.5]]
+    # 앱을 새로 띄워 저장소에서 다시 읽는다
+    client = TestClient(
+        build_http_app(equity_adapter="duckdb", equity_root=root, research_db_path=db)
+    )
+    (line,) = _strict(client.get(f"{BASE}/lines", params=REAL_SAMSUNG))["lines"]
+    assert line["anchors"] == [{"bar_date": "2024-01-09", "price": price}]
+    assert line["paths"][0]["end"]["price"] == price
+    # 분석 조회도 실데이터 경로로 답한다(봉이 적어 판정 불가여도 코드화된 응답이다)
+    regime = client.get(f"{BASE}/regime", params={**REAL_SAMSUNG, "timeframe": "day"})
+    assert regime.status_code == 200, regime.text
+    assert _strict(regime)["verdict"] == "undecidable"
+
+
 def test_practice_lines_never_reach_the_real_chart(tmp_path: Path) -> None:
     """두 원천이 같은 연구 DB 파일을 써도 연습 선은 실데이터 차트·중첩에 나오지 않는다."""
     pytest.importorskip("duckdb", reason="backend optional extra `equity`")

@@ -168,6 +168,33 @@
   padding: var(--space-4);
 }
 
+/* 차트와 레이어 칸이 나란히 놓이는 폭에서는 작업 칸이 남은 화면 높이를 채우고 두 칸이 각자 안에서 스크롤한다 — 바깥
+   페이지는 스크롤하지 않아 긴 생성 패널을 내려 읽는 동안에도 차트가 화면에 남는다(트레이딩뷰의 오른쪽 패널처럼). 높이는
+   화면(`.stock-chart-page`)이 정한다. 차트 아래로 쌓이는 좁은 폭에서는 페이지와 함께 흐른다. */
+@media (min-width: 1240px) {
+  .stock-chart {
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .stock-chart__workspace {
+    flex-wrap: nowrap;
+    align-items: stretch;
+    min-height: 0;
+  }
+
+  .stock-chart__card,
+  .stock-chart__layers {
+    max-height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .stock-chart__card {
+    align-content: start;
+  }
+}
+
 .stock-chart__head {
   display: flex;
   flex-wrap: wrap;

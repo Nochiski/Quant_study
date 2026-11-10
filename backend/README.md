@@ -246,7 +246,7 @@ extra 목록과 ruff 대상은 CI(`.github/workflows/ci.yml` backend job)와 같
 의미를 숨기는 Python fallback 대신 `CoreUnavailable`로 실패한다.
 
 브라우저가 이 서버를 부를 수 있는 origin 은 `STRATEGY_WORKBENCH_ALLOWED_ORIGINS`(쉼표로 구분)로
-정한다. 설정하지 않으면 개발 서버 하나(`http://localhost:5173`)다. 워크트리별로 preview 포트를
+정한다. 설정하지 않으면 개발 서버의 두 루프백 이름(`bootstrap/_http.py`의 `DEFAULT_ALLOWED_ORIGINS`)이다. 워크트리별로 preview 포트를
 옮겨 e2e 를 돌릴 때는 그 origin 을 여기에 함께 넘겨야 한다 — 목록에 없으면 서버는 정상인데
 브라우저 요청만 CORS 로 막혀 화면이 빈다. 값이 있는데 origin 이 하나도 없으면 조용히 기본값으로
 돌아가지 않고 기동에 실패한다.
@@ -258,7 +258,7 @@ extra 목록과 ruff 대상은 CI(`.github/workflows/ci.yml` backend job)와 같
 | `STRATEGY_WORKBENCH_DB_PATH` | `.local/strategy-revisions.sqlite3` | 전략 revision·초안 저장소 |
 | `STRATEGY_WORKBENCH_RESEARCH_DB_PATH` | `.local/research.sqlite3` | 백테스트 실행 기록(목록·상태·요청), 시도 원장·계열 합치기. 재시작 때 끝나지 않은 run 은 `backtest.run.interrupted` 로 닫는다 |
 | `STRATEGY_WORKBENCH_ARTIFACT_ROOT` | `.local/backtest-runs` | 연구 DB와 짝을 이루는 실행 결과 루트. 프로세스마다 분리하며 E2E는 격리 런타임 아래 경로를 주입한다 |
-| `STRATEGY_WORKBENCH_ALLOWED_ORIGINS` | `http://localhost:5173` | CORS 허용 origin(쉼표로 구분) |
+| `STRATEGY_WORKBENCH_ALLOWED_ORIGINS` | `DEFAULT_ALLOWED_ORIGINS`(개발 서버의 두 루프백 이름) | CORS 허용 origin(쉼표로 구분) |
 | `STRATEGY_WORKBENCH_EQUITY_ADAPTER` | `mock` | `mock` 또는 `duckdb` |
 | `STRATEGY_WORKBENCH_EQUITY_ROOT` | 없음 | duckdb adapter가 읽을 equity 층 루트. `duckdb`면 필수 |
 | `STRATEGY_WORKBENCH_ASSISTANT_DB_PATH` | `.local/assistant.sqlite3` | 어시스턴트 세션 저장소(예전 프로파일 표는 시작할 때 `.env`로 옮긴다) |

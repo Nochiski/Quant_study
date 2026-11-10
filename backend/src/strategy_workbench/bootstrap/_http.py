@@ -43,9 +43,8 @@ RUN_SLOTS_ENV = "STRATEGY_WORKBENCH_RUN_SLOTS"
 E2E_TRIAL_HOLD_SECONDS_ENV = "STRATEGY_WORKBENCH_E2E_TRIAL_HOLD_SECONDS"
 RUN_ISOLATION_ENV = "STRATEGY_WORKBENCH_RUN_ISOLATION"
 RUN_MEMORY_RESERVE_GB_ENV = "STRATEGY_WORKBENCH_RUN_MEMORY_RESERVE_GB"
-# 개발 서버의 두 루프백 이름. `uv run dev`는 vite를 127.0.0.1에 띄우고 vite가 그 주소를
-# Local로 알린다 — 그 주소로 연 화면이 CORS로 막히면 서버는 200인데 화면에는 일반 실패
-# 문장만 남는다.
+# 같은 개발 서버의 두 루프백 이름 — 어느 이름으로 열어도 CORS로 막히지 않는다(막히면 서버는
+# 200인데 화면에는 일반 실패 문장만 남는다).
 DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
 ASSISTANT_DB_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_DB_PATH"
 ASSISTANT_SECRETS_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH"
@@ -150,10 +149,10 @@ def runtime_equity_selection() -> tuple[str, Path | None]:
 def runtime_allowed_origins() -> tuple[str, ...]:
     """브라우저가 이 서버를 부를 수 있는 origin 목록(쉼표로 구분).
 
-    기본값은 개발 서버 하나다. 포트를 옮겨 e2e를 돌릴 때(워크트리별 `PW_PREVIEW_PORT`) 그
-    origin 이 목록에 없으면 브라우저 요청이 CORS 로 막혀 화면이 빈다 — 서버는 멀쩡한데 화면만
-    죽은, 원인을 짚기 어려운 조합이다. 어떤 주소를 허용할지는 프로세스를 띄우는 쪽만 알므로
-    환경 변수로 받는다.
+    기본값은 개발 서버 하나(`DEFAULT_ALLOWED_ORIGINS`의 두 루프백 이름)다. 포트를 옮겨 e2e를
+    돌릴 때(워크트리별 `PW_PREVIEW_PORT`) 그 origin 이 목록에 없으면 브라우저 요청이 CORS 로
+    막혀 화면이 빈다 — 서버는 멀쩡한데 화면만 죽은, 원인을 짚기 어려운 조합이다. 어떤 주소를
+    허용할지는 프로세스를 띄우는 쪽만 알므로 환경 변수로 받는다.
     """
     configured = os.environ.get(ALLOWED_ORIGINS_ENV)
     if configured is None:

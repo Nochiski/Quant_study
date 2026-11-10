@@ -2158,8 +2158,91 @@
         "title": "CellVerdict",
         "type": "string"
       },
+      "ChartAutoParamsBody": {
+        "description": "자동 기록의 파라미터(application `AutoParams`와 같은 칸). 피벗 민감도 둘은 모든 도구에\n있고, 채널은 방향·첫 점, 되돌림은 기준 스윙, 수평 구간은 묶는 폭·최소 접촉을 쓴다. 칸이\n빠지거나 다른 도구의 칸이 섞인 기록은 저장할 때 `chart.line.auto_record`로 거절된다.",
+        "properties": {
+          "candidate_sensitivity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Sensitivity"
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrendDirection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "first_anchor": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Anchor"
+          },
+          "min_touches": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Touches"
+          },
+          "structure_sensitivity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structure Sensitivity"
+          },
+          "swing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SwingChoice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "width_atr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width Atr"
+          }
+        },
+        "title": "ChartAutoParamsBody",
+        "type": "object"
+      },
       "ChartAutoRecordBody": {
-        "description": "자동 선의 기록. 후보 응답의 `record`를 선 저장 요청에 그대로 싣는다.",
+        "description": "자동 선의 기록. 후보 응답의 `record`를 선 저장 요청에 그대로 싣는다. 판정·방향 출처·\n구간 출처는 저장할 때 서버가 다시 계산한다(요청 값은 쓰지 않는다).",
         "properties": {
           "algorithm_version": {
             "title": "Algorithm Version",
@@ -2176,27 +2259,7 @@
             ]
           },
           "params": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "title": "Params",
-            "type": "object"
+            "$ref": "#/components/schemas/ChartAutoParamsBody"
           },
           "regime": {
             "anyOf": [

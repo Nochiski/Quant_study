@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from threading import Lock
@@ -76,6 +76,7 @@ from strategy_workbench.application.stock_chart.ports.outgoing.chart_drawings im
     ChartLineContent,
     ChartLineNotFoundError,
     LineAnchor,
+    ParamValue,
     RegimeRecord,
 )
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_prices import (
@@ -625,7 +626,7 @@ class StockChartService:
             )
 
         params = AutoParams.read(auto.params)
-        if params is None or params.to_params() != dict(auto.params):
+        if params is None or _present(params.to_params()) != _present(auto.params):
             raise reject("params unreadable or carry unknown keys —")
         if not params.fits(draft.kind):
             raise reject("params belong to another tool —")
@@ -955,6 +956,11 @@ def _window(
         span.bars,
         _window_source(series, timeframe, span),
     )
+
+
+def _present(params: Mapping[str, ParamValue]) -> dict[str, ParamValue]:
+    """값이 있는 칸만 — 빈 칸(None)을 싣든 빼든 같은 기록이다."""
+    return {key: value for key, value in params.items() if value is not None}
 
 
 def _window_source(series: ChartSeries, timeframe: Timeframe, span: Window) -> WindowSource:

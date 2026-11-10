@@ -1358,9 +1358,42 @@ export type CellVerdict =
   "recommended" | "peak" | "failed" | "unscored" | "scored";
 
 /**
+ * ChartAutoParamsBody
+ *
+ * 자동 기록의 파라미터(application `AutoParams`와 같은 칸). 피벗 민감도 둘은 모든 도구에
+ * 있고, 채널은 방향·첫 점, 되돌림은 기준 스윙, 수평 구간은 묶는 폭·최소 접촉을 쓴다. 칸이
+ * 빠지거나 다른 도구의 칸이 섞인 기록은 저장할 때 `chart.line.auto_record`로 거절된다.
+ */
+export type ChartAutoParamsBody = {
+  /**
+   * Candidate Sensitivity
+   */
+  candidate_sensitivity?: number | null;
+  direction?: TrendDirection | null;
+  /**
+   * First Anchor
+   */
+  first_anchor?: string | null;
+  /**
+   * Min Touches
+   */
+  min_touches?: number | null;
+  /**
+   * Structure Sensitivity
+   */
+  structure_sensitivity?: number | null;
+  swing?: SwingChoice | null;
+  /**
+   * Width Atr
+   */
+  width_atr?: number | null;
+};
+
+/**
  * ChartAutoRecordBody
  *
- * 자동 선의 기록. 후보 응답의 `record`를 선 저장 요청에 그대로 싣는다.
+ * 자동 선의 기록. 후보 응답의 `record`를 선 저장 요청에 그대로 싣는다. 판정·방향 출처·
+ * 구간 출처는 저장할 때 서버가 다시 계산한다(요청 값은 쓰지 않는다).
  */
 export type ChartAutoRecordBody = {
   /**
@@ -1368,12 +1401,7 @@ export type ChartAutoRecordBody = {
    */
   algorithm_version: string;
   chosen_by?: ChosenBy | null;
-  /**
-   * Params
-   */
-  params: {
-    [key: string]: string | number | number | boolean | null;
-  };
+  params: ChartAutoParamsBody;
   regime?: ChartRegimeRecordBody | null;
   /**
    * Regime Window End

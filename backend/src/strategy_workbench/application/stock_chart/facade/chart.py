@@ -5,6 +5,7 @@ from strategy_workbench.application.stock_chart._errors import (
     LineIssue,
 )
 from strategy_workbench.application.stock_chart._lines import ChartPoint, LevelPath
+from strategy_workbench.application.stock_chart._provenance import AutoParams
 from strategy_workbench.application.stock_chart._service import (
     MAX_CHANNEL_CANDIDATES,
     MAX_MEMO_CHARS,
@@ -40,6 +41,7 @@ from strategy_workbench.application.stock_chart._views import (
 )
 
 __all__ = [
+    "AutoParams",
     "MAX_CHANNEL_CANDIDATES",
     "MAX_MEMO_CHARS",
     "MAX_SEARCH_RESULTS",

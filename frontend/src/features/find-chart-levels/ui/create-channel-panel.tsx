@@ -13,7 +13,7 @@ import {
 } from "../../../entities/chart";
 import { t, tFill } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
-import { serverParam, strengthText } from "../model/line-evidence";
+import { strengthText } from "../model/line-evidence";
 import { useAddCandidates } from "../model/use-add-candidates";
 import type { LevelFinder } from "../model/use-level-finder";
 import { CreateFooter, FinderFailure, ParamField, RefreshingNote, WindowFields } from "./finder-fields";
@@ -250,14 +250,14 @@ export const CreateChannelPanel = ({ finder, target, timeframe, instrument }: Cr
         <ParamField
           label={t("chart.finder.params.candidate")}
           value={draft.candidateSensitivity}
-          serverValue={serverParam(record?.params, "candidate_sensitivity")}
+          serverValue={(record?.params.candidate_sensitivity ?? null)}
           step={0.1}
           onCommit={(value) => dispatch({ type: "edit", input: { candidateSensitivity: value } })}
         />
         <ParamField
           label={t("chart.finder.params.structure")}
           value={draft.structureSensitivity}
-          serverValue={serverParam(record?.params, "structure_sensitivity")}
+          serverValue={(record?.params.structure_sensitivity ?? null)}
           step={0.1}
           onCommit={(value) => dispatch({ type: "edit", input: { structureSensitivity: value } })}
         />

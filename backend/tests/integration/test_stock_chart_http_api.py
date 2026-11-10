@@ -337,6 +337,17 @@ def test_re_adding_auto_zones_after_a_sqlite_round_trip_keeps_one_line_each(tmp_
     assert len(listed) == len(zones["zones"])
 
 
+def test_auto_params_wire_fields_are_the_application_record_keys() -> None:
+    # HTTP 칸 이름이 저장 기록 키(`AutoParams` 필드 = `to_params` 키)와 갈라지면 저장이 조용히
+    # 칸을 잃는다 — 둘을 묶어 둔다
+    from dataclasses import fields
+
+    from strategy_workbench.adapters.inbound.http_api._chart_routes import ChartAutoParamsBody
+    from strategy_workbench.application.stock_chart.facade.chart import AutoParams
+
+    assert [f.name for f in fields(ChartAutoParamsBody)] == [f.name for f in fields(AutoParams)]
+
+
 def test_real_data_candles_show_actual_prices(tmp_path: Path) -> None:
     pytest.importorskip("duckdb", reason="backend optional extra `equity`")
     from tests.test_adapters_equity_duckdb_chart import _raw, build_chart_root

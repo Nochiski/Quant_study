@@ -4,6 +4,7 @@ import type { ChartCandleBody, ChartLineBody } from "../../../entities/chart";
 import {
   barWindowOf,
   moveWindowEdge,
+  sweptWindow,
   nudgeWindowEdge,
   visibleWindow,
   windowDates,
@@ -73,6 +74,21 @@ describe("analysis window edges", () => {
     // 화면 기간: 보이는 완성 봉의 첫·마지막 봉 시작일
     expect(visibleWindow(WEEKS.slice(2, 5))).toEqual({ start: "2025-01-20", end: "2025-02-03" });
     expect(visibleWindow(WEEKS.slice(2, 3))).toBeNull();
+  });
+});
+
+describe("swept window", () => {
+  it("spans the pressed and released bars in either order inside the completed bars", () => {
+    // 오른쪽에서 왼쪽으로 그어도 같은 구간이고, 계열 밖으로 그은 끝은 첫·마지막 완성 봉으로 자른다
+    expect(sweptWindow(2, 5, 8)).toEqual({ start: 2, end: 5 });
+    expect(sweptWindow(5, 2, 8)).toEqual({ start: 2, end: 5 });
+    expect(sweptWindow(-3, 11.4, 8)).toEqual({ start: 0, end: 7 });
+  });
+
+  it("leaves the window alone when the sweep is narrower than the minimum", () => {
+    // 같은 봉 안에서만 그었으면 구간을 바꾸지 않는다(최소 두 봉)
+    expect(sweptWindow(3, 3.2, 8)).toBeNull();
+    expect(sweptWindow(3, 4, 8)).toEqual({ start: 3, end: 4 });
   });
 });
 

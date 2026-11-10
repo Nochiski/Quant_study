@@ -63,7 +63,7 @@ const windowFields = (page: Page) => ({
 });
 
 test(
-  "US-CS-16 판정 구간을 끌어 국면 판정을 보고, 박스권이면 수평 구간을 권받고, 하락 판정에서 첫 점을 골라 추천 채널을 추가한다",
+  "US-CS-16 판정 구간을 끌거나 Shift+끌기로 새로 그어 국면 판정을 보고, 박스권이면 수평 구간을 권받고, 하락 판정에서 첫 점을 골라 추천 채널을 추가한다",
   { tag: ["@story", "@US-CS-16"] },
   async ({ page }) => {
     await clearLines();
@@ -109,9 +109,29 @@ test(
     expect(dragged < nudged).toBe(true);
     await expect(startEdge).toHaveAttribute("aria-valuetext", dragged);
 
+    // Shift를 누른 채 차트를 끌면 누른 봉부터 놓은 봉까지가 새 판정 구간이다 — 차트는 옮겨지지 않는다
+    const plot = await chart.boundingBox();
+    if (plot === null) throw new Error("chart has no bounding box");
+    const sweepY = plot.y + plot.height / 2;
+    const viewBefore = await page.getByLabel("시작일").inputValue();
+    await page.mouse.move(plot.x + (plot.width - 84) * 0.25, sweepY);
+    await page.keyboard.down("Shift");
+    await page.mouse.down();
+    await page.mouse.move(plot.x + (plot.width - 84) * 0.55, sweepY, { steps: 8 });
+    await page.mouse.up();
+    await page.keyboard.up("Shift");
+    await expect.poll(() => windowFields(page).start.inputValue()).not.toBe(dragged);
+    const swept = { start: await windowFields(page).start.inputValue(), end: await windowFields(page).end.inputValue() };
+    expect(swept.start < swept.end).toBe(true);
+    expect(swept.end < regime.window.end).toBe(true);
+    await expect(startEdge).toHaveAttribute("aria-valuetext", swept.start);
+    await expect(chart.getByRole("slider", { name: "판정 구간 끝" })).toHaveAttribute("aria-valuetext", swept.end);
+    await expect(page.getByLabel("시작일")).toHaveValue(viewBefore);
+
     // 박스권 구간: 채널을 추천하지 않고(그리지 않음) 수평 구간을 권한다
-    await windowFields(page).start.fill(SIDEWAYS.start);
+    // 앞의 Shift+끌기로 끝이 박스권 시작보다 앞이라 끝부터 옮긴다(시작은 끝을 넘지 못한다)
     await windowFields(page).end.fill(SIDEWAYS.end);
+    await windowFields(page).start.fill(SIDEWAYS.start);
     await expect(layers.getByText("박스권", { exact: true })).toBeVisible();
     await expect(layers.getByRole("radio", { name: "그리지 않음" })).toBeChecked();
     await layers.getByRole("button", { name: "수평 구간 만들기" }).click();

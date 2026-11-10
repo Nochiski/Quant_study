@@ -17,6 +17,8 @@ type AnalysisWindowOverlayProps = {
   completed: readonly ChartCandleBody[];
   /** 지금 구간(서버가 맞춘 응답 구간, 기다리는 동안은 고친 날짜). 없으면 그리지 않는다. */
   window: DateRange | null;
+  /** Shift+끌기로 긋는 중인 구간(`useWindowSweep`). 있으면 지금 구간 대신 그것을 그린다. */
+  sweep?: BarWindow | null;
   onChange: (window: DateRange) => void;
   /** 테두리에 초점이 있을 때 Esc — 패널의 Esc와 같이 패널을 닫는다. */
   onEscape: () => void;
@@ -32,10 +34,18 @@ const HIT_WIDTH = 24;
  * 놓는 순간 구간을 바꿔 다시 판정한다. 초점에서 ←/→ 한 봉, Shift는 열 봉, Home/End는 끝까지, Esc는 패널 닫기. 차트
  * 줌·이동 키·끌기로 번지지 않게 멈춘다. 낭독·툴팁 날짜는 날짜 칸과 같은 봉 시작일이다.
  */
-export const AnalysisWindowOverlay = ({ scale, completed, window, onChange, onEscape }: AnalysisWindowOverlayProps) => {
+export const AnalysisWindowOverlay = ({
+  scale,
+  completed,
+  window,
+  sweep = null,
+  onChange,
+  onEscape,
+}: AnalysisWindowOverlayProps) => {
   const [drag, setDrag] = useState<{ edge: WindowEdge; window: BarWindow; from: BarWindow } | null>(null);
-  const resting = window === null ? null : barWindowOf(completed, window);
-  const shown = drag?.window ?? resting;
+  // 지금 구간이 아직 없어도(첫 응답 전·실패) Shift+끌기로 그은 구간은 그린다
+  const resting = (window === null ? null : barWindowOf(completed, window)) ?? sweep;
+  const shown = drag?.window ?? sweep ?? resting;
   if (shown === null || resting === null) return null;
   const { plot, step } = scale;
   const count = completed.length;

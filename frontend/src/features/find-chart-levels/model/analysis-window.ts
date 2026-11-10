@@ -35,6 +35,17 @@ export const moveWindowEdge = (
 };
 
 /**
+ * Shift+끌기로 새로 그은 구간: 누른 봉과 놓은 봉(순서 무관)을 양 끝으로, 완성 봉 범위 안으로 자른다. 폭이
+ * `MIN_WINDOW_BARS`보다 좁으면 null(구간을 바꾸지 않는다).
+ */
+export const sweptWindow = (from: number, to: number, count: number): BarWindow | null => {
+  const clamp = (index: number) => Math.min(Math.max(Math.round(index), 0), count - 1);
+  const start = clamp(Math.min(from, to));
+  const end = clamp(Math.max(from, to));
+  return end - start + 1 >= MIN_WINDOW_BARS ? { start, end } : null;
+};
+
+/**
  * 키보드 이동(slider 관례): ←/→ 한 봉, Shift는 `LARGE_STEP_BARS`봉, Home/End는 그 테두리가 갈 수 있는 끝까지.
  * 그 밖의 키는 null(처리하지 않음).
  */

@@ -45,6 +45,7 @@ import {
   FinderPanels,
   previewOverlays,
   useLevelFinder,
+  useWindowSweep,
   visibleWindow,
 } from "../../../features/find-chart-levels";
 import { useChartNavigation } from "../../../features/navigate-chart";
@@ -238,6 +239,14 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
     ),
   );
 
+  // 생성 패널이 열려 있으면 Shift+끌기로 판정·분석 구간을 새로 긋는다
+  const sweep = useWindowSweep({
+    scale,
+    completed,
+    enabled: panel.view === "create",
+    onChange: (window) => finder.dispatch({ type: "edit", input: { window } }),
+  });
+
   if (candlesQuery.isError)
     return (
       <FailureNotice
@@ -340,6 +349,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                 // 키보드 줌·이동(+/−·←/→·Home)을 받는 Tab 정지
                 tabIndex={0}
                 {...navigation.svgProps}
+                {...sweep.svgProps}
                 // 고른 선 지우기 키가 먼저고, 아니면 줌·이동 키다
                 onKeyDown={(event) => {
                   if (!drawing.onChartKeyDown(event, shownLines)) navigation.svgProps.onKeyDown(event);
@@ -379,6 +389,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                       scale={scale}
                       completed={completed}
                       window={finder.results.window}
+                      sweep={sweep.window}
                       onChange={(window) => finder.dispatch({ type: "edit", input: { window } })}
                       onEscape={() => finder.dispatch({ type: "close" })}
                     />

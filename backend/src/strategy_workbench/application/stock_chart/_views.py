@@ -118,7 +118,7 @@ class PivotPoint:
 @dataclass(frozen=True)
 class RegimeView:
     """판정 값은 domain `judgement` 그대로이고, 피벗만 화면 좌표(`structure_highs`·`_lows`)로
-    옮긴다. `rules`는 판정 규칙 설명 문장(domain `REGIME_RULES`), `pivot_rule`은 피벗 확정 규칙
+    옮긴다. `rules`는 판정 규칙 설명 문장(domain `regime_rules`), `pivot_rule`은 피벗 확정 규칙
     문장이다."""
 
     context: ChartContext
@@ -175,6 +175,8 @@ class RetracementView:
     created: date | None
     message: str | None
     record: AutoRecord
+    # 기준 스윙마다 어떤 두 점을 고르는지(domain `swing_choice_rule`, `SwingChoice` 차례)
+    swing_rules: tuple[tuple[SwingChoice, str], ...]
 
 
 @dataclass(frozen=True)

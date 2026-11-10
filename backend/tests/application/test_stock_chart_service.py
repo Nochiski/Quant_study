@@ -500,6 +500,40 @@ def test_search_ranks_index_name_then_ticker_then_exact_name_then_contains() -> 
     assert codes("  ") == []
 
 
+class _FundPrices(FakePrices):
+    """이름이 같은 순위로 걸리는 리츠·ETF·우선주 셋."""
+
+    def chart_instruments(self) -> tuple[ChartInstrument, ...]:
+        return tuple(
+            ChartInstrument(InstrumentRef(InstrumentKind.STOCK, code), name, group)
+            for code, name, group in (
+                ("900001", "가상 A리츠", "reit"),  # 이름은 ETF·ETN보다 앞이다
+                ("900002", "가상 B우", "preferred"),
+                ("900003", "가상 ETF", "etf"),
+            )
+        )
+
+
+def test_search_orders_by_the_port_group_vocabulary_then_other_kinds() -> None:
+    # 같은 순위(이름 포함) 안에서 포트 어휘 차례(우선주 → ETF) 뒤에 그 밖의 종류(리츠)가 온다
+    found = _service(prices=_FundPrices()).search("가상").instruments
+
+    assert [item.ref.code for item in found] == ["900002", "900003", "900001"]
+
+
+class _EmptyLedger(FakePrices):
+    def confirmed_session(self) -> date | None:
+        return None
+
+
+def test_a_ledger_without_a_confirmed_session_has_its_own_code() -> None:
+    # 원장에 확정일이 없는 것(차트를 열 수 없음)과 그 주기에 완성 봉이 없는 것은 다른 사유다
+    with pytest.raises(ChartRequestError) as error:
+        _service(prices=_EmptyLedger()).candles(STOCK, Timeframe.DAY)
+
+    assert error.value.code == "chart.ledger.no_confirmed_session"
+
+
 def test_unknown_instrument_is_not_found() -> None:
     with pytest.raises(InstrumentNotFoundError):
         _service().candles(InstrumentRef(InstrumentKind.STOCK, "999999"), Timeframe.DAY)

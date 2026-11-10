@@ -2829,6 +2829,7 @@
             "anyOf": [
               {
                 "enum": [
+                  "chart.ledger.no_confirmed_session",
                   "chart.series.no_completed_bars",
                   "chart.window.incomplete",
                   "chart.window.outside_series",
@@ -3522,6 +3523,14 @@
           "swing": {
             "$ref": "#/components/schemas/SwingChoice"
           },
+          "swing_rules": {
+            "description": "기준 스윙마다 어떤 두 점을 고르는지(서버 문장).",
+            "items": {
+              "$ref": "#/components/schemas/ChartSwingRuleBody"
+            },
+            "title": "Swing Rules",
+            "type": "array"
+          },
           "timeframe": {
             "$ref": "#/components/schemas/Timeframe"
           },
@@ -3537,9 +3546,27 @@
           "drawing",
           "created",
           "message",
-          "record"
+          "record",
+          "swing_rules"
         ],
         "title": "ChartRetracementBody",
+        "type": "object"
+      },
+      "ChartSwingRuleBody": {
+        "properties": {
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          },
+          "swing": {
+            "$ref": "#/components/schemas/SwingChoice"
+          }
+        },
+        "required": [
+          "swing",
+          "rule"
+        ],
+        "title": "ChartSwingRuleBody",
         "type": "object"
       },
       "ChartTickStepBody": {
@@ -3608,6 +3635,7 @@
             "type": "boolean"
           },
           "end": {
+            "description": "모든 칩이 같은 날 — 마지막 완성 봉의 시작일.",
             "format": "date",
             "title": "End",
             "type": "string"

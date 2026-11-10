@@ -192,7 +192,7 @@ class ChartWindowBody:
 class ChartWindowSuggestionBody:
     bars: int
     start: date
-    end: date
+    end: Annotated[date, Field(description="모든 칩이 같은 날 — 마지막 완성 봉의 시작일.")]
     default: bool
 
 
@@ -345,6 +345,12 @@ class ChartChannelsBody:
 
 
 @dataclass(frozen=True)
+class ChartSwingRuleBody:
+    swing: SwingChoice
+    rule: str
+
+
+@dataclass(frozen=True)
 class ChartRetracementBody:
     context: ChartContextBody
     timeframe: Timeframe
@@ -359,6 +365,10 @@ class ChartRetracementBody:
     ]
     message: str | None
     record: ChartAutoRecordBody
+    swing_rules: Annotated[
+        list[ChartSwingRuleBody],
+        Field(description="기준 스윙마다 어떤 두 점을 고르는지(서버 문장)."),
+    ]
 
 
 @dataclass(frozen=True)
@@ -728,6 +738,7 @@ def _retracement(view: RetracementView) -> ChartRetracementBody:
         created=view.created,
         message=view.message,
         record=_record_body(view.record),
+        swing_rules=[ChartSwingRuleBody(swing, rule) for swing, rule in view.swing_rules],
     )
 
 

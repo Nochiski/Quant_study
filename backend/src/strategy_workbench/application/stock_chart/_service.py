@@ -81,6 +81,7 @@ from strategy_workbench.application.stock_chart.ports.outgoing.chart_drawings im
 )
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_prices import (
     PRACTICE_CODE_PREFIX,
+    STOCK_GROUPS,
     ChartInstrument,
     ChartPricePort,
     InstrumentKind,
@@ -137,13 +138,14 @@ from strategy_workbench.domain.chart_analysis.facade.wording import (
     CONFLUENCE_CAUTION,
     ENDS_NEAR_EXTREME_WARNING,
     NO_SWING_MESSAGE,
-    REGIME_RULES,
     STARTS_NEAR_EXTREME_WARNING,
     ZONE_BASIS,
     anchor_issue_message,
     confluence_rules,
     pivot_rule,
+    regime_rules,
     regime_sentence,
+    swing_choice_rule,
     zone_rules,
 )
 
@@ -158,8 +160,8 @@ MAX_CHANNEL_CANDIDATES = 10
 MAX_MEMO_CHARS = 500
 # 묶은 계열 캐시의 칸 수(대상 × 주기 × 민감도). 넘치면 가장 오래 안 쓴 것부터 버린다.
 SERIES_CACHE_SIZE = 32
-# 이름 포함 검색의 같은 순위 안 순서: 지수 → 보통주 → 우선주 → ETF → 그 밖.
-_GROUP_ORDER = {"common": 0, "preferred": 1, "etf": 2}
+# 이름 포함 검색의 같은 순위 안 순서: 지수 → 포트 어휘 차례(보통주 → 우선주 → ETF) → 그 밖.
+_GROUP_ORDER = {group: rank for rank, group in enumerate(STOCK_GROUPS)}
 
 
 @dataclass(frozen=True, eq=False)
@@ -306,7 +308,7 @@ class StockChartService:
             structure_lows=_pivots(series, loaded.scale, judgement.structure_lows),
             sentence=regime_sentence(judgement),
             warnings=_warnings(judgement),
-            rules=REGIME_RULES,
+            rules=regime_rules(series.params),
             pivot_rule=pivot_rule(series.params),
         )
 
@@ -392,6 +394,7 @@ class StockChartService:
             created=None if pair is None else series.bar_date(retracement_created(pair)),
             message=NO_SWING_MESSAGE if pair is None else None,
             record=_record(view, replace(_auto_params(series.params), swing=choice)),
+            swing_rules=tuple((item, swing_choice_rule(item)) for item in SwingChoice),
         )
 
     def zones(
@@ -742,7 +745,7 @@ class StockChartService:
         as_of = self._prices.confirmed_session()
         if as_of is None:
             raise ChartRequestError(
-                "chart.series.no_completed_bars",
+                "chart.ledger.no_confirmed_session",
                 f"ledger has no confirmed session — kind={ref.kind.value} code={ref.code}",
             )
         history = self._prices.chart_history(ref, as_of)

@@ -16,7 +16,8 @@ export type AddOutcome = { saved: number; failed: number };
  * `record`를 그대로 싣는다(설계 문서 6장) — 화면은 가격·기록을 다시 만들지 않는다. 수평 구간은 고른 띠마다 한 선이다.
  *
  * 묶음 중 일부만 저장됐으면 결과(`lastOutcome`)로 알리고, 다시 누르면 같은 묶음을 다시 보낸다 — 이미 저장된 띠는
- * 서버가 같은 기준점의 자동 선을 새로 만들지 않고 돌려주므로(`create_line`) 저장 안 된 것만 새로 생긴다. 겹친 누르기는
+ * 서버가 저장 내용(기준점·레벨·연장·메모·잠금·자동 기록)이 모두 같은 자동 선을 새로 만들지 않고 돌려주므로
+ * (`create_line`) 저장 안 된 것만 새로 생긴다. 겹친 누르기는
  * 부르는 순간 세우는 ref로 막는다(변이 상태는 다음 렌더에야 바뀐다).
  */
 export const useAddCandidates = (target: ChartTarget, timeframe: Timeframe) => {

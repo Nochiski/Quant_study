@@ -102,6 +102,8 @@ def _index() -> pa.Table:
             )
         )
         rows.append(("KOSPI", "건설", day, 90.0, 91.0, 89.0, 90.5))
+        # 원장에 행만 있고 값이 0인 지수(실원장 '코스피 (외국주포함)')
+        rows.append(("KOSPI", "코스피 (외국주포함)", day, 0.0, 0.0, 0.0, 0.0))
         rows.append(("KOSDAQ", "건설", day, 50.0, 51.0, 49.0, 50.5))
     return pa.table(
         {
@@ -172,7 +174,7 @@ def test_instruments_list_stocks_with_short_names_and_indices_per_market(
     # 상장지수상품은 원장 증권 종류(`etf`)를 어댑터가 호가표로 바꿔 넘긴다(위로는 enum)
     moved = items[InstrumentRef(InstrumentKind.STOCK, "000030")]
     assert (moved.group, moved.tick) == ("etf", TickTable.FUND)
-    # 같은 이름의 업종 지수는 시장 구분으로 갈린다
+    # 같은 이름의 업종 지수는 시장 구분으로 갈린다. 쓸 수 있는 봉이 하나도 없는 지수는 싣지 않는다
     indices = sorted(ref.code for ref in items if ref.kind is InstrumentKind.INDEX)
     assert indices == ["KOSDAQ:건설", "KOSPI:건설", "KOSPI:코스피"]
     assert items[KOSPI].group == "KOSPI"

@@ -76,7 +76,13 @@ export const CreateChannelPanel = ({ finder, target, timeframe, instrument }: Cr
         window={results.window}
         suggestions={shownRegime?.suggestions}
         onChange={(window) => dispatch({ type: "edit", input: { window } })}
-        note={tFill("chart.finder.channel.windowNote", { date: shownRegime?.context.as_of ?? "" })}
+        // 제안 칩은 모두 마지막 완성 봉에서 끝난다(주·월봉은 기준일이 진행 중 봉 안이다) — 응답의 칩
+        // 끝 날짜(그 봉의 시작일). 응답 전·거절이면 날짜 없이 안내한다
+        note={
+          shownRegime?.suggestions[0] === undefined
+            ? t("chart.finder.channel.windowNoteNoDate")
+            : tFill("chart.finder.channel.windowNote", { date: shownRegime.suggestions[0].end })
+        }
       />
       {(judged?.warnings ?? []).map((warning) => (
         <p key={warning} className="finder-warning">

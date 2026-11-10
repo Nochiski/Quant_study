@@ -1729,6 +1729,7 @@ export type ChartErrorDetail = {
    * Code
    */
   code:
+    | "chart.ledger.no_confirmed_session"
     | "chart.series.no_completed_bars"
     | "chart.window.incomplete"
     | "chart.window.outside_series"
@@ -2113,8 +2114,25 @@ export type ChartRetracementBody = {
   message: string | null;
   record: ChartAutoRecordBody;
   swing: SwingChoice;
+  /**
+   * Swing Rules
+   *
+   * 기준 스윙마다 어떤 두 점을 고르는지(서버 문장).
+   */
+  swing_rules: Array<ChartSwingRuleBody>;
   timeframe: Timeframe;
   window: ChartWindowBody;
+};
+
+/**
+ * ChartSwingRuleBody
+ */
+export type ChartSwingRuleBody = {
+  /**
+   * Rule
+   */
+  rule: string;
+  swing: SwingChoice;
 };
 
 /**
@@ -2166,6 +2184,8 @@ export type ChartWindowSuggestionBody = {
   default: boolean;
   /**
    * End
+   *
+   * 모든 칩이 같은 날 — 마지막 완성 봉의 시작일.
    */
   end: string;
   /**

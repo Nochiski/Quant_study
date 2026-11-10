@@ -1100,7 +1100,7 @@ def _record(
 
 def _check_record(source: LineSource, auto: AutoRecord | None) -> None:
     """자동 기록은 자동 선(`auto`·`auto_copied`)에만 있고 이 판의 알고리즘 기록이어야 한다. 기록의
-    내용(파라미터·구간·기준점)은 `_verified_record`가 같은 찾기를 다시 돌려 본다."""
+    내용(파라미터·구간, 자동 선은 기준점까지)은 `_verified_record`가 본다."""
     if (source is LineSource.MANUAL) != (auto is None):
         raise ChartRequestError(
             "chart.line.auto_record",

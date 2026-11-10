@@ -101,5 +101,5 @@ describe("useLineVisibility", () => {
     await new Promise((resolve) => setTimeout(resolve, 80));
 
     expect(result.current.failure).toBeNull();
-});
+  });
 });

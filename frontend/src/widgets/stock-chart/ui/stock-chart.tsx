@@ -482,9 +482,11 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
               confluenceCount={confluence.data?.groups.length ?? null}
               includeMine={includeMine}
               onRemove={(group, title) => {
-                if (!removal.removeLine(group, title)) return;
-                if (group.some((line) => line.line_id === drawing.state.selectedId))
+                // 자동 선은 수동 그리기의 고른 선일 수 있어(근거 패널에서 고름) 지우면 고르기를 푼다
+                const accepted = removal.removeLine(group, title);
+                if (accepted && group.some((line) => line.line_id === drawing.state.selectedId))
                   drawing.dispatch({ type: "select", lineId: null });
+                return accepted;
               }}
               removing={removal.removing}
               screenWindow={visibleWindow(visibleCompleted)}

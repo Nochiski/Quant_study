@@ -30,8 +30,8 @@ type AutoLinesPanelProps = {
   /** 보이는 선의 중첩 수(서버 응답, 아직 없으면 null)와 내 선 포함 여부. */
   confluenceCount: number | null;
   includeMine: boolean;
-  /** 지우기(묶음은 함께, 되돌리기 한 번에 함께 되살아난다). */
-  onRemove: (lines: readonly ChartLineBody[], title: string) => void;
+  /** 지우기(묶음은 함께, 되돌리기 한 번에 함께 되살아난다). 이미 지우는 중이면 false(수동 칸과 같은 계약). */
+  onRemove: (lines: readonly ChartLineBody[], title: string) => boolean;
   removing: boolean;
   /** 지금 화면에 보이는 완성 봉 구간 — 되돌림·수평 구간 생성 패널의 기본 분석 구간("기본값은 화면 기간"). */
   screenWindow: DateRange | null;

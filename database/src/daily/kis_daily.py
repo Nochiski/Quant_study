@@ -93,7 +93,6 @@ class CallOutcome:
     code: str
     rows: tuple[dict[str, object], ...]
     n_calls: int
-    odd: str | None = None         # 응답 형태 이상 신호(`backfill_kis.normalize`) — 행은 살렸지만 모양이 예상 밖
 
 
 @dataclass(frozen=True)
@@ -126,9 +125,8 @@ def window(today: dt.date, days: int = WINDOW_DAYS) -> tuple[str, str]:
 def call(url: str, tr: str, params: Mapping[str, str], out_key: str, label: str) -> CallOutcome:
     """KIS 콜 1회. 재시도·토큰 재발급·유량 백오프는 `backfill_kis` 규칙을 그대로 쓴다.
 
-    신용잔고(`fetch_credit`)와 순위 스냅숏(`daily.kis_rank`)이 같이 쓴다 — 규칙을 한 곳에 둔다.
     토큰 만료(EGW00121·EGW00123)는 캐시를 버리고 **1회** 재발급 후 재시도한다. 그래도
-    만료면 조용히 넘기지 않고 verdict='token' 으로 올린다(등급은 호출부가 정한다 — 신용잔고 rc 2 · 순위 rc 5).
+    만료면 조용히 넘기지 않고 verdict='token' 으로 올린다(호출부가 rc 2 로 만든다).
     `api.kis()` 가 콜당 0.3초를 쉬므로 별도 PACE 는 두지 않는다(실측 2.71콜/s).
     `label` 은 로그 줄에 붙이는 콜 식별자다(예: 'credit 005930 20260730~20260909').
     """
@@ -158,7 +156,7 @@ def call(url: str, tr: str, params: Mapping[str, str], out_key: str, label: str)
             if odd:
                 print(f"    ? 응답 형태 이상({odd}) — {label} rows={len(rows)}")
                 code = f"{code}/{odd}"
-            return CallOutcome("ok" if rows else "empty", code, tuple(rows), n_calls, odd)
+            return CallOutcome("ok" if rows else "empty", code, tuple(rows), n_calls)
         if verdict == "token":
             if token_retried:
                 return CallOutcome("token", code, (), n_calls)

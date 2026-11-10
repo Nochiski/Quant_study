@@ -30,7 +30,6 @@ from strategy_workbench.application.stock_chart.facade.ports import (
     AutoRecord,
     ChartHistory,
     ChartInstrument,
-    ChartLine,
     ChartLineContent,
     ChartLineNotFoundError,
     InstrumentKind,
@@ -59,6 +58,8 @@ from strategy_workbench.domain.chart_analysis.facade.regime import (
 )
 from strategy_workbench.domain.chart_analysis.facade.series import PivotKind
 
+from ._stock_chart_fakes import FakeDrawings, SeriesPrices
+
 STOCK = InstrumentRef(InstrumentKind.STOCK, "005930")
 UPTREND = InstrumentRef(InstrumentKind.STOCK, "000660")
 AS_OF = date(2025, 10, 30)
@@ -86,58 +87,36 @@ def _zigzag() -> list[float]:
     return closes
 
 
-class FakePrices:
+class FakePrices(SeriesPrices):
+    """손 픽스처 두 종목(직선 `STOCK`, 지그재그 `UPTREND`)과 검색용 대상 넷."""
+
     def __init__(self) -> None:
-        self.history = {
-            STOCK: ChartHistory(_bars([100.0 + i for i in range(len(SESSIONS))]), 143.0 / 2),
-            UPTREND: ChartHistory(_bars(_zigzag()), _zigzag()[-1]),
-        }
-
-    def confirmed_session(self) -> date | None:
-        return AS_OF
-
-    def chart_instruments(self) -> tuple[ChartInstrument, ...]:
-        return (
-            ChartInstrument(STOCK, "삼성전자", "common"),
-            ChartInstrument(UPTREND, "SK하이닉스", "common"),
-            ChartInstrument(
-                InstrumentRef(InstrumentKind.STOCK, "005935"), "삼성전자우", "preferred"
+        super().__init__(
+            (
+                ChartInstrument(STOCK, "삼성전자", "common"),
+                ChartInstrument(UPTREND, "SK하이닉스", "common"),
+                ChartInstrument(
+                    InstrumentRef(InstrumentKind.STOCK, "005935"), "삼성전자우", "preferred"
+                ),
+                ChartInstrument(
+                    InstrumentRef(InstrumentKind.STOCK, "035420"),
+                    "NAVER",
+                    "common",
+                    ("네이버보통주",),
+                ),
+                ChartInstrument(
+                    InstrumentRef(InstrumentKind.INDEX, "KOSPI:코스피 200"), "코스피 200"
+                ),
+                ChartInstrument(
+                    InstrumentRef(InstrumentKind.INDEX, "KOSPI:코스피"), "코스피", "KOSPI"
+                ),
             ),
-            ChartInstrument(
-                InstrumentRef(InstrumentKind.STOCK, "035420"), "NAVER", "common", ("네이버보통주",)
-            ),
-            ChartInstrument(InstrumentRef(InstrumentKind.INDEX, "KOSPI:코스피 200"), "코스피 200"),
-            ChartInstrument(InstrumentRef(InstrumentKind.INDEX, "KOSPI:코스피"), "코스피", "KOSPI"),
+            {
+                STOCK: ChartHistory(_bars([100.0 + i for i in range(len(SESSIONS))]), 143.0 / 2),
+                UPTREND: ChartHistory(_bars(_zigzag()), _zigzag()[-1]),
+            },
+            AS_OF,
         )
-
-    def chart_history(self, instrument: InstrumentRef, end: date) -> ChartHistory | None:
-        return self.history.get(instrument)
-
-
-class FakeDrawings:
-    def __init__(self) -> None:
-        self.lines: dict[str, ChartLine] = {}
-
-    def list_lines(self, instrument: InstrumentRef) -> tuple[ChartLine, ...]:
-        return tuple(line for line in self.lines.values() if line.instrument == instrument)
-
-    def get_line(self, line_id: str) -> ChartLine | None:
-        return self.lines.get(line_id)
-
-    def add_line(self, line: ChartLine) -> None:
-        self.lines[line.line_id] = line
-
-    def update_content(
-        self, line_id: str, content: ChartLineContent, updated_at: datetime
-    ) -> ChartLine:
-        if line_id not in self.lines:
-            raise ChartLineNotFoundError(line_id)
-        self.lines[line_id] = replace(self.lines[line_id], content=content, updated_at=updated_at)
-        return self.lines[line_id]
-
-    def delete_line(self, line_id: str) -> None:
-        if self.lines.pop(line_id, None) is None:
-            raise ChartLineNotFoundError(line_id)
 
 
 def _service(

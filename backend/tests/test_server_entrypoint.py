@@ -61,6 +61,12 @@ def test_http_runtime_owns_the_browser_origin_allowlist(monkeypatch) -> None:
     """
     monkeypatch.delenv(_http.ALLOWED_ORIGINS_ENV, raising=False)
     assert _http.runtime_allowed_origins() == _http.DEFAULT_ALLOWED_ORIGINS
+    # 기본값은 개발 서버를 어느 루프백 이름으로 열어도 받는다 — `uv run dev`는 vite를
+    # 127.0.0.1에 띄우고 그 주소를 알린다
+    assert set(_http.DEFAULT_ALLOWED_ORIGINS) == {
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    }
 
     monkeypatch.setenv(
         _http.ALLOWED_ORIGINS_ENV, " http://localhost:15173 , http://localhost:5173 "

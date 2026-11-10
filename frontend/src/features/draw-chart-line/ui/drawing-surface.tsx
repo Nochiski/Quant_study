@@ -1,6 +1,7 @@
 import { useEffect, useRef, type MouseEvent, type PointerEvent } from "react";
 
 import {
+  DRAG_THRESHOLD_PX,
   ChartLineShape,
   levelSegments,
   lineTone,
@@ -16,17 +17,28 @@ import {
   type Timeframe,
 } from "../../../entities/chart";
 import { useCommittedRef } from "../../../shared/lib/react";
-import { completedAnchors } from "../model/drawing";
 import { isDraggable } from "../model/line-edit";
-import type { ChartDrawing } from "../model/use-chart-drawing";
+import type { ChartDrawing, DragGrip } from "../model/use-chart-drawing";
 
 // 그리는 중인 미리보기 선의 라벨 주인 이름(저장 선 id와 겹치지 않는다)
 const DRAFT = "draft";
-// 누른 자리에서 이만큼(px) 넘게 움직여 놓으면 끌어서 그린 것이다 — 손떨림은 클릭으로 본다
-const DRAG_DRAW_PX = 4;
 
 /** 그림 칸 기준 포인터 자리와, 이번 움직임에서 마그넷을 반대로 쓰는가(Ctrl·⌘을 누르는 중). */
 type Pointer = { x: number; y: number; flipMagnet: boolean };
+
+/**
+ * 지금 누르고 있는 것(client 좌표의 누른 자리와 함께).
+ * - `draw`: 그리기 도구로 점을 찍었다. `continues`면 선이 아직 안 끝나 끌어 놓은 자리가 다음 점이다. 뒤따르는 click은
+ *   이 누르기의 끝이라 고르기 풀기로 보지 않는다 — 누르는 동안 저장이 끝나 선택 도구로 돌아와 있을 수 있다.
+ * - `grab`: 선 손잡이·수평선 몸통을 잡았다. 문턱(`DRAG_THRESHOLD_PX`)을 넘기 전에는 옮기지 않는다(`moved`) — 고르려고
+ *   누르다 떨린 손이 선을 옮겨 저장하지 않는다.
+ */
+type Press =
+  | { kind: "draw"; x: number; y: number; continues: boolean }
+  | { kind: "grab"; x: number; y: number; moved: boolean };
+
+const movedFrom = (press: Press, event: MouseEvent<SVGElement>) =>
+  Math.hypot(event.clientX - press.x, event.clientY - press.y) >= DRAG_THRESHOLD_PX;
 
 type DrawingSurfaceProps = {
   drawing: ChartDrawing;
@@ -63,8 +75,7 @@ export const DrawingSurface = ({
   const { state, dispatch, hover, drag, preview } = drawing;
   const frame = useRef<number | null>(null);
   const pending = useRef<Pointer | null>(null);
-  // 그리기 도구로 누른 자리(client 좌표)와 그 누르기가 선을 끝냈는가. 끌어서 놓으면 놓은 자리가 다음 점이다.
-  const press = useRef<{ x: number; y: number; finished: boolean } | null>(null);
+  const press = useRef<Press | null>(null);
   const { plot } = scale;
   // 기준점을 둘 수 있는 마지막 봉(진행 중 봉은 기준점이 될 수 없다 — 서버도 거절한다)
   const anchorLimit = Math.min(completedCount - 1, scale.last);
@@ -104,6 +115,11 @@ export const DrawingSurface = ({
   );
 
   const onPointerMove = (event: MouseEvent<SVGGElement>) => {
+    const pressed = press.current;
+    if (pressed?.kind === "grab" && !pressed.moved) {
+      if (!movedFrom(pressed, event)) return;
+      pressed.moved = true;
+    }
     pending.current = pointer(event);
     if (frame.current !== null) return;
     frame.current = requestAnimationFrame(() => {
@@ -115,35 +131,44 @@ export const DrawingSurface = ({
 
   // 그리기 도구는 누르는 순간 점을 찍는다 — 눌렀다 놓기(클릭)를 거듭해도, 누른 채 끌어 놓아도 같은 선이 된다.
   const onPointerDown = (event: PointerEvent<SVGGElement>) => {
+    press.current = null;
     if (state.tool === "select" || drag !== null || event.button !== 0) return;
     const point = pointAt(pointer(event));
     if (point === null) return;
+    const placed = drawing.place(point);
+    if (placed === "ignored") return;
     // 칸 밖에서 놓아도 놓기를 받는다
     event.currentTarget.setPointerCapture(event.pointerId);
-    press.current = { x: event.clientX, y: event.clientY, finished: completedAnchors(state, point) !== null };
-    drawing.place(point);
+    press.current = { kind: "draw", x: event.clientX, y: event.clientY, continues: placed === "added" };
+  };
+
+  // 선 손잡이·수평선 몸통 잡기. 차트 이동(pan)으로 번지지 않게 멈추고 포인터를 붙잡는다.
+  const grab = (event: PointerEvent<SVGElement>, line: ChartLineBody, grip: DragGrip) => {
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    press.current = { kind: "grab", x: event.clientX, y: event.clientY, moved: false };
+    drawing.startDrag(line, grip);
   };
 
   const onPointerUp = (event: PointerEvent<SVGGElement>) => {
+    const pressed = press.current;
     if (drag !== null) {
+      // 문턱을 넘지 않은 잡기는 옮긴 것이 없어 저장하지 않는다(endDrag가 같은 기준점이면 그냥 놓는다)
+      if (pressed?.kind === "grab") press.current = null;
       drawing.endDrag();
       return;
     }
-    const pressed = press.current;
-    press.current = null;
     // 끌었다 놓았다: 누른 점이 선을 끝내지 않았으면 놓은 자리가 다음 점이다(Esc로 그만둔 뒤면 찍은 점이 없다)
-    if (
-      pressed === null ||
-      pressed.finished ||
-      state.points.length === 0 ||
-      Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < DRAG_DRAW_PX
-    )
+    if (pressed?.kind !== "draw" || !pressed.continues || state.points.length === 0 || !movedFrom(pressed, event))
       return;
     const point = pointAt(pointer(event));
     if (point !== null) drawing.place(point);
   };
 
   const onClick = () => {
+    const pressed = press.current;
+    press.current = null;
+    if (pressed?.kind === "draw") return;
     if (drag === null && state.tool === "select") dispatch({ type: "select", lineId: null });
   };
 
@@ -186,7 +211,10 @@ export const DrawingSurface = ({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={drawing.abandonDrag}
+      onPointerCancel={() => {
+        press.current = null;
+        drawing.abandonDrag();
+      }}
       onLostPointerCapture={() => {
         // 놓기(pointerup)가 먼저 와서 저장 중이면 그대로 둔다 — 놓지 못하고 잃은 끌기만 되돌린다
         if (drag !== null && !drag.committing) drawing.abandonDrag();
@@ -218,11 +246,7 @@ export const DrawingSurface = ({
           // 수평선은 몸통 어디를 잡아도 가격을 옮긴다 — 기준점 손잡이는 선의 왼쪽 끝이라 화면 밖일 수 있다
           onGrab={
             state.tool === "select" && line.kind === "hline" && isDraggable(line, timeframe)
-              ? (event) => {
-                  event.stopPropagation();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  drawing.startDrag(line, "body");
-                }
+              ? (event) => grab(event, line, "body")
               : undefined
           }
           onHover={(over) =>
@@ -271,11 +295,7 @@ export const DrawingSurface = ({
                 cy={at.y}
                 r={6}
                 aria-hidden="true"
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  drawing.startDrag(selected, index);
-                }}
+                onPointerDown={(event) => grab(event, selected, index)}
                 onClick={(event) => event.stopPropagation()}
                 onDoubleClick={(event) => event.stopPropagation()}
               />

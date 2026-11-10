@@ -8,4 +8,5 @@ export { DrawingHint } from "./ui/drawing-hint";
 export { DrawingSurface } from "./ui/drawing-surface";
 export { DrawingToolbar } from "./ui/drawing-toolbar";
 export { MyLinesPanel } from "./ui/my-lines-panel";
+export { type DrawingTool } from "./model/drawing";
 export { useChartDrawing, type ChartDrawing } from "./model/use-chart-drawing";

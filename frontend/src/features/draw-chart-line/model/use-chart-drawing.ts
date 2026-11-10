@@ -1,7 +1,8 @@
-import { useLayoutEffect, useReducer, useRef, useState } from "react";
+import { useLayoutEffect, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import {
   lineTitle,
+  lineTone,
   useCreateChartLine,
   useUpdateChartLine,
   type ChartLineBody,
@@ -118,22 +119,47 @@ export const useChartDrawing = (
     }
   };
 
-  /** 차트를 눌렀다: 점을 더하고, 선이 끝나면 저장한다. */
-  const place = (point: ChartPointBody) => {
-    if (state.tool === "select" || create.isPending) return;
+  /**
+   * 차트를 눌렀다: 점을 더하고(`added`), 선이 끝나면 저장한다(`finished`). 선택 도구이거나 앞 선을 저장하는 중이면
+   * 받지 않는다(`ignored`).
+   */
+  const place = (point: ChartPointBody): "added" | "finished" | "ignored" => {
+    if (state.tool === "select" || create.isPending) return "ignored";
     const anchors = completedAnchors(state, point);
-    if (anchors === null) dispatch({ type: "addPoint", point });
-    else void save(state.tool, anchors);
+    if (anchors === null) {
+      dispatch({ type: "addPoint", point });
+      return "added";
+    }
+    void save(state.tool, anchors);
+    return "finished";
   };
 
   /** 저장 선 고치기. 요청은 한 줄로 차례대로 가고 본문은 차례가 왔을 때의 최신 선에서 만든다. */
   const edit = (line: ChartLineBody, patch: ChartLinePatch) =>
     settle(update.mutateAsync({ line, patch }));
 
-  /** 지운다. 받았으면(이미 지우는 중이 아니면) 그 선의 고르기를 풀고 true. */
-  const remove = (line: ChartLineBody): boolean => {
-    if (!onRemove([line], lineTitle(line, target.kind, timeframe))) return false;
-    if (state.selectedId === line.line_id) dispatch({ type: "select", lineId: null });
+  /**
+   * 지운다(선 하나, 또는 함께 지울 묶음 — 자동 수평 구간 한 벌). 받았으면(이미 지우는 중이 아니면) 고른 선이 그
+   * 안에 있을 때 고르기를 풀고 true.
+   */
+  const remove = (group: readonly ChartLineBody[], title: string): boolean => {
+    if (!onRemove(group, title)) return false;
+    if (group.some((line) => line.line_id === state.selectedId)) dispatch({ type: "select", lineId: null });
+    return true;
+  };
+
+  /**
+   * 차트(SVG)에 초점이 있을 때의 키: 고른 내 선을 Delete·Backspace로 지운다(트레이딩뷰 관례, 되돌리기는 Ctrl+Z).
+   * 차트 안의 다른 초점(판정 구간 손잡이)에서 올라온 키·수정키 조합·끄는 중은 받지 않는다. 처리했으면 true.
+   */
+  const chartKey = (event: ReactKeyboardEvent<SVGSVGElement>, lines: readonly ChartLineBody[]): boolean => {
+    if (event.key !== "Delete" && event.key !== "Backspace") return false;
+    if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || drag !== null)
+      return false;
+    const line = lines.find((item) => item.line_id === state.selectedId);
+    if (line === undefined || lineTone(line) !== "mine") return false;
+    event.preventDefault();
+    remove([line], lineTitle(line, target.kind, timeframe));
     return true;
   };
 
@@ -198,6 +224,7 @@ export const useChartDrawing = (
     save,
     edit,
     remove,
+    chartKey,
     startDrag,
     moveDrag,
     endDrag,

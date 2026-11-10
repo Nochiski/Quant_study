@@ -22,7 +22,7 @@ type ChartLineShapeProps = {
   onSelect?: () => void;
   /** 포인터가 누를 자리에 올라왔다(true)·떠났다(false). 오른쪽 축 배지가 고른 선이 없을 때 이 선을 보인다. */
   onHover?: (over: boolean) => void;
-  /** 누를 자리를 누르기 시작했다 — 선 몸통 끌기. 넘기면 누를 자리 커서가 위아래 끌기 모양이 된다. */
+  /** 누를 자리를 누르기 시작했다 — 선 몸통 끌기. 넘기면 누를 자리 커서가 잡기 모양이 된다. */
   onGrab?: (event: PointerEvent<SVGPathElement>) => void;
 };
 

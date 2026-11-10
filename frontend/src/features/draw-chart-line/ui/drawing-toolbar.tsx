@@ -35,11 +35,11 @@ const Icon = ({ d }: { d: string }) => (
  */
 export const DrawingToolbar = ({
   drawing,
-  onDrawTool,
+  onPick,
 }: {
   drawing: ChartDrawing;
-  /** 그리기 도구(선택 말고)를 골랐다 — 위젯이 자동 찾기 중이면 수동 그리기로 넘긴다. */
-  onDrawTool: () => void;
+  /** 도구를 골랐다. 도구 바꾸기와 분석 방식 전환(그리기 도구면 수동 그리기)은 위젯이 함께 한다. */
+  onPick: (tool: DrawingTool) => void;
 }) => {
   const { state, dispatch } = drawing;
   // Tab이 들어올 버튼(도구 넷 + 마그넷 = 다섯 칸의 순서). 처음엔 지금 도구다.
@@ -79,10 +79,7 @@ export const DrawingToolbar = ({
             aria-label={t(TOOL_LABELS[tool])}
             aria-pressed={state.tool === tool}
             tabIndex={tabStop === index ? 0 : -1}
-            onClick={() => {
-              if (tool !== "select") onDrawTool();
-              dispatch({ type: "pickTool", tool });
-            }}
+            onClick={() => onPick(tool)}
           >
             <Icon d={TOOL_ICONS[tool]} />
           </button>

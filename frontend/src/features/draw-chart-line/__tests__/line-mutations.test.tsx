@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -157,28 +157,59 @@ describe("line edits", () => {
     expect(bodies.map((body) => body.anchors)).toEqual([[{ bar_date: line("a").anchors[0].bar_date, price: 2_600 }]]);
   });
 
-  it("clears the selection only when the removal is accepted", () => {
+  it("clears the selection only when a removal holding the selected line is accepted", () => {
     const { wrapper } = setup([line("a")]);
     let accepting = false;
+    const { result } = renderHook(() => useChartDrawing(KOSPI, "week", () => accepting), { wrapper });
+    act(() => result.current.dispatch({ type: "select", lineId: "a" }));
+
+    // 앞 지우기가 나가 있어 받지 않았으면 고른 선을 그대로 둔다
+    act(() => void result.current.remove([line("a")], "수평선"));
+    expect(result.current.state.selectedId).toBe("a");
+
+    accepting = true;
+    // 고른 선이 없는 묶음을 지우면 고르기는 그대로다
+    act(() => void result.current.remove([line("b"), line("c")], "수평 구간"));
+    expect(result.current.state.selectedId).toBe("a");
+    act(() => void result.current.remove([line("b"), line("a")], "수평 구간"));
+    expect(result.current.state.selectedId).toBeNull();
+  });
+
+  it("removes the selected line of mine from a chart Delete key only when the chart itself has focus", () => {
+    const { wrapper } = setup([line("a")]);
     const removed: string[] = [];
     const { result } = renderHook(
       () =>
         useChartDrawing(KOSPI, "week", (lines, title) => {
           removed.push(`${lines.map((item) => item.line_id).join(",")}:${title}`);
-          return accepting;
+          return true;
         }),
       { wrapper },
     );
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const slider = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    const key = (values: Partial<KeyboardEvent<SVGSVGElement>>) =>
+      ({ key: "Delete", target: svg, currentTarget: svg, preventDefault: () => undefined, ...values }) as
+        KeyboardEvent<SVGSVGElement>;
+    const auto = line("z", { source: "auto" });
     act(() => result.current.dispatch({ type: "select", lineId: "a" }));
 
-    // 앞 지우기가 나가 있어 받지 않았으면 고른 선을 그대로 둔다
-    act(() => void result.current.remove(line("a")));
-    expect(result.current.state.selectedId).toBe("a");
+    // 차트 안의 다른 초점(판정 구간 손잡이)·수정키 조합·다른 키는 받지 않는다
+    expect(result.current.chartKey(key({ target: slider }), [line("a")])).toBe(false);
+    expect(result.current.chartKey(key({ ctrlKey: true }), [line("a")])).toBe(false);
+    expect(result.current.chartKey(key({ key: "ArrowLeft" }), [line("a")])).toBe(false);
+    expect(removed).toEqual([]);
 
-    accepting = true;
-    act(() => void result.current.remove(line("a")));
+    let handled = false;
+    act(() => {
+      handled = result.current.chartKey(key({ key: "Backspace" }), [line("a")]);
+    });
+    expect(handled).toBe(true);
+    expect(removed).toEqual([expect.stringMatching(/^a:수평선 /u)]);
     expect(result.current.state.selectedId).toBeNull();
-    expect(removed).toHaveLength(2);
-    expect(removed[0]).toMatch(/^a:수평선 /u);
+
+    // 자동 선은 묶음 단위로 자동 후보 칸에서 지운다
+    act(() => result.current.dispatch({ type: "select", lineId: "z" }));
+    expect(result.current.chartKey(key({}), [auto])).toBe(false);
   });
 });

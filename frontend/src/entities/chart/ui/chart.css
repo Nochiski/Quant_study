@@ -195,5 +195,5 @@
 }
 
 .chart-line__hit--grab {
-  cursor: ns-resize;
+  cursor: grab;
 }

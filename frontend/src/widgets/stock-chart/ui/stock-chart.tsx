@@ -35,6 +35,7 @@ import {
   DrawingToolbar,
   MyLinesPanel,
   useChartDrawing,
+  type DrawingTool,
 } from "../../../features/draw-chart-line";
 import { UndoNotice, useLineRemoval } from "../../../features/remove-chart-line";
 import {
@@ -262,11 +263,15 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
       if (selected !== undefined && lineTone(selected) !== "mine") drawing.dispatch({ type: "select", lineId: null });
     }
   };
+  // 그리기 도구를 고르면(자동 찾기 중이어도) 수동 그리기로 넘어간다 — 도구 막대는 두 방식 모두 보인다
+  const pickTool = (tool: DrawingTool) => {
+    if (tool !== "select" && mode === "auto") changeMode("manual");
+    drawing.dispatch({ type: "pickTool", tool });
+  };
   const creating = panel.view === "create";
   // 포인터를 올린 선은 선택 도구일 때만 본다(그리기 도구로 바꾸면 선의 누를 자리가 사라져 떠남이 오지 않는다)
-  const selectedLine = shownLines.find((line) => line.line_id === drawing.state.selectedId);
   const badgeLine =
-    selectedLine ??
+    shownLines.find((line) => line.line_id === drawing.state.selectedId) ??
     (drawing.state.tool === "select"
       ? shownLines.find((line) => line.line_id === drawing.hoverLineId)
       : undefined);
@@ -297,14 +302,9 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
           </p>
         ) : null}
         <div className="stock-chart__frame">
-          {/* 도구 막대는 두 방식 모두 보인다(트레이딩뷰처럼 늘 왼쪽) — 자동 찾기 중에 그리기 도구를 고르면 수동 그리기로 넘어간다 */}
+          {/* 도구 막대는 두 방식 모두 늘 왼쪽에 있다(트레이딩뷰 관례) */}
           <div className="stock-chart__tools">
-            <DrawingToolbar
-              drawing={drawing}
-              onDrawTool={() => {
-                if (mode === "auto") changeMode("manual");
-              }}
-            />
+            <DrawingToolbar drawing={drawing} onPick={pickTool} />
           </div>
           <div className="stock-chart__plot" ref={box}>
             {candlesQuery.isPending ? (
@@ -340,18 +340,9 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                 // 키보드 줌·이동(+/−·←/→·Home)을 받는 Tab 정지
                 tabIndex={0}
                 {...navigation.svgProps}
+                // 고른 선 지우기 키가 먼저고, 아니면 줌·이동 키다
                 onKeyDown={(event) => {
-                  // 차트에서 고른 내 선은 Delete·Backspace로 지운다(트레이딩뷰 관례, Ctrl+Z로 되돌린다)
-                  if (
-                    (event.key === "Delete" || event.key === "Backspace") &&
-                    selectedLine !== undefined &&
-                    lineTone(selectedLine) === "mine"
-                  ) {
-                    event.preventDefault();
-                    drawing.remove(selectedLine);
-                    return;
-                  }
-                  navigation.svgProps.onKeyDown(event);
+                  if (!drawing.chartKey(event, shownLines)) navigation.svgProps.onKeyDown(event);
                 }}
               >
                 <defs>
@@ -503,13 +494,8 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
               manual={mode === "manual"}
               confluenceCount={confluence.data?.groups.length ?? null}
               includeMine={includeMine}
-              onRemove={(group, title) => {
-                // 자동 선은 수동 그리기의 고른 선일 수 있어(근거 패널에서 고름) 지우면 고르기를 푼다
-                const accepted = removal.removeLine(group, title);
-                if (accepted && group.some((line) => line.line_id === drawing.state.selectedId))
-                  drawing.dispatch({ type: "select", lineId: null });
-                return accepted;
-              }}
+              // 자동 선도 고른 선일 수 있어(근거 패널·차트에서 고름) 지우면 고르기를 푸는 같은 경로로 지운다
+              onRemove={drawing.remove}
               removing={removal.removing}
               screenWindow={visibleWindow(visibleCompleted)}
             />

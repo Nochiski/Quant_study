@@ -85,12 +85,12 @@
   fill: var(--text);
 }
 
-/* 십자선 축 라벨(그리기 도구) — 오른쪽 축 배지의 잉크 배지와 같은 모양 */
-.drawing-cursor-labels rect {
+/* 십자선 날짜 라벨(그리기 도구) — 가격 라벨은 오른쪽 축의 내 선 배지(AxisBadges)를 그대로 쓴다 */
+.drawing-cursor-labels > rect {
   fill: var(--text);
 }
 
-.drawing-cursor-labels text {
+.drawing-cursor-labels > text {
   fill: var(--surface-panel);
   font-family: var(--font-mono);
   font-size: var(--text-size-small);

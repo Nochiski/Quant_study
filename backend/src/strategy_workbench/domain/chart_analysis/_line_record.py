@@ -49,7 +49,8 @@ class LineSource(Enum):
 
 
 class WindowSource(Enum):
-    """판정 구간의 출처. 자동 제안 칩 길이 그대로면 preset, 테두리를 끌거나 날짜를 고치면 user다."""
+    """판정 구간의 출처. 자동 제안 칩 길이 그대로(마지막 완성 봉에서 끝남)면 preset, 그 밖은 모두
+    user다 — 테두리를 끌거나 날짜를 고친 구간도, 패널이 처음 채운 화면 기간도 제안 구간이 아니다."""
 
     PRESET = "preset"
     USER = "user"

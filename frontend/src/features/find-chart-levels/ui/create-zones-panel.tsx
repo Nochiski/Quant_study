@@ -9,7 +9,6 @@ import {
   type Timeframe,
 } from "../../../entities/chart";
 import { t, tFill } from "../../../shared/config";
-import { serverParam } from "../model/line-evidence";
 import { useAddCandidates } from "../model/use-add-candidates";
 import type { LevelFinder } from "../model/use-level-finder";
 import { CreateFooter, FinderFailure, ParamField, RefreshingNote, WindowFields } from "./finder-fields";
@@ -39,7 +38,7 @@ export const CreateZonesPanel = ({ finder, target, timeframe, instrument }: Crea
   const close = () => dispatch({ type: "close" });
   const found = results.zones.data;
   const record = found?.record;
-  const width = draft.widthAtr ?? serverParam(record?.params, "width_atr");
+  const width = draft.widthAtr ?? record?.params?.width_atr ?? null;
   const widths =
     width === null || WIDTH_CHOICES.includes(width) ? WIDTH_CHOICES : [...WIDTH_CHOICES, width].sort((a, b) => a - b);
   const price = (value: number) => formatPrice(value, instrument.kind);
@@ -91,14 +90,14 @@ export const CreateZonesPanel = ({ finder, target, timeframe, instrument }: Crea
           <ParamField
             label={t("chart.finder.params.candidate")}
             value={draft.candidateSensitivity}
-            serverValue={serverParam(record?.params, "candidate_sensitivity")}
+            serverValue={record?.params?.candidate_sensitivity ?? null}
             step={0.1}
             onCommit={(value) => dispatch({ type: "edit", input: { candidateSensitivity: value } })}
           />
           <ParamField
             label={t("chart.finder.zones.minTouches")}
             value={draft.minTouches}
-            serverValue={serverParam(record?.params, "min_touches")}
+            serverValue={record?.params?.min_touches ?? null}
             step={1}
             onCommit={(value) => dispatch({ type: "edit", input: { minTouches: value } })}
           />

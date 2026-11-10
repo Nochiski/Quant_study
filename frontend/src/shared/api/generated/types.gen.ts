@@ -1358,9 +1358,45 @@ export type CellVerdict =
   "recommended" | "peak" | "failed" | "unscored" | "scored";
 
 /**
+ * ChartAutoParamsBody
+ *
+ * 자동 기록의 파라미터(application `AutoParams`와 같은 칸). 피벗 민감도 둘은 모든 도구에
+ * 있고, 채널은 방향·첫 점, 되돌림은 기준 스윙, 수평 구간은 묶는 폭·최소 접촉을 쓴다. 칸이
+ * 빠지거나 다른 도구의 칸이 섞인 기록은 저장할 때 `chart.line.auto_record`로, 모르는 칸은
+ * `chart.request_invalid`로 거절된다.
+ */
+export type ChartAutoParamsBody = {
+  /**
+   * Candidate Sensitivity
+   */
+  candidate_sensitivity?: number | null;
+  direction?: TrendDirection | null;
+  /**
+   * First Anchor
+   */
+  first_anchor?: string | null;
+  /**
+   * Min Touches
+   */
+  min_touches?: number | null;
+  /**
+   * Structure Sensitivity
+   */
+  structure_sensitivity?: number | null;
+  swing?: SwingChoice | null;
+  /**
+   * Width Atr
+   */
+  width_atr?: number | null;
+};
+
+/**
  * ChartAutoRecordBody
  *
- * 자동 선의 기록. 후보 응답의 `record`를 선 저장 요청에 그대로 싣는다.
+ * 자동 선의 기록. 후보 응답의 `record`를 선 저장 요청에 그대로 싣는다. 판정·방향 출처는
+ * 저장할 때 서버가 다시 계산한다(요청 값은 쓰지 않는다). 구간 출처는 판정 구간이 지금 마지막
+ * 완성 봉에서 끝나면 서버가 정하고, 앞서 끝나면 요청 값을 따르되 preset은 그 끝에서 잰 제안
+ * 칩 구간일 때만 받는다.
  */
 export type ChartAutoRecordBody = {
   /**
@@ -1369,11 +1405,9 @@ export type ChartAutoRecordBody = {
   algorithm_version: string;
   chosen_by?: ChosenBy | null;
   /**
-   * Params
+   * 이 판의 형식으로 읽히지 않는 저장 기록이면 null(조건을 알 수 없다).
    */
-  params: {
-    [key: string]: string | number | number | boolean | null;
-  };
+  params: ChartAutoParamsBody | null;
   regime?: ChartRegimeRecordBody | null;
   /**
    * Regime Window End
@@ -10823,7 +10857,8 @@ export type WindowSelectionRule =
 /**
  * WindowSource
  *
- * 판정 구간의 출처. 자동 제안 칩 길이 그대로면 preset, 테두리를 끌거나 날짜를 고치면 user다.
+ * 판정 구간의 출처. 자동 제안 칩 길이 그대로(마지막 완성 봉에서 끝남)면 preset, 그 밖은 모두
+ * user다 — 테두리를 끌거나 날짜를 고친 구간도, 패널이 처음 채운 화면 기간도 제안 구간이 아니다.
  */
 export type WindowSource = "preset" | "user";
 

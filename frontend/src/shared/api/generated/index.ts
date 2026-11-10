@@ -210,6 +210,7 @@ export type {
   CellKind,
   CellPlateau,
   CellVerdict,
+  ChartAutoParamsBody,
   ChartAutoRecordBody,
   ChartCandleBody,
   ChartCandlesBody,

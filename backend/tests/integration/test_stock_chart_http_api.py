@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import date
 from pathlib import Path
 from typing import Any, Protocol
@@ -299,6 +300,94 @@ def test_preview_returns_the_drawing_without_saving(tmp_path: Path) -> None:
         422,
         "chart.line.anchor_in_progress",
     )
+
+
+def test_re_adding_auto_zones_after_a_sqlite_round_trip_keeps_one_line_each(tmp_path: Path) -> None:
+    # 묶음 추가를 부분 실패 뒤 다시 보낸다 — 저장소(SQLite)에서 읽어 온 선과 같은 본문이면 합친다.
+    # 두 번째 요청은 저장 응답의 화면 기준점(÷k·×k 왕복을 거친 값)을 그대로 싣는다
+    db = tmp_path / "research.sqlite3"
+    client = TestClient(build_http_app(research_db_path=db))
+    zones = _strict(
+        client.get(f"{BASE}/zones", params={**SAMSUNG, "timeframe": "day", "min_touches": "1"})
+    )
+    assert zones["zones"], "practice series has no zones to save"
+
+    def save(anchors: list[dict[str, object]]) -> tuple[list[dict[str, object]], str]:
+        response = client.post(
+            f"{BASE}/lines",
+            json={
+                "instrument_kind": "stock",
+                "instrument_code": "practice:005930",
+                "timeframe": "day",
+                "kind": "hline",
+                "source": "auto",
+                "anchors": anchors,
+                "auto": zones["record"],
+            },
+        )
+        assert response.status_code == 201, response.text
+        body = _strict(response)
+        return body["anchors"], body["line_id"]
+
+    first = [save(zone["drawing"]["anchors"]) for zone in zones["zones"]]
+    # 앱을 새로 띄워 저장소에서 다시 읽은 뒤 같은 묶음을 다시 보낸다
+    client = TestClient(build_http_app(research_db_path=db))
+    again = [save(anchors) for anchors, _ in first]
+    assert [line_id for _, line_id in again] == [line_id for _, line_id in first]
+    listed = _strict(client.get(f"{BASE}/lines", params=SAMSUNG))["lines"]
+    assert len(listed) == len(zones["zones"])
+
+
+def test_auto_params_wire_fields_are_the_application_record_keys() -> None:
+    # HTTP 칸 이름이 저장 기록 키(`AutoParams` 필드 = `to_params` 키)와 갈라지면 저장이 조용히
+    # 칸을 잃는다 — 둘을 묶어 둔다
+    from dataclasses import fields
+
+    from strategy_workbench.adapters.inbound.http_api._chart_routes import ChartAutoParamsBody
+    from strategy_workbench.application.stock_chart.facade.chart import AutoParams
+    from strategy_workbench.domain.chart_analysis.facade.levels import SwingChoice, TrendDirection
+
+    names = [f.name for f in fields(AutoParams)]
+    assert [f.name for f in fields(ChartAutoParamsBody)] == names
+    every = AutoParams(
+        1.0, 2.0, TrendDirection.UP, date(2025, 1, 2), SwingChoice.LATEST_MAJOR, 0.5, 2
+    )
+    assert list(every.to_params()) == names
+
+
+def test_unknown_auto_params_are_rejected_and_unreadable_saved_records_read_as_null(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "research.sqlite3"
+    client = TestClient(build_http_app(research_db_path=db))
+    zones = _strict(
+        client.get(f"{BASE}/zones", params={**SAMSUNG, "timeframe": "day", "min_touches": "1"})
+    )
+    body = {
+        "instrument_kind": "stock",
+        "instrument_code": "practice:005930",
+        "timeframe": "day",
+        "kind": "hline",
+        "source": "auto",
+        "anchors": zones["zones"][0]["drawing"]["anchors"],
+    }
+    record = zones["record"]
+    unknown = {**record, "params": {**record["params"], "anything": "x"}}
+    rejected = client.post(f"{BASE}/lines", json={**body, "auto": unknown})
+    assert (rejected.status_code, rejected.json()["detail"]["code"]) == (
+        422,
+        "chart.request_invalid",
+    )
+    saved = _strict(client.post(f"{BASE}/lines", json={**body, "auto": record}))
+    assert saved["auto"]["params"] == record["params"]
+    # 이 판의 형식으로 읽히지 않는 옛 저장 행은 조건을 지어내지 않고 null로 보인다
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "UPDATE chart_drawing SET params_json = ? WHERE line_id = ?",
+            ('{"candidate_sensitivity": 1.0}', saved["line_id"]),
+        )
+    (listed,) = _strict(client.get(f"{BASE}/lines", params=SAMSUNG))["lines"]
+    assert listed["auto"]["params"] is None
 
 
 def test_real_data_candles_show_actual_prices(tmp_path: Path) -> None:

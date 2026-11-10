@@ -158,7 +158,7 @@ const CHANNEL_RECORD = {
   params: {
     candidate_sensitivity: 1,
     structure_sensitivity: 2,
-    direction: "down",
+    direction: "down" as const,
     first_anchor: "2025-02-24",
   },
   regime_window_start: "2024-10-28",
@@ -226,7 +226,7 @@ describe("line evidence", () => {
       window: { start: "2024-10-28", end: "2025-10-20" },
       candidateSensitivity: 1,
       structureSensitivity: 2,
-      direction: "down",
+      direction: "down" as const,
       firstAnchor: "2025-02-24",
       levels: null,
       extendRight: true,

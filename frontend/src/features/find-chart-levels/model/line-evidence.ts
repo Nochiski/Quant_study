@@ -3,7 +3,6 @@ import {
   trendDirectionLabel,
   type ChartAutoRecordBody,
   type ChartLineBody,
-  type SwingChoice,
   type Timeframe,
   type TrendDirection,
 } from "../../../entities/chart";
@@ -13,7 +12,7 @@ import type { DirectionChoice, FinderDraft } from "./finder-panel";
 /**
  * 저장한 자동 선(자동 후보 칸의 한 줄 — 채널·되돌림은 선 하나, 수평 구간은 함께 만든 띠 묶음) → 근거 패널·후보 칸 표시
  * 모델. 가격·레벨 가격·생긴 날은 응답 값 그대로이고(설계 문서 6장), 여기서는 줄을 고르고 이름을 붙이고 현재가 대비
- * 비율만 센다. 자동 기록(`auto.params`)의 칸 이름은 backend `AutoParams.to_params`가 정한 wire 계약이다.
+ * 비율만 센다. 자동 기록(`auto.params`)은 서버 스키마(`ChartAutoParamsBody`)의 칸을 그대로 읽는다.
  */
 
 export type EvidenceAnchor = { role: MessageKey; barDate: string; price: number };
@@ -39,20 +38,6 @@ export type LineEvidence = {
   params: EvidenceParam[];
 };
 
-const DIRECTIONS: readonly TrendDirection[] = ["up", "down"];
-const SWINGS: readonly SwingChoice[] = ["range_extremes", "latest_major", "latest_confirmed"];
-
-const stringParam = <T extends string>(record: ChartAutoRecordBody | null, key: string, allowed: readonly T[]) => {
-  const value = record?.params[key];
-  return allowed.find((item) => item === value) ?? null;
-};
-
-/** 자동 기록 `params`의 숫자 칸 하나(서버가 쓴 값). 없거나 숫자가 아니면 null. */
-export const serverParam = (params: ChartAutoRecordBody["params"] | undefined, key: string): number | null => {
-  const value = params?.[key];
-  return typeof value === "number" ? value : null;
-};
-
 /** 현재가 대비 비율(%). 현재가가 없거나 0 이하면 null. */
 export const changeFromCurrent = (price: number, current: number | null): number | null =>
   current === null || current <= 0 ? null : (price / current - 1) * 100;
@@ -68,7 +53,7 @@ export const zoneBounds = (line: Pick<ChartLineBody, "anchors">): { low: number;
 };
 
 const channelDirection = (line: ChartLineBody): TrendDirection | null =>
-  line.kind === "fib_channel" ? stringParam(line.auto ?? null, "direction", DIRECTIONS) : null;
+  line.kind === "fib_channel" ? (line.auto?.params?.direction ?? null) : null;
 
 /**
  * 자동 후보 한 줄(근거 패널 제목 포함)의 이름: 수평 구간 "· N곳", 채널은 방향, 되돌림은 종류. 다른 주기로 만든 줄이면
@@ -138,18 +123,17 @@ export const recreateSeed = (line: ChartLineBody): Partial<FinderDraft> => {
   const record = line.auto ?? null;
   const start = record?.regime_window_start ?? null;
   const end = record?.regime_window_end ?? null;
-  const direction = stringParam(record, "direction", DIRECTIONS);
-  const firstAnchor = record?.params.first_anchor;
+  const params = record?.params;
   return {
     window: start !== null && end !== null ? { start, end } : null,
-    candidateSensitivity: serverParam(record?.params, "candidate_sensitivity"),
-    structureSensitivity: serverParam(record?.params, "structure_sensitivity"),
-    direction: (direction ?? "recommended") satisfies DirectionChoice,
-    firstAnchor: typeof firstAnchor === "string" ? firstAnchor : null,
-    swing: stringParam(record, "swing", SWINGS) ?? "range_extremes",
+    candidateSensitivity: params?.candidate_sensitivity ?? null,
+    structureSensitivity: params?.structure_sensitivity ?? null,
+    direction: (params?.direction ?? "recommended") satisfies DirectionChoice,
+    firstAnchor: params?.first_anchor ?? null,
+    swing: params?.swing ?? "range_extremes",
     levels: line.levels,
     extendRight: line.extend_right,
-    widthAtr: serverParam(record?.params, "width_atr"),
-    minTouches: serverParam(record?.params, "min_touches"),
+    widthAtr: params?.width_atr ?? null,
+    minTouches: params?.min_touches ?? null,
   };
 };

@@ -35,6 +35,7 @@ from strategy_workbench.application.stock_chart.facade.ports import (
     ChartLineNotFoundError,
     InstrumentKind,
     InstrumentRef,
+    LineAnchor,
     RegimeRecord,
 )
 from strategy_workbench.domain.chart_analysis.facade.bars import PriceBar, Timeframe
@@ -394,7 +395,8 @@ def test_lines_that_cannot_be_drawn_are_rejected(draft: ChartLineDraft, code: st
 
 
 def test_confluence_reads_visible_saved_lines_and_inline_candidates() -> None:
-    service = _service()
+    drawings = FakeDrawings()
+    service = _service(drawings)
     shown = service.create_line(_hline(60.0)).line.line_id
     # 숨긴 선은 되돌림 레벨 0.236(= 70 − 20·0.236 = 65.28)과 겹쳐도 넣지 않는다
     service.create_line(_hline(65.28, visible=False))
@@ -420,32 +422,37 @@ def test_confluence_reads_visible_saved_lines_and_inline_candidates() -> None:
     assert service.confluence(STOCK, (replace(candidate, ref=shown),)).groups == ()
     # 내 선을 빼면(include_mine=False) 손으로 그은 수평선이 빠져 되돌림 혼자라 중첩이 없다
     assert service.confluence(STOCK, (candidate,), include_mine=False).groups == ()
-    # 저장한 자동 선은 내 선을 빼도 남는다 — 같은 60의 자동 띠는 되돌림 0.5와 계속 겹친다
-    band = service.create_line(
+    # 저장한 자동 선은 내 선을 빼도 남는다 — 같은 60의 자동 띠는 되돌림 0.5와 계속 겹친다.
+    # 띠는 저장소에 바로 넣는다(저장 경로의 기록 검사는 따로 본다). 저장 가격 = 화면 ÷ k(0.5)
+    shown_line = drawings.lines[shown]
+    drawings.add_line(
         replace(
-            _hline(59.9),
+            shown_line,
+            line_id="band",
             source=LineSource.AUTO,
-            edit=LineEdit((ChartPoint(date(2025, 9, 3), 59.9), ChartPoint(date(2025, 9, 3), 60.1))),
-            auto=AutoRecord(ALGORITHM_VERSION, {"candidate_sensitivity": 1.0}),
+            content=ChartLineContent(
+                (LineAnchor(date(2025, 9, 3), 119.8), LineAnchor(date(2025, 9, 3), 120.2))
+            ),
+            auto=AutoRecord(ALGORITHM_VERSION, {}),
         )
-    ).line.line_id
+    )
     (kept,) = service.confluence(STOCK, (candidate,), include_mine=False).groups
-    assert sorted(m.ref for m in kept.members) == sorted(["auto-1", band])
+    assert sorted(m.ref for m in kept.members) == sorted(["auto-1", "band"])
 
 
 def test_saving_the_same_auto_line_again_returns_the_saved_one() -> None:
     # 묶음 추가를 부분 실패 뒤 다시 보내도 저장 내용이 완전히 같은 자동 선은 두 줄 생기지 않는다
     drawings = FakeDrawings()
     service = _service(drawings)
-    day = date(2025, 9, 3)
-    record = AutoRecord(ALGORITHM_VERSION, {"candidate_sensitivity": 1.0})
+    swing = service.retracement(UPTREND, Timeframe.DAY, SwingChoice.LATEST_CONFIRMED)
+    assert swing.drawing is not None
     retracement = ChartLineDraft(
-        STOCK,
+        UPTREND,
         Timeframe.DAY,
         LineKind.FIB_RETRACEMENT,
         LineSource.AUTO,
-        LineEdit((ChartPoint(day, 50.0), ChartPoint(date(2025, 10, 1), 70.0))),
-        record,
+        LineEdit(swing.drawing.anchors),
+        swing.record,
     )
     first = service.create_line(retracement).line.line_id
     assert service.create_line(retracement).line.line_id == first
@@ -456,38 +463,46 @@ def test_saving_the_same_auto_line_again_returns_the_saved_one() -> None:
     shown = service.create_line(retracement).line
     assert (shown.line_id, shown.content.visible) == (first, True)
     assert len(drawings.lines) == 1
-    # 레벨만·연장만·파라미터만 다르면 새 선이다(옛 선을 고치지 않는다)
+    # 화면 ↔ 저장 왕복으로 가격 마지막 자리가 다른 본문도 같은 선이다
+    nudged = LineEdit(
+        tuple(replace(a, price=math.nextafter(a.price, math.inf)) for a in retracement.edit.anchors)
+    )
+    assert service.create_line(replace(retracement, edit=nudged)).line.line_id == first
+    assert len(drawings.lines) == 1
+    # 레벨만·연장만·파라미터만 다르면 새 선이다(옛 선을 고치지 않는다).
+    # 민감도를 바꿔도 기준점은 같다
+    loose = service.retracement(
+        UPTREND, Timeframe.DAY, SwingChoice.LATEST_CONFIRMED, swing=SwingSettings(1.5)
+    )
+    assert loose.drawing is not None and loose.drawing.anchors == swing.drawing.anchors
     different = (
         replace(retracement, edit=replace(retracement.edit, levels=(0.0, 0.5, 1.0))),
         replace(retracement, edit=replace(retracement.edit, extend_right=False)),
-        replace(retracement, auto=AutoRecord(ALGORITHM_VERSION, {"candidate_sensitivity": 1.5})),
+        replace(retracement, auto=loose.record),
     )
     for draft in different:
         made = service.create_line(draft).line
         assert made.line_id != first
+        # 서버가 다시 만든 기록은 후보 응답의 기록과 같다
         assert (made.content.levels, made.content.extend_right, made.auto) == (
             draft.edit.levels,
             draft.edit.extend_right,
             draft.auto,
         )
-    assert service.lines(STOCK).lines[0].line.content.levels is None
+    assert service.lines(UPTREND).lines[0].line.content.levels is None
     assert len(drawings.lines) == 4
-    # 주기가 다르거나 출처가 다르면 합치지 않는다
-    service.create_line(
-        replace(
-            retracement,
-            timeframe=Timeframe.WEEK,
-            edit=LineEdit(
-                (ChartPoint(date(2025, 9, 1), 50.0), ChartPoint(date(2025, 9, 29), 70.0))
-            ),
-        )
-    )
+    # 출처가 다르면(복사본) 합치지 않는다
     service.create_line(replace(retracement, source=LineSource.AUTO_COPIED))
-    assert len(drawings.lines) == 6
+    assert len(drawings.lines) == 5
+    # 주기가 다른 같은 내용의 선과도 합치지 않는다
+    weekly_only = FakeDrawings()
+    weekly_only.add_line(replace(drawings.lines[first], line_id="weekly", timeframe=Timeframe.WEEK))
+    made = _service(weekly_only).create_line(retracement).line
+    assert made.line_id != "weekly" and len(weekly_only.lines) == 2
     # 손으로 그은 선은 같은 자리여도 새 선이다
     service.create_line(_hline(60.0))
     service.create_line(_hline(60.0))
-    assert len(drawings.lines) == 8
+    assert len(drawings.lines) == 7
 
 
 def test_search_ranks_index_name_then_ticker_then_exact_name_then_contains() -> None:
@@ -571,7 +586,59 @@ def test_auto_lines_keep_their_anchors_and_report_when_they_formed() -> None:
         )
     )
     assert copy.created == swing.created
-    assert service.update_line(copy.line.line_id, LineEdit(moved)).created is None
+    moved_copy = service.update_line(copy.line.line_id, LineEdit(moved))
+    assert moved_copy.created is None
+    # 옮긴 복사본을 지우고 되돌리면(같은 내용으로 다시 만들기) 다시 저장된다 — 복사본은 후보를
+    # 대조하지 않는다
+    service.delete_line(copy.line.line_id)
+    restored = service.create_line(
+        ChartLineDraft(
+            UPTREND,
+            Timeframe.DAY,
+            LineKind.FIB_RETRACEMENT,
+            LineSource.AUTO_COPIED,
+            LineEdit(moved_copy.anchors),
+            moved_copy.line.auto,
+        )
+    )
+    assert (restored.line.content.anchors, restored.created) == (
+        moved_copy.line.content.anchors,
+        None,
+    )
+
+
+def test_a_preset_record_saved_after_the_ledger_moves_on_stays_preset() -> None:
+    # 어제 제안 칩 그대로 만든 기록을 오늘(완성 봉이 하나 는 뒤) 되살리거나 복사해도 그때의
+    # 출처를 지킨다. 칩 길이가 아닌 구간의 preset 주장은 받지 않는다
+    yesterday = FakePrices()
+    full = yesterday.history[UPTREND]
+    yesterday.history[UPTREND] = ChartHistory(full.bars[:-1], full.last_actual_close)
+    swing = _service(prices=yesterday).retracement(
+        UPTREND, Timeframe.DAY, SwingChoice.LATEST_CONFIRMED
+    )
+    assert swing.drawing is not None and swing.record.window_source is WindowSource.PRESET
+    anchors = swing.drawing.anchors
+    service = _service()
+
+    def save(record: AutoRecord) -> WindowSource | None:
+        line = service.create_line(
+            ChartLineDraft(
+                UPTREND,
+                Timeframe.DAY,
+                LineKind.FIB_RETRACEMENT,
+                LineSource.AUTO_COPIED,
+                LineEdit(anchors),
+                record,
+            )
+        ).line
+        assert line.auto is not None
+        return line.auto.window_source
+
+    assert save(swing.record) is WindowSource.PRESET
+    assert swing.record.regime_window is not None
+    start, end = swing.record.regime_window
+    shorter = replace(swing.record, regime_window=(SESSIONS[SESSIONS.index(start) + 1], end))
+    assert save(shorter) is WindowSource.USER
 
 
 def test_analysis_parameter_ranges_are_checked_by_the_domain() -> None:
@@ -727,32 +794,67 @@ def test_lines_of_the_other_mode_can_be_neither_edited_nor_deleted() -> None:
     assert drawings.lines[real_id].content.anchors[0].price == 120.0
 
 
-def test_auto_records_are_checked_against_the_current_version_and_tool() -> None:
+def test_auto_records_must_reproduce_the_line_and_the_server_rebuilds_the_verdicts() -> None:
     drawings = FakeDrawings()
     service = _service(drawings)
     swing = service.retracement(UPTREND, Timeframe.DAY, SwingChoice.LATEST_CONFIRMED)
     assert swing.drawing is not None
+    anchors = swing.drawing.anchors
     draft = ChartLineDraft(
         UPTREND,
         Timeframe.DAY,
         LineKind.FIB_RETRACEMENT,
         LineSource.AUTO,
-        LineEdit(swing.drawing.anchors),
+        LineEdit(anchors),
         swing.record,
     )
+    params = dict(swing.record.params)
     rejected = (
         # 다른 알고리즘 버전의 기록은 지금 규칙의 결과가 아니다
-        replace(swing.record, algorithm_version="chart_analysis@0"),
-        # 국면·방향 출처는 채널 추천의 기록이다
-        replace(swing.record, regime=RegimeRecord(RegimeVerdict.UP, 2.5, Structure.UP)),
+        replace(draft, auto=replace(swing.record, algorithm_version="chart_analysis@0")),
+        # 읽히지 않는 칸·모르는 칸·빠진 칸·다른 도구의 칸
+        replace(draft, auto=replace(swing.record, params={**params, "anything": "x"})),
+        replace(draft, auto=replace(swing.record, params={"candidate_sensitivity": 1.0})),
+        replace(draft, auto=replace(swing.record, params={**params, "direction": "up"})),
+        # 판정 구간이 없거나 계열 밖이다
+        replace(draft, auto=replace(swing.record, regime_window=None)),
+        replace(
+            draft,
+            auto=replace(swing.record, regime_window=(date(2025, 1, 2), date(2025, 1, 3))),
+        ),
+        # 기준점이 이 찾기의 결과가 아니다(가격을 바꾼 본문)
+        replace(draft, edit=LineEdit((anchors[0], replace(anchors[1], price=123.4)))),
     )
-    for record in rejected:
+    for bad in rejected:
         with pytest.raises(ChartRequestError) as error:
-            service.create_line(replace(draft, auto=record))
+            service.create_line(bad)
         assert error.value.code == "chart.line.auto_record"
+    assert drawings.lines == {}
 
-    saved = service.create_line(draft)
+    # 판정·방향 출처·구간 출처는 요청 값을 믿지 않고 서버가 다시 계산한다
+    tampered = replace(
+        swing.record,
+        regime=RegimeRecord(RegimeVerdict.UP, 2.5, Structure.UP),
+        chosen_by=ChosenBy.USER_OVERRIDE,
+        window_source=WindowSource.USER,
+    )
+    saved = service.create_line(replace(draft, auto=tampered))
+    assert saved.line.auto == swing.record
     assert saved.created == swing.created
+    channels = service.channels(UPTREND, Timeframe.DAY, TrendDirection.UP)
+    channel = channels.candidates[0]
+    rebuilt = service.create_line(
+        ChartLineDraft(
+            UPTREND,
+            Timeframe.DAY,
+            LineKind.FIB_CHANNEL,
+            LineSource.AUTO,
+            LineEdit(channel.drawing.anchors),
+            replace(channels.record, regime=None, chosen_by=None),
+        )
+    )
+    assert rebuilt.line.auto == channels.record
+
     # 저장 뒤 규칙 판이 바뀌면(옛 버전 기록) 생긴 날을 다시 계산하지 않는다
     line_id = saved.line.line_id
     old = replace(swing.record, algorithm_version="chart_analysis@0")

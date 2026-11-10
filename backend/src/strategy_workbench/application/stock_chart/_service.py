@@ -9,9 +9,8 @@
 
 from __future__ import annotations
 
-import math
 from collections import OrderedDict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from threading import Lock
@@ -77,6 +76,7 @@ from strategy_workbench.application.stock_chart.ports.outgoing.chart_drawings im
     ChartLineContent,
     ChartLineNotFoundError,
     LineAnchor,
+    ParamValue,
     RegimeRecord,
 )
 from strategy_workbench.application.stock_chart.ports.outgoing.chart_prices import (
@@ -171,6 +171,15 @@ class _Loaded:
     # 현재가(기준일까지 원장 마지막 일봉 종가)의 저장 공간 값.
     # 응답 머리 `current_price`는 이 값의 화면 가격이다.
     current_close: float | None
+
+
+@dataclass(frozen=True, eq=False)
+class _Replay:
+    """저장한 자동 기록으로 찾기를 다시 돌릴 입력 — 기록 민감도로 묶은 계열과 판정 구간."""
+
+    params: AutoParams
+    series: ChartSeries
+    window: Window
 
 
 @dataclass(frozen=True, eq=False)
@@ -348,7 +357,7 @@ class StockChartService:
                 replace(
                     _auto_params(series.params), direction=direction, first_anchor=first_anchor
                 ),
-                regime=RegimeRecord(judgement.verdict, judgement.strength, judgement.structure),
+                regime=_regime_record(judgement),
                 chosen=chosen_by(judgement.channel_direction, direction),
             ),
             anchor_choices=_pivots(
@@ -546,13 +555,15 @@ class StockChartService:
         )
 
     def create_line(self, draft: ChartLineDraft) -> ChartLineView:
-        _check_record(draft.kind, draft.source, draft.auto)
+        _check_record(draft.source, draft.auto)
         loaded = self._load(draft.instrument)
         frame = self._required_frame(loaded, draft.timeframe)
         _, stored, _ = self._shape(
             loaded, frame, draft.kind, draft.edit.anchors, draft.edit.levels, "draft"
         )
         content = self._content(stored, draft.edit)
+        if draft.auto is not None:
+            draft = replace(draft, auto=self._verified_record(loaded, draft, stored))
         if draft.source is LineSource.AUTO:
             same_line = self._same_auto_line(draft, content)
             if same_line is not None:
@@ -604,13 +615,86 @@ class StockChartService:
         line = self._drawings.update_content(line_id, content, self._now())
         return self._line_view(loaded, line)
 
+    def _verified_record(
+        self, loaded: _Loaded, draft: ChartLineDraft, stored: tuple[LineAnchor, ...]
+    ) -> AutoRecord:
+        """자동 기록을 서버가 다시 만든다 — 기록은 국면 분류 연계의 출처라 서버가 정본이다.
+
+        파라미터가 읽히고(모르는 칸 없음) 그 도구의 칸이며(`AutoParams.fits`) 판정 구간이 지금
+        완성 봉 안이어야 한다. 자동 선(`auto`)은 그 파라미터·구간으로 같은 찾기를 다시 돌려 기준점이
+        그 결과(후보)인지도 본다. 복사본(`auto_copied`)은 기준점을 옮길 수 있는 선이라 후보는
+        대조하지 않는다 — 기록은 원본 자동 선의 출처다. 판정·방향 출처는 다시 계산하고 구간 출처는
+        `_saved_window_source`가 정한다. 맞지 않으면 `chart.line.auto_record`로 거절한다."""
+        auto = draft.auto
+        if auto is None:
+            raise RuntimeError(f"verified record needs an auto record — kind={draft.kind.value}")
+
+        def reject(reason: str) -> ChartRequestError:
+            return ChartRequestError(
+                "chart.line.auto_record",
+                f"auto record does not reproduce this line — {reason} "
+                f"code={draft.instrument.code} kind={draft.kind.value} "
+                f"source={draft.source.value} timeframe={draft.timeframe.value} "
+                f"params={dict(auto.params)} window={auto.regime_window} anchors="
+                f"{[(a.bar_date.isoformat(), a.price) for a in stored]}",
+            )
+
+        replay = self._replay(loaded, draft.timeframe, auto)
+        if replay is None:
+            raise reject("params unreadable, or window missing or outside completed candles —")
+        params, series, window = replay.params, replay.series, replay.window
+        if _present(params.to_params()) != _present(auto.params):
+            raise reject("params carry unknown keys —")
+        if not params.fits(draft.kind):
+            raise reject("params belong to another tool —")
+        if draft.source is LineSource.AUTO:
+            indexed = resolve(series, stored)
+            if (
+                isinstance(indexed, date)
+                or created_index(series, window, draft.kind, indexed, params) is None
+            ):
+                raise reject("anchors are not a candidate of this search —")
+        regime, chosen = None, None
+        if draft.kind is LineKind.FIB_CHANNEL and params.direction is not None:
+            judgement = judge_regime(series, window)
+            regime = _regime_record(judgement)
+            chosen = chosen_by(judgement.channel_direction, params.direction)
+        view = WindowView(
+            series.bar_date(window.start),
+            series.bar_date(window.end),
+            window.bars,
+            _saved_window_source(series, draft.timeframe, window, auto.window_source),
+        )
+        return _record(view, params, regime=regime, chosen=chosen)
+
+    def _replay(self, loaded: _Loaded, timeframe: Timeframe, auto: AutoRecord) -> _Replay | None:
+        """저장한 자동 기록으로 찾기를 다시 돌릴 입력. 이 판의 기록이고 파라미터가 읽히며 판정
+        구간이 지금 완성 봉 안이면 그 입력, 아니면 None. 생긴 날 계산과 저장 검증이 함께 쓴다."""
+        if auto.regime_window is None or auto.algorithm_version != ALGORITHM_VERSION:
+            return None
+        params = AutoParams.read(auto.params)
+        if params is None:
+            return None
+        frame = self._frame(loaded, timeframe, params.swing_params)
+        if frame is None:
+            return None
+        series = frame.series
+        start, end = (series.index_of(day) for day in auto.regime_window)
+        if start is None or end is None or start > end:
+            return None
+        return _Replay(params, series, Window(start, end))
+
     def _same_auto_line(self, draft: ChartLineDraft, content: ChartLineContent) -> ChartLine | None:
         """저장 내용이 완전히 같은 자동 선. 주기·종류·기준점·레벨·연장·메모·잠금·자동 기록
         (알고리즘·파라미터·판정 구간·판정·방향 출처) 전부가 같고 보이기만 다를 수 있다.
 
         묶음 추가를 다시 보내도(부분 실패 뒤 재시도) 같은 띠가 두 줄 생기지 않게 그 선을 돌려준다.
-        하나라도 다르면 None — 레벨이나 조건을 바꿔 다시 만든 선은 새 선이다."""
-        shown = replace(content, visible=True)
+        하나라도 다르면 None — 레벨이나 조건을 바꿔 다시 만든 선은 새 선이다. 기준점은 저장 ↔
+        화면 왕복의 마지막 자리 차이를 같다고 보는 `unmoved`로 견준다(편집과 같은 규칙)."""
+
+        def rest(c: ChartLineContent) -> ChartLineContent:
+            return replace(c, anchors=(), visible=True)
+
         return next(
             (
                 line
@@ -619,7 +703,8 @@ class StockChartService:
                 and line.timeframe is draft.timeframe
                 and line.kind is draft.kind
                 and line.auto == draft.auto
-                and replace(line.content, visible=True) == shown
+                and unmoved(line.content.anchors, content.anchors)
+                and rest(line.content) == rest(content)
             ),
             None,
         )
@@ -780,27 +865,13 @@ class StockChartService:
     def _created(
         self, loaded: _Loaded, line: ChartLine, indexed: tuple[Anchor, ...]
     ) -> date | None:
-        """자동 선의 생긴 날 — 저장한 민감도·판정 구간으로 다시 찾아 같은 후보의 확정 봉."""
-        auto = line.auto
-        # 다른 알고리즘 버전의 기록은 이 판의 규칙으로 다시 찾으면 다른 결과가 나올 수 있다
-        if (
-            auto is None
-            or auto.regime_window is None
-            or auto.algorithm_version != ALGORITHM_VERSION
-        ):
+        """자동 선의 생긴 날 — 저장한 민감도·판정 구간으로 다시 찾아 같은 후보의 확정 봉. 다른
+        알고리즘 버전의 기록은 이 판의 규칙으로 다시 찾으면 다른 결과가 나올 수 있어 None이다."""
+        replay = None if line.auto is None else self._replay(loaded, line.timeframe, line.auto)
+        if replay is None:
             return None
-        params = AutoParams.read(auto.params)
-        if params is None:
-            return None
-        frame = self._frame(loaded, line.timeframe, params.swing_params)
-        if frame is None:
-            return None
-        series = frame.series
-        start, end = (series.index_of(day) for day in auto.regime_window)
-        if start is None or end is None or start > end:
-            return None
-        found = created_index(series, Window(start, end), line.kind, indexed, params)
-        return None if found is None else series.bar_date(found)
+        found = created_index(replay.series, replay.window, line.kind, indexed, replay.params)
+        return None if found is None else replay.series.bar_date(found)
 
 
 def rank_instruments(
@@ -889,13 +960,46 @@ def _window(
                 f"window start after end — start={request.start} end={request.end}",
             )
         span = Window(start, end)
-    source = (
+    return span, WindowView(
+        series.bar_date(span.start),
+        series.bar_date(span.end),
+        span.bars,
+        _window_source(series, timeframe, span),
+    )
+
+
+def _present(params: Mapping[str, ParamValue]) -> dict[str, ParamValue]:
+    """값이 있는 칸만 — 빈 칸(None)을 싣든 빼든 같은 기록이다."""
+    return {key: value for key, value in params.items() if value is not None}
+
+
+def _saved_window_source(
+    series: ChartSeries, timeframe: Timeframe, span: Window, requested: WindowSource | None
+) -> WindowSource:
+    """저장할 기록의 구간 출처. 구간이 지금 마지막 완성 봉에서 끝나면 서버가 정한다
+    (`_window_source`). 그보다 앞서 끝나는 구간은 기준일이 지난 기록의 되살리기·복사라 그때의
+    출처(요청 값)를 따르되, preset은 그 끝에서 잰 제안 칩 구간(계열 앞에서 잘린 것 포함)일 때만
+    받는다."""
+    if span.end == len(series.candles) - 1:
+        return _window_source(series, timeframe, span)
+    chip = any(
+        span == Window.ending_at(span.end, bars)
+        for bars in WINDOW_PRESETS[timeframe].suggested_bars
+    )
+    return WindowSource.PRESET if requested is WindowSource.PRESET and chip else WindowSource.USER
+
+
+def _regime_record(judgement: RegimeJudgement) -> RegimeRecord:
+    return RegimeRecord(judgement.verdict, judgement.strength, judgement.structure)
+
+
+def _window_source(series: ChartSeries, timeframe: Timeframe, span: Window) -> WindowSource:
+    """제안 칩 길이 그대로(마지막 완성 봉에서 끝남)면 `preset`, 아니면 `user`(끌기·날짜 입력·
+    화면 기간)."""
+    return (
         WindowSource.PRESET
         if any(span == w for _, w in _presets(series, timeframe))
         else WindowSource.USER
-    )
-    return span, WindowView(
-        series.bar_date(span.start), series.bar_date(span.end), span.bars, source
     )
 
 
@@ -994,40 +1098,18 @@ def _record(
     )
 
 
-def _check_record(kind: LineKind, source: LineSource, auto: AutoRecord | None) -> None:
-    """자동 기록은 자동 선에만 있고, 수치 칸은 유한해야 한다(NaN·inf는 저장·JSON이 받지 못한다)."""
+def _check_record(source: LineSource, auto: AutoRecord | None) -> None:
+    """자동 기록은 자동 선(`auto`·`auto_copied`)에만 있고 이 판의 알고리즘 기록이어야 한다. 기록의
+    내용(파라미터·구간, 자동 선은 기준점까지)은 `_verified_record`가 본다."""
     if (source is LineSource.MANUAL) != (auto is None):
         raise ChartRequestError(
             "chart.line.auto_record",
             f"auto record must be present exactly for auto lines — source={source.value} "
             f"auto={'present' if auto is not None else 'missing'}",
         )
-    if auto is None:
-        return
-    if auto.algorithm_version != ALGORITHM_VERSION:
+    if auto is not None and auto.algorithm_version != ALGORITHM_VERSION:
         raise ChartRequestError(
             "chart.line.auto_record",
             f"auto record from another algorithm version — got={auto.algorithm_version!r} "
             f"current={ALGORITHM_VERSION!r}",
-        )
-    # 판정(국면)과 방향 출처는 채널 추천의 기록이다 — 되돌림·수평 구간에는 없다
-    if kind is not LineKind.FIB_CHANNEL and (auto.regime is not None or auto.chosen_by is not None):
-        raise ChartRequestError(
-            "chart.line.auto_record",
-            f"regime and chosen_by belong to channel records only — kind={kind.value}",
-        )
-    bad = [
-        key
-        for key, value in auto.params.items()
-        if isinstance(value, float) and not math.isfinite(value)
-    ]
-    strength = None if auto.regime is None else auto.regime.strength
-    if bad or (strength is not None and not math.isfinite(strength)):
-        raise ChartRequestError(
-            "chart.line.auto_record",
-            f"auto record numbers must be finite — params={bad} regime_strength={strength}",
-        )
-    if auto.regime_window is not None and auto.regime_window[0] > auto.regime_window[1]:
-        raise ChartRequestError(
-            "chart.line.auto_record", f"regime window reversed — window={auto.regime_window}"
         )

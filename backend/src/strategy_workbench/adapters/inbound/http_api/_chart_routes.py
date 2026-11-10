@@ -10,16 +10,17 @@ frontend는 두 점을 잇고 오른쪽으로 연장만 하며 가격을 계산�
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import date, datetime
 from typing import Annotated, Any, Literal, TypeVar
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, status
-from pydantic import Field
+from pydantic import ConfigDict, Field, TypeAdapter
 
 from strategy_workbench.application.stock_chart.facade.chart import (
     MAX_CHANNEL_CANDIDATES,
     MAX_SEARCH_RESULTS,
+    AutoParams,
     CandleView,
     ChannelView,
     ChartContext,
@@ -211,11 +212,35 @@ class ChartRegimeRecordBody:
 
 
 @dataclass(frozen=True)
+class ChartAutoParamsBody:
+    """자동 기록의 파라미터(application `AutoParams`와 같은 칸). 피벗 민감도 둘은 모든 도구에
+    있고, 채널은 방향·첫 점, 되돌림은 기준 스윙, 수평 구간은 묶는 폭·최소 접촉을 쓴다. 칸이
+    빠지거나 다른 도구의 칸이 섞인 기록은 저장할 때 `chart.line.auto_record`로, 모르는 칸은
+    `chart.request_invalid`로 거절된다."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
+
+    candidate_sensitivity: float | None = None
+    structure_sensitivity: float | None = None
+    direction: TrendDirection | None = None
+    first_anchor: date | None = None
+    swing: SwingChoice | None = None
+    width_atr: float | None = None
+    min_touches: int | None = None
+
+
+@dataclass(frozen=True)
 class ChartAutoRecordBody:
-    """자동 선의 기록. 후보 응답의 `record`를 선 저장 요청에 그대로 싣는다."""
+    """자동 선의 기록. 후보 응답의 `record`를 선 저장 요청에 그대로 싣는다. 판정·방향 출처는
+    저장할 때 서버가 다시 계산한다(요청 값은 쓰지 않는다). 구간 출처는 판정 구간이 지금 마지막
+    완성 봉에서 끝나면 서버가 정하고, 앞서 끝나면 요청 값을 따르되 preset은 그 끝에서 잰 제안
+    칩 구간일 때만 받는다."""
 
     algorithm_version: str
-    params: dict[str, ParamValue]
+    params: Annotated[
+        ChartAutoParamsBody | None,
+        Field(description="이 판의 형식으로 읽히지 않는 저장 기록이면 null(조건을 알 수 없다)."),
+    ]
     regime_window_start: date | None = None
     regime_window_end: date | None = None
     regime: ChartRegimeRecordBody | None = None
@@ -554,9 +579,15 @@ def _pivot(pivot: PivotPoint) -> ChartPivotBody:
 def _record_body(record: AutoRecord) -> ChartAutoRecordBody:
     regime = record.regime
     window = record.regime_window
+    parsed = AutoParams.read(record.params)
+    params = (
+        None
+        if parsed is None
+        else ChartAutoParamsBody(**{f.name: getattr(parsed, f.name) for f in fields(parsed)})
+    )
     return ChartAutoRecordBody(
         algorithm_version=record.algorithm_version,
-        params=dict(record.params),
+        params=params,
         regime_window_start=None if window is None else window[0],
         regime_window_end=None if window is None else window[1],
         regime=None
@@ -567,10 +598,18 @@ def _record_body(record: AutoRecord) -> ChartAutoRecordBody:
     )
 
 
+_PARAMS_WIRE = TypeAdapter(ChartAutoParamsBody)
+
+
 def _record(body: ChartAutoRecordBody) -> AutoRecord:
     start, end = body.regime_window_start, body.regime_window_end
     regime = body.regime
-    params: Mapping[str, ParamValue] = dict(body.params)
+    # 칸 이름은 `AutoParams` 필드 이름 그대로다(저장 기록의 키). 빈 칸은 싣지 않는다
+    params: Mapping[str, ParamValue] = (
+        {}
+        if body.params is None
+        else _PARAMS_WIRE.dump_python(body.params, mode="json", exclude_none=True)
+    )
     return AutoRecord(
         algorithm_version=body.algorithm_version,
         params=params,

@@ -19,6 +19,7 @@ from strategy_workbench.domain.chart_analysis._regime import (
     RegimeVerdict,
     Structure,
 )
+from strategy_workbench.domain.chart_analysis._retracement import SwingChoice
 from strategy_workbench.domain.chart_analysis._series import SwingParams
 from strategy_workbench.domain.chart_analysis._zones import TOUCH_GAP_BARS, ZoneParams
 
@@ -58,6 +59,18 @@ def _plain(value: float) -> str:
     return f"{value:g}"
 
 
+_SWING_CHOICE_RULES = {
+    SwingChoice.RANGE_EXTREMES: "구간 안 확정 저점·고점 중 가장 낮은 점과 높은 점",
+    SwingChoice.LATEST_MAJOR: "큰 스윙(구조 판정 민감도)의 마지막 두 피벗",
+    SwingChoice.LATEST_CONFIRMED: "후보 민감도로 확정된 마지막 두 피벗",
+}
+
+
+def swing_choice_rule(choice: SwingChoice) -> str:
+    """되돌림 기준 스윙 하나가 어떤 두 점을 고르는지(`retracement_pivots` 규칙의 설명)."""
+    return _SWING_CHOICE_RULES[choice]
+
+
 def regime_rules(swing: SwingParams) -> tuple[str, ...]:
     """판정 규칙 접힘 설명(채널 생성 패널). 임계는 이 노드의 상수, ATR 기간은 이번 계열의 값이다."""
     flat, trend, box_max = _plain(FLAT_STRENGTH), _plain(TREND_STRENGTH), _plain(BOX_RATIO_MAX)
@@ -72,7 +85,6 @@ def regime_rules(swing: SwingParams) -> tuple[str, ...]:
         f"|S| ≥ {trend}이고 큰 스윙의 확정 고점 2·저점 2가 같은 방향(HH·HL 또는 LH·LL)이면 "
         "상승·하락, 아니면 보류예요.",
     )
-
 
 
 def pivot_rule(params: SwingParams) -> str:

@@ -2114,8 +2114,25 @@ export type ChartRetracementBody = {
   message: string | null;
   record: ChartAutoRecordBody;
   swing: SwingChoice;
+  /**
+   * Swing Rules
+   *
+   * 기준 스윙마다 어떤 두 점을 고르는지(서버 문장, 고르기 칸 순서).
+   */
+  swing_rules: Array<ChartSwingRuleBody>;
   timeframe: Timeframe;
   window: ChartWindowBody;
+};
+
+/**
+ * ChartSwingRuleBody
+ */
+export type ChartSwingRuleBody = {
+  /**
+   * Rule
+   */
+  rule: string;
+  swing: SwingChoice;
 };
 
 /**

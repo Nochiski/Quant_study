@@ -345,6 +345,12 @@ class ChartChannelsBody:
 
 
 @dataclass(frozen=True)
+class ChartSwingRuleBody:
+    swing: SwingChoice
+    rule: str
+
+
+@dataclass(frozen=True)
 class ChartRetracementBody:
     context: ChartContextBody
     timeframe: Timeframe
@@ -359,6 +365,10 @@ class ChartRetracementBody:
     ]
     message: str | None
     record: ChartAutoRecordBody
+    swing_rules: Annotated[
+        list[ChartSwingRuleBody],
+        Field(description="기준 스윙마다 어떤 두 점을 고르는지(서버 문장, 고르기 칸 순서)."),
+    ]
 
 
 @dataclass(frozen=True)
@@ -728,6 +738,7 @@ def _retracement(view: RetracementView) -> ChartRetracementBody:
         created=view.created,
         message=view.message,
         record=_record_body(view.record),
+        swing_rules=[ChartSwingRuleBody(swing, rule) for swing, rule in view.swing_rules],
     )
 
 

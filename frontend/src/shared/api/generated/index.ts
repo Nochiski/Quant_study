@@ -237,6 +237,7 @@ export type {
   ChartRegimeBody,
   ChartRegimeRecordBody,
   ChartRetracementBody,
+  ChartSwingRuleBody,
   ChartTickStepBody,
   ChartWindowBody,
   ChartWindowSuggestionBody,

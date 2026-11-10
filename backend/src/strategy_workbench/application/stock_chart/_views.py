@@ -175,6 +175,8 @@ class RetracementView:
     created: date | None
     message: str | None
     record: AutoRecord
+    # 기준 스윙마다 어떤 두 점을 고르는지(domain `swing_choice_rule`, `SwingChoice` 차례)
+    swing_rules: tuple[tuple[SwingChoice, str], ...]
 
 
 @dataclass(frozen=True)

@@ -145,6 +145,7 @@ from strategy_workbench.domain.chart_analysis.facade.wording import (
     pivot_rule,
     regime_rules,
     regime_sentence,
+    swing_choice_rule,
     zone_rules,
 )
 
@@ -393,6 +394,7 @@ class StockChartService:
             created=None if pair is None else series.bar_date(retracement_created(pair)),
             message=NO_SWING_MESSAGE if pair is None else None,
             record=_record(view, replace(_auto_params(series.params), swing=choice)),
+            swing_rules=tuple((item, swing_choice_rule(item)) for item in SwingChoice),
         )
 
     def zones(

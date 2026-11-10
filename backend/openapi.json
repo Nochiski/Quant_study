@@ -3523,6 +3523,14 @@
           "swing": {
             "$ref": "#/components/schemas/SwingChoice"
           },
+          "swing_rules": {
+            "description": "기준 스윙마다 어떤 두 점을 고르는지(서버 문장, 고르기 칸 순서).",
+            "items": {
+              "$ref": "#/components/schemas/ChartSwingRuleBody"
+            },
+            "title": "Swing Rules",
+            "type": "array"
+          },
           "timeframe": {
             "$ref": "#/components/schemas/Timeframe"
           },
@@ -3538,9 +3546,27 @@
           "drawing",
           "created",
           "message",
-          "record"
+          "record",
+          "swing_rules"
         ],
         "title": "ChartRetracementBody",
+        "type": "object"
+      },
+      "ChartSwingRuleBody": {
+        "properties": {
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          },
+          "swing": {
+            "$ref": "#/components/schemas/SwingChoice"
+          }
+        },
+        "required": [
+          "swing",
+          "rule"
+        ],
+        "title": "ChartSwingRuleBody",
         "type": "object"
       },
       "ChartTickStepBody": {

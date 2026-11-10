@@ -10,6 +10,7 @@ from strategy_workbench.domain.chart_analysis._wording import (
     regime_rules,
     regime_sentence,
     structure_label,
+    swing_choice_rule,
     zone_rules,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "regime_rules",
     "regime_sentence",
     "structure_label",
+    "swing_choice_rule",
     "zone_rules",
 ]

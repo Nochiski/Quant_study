@@ -106,7 +106,10 @@ export const CreateRetracementPanel = ({
             />
             <span>
               <strong>{swingChoiceLabel(swing)}</strong>
-              <span className="finder-choice__meta">{t(`chart.finder.retracement.swing.${swing}`)}</span>
+              {/* 어떤 두 점을 고르는지는 서버 문장(domain `swing_choice_rule`)이다 — 응답이 오기 전엔 비운다 */}
+              <span className="finder-choice__meta">
+                {found?.swing_rules.find((item) => item.swing === swing)?.rule ?? ""}
+              </span>
             </span>
           </label>
         ))}

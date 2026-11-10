@@ -101,7 +101,7 @@ describe("finder results while a new window is being judged", () => {
     expect(requests.filter((request) => request.start === W2.start)).toEqual([{ start: W2.start, direction: "down" }]);
   });
 
-  it("does not let a pick land on the old candidates while the new ones load", async () => {
+  it("neither draws nor lets a pick land on the old candidates while the new ones load", async () => {
     answer();
     const { result } = renderHook(() => useLevelFinder(KOSPI, "day"), { wrapper });
     act(() =>
@@ -114,9 +114,12 @@ describe("finder results while a new window is being judged", () => {
     );
     await waitFor(() => expect(result.current.results.ready).toBe(true));
     // 직접 고른 방향이라 W2 판정을 기다리지 않고 채널을 묻는다 — 그 답이 오기 전에는 앞 후보가 보여도 고를 수 없다
+    expect(result.current.results.previews[0].drawing.anchors[0].bar_date).toBe(W1.start);
     act(() => result.current.dispatch({ type: "edit", input: { window: W2 } }));
     await waitFor(() => expect(result.current.results.channels.isPlaceholderData).toBe(true));
     expect(result.current.results.ready).toBe(false);
+    // 앞 구간의 채널은 새 구간 위에 미리보기로 남지 않는다
+    expect(result.current.results.previews).toEqual([]);
     await waitFor(() => expect(result.current.results.ready).toBe(true));
     expect(result.current.results.previews[0].drawing.anchors[0].bar_date).toBe(W2.start);
   });

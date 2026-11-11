@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import SignalBasis
 from tests.test_adapters_weekly_rebalance import model_db
@@ -125,11 +128,20 @@ def load():
 
 
 def _close_rig(
-    tmp_path: Path, *, close_rc: int, report_rc: int, hook: bool, recorder_running: bool = False
+    tmp_path: Path,
+    *,
+    close_rc: int,
+    report_rc: int,
+    hook: bool,
+    recorder_running: bool = False,
+    reads: tuple[tuple[str, str | None, int], ...] = (),
 ) -> tuple[Path, Path]:
     """장 마감·주문 단계를 대역으로 돌린다. backend python 은 인자를 적고 정한 종료 코드로 끝난다.
 
     `recorder_running`이면 체결 기록기 잠금(.lock-fills)이 잡혀 있는 것으로 답한다.
+    `reads`는 장 상태 읽기(session-status)마다 차례로 쓰는 (그때 시각 HHMM, 그 직전 기록기가
+    받은 장운영 줄, 읽기 종료 코드)다. 시각은 스크립트의 `date +%H%M`이 답한다. 다 쓰면 마지막
+    시각에 머물고, 비우면 진짜 시각이다.
     """
     ledger = tmp_path / "ledger"
     _executable(ledger / ".venv" / "bin" / "python", f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
@@ -137,28 +149,56 @@ def _close_rig(
     _executable(ledger / "src" / "daily" / "calendar.py", _TRADING_CALENDAR)
     calls = tmp_path / "calls.txt"
     backend = tmp_path / "backend"
+    work = tmp_path / "work"
+    session_file = work / "records" / f"session-{_today()}.jsonl"
+    queue, clock = tmp_path / "reads.tsv", tmp_path / "clock.txt"
+    queue.write_text("".join(f"{at}\t{row or '-'}\t{rc}\n" for at, row, rc in reads))
     _executable(
         backend / ".venv" / "bin" / "python",
         f"""#!/bin/sh
 printf '%s\\n' "$*" >> "{calls}"
 case "$*" in
-  *session-status*) exec "{sys.executable}" "$@" ;;
+  *session-status*)
+    if [ -s "{queue}" ]; then
+      IFS="$(printf '\\t')" read -r at row rc < "{queue}"
+      tail -n +2 "{queue}" > "{queue}.next" && mv "{queue}.next" "{queue}"
+      echo "$at" > "{clock}"
+      if [ "$row" != - ]; then
+        mkdir -p "{session_file.parent}"
+        printf '%s\\n' "$row" >> "{session_file}"
+      fi
+      [ "$rc" = 0 ] || {{ echo "[unreadable] session record unreadable — line=1"; exit "$rc"; }}
+    fi
+    # 장 시작을 기다리는 읽기는 0.2초로 줄인다(테스트 시간). 시각은 위 줄이 정한다
+    n=$#; prev=""
+    for a in "$@"; do
+      [ "$prev" = --wait-seconds ] && [ "$a" != 0 ] && a=0.2
+      prev="$a"
+      set -- "$@" "$a"
+    done
+    shift "$n"
+    exec "{sys.executable}" "$@" ;;
   *" close "*) exit {close_rc} ;;
   *risk-report*) exit {report_rc} ;;
 esac
 exit 0
 """,
     )
-    work = tmp_path / "work"
     (work / "plans").mkdir(parents=True)
     (work / "plans" / "weekly-2026-10-30.json").write_text("{}")
     held = "  *lock-fills*) exit 1 ;;\n" if recorder_running else ""
     _executable(tmp_path / "bin" / "flock", f'#!/bin/sh\ncase "$*" in\n{held}esac\nexit 0\n')
-    # 정규장 마감을 기다리는 동안 1분이 지나면 기록기가 마감 신호를 받는다
+    real_date = shutil.which("date")
+    _executable(
+        tmp_path / "bin" / "date",
+        f'#!/bin/sh\ncase "$*" in\n  *%H%M*) [ -f "{clock}" ] && exec cat "{clock}" ;;\nesac\n'
+        f'exec "{real_date}" "$@"\n',
+    )
+    # 장 마감 단계: 정규장 마감을 기다리는 동안 1분이 지나면 기록기가 마감 신호를 받는다
     _executable(
         tmp_path / "bin" / "sleep",
-        f"#!/bin/sh\necho \"sleep $*\" >> \"{calls}\"\nprintf '%s\\n' '{_session_row('8')}' "
-        f'>> "{work / "records" / f"session-{_today()}.jsonl"}"\n',
+        f'#!/bin/sh\necho "sleep $*" >> "{calls}"\n'
+        f"[ \"$1\" = 60 ] && printf '%s\\n' '{_session_row('8')}' >> \"{session_file}\"\nexit 0\n",
     )
     after = tmp_path / "after_risk_report.sh"
     _executable(after, f'#!/bin/sh\necho "hook $*" >> "{calls}"\n')
@@ -251,38 +291,135 @@ def load():
 """
 
 
-def _order_rig(tmp_path: Path) -> tuple[Path, Path]:
-    conf, calls = _close_rig(tmp_path, close_rc=0, report_rc=0, hook=False)
+def _order_rig(
+    tmp_path: Path,
+    *,
+    reads: tuple[tuple[str, str | None, int], ...],
+    recorder_running: bool = True,
+) -> tuple[Path, Path]:
+    conf, calls = _close_rig(
+        tmp_path,
+        close_rc=0,
+        report_rc=0,
+        hook=False,
+        recorder_running=recorder_running,
+        reads=reads,
+    )
     _executable(tmp_path / "ledger" / "src" / "daily" / "calendar.py", _ORDER_DAY_CALENDAR)
     return conf, calls
 
 
-def test_orders_skip_rounds_before_a_late_opening(tmp_path: Path) -> None:
-    # 2027-01-04(월) 새해 첫 거래일은 10:00 개장인 주문일이다. 09:05 open 은 장 시작 전이라
-    # 내지 않고, 개장 뒤 chase 회차가 낸다(2026-11-05 사용자 결정: 키움 장운영 신호로 알아차린다).
-    conf, calls = _order_rig(tmp_path)
+def _sleeps(calls: Path) -> list[str]:
+    return [line for line in calls.read_text().splitlines() if line.startswith("sleep")]
+
+
+def test_open_waits_for_the_opening_signal_and_sends_at_once(tmp_path: Path) -> None:
+    # 2027-01-04(월) 새해 첫 거래일은 10:00 개장인 주문일이다. open 은 장 시작 전에 떠서
+    # 기다리다 장시작 신호를 받는 순간 낸다 — 동시호가에 내지 않는다
+    # (2026-11-11 사용자 결정 "장 시작과 동시에").
+    conf, calls = _order_rig(
+        tmp_path, reads=(("0958", None, 0), ("1000", _session_row("3", ago_minutes=0), 0))
+    )
     _write_session(tmp_path, _session_row("0", "005500"))
     result = _run_close(tmp_path, conf, "open")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "장 시작 전" in result.stdout
-    assert _commands(calls) == ["session-status"]
+    assert "장 시작을 기다린다(장운영 before_open)" in result.stdout
+    assert "장운영 before_open → open" in result.stdout
+    assert _commands(calls) == ["session-status", "session-status", "execute"]
+    lines = calls.read_text().splitlines()
+    waited = [line for line in lines if "session-status" in line][1]
+    assert "--wait-seconds 60" in waited  # 한 프로세스 안에서 다시 읽으며 기다린다
+    execute = next(line for line in lines if " execute " in line)
+    assert "--plan weekly-2026-10-30 --phase open --send" in execute
+    assert _sleeps(calls) == []
 
-    _write_session(tmp_path, _session_row("0", "000100", ago_minutes=2), _session_row("3"))
-    result = _run_close(tmp_path, conf, "chase")
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert _commands(calls)[-2:] == ["session-status", "execute"]
 
-
-def test_orders_keep_the_fixed_schedule_without_session_signals(tmp_path: Path) -> None:
-    # 기록기가 돌지 않았거나 모의 서버가 장운영을 보내지 않으면 지금처럼 정해진 시각에 낸다 —
-    # 새 신호가 없다는 이유로 그 주 주문을 잃지 않는다
-    conf, calls = _order_rig(tmp_path)
+@pytest.mark.parametrize(
+    ("recorder_running", "reads", "reason", "sleeps"),
+    [
+        # 기록기가 돌지 않으면 신호를 쓰기 전처럼 09:05 에 낸다 — 그 주 주문을 잃지 않는다
+        (False, (("0857", None, 0), ("0905", None, 0)), "체결 기록기가 돌지 않아", []),
+        # 기록기는 도는데 신호가 한 줄도 없으면 신호 고장으로 보고 10:15 에 낸다
+        (True, (("0957", None, 0), ("1015", None, 0)), "신호 고장으로 봄", []),
+        # 장 상태를 읽지 못하면 30초마다 다시 읽고(로그를 채우지 않게) 09:05 에 낸다
+        (True, (("0857", None, 1), ("0905", None, 1)), "장 상태를 읽지 못함(rc=1", ["sleep 30"]),
+    ],
+)
+def test_open_falls_back_to_a_fixed_time_without_session_signals(
+    tmp_path: Path,
+    recorder_running: bool,
+    reads: tuple[tuple[str, str | None, int], ...],
+    reason: str,
+    sleeps: list[str],
+) -> None:
+    conf, calls = _order_rig(tmp_path, reads=reads, recorder_running=recorder_running)
     result = _run_close(tmp_path, conf, "open")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "장운영 신호 없음" in result.stdout
-    assert _commands(calls) == ["session-status", "execute"]
-    execute = next(line for line in calls.read_text().splitlines() if " execute " in line)
-    assert "--plan weekly-2026-10-30 --phase open --send" in execute
+    assert "장 시작을 기다린다" in result.stdout
+    assert reason in result.stdout
+    assert _commands(calls) == ["session-status", "session-status", "execute"]
+    assert _sleeps(calls) == sleeps
+
+
+def test_open_gives_up_the_week_when_the_market_is_not_open_by_the_last_round(
+    tmp_path: Path,
+) -> None:
+    # 개장이 11:30 뒤로 밀리면(장애 공지 등) 그 주는 내지 않는다 — 마지막 chase 회차 뒤라
+    # 쫓을 수 없다
+    conf, calls = _order_rig(tmp_path, reads=(("1129", None, 0), ("1130", None, 0)))
+    _write_session(tmp_path, _session_row("0", "030000"))
+    result = _run_close(tmp_path, conf, "open")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "11:30 까지 장이 열리지 않음(장운영 before_open)" in result.stdout
+    assert _commands(calls) == ["session-status", "session-status"]
+
+
+@pytest.mark.parametrize(
+    ("rows", "recorder_running", "read", "sent", "reason"),
+    [
+        (
+            (_session_row("0", "005500"),),
+            True,
+            ("0915", None, 0),
+            False,
+            "장 시작 전(장운영 before_open)",
+        ),
+        ((_session_row("3", ago_minutes=15),), True, ("0915", None, 0), True, None),
+        ((_session_row("8"),), True, ("1530", None, 0), False, "정규장이 끝남"),
+        ((), True, ("0955", None, 0), False, "장 시작 전(장운영 unknown)"),
+        ((), True, ("1015", None, 0), True, "신호 고장으로 봄"),
+        ((), False, ("0915", None, 0), True, "체결 기록기가 돌지 않아"),
+        ((), True, ("0915", None, 1), True, "장 상태를 읽지 못함(rc=1"),
+    ],
+    ids=[
+        "before-open-skips",
+        "open-sends",
+        "closed-skips",
+        "silent-recorder-waits",
+        "silent-recorder-gives-up-at-10-15",
+        "no-recorder-keeps-schedule",
+        "unreadable-keeps-schedule",
+    ],
+)
+def test_chase_round_sends_only_once_the_market_may_be_open(
+    tmp_path: Path,
+    rows: tuple[str, ...],
+    recorder_running: bool,
+    read: tuple[str, str | None, int],
+    sent: bool,
+    reason: str | None,
+) -> None:
+    # chase 는 기다리지 않는다 — 판정이 아직이면 그 회차를 건너뛰고 다음 회차가 다시 본다
+    conf, calls = _order_rig(tmp_path, reads=(read,), recorder_running=recorder_running)
+    if rows:
+        _write_session(tmp_path, *rows)
+    result = _run_close(tmp_path, conf, "chase")
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = ["session-status", "execute"] if sent else ["session-status"]
+    assert _commands(calls) == expected
+    if reason is not None:
+        assert reason in result.stdout
+    assert "장 시작을 기다린다" not in result.stdout
 
 
 def test_close_waits_for_the_regular_close_on_a_late_closing_day(tmp_path: Path) -> None:
@@ -303,4 +440,15 @@ def test_close_goes_ahead_when_the_recorder_ended_without_a_close_signal(tmp_pat
     result = _run_close(tmp_path, conf)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "정규장 마감 신호 없이 체결 기록기가 끝남" in result.stdout
+    assert _commands(calls) == ["session-status", "close", "risk-report"]
+
+
+def test_close_measures_at_the_fixed_time_when_the_state_is_unreadable(tmp_path: Path) -> None:
+    # 장운영 기록을 읽지 못하면 기다리지 않고 지금처럼 15:40 에 잰다
+    conf, calls = _close_rig(
+        tmp_path, close_rc=0, report_rc=0, hook=False, reads=(("1540", None, 1),)
+    )
+    result = _run_close(tmp_path, conf)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "장 상태를 읽지 못함(rc=1 [unreadable]" in result.stdout
     assert _commands(calls) == ["session-status", "close", "risk-report"]

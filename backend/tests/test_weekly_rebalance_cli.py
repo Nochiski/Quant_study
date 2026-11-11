@@ -26,6 +26,7 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import Kiwoo
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountState,
     LedgerRepairService,
+    MarketPhase,
     NoticeError,
     PlanRecord,
     RiskGuardService,
@@ -204,6 +205,34 @@ def test_a_quoted_home_workdir_is_expanded_before_exporting(
     assert seen == [tmp_path / "s07"]
     assert (tmp_path / "s07" / "exports" / "days.csv").exists()
     assert not (tmp_path / "~").exists()
+
+
+def test_session_status_waits_in_one_process_until_the_market_opens(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # 예약 open 은 장 시작 전에 떠서 이 명령으로 기다린다. 명령을 거듭 띄우면 한 번에 약 3초라
+    # 한 프로세스 안에서 다시 읽고, 열리면 그 자리에서 답한다
+    # (2026-11-11 사용자 결정 "장 시작과 동시에").
+    answers = [MarketPhase.BEFORE_OPEN, MarketPhase.BEFORE_OPEN, MarketPhase.OPEN]
+    reads: list[Path] = []
+
+    def session(workdir: Path) -> MarketPhase:
+        reads.append(workdir)
+        return answers[min(len(reads), len(answers)) - 1]
+
+    factories = CliFactories(
+        _unused_planner, _no_execution, _no_recorder, _no_notifier, session=session
+    )
+    status = ["session-status", "--workdir", str(tmp_path)]
+    assert run_cli(factories, [*status, "--wait-seconds", "60"]) == 0
+    assert capsys.readouterr().out.strip() == "open"
+    assert len(reads) == 3
+    # 그 초가 지나면 그때 상태를 답한다 — 신호가 없을 때의 시각 판정은 예약 스크립트가 한다
+    reads.clear()
+    answers[:] = [MarketPhase.UNKNOWN]
+    assert run_cli(factories, [*status, "--wait-seconds", "0.2"]) == 0
+    assert capsys.readouterr().out.strip() == "unknown"
+    assert len(reads) == 2
 
 
 def _unused_planner(workdir: Path, model_root: Path | None) -> WeeklyRebalanceService:

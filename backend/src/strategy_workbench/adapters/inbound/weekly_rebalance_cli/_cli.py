@@ -12,8 +12,10 @@
     export   --workdir <폴더>   # <작업 폴더>/exports 에 분석·복기용 CSV 4개
     record-fills --workdir <폴더> --until HH:MM   # 장중 실시간 체결 알림·장운영 기록(한 곳에서만)
              # 정규장 마감 신호 5분 뒤 끝나고, 신호가 없으면 --until 에 끝난다
-    session-status --workdir <폴더>   # 지금 정규장 상태(키움 접속 없음)
-             # unknown | before_open | open | closed 한 낱말. 예약 스크립트가 읽는다
+    session-status --workdir <폴더> [--wait-seconds <초>]   # 지금 정규장 상태(키움 접속 없음)
+             # unknown | before_open | open | closed 한 낱말. 예약 스크립트가 읽는다.
+             # --wait-seconds 면 열림·끝남이 될 때까지 0.5초마다 다시 읽는다
+             # (그 초가 지나면 그때 상태)
     notify-plan --workdir <폴더> --plan weekly-YYYY-MM-DD --execute-on YYYY-MM-DD [--print]
     signal-status --workdir <폴더> --model-root <모델 루트> --signal-date YYYY-MM-DD
              [--basis evening|supplement]
@@ -58,6 +60,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import date, time
 from pathlib import Path
+from time import monotonic, sleep
 
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     Approval,
@@ -130,6 +133,9 @@ RiskReportFactory = Callable[[Path, Path | None], RiskReportService]
 # 작업 폴더 → 지금 정규장 상태(체결 기록기가 남긴 장운영 기록, 키움 접속 없음).
 # 읽지 못하면 `OSError`·`ValueError`.
 SessionFactory = Callable[[Path], MarketPhase]
+# `session-status --wait-seconds`가 다시 읽는 간격. 기록 파일 하나를 읽을 뿐이라 짧게 둔다.
+# 장이 열린 뒤 이만큼 안에 open 이 주문을 낸다(2026-11-11 사용자 결정 "장 시작과 동시에").
+SESSION_POLL_SECONDS = 0.5
 # `signal-status`가 "아직 빌드가 없다(기다린다)"를 알리는 종료 코드. 예약 스크립트가 읽는다.
 SIGNAL_NOT_READY_EXIT = 3
 
@@ -217,6 +223,12 @@ def _parser() -> argparse.ArgumentParser:
         "--until", type=time.fromisoformat, required=True, help="끝 상한 HH:MM(마감 신호가 없을 때)"
     )
     session = commands.add_parser("session-status", help="오늘 정규장 상태를 한 낱말로 보인다")
+    session.add_argument(
+        "--wait-seconds",
+        type=float,
+        default=0.0,
+        help="열림·끝남이 될 때까지 다시 읽는 최대 초(0이면 한 번만 읽는다)",
+    )
     notify = commands.add_parser("notify-plan", help="남긴 주문지를 텔레그램으로 보낸다")
     notify.add_argument("--plan", required=True)
     notify.add_argument("--execute-on", type=date.fromisoformat, required=True)
@@ -257,6 +269,21 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _await_session(read: SessionFactory, workdir: Path, wait_seconds: float) -> MarketPhase:
+    """정규장이 열리거나 끝날 때까지 장 상태를 다시 읽는다.
+
+    `wait_seconds`가 지나면 그때 상태를 답한다. 한 프로세스 안에서 기록 파일만 다시 읽는다 —
+    예약 스크립트가 명령을 거듭 띄우면 한 번에 약 3초가 들어 장 시작을 늦게 알아챈다
+    (2026-11-11 서버 실측 2.8초). 읽지 못하면 `OSError`·`ValueError`를 그대로 낸다.
+    """
+    deadline = monotonic() + max(wait_seconds, 0.0)
+    while True:
+        phase = read(workdir)
+        if phase in (MarketPhase.OPEN, MarketPhase.CLOSED) or monotonic() >= deadline:
+            return phase
+        sleep(SESSION_POLL_SECONDS)
+
+
 def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -276,10 +303,11 @@ def run_cli(factories: CliFactories, argv: Sequence[str] | None = None) -> int:
             print("[unavailable] 장 상태 읽기를 이 명령줄에 연결하지 않았다")
             return 1
         try:
-            print(factories.session(args.workdir).value)
+            phase = _await_session(factories.session, args.workdir, args.wait_seconds)
         except (OSError, ValueError) as error:
             print(f"[unreadable] {error}")
             return 1
+        print(phase.value)
         return 0
     if args.command in ("risk-report", "risk-show"):
         if factories.risk_report is None:

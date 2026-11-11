@@ -141,7 +141,8 @@ def _close_rig(
     `recorder_running`이면 체결 기록기 잠금(.lock-fills)이 잡혀 있는 것으로 답한다.
     `reads`는 장 상태 읽기(session-status)마다 차례로 쓰는 (그때 시각 HHMM, 그 직전 기록기가
     받은 장운영 줄, 읽기 종료 코드)다. 시각은 스크립트의 `date +%H%M`이 답한다. 다 쓰면 마지막
-    시각에 머물고, 비우면 진짜 시각이다.
+    시각에 머물고, 비우면 진짜 시각이다. 줄 자리에 `=낱말`을 주면 진짜 명령(한 번에 약 2초)을
+    띄우지 않고 그 상태 낱말을 바로 답한다 — 스크립트 판정 분기만 보는 테스트용이다.
     """
     ledger = tmp_path / "ledger"
     _executable(ledger / ".venv" / "bin" / "python", f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
@@ -163,11 +164,14 @@ case "$*" in
       IFS="$(printf '\\t')" read -r at row rc < "{queue}"
       tail -n +2 "{queue}" > "{queue}.next" && mv "{queue}.next" "{queue}"
       echo "$at" > "{clock}"
-      if [ "$row" != - ]; then
-        mkdir -p "{session_file.parent}"
-        printf '%s\\n' "$row" >> "{session_file}"
-      fi
       [ "$rc" = 0 ] || {{ echo "[unreadable] session record unreadable — line=1"; exit "$rc"; }}
+      case "$row" in
+        =*) echo "${{row#=}}"; exit 0 ;;
+        -) ;;
+        *)
+          mkdir -p "{session_file.parent}"
+          printf '%s\\n' "$row" >> "{session_file}" ;;
+      esac
     fi
     # 장 시작을 기다리는 읽기는 0.2초로 줄인다(테스트 시간). 시각은 위 줄이 정한다
     n=$#; prev=""
@@ -338,9 +342,9 @@ def test_open_waits_for_the_opening_signal_and_sends_at_once(tmp_path: Path) -> 
     ("recorder_running", "reads", "reason", "sleeps"),
     [
         # 기록기가 돌지 않으면 신호를 쓰기 전처럼 09:05 에 낸다 — 그 주 주문을 잃지 않는다
-        (False, (("0857", None, 0), ("0905", None, 0)), "체결 기록기가 돌지 않아", []),
+        (False, (("0857", "=unknown", 0), ("0905", "=unknown", 0)), "체결 기록기가 돌지 않아", []),
         # 기록기는 도는데 신호가 한 줄도 없으면 신호 고장으로 보고 10:15 에 낸다
-        (True, (("0957", None, 0), ("1015", None, 0)), "신호 고장으로 봄", []),
+        (True, (("0957", "=unknown", 0), ("1015", "=unknown", 0)), "신호 고장으로 봄", []),
         # 장 상태를 읽지 못하면 30초마다 다시 읽고(로그를 채우지 않게) 09:05 에 낸다
         (True, (("0857", None, 1), ("0905", None, 1)), "장 상태를 읽지 못함(rc=1", ["sleep 30"]),
     ],
@@ -366,8 +370,9 @@ def test_open_gives_up_the_week_when_the_market_is_not_open_by_the_last_round(
 ) -> None:
     # 개장이 11:30 뒤로 밀리면(장애 공지 등) 그 주는 내지 않는다 — 마지막 chase 회차 뒤라
     # 쫓을 수 없다
-    conf, calls = _order_rig(tmp_path, reads=(("1129", None, 0), ("1130", None, 0)))
-    _write_session(tmp_path, _session_row("0", "030000"))
+    conf, calls = _order_rig(
+        tmp_path, reads=(("1129", "=before_open", 0), ("1130", "=before_open", 0))
+    )
     result = _run_close(tmp_path, conf, "open")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "11:30 까지 장이 열리지 않음(장운영 before_open)" in result.stdout
@@ -375,21 +380,15 @@ def test_open_gives_up_the_week_when_the_market_is_not_open_by_the_last_round(
 
 
 @pytest.mark.parametrize(
-    ("rows", "recorder_running", "read", "sent", "reason"),
+    ("recorder_running", "read", "sent", "reason"),
     [
-        (
-            (_session_row("0", "005500"),),
-            True,
-            ("0915", None, 0),
-            False,
-            "장 시작 전(장운영 before_open)",
-        ),
-        ((_session_row("3", ago_minutes=15),), True, ("0915", None, 0), True, None),
-        ((_session_row("8"),), True, ("1530", None, 0), False, "정규장이 끝남"),
-        ((), True, ("0955", None, 0), False, "장 시작 전(장운영 unknown)"),
-        ((), True, ("1015", None, 0), True, "신호 고장으로 봄"),
-        ((), False, ("0915", None, 0), True, "체결 기록기가 돌지 않아"),
-        ((), True, ("0915", None, 1), True, "장 상태를 읽지 못함(rc=1"),
+        (True, ("0915", "=before_open", 0), False, "장 시작 전(장운영 before_open)"),
+        (True, ("0915", "=open", 0), True, None),
+        (True, ("1530", "=closed", 0), False, "정규장이 끝남"),
+        (True, ("0955", "=unknown", 0), False, "장 시작 전(장운영 unknown)"),
+        (True, ("1015", "=unknown", 0), True, "신호 고장으로 봄"),
+        (False, ("0915", "=unknown", 0), True, "체결 기록기가 돌지 않아"),
+        (True, ("0915", None, 1), True, "장 상태를 읽지 못함(rc=1"),
     ],
     ids=[
         "before-open-skips",
@@ -403,7 +402,6 @@ def test_open_gives_up_the_week_when_the_market_is_not_open_by_the_last_round(
 )
 def test_chase_round_sends_only_once_the_market_may_be_open(
     tmp_path: Path,
-    rows: tuple[str, ...],
     recorder_running: bool,
     read: tuple[str, str | None, int],
     sent: bool,
@@ -411,8 +409,6 @@ def test_chase_round_sends_only_once_the_market_may_be_open(
 ) -> None:
     # chase 는 기다리지 않는다 — 판정이 아직이면 그 회차를 건너뛰고 다음 회차가 다시 본다
     conf, calls = _order_rig(tmp_path, reads=(read,), recorder_running=recorder_running)
-    if rows:
-        _write_session(tmp_path, *rows)
     result = _run_close(tmp_path, conf, "chase")
     assert result.returncode == 0, result.stdout + result.stderr
     expected = ["session-status", "execute"] if sent else ["session-status"]

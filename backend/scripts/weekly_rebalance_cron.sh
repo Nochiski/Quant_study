@@ -16,13 +16,16 @@
 # 단계(prepare 밖의 단계는 휴장일에 아무것도 하지 않는다):
 #   fills    장중 실시간 체결 알림과 장운영 신호 기록. 정규장 마감 신호 5분 뒤 끝나고, 신호가 없으면
 #            두 번째 인자 HH:MM(끝 상한, crontab 이 넣는다)에 끝난다
-#   open     직전 거래일 주문안이 있으면 전 종목을 낸다(매도 먼저)
+#   open     직전 거래일 주문안이 있으면 장이 열리는 순간 전 종목을 낸다(매도 먼저). 장 시작 전에 떠서
+#            fills 가 남기는 장운영 신호를 0.5초마다 읽으며 기다린다(키움에 묻지 않는다)
 #   chase    잔량을 취소하고 그때 2호가로 다시 낸다(마지막 회차 주문은 장 마감까지)
 #   close    장 마감 대사·하루 기록·키움 원본, 이어서 일일 위험 보고(판단에 쓰지 않는다)
-# 장 시각이 바뀌는 날(수능일 10:00~16:30 · 새해 첫 거래일 10:00 개장)은 fills 가 남긴 키움 장운영 신호로
-# 알아차린다(2026-11-05 사용자 결정, 시각 표 없음): open·chase 는 장 시작 전이면 그 회차를 건너뛰고,
-# close 는 정규장 마감 신호를 받을 때까지 기다렸다 잰다. 신호가 없으면(기록기 실패·모의 서버가 안 보냄)
-# 지금처럼 정해진 시각에 돈다 — 새 신호가 없다는 이유로 주문을 잃지 않는다.
+# 장 시각이 바뀌는 날(수능일 10:00~16:30 · 새해 첫 거래일 10:00 개장)도 fills 가 남긴 키움 장운영 신호로
+# 알아차린다(2026-11-05 사용자 결정, 시각 표 없음): open 은 장이 열릴 때까지 기다렸다 바로 내고
+# (2026-11-11 사용자 결정), chase 는 장 시작 전이면 그 회차를 건너뛰고, close 는 정규장 마감 신호를 받을
+# 때까지 기다렸다 잰다. 신호가 없을 때 주문을 내는 시각은 order_gate 한 곳이 정한다 — 기록기가 돌지 않거나
+# 장 상태를 읽지 못하면 신호를 쓰기 전처럼 09:05, 기록기는 도는데 신호가 한 줄도 없으면(신호 고장) 10:15.
+# 새 신호가 없다는 이유로 그 주 주문을 잃지 않는다.
 #   prepare  휴장이 이어지는 첫날(보통 토요일)이고 그 전날이 그 주 마지막 거래일이면, 그날 분 WISE
 #            추정치까지 넣은 주말 보강판이 준비된 것을 확인한 뒤 그 거래일 순위로 주문안을 만들고
 #            텔레그램으로 주문지를 보낸다(만들지 못했으면 보류·실패 알림). 금요일 추정치가 토요일
@@ -30,7 +33,7 @@
 #            달력의 supplement_target 하나를 쓴다(보강판을 짓는 쪽과 같은 판정)
 # 휴장 판정을 할 수 없으면(연도 파일 부재 등) 휴장으로 위장하지 않고 실패한다.
 # 단계 묶음마다 작업 폴더의 잠금 파일을 잡는다. open·chase 는 같은 잠금이라 겹쳐 돌지 않고, 앞 실행이
-# 아직 돌면 이번 회차는 건너뛴다.
+# 아직 돌면 이번 회차는 건너뛴다(장 시작을 기다리는 open 동안의 chase 회차도).
 set -euo pipefail
 
 CONF="${S07_CONF:-$HOME/s07/s07.env}"
@@ -85,17 +88,62 @@ wr() { (cd "$S07_BACKEND" && .venv/bin/python -m strategy_workbench.bootstrap.we
 
 approval_flag() { [ "${S07_REQUIRE_APPROVAL:-1}" = "0" ] && echo "--without-approval" || true; }
 
-session_phase() {  # 지금 정규장 상태 unknown|before_open|open|closed. 읽지 못하면 unknown
-  local phase
-  phase="$(wr session-status --workdir "$S07_WORKDIR")" || phase=unknown
-  case "$phase" in
-    before_open | open | closed) echo "$phase" ;;
-    *) echo unknown ;;
+now_hhmm() { TZ=Asia/Seoul date +%H%M; }
+
+# 장운영 신호가 없을 때 주문을 내는 시각(KST HHMM). 신호가 있으면 장이 열리는 순간 낸다.
+FIXED_OPEN=0905     # 기록기가 돌지 않거나 장 상태를 읽지 못할 때 — 신호를 쓰기 전의 정해진 open 시각
+SIGNAL_GIVE_UP=1015 # 기록기는 도는데 신호가 한 줄도 없을 때 — 알려진 가장 늦은 개장(10:00) + 15분
+ORDER_LAST=1130     # 마지막 chase 회차(weekly_rebalance.crontab). open 은 이때까지만 장 시작을 기다린다
+
+# read_session [기다릴 초] — 지금 정규장 상태를 SESSION 에 둔다: unknown|before_open|open|closed,
+# 읽지 못하면 error(이유는 SESSION_DETAIL). 초를 주면 열림·끝남이 될 때까지 한 프로세스 안에서 0.5초마다
+# 다시 읽는다 — 명령을 거듭 띄우면 한 번에 약 3초가 든다.
+read_session() {
+  local out rc=0
+  out="$(wr session-status --workdir "$S07_WORKDIR" --wait-seconds "${1:-0}")" || rc=$?
+  SESSION_DETAIL=""
+  case "$rc:$out" in
+    0:unknown | 0:before_open | 0:open | 0:closed) SESSION="$out" ;;
+    *)
+      SESSION=error
+      SESSION_DETAIL="rc=$rc ${out:0:300}"
+      ;;
   esac
 }
 
 recorder_running() {  # 체결 기록기(fills)가 아직 그 잠금을 쥐고 있나
   ! flock -n "$S07_WORKDIR/.lock-fills" true
+}
+
+# 지금 주문을 내도 되나 — open·chase 판정은 여기 한 곳이다. read_session 뒤에 부른다.
+# GATE=go|wait|closed, GATE_WHY=신호 없이 정해진 시각으로 진행하는 이유(로그로 남긴다).
+order_gate() {
+  local now
+  now="$(now_hhmm)"
+  GATE=wait
+  GATE_WHY=""
+  case "$SESSION" in
+    open) GATE=go ;;
+    closed) GATE=closed ;;
+    before_open) ;;
+    unknown)
+      if ! recorder_running; then
+        if [ "$now" -ge "$FIXED_OPEN" ]; then
+          GATE=go
+          GATE_WHY="체결 기록기가 돌지 않아 장운영 신호가 없음 — 정해진 시각에 진행"
+        fi
+      elif [ "$now" -ge "$SIGNAL_GIVE_UP" ]; then
+        GATE=go
+        GATE_WHY="체결 기록기는 도는데 장운영 신호가 한 줄도 없음(신호 고장으로 봄) — 진행"
+      fi
+      ;;
+    *)
+      if [ "$now" -ge "$FIXED_OPEN" ]; then
+        GATE=go
+        GATE_WHY="장 상태를 읽지 못함($SESSION_DETAIL) — 정해진 시각에 진행"
+      fi
+      ;;
+  esac
 }
 
 hold_lock() {  # hold_lock <묶음> — 같은 묶음 실행이 이미 돌면 건너뛴다
@@ -129,18 +177,42 @@ case "$PHASE" in
       log "직전 거래일($SIGNAL) 주문안 없음 — 건너뜀"
       exit 0
     fi
-    SESSION="$(session_phase)"
-    case "$SESSION" in
-      before_open)
-        log "장 시작 전(키움 장운영 신호) — 건너뜀, 다음 회차가 다시 본다"
+    read_session
+    order_gate
+    if [ "$PHASE" = open ] && [ "$GATE" = wait ]; then
+      # 장이 열리는 순간 낸다(2026-11-11 사용자 결정). 주문 잠금을 쥐고 기다리므로 그동안의 chase 회차는
+      # 건너뛴다. 매매에서 뺄 종목 승인은 기다림이 끝난 뒤 execute 가 읽는다.
+      log "장 시작을 기다린다(장운영 $SESSION${SESSION_DETAIL:+ · $SESSION_DETAIL})"
+      SEEN="$SESSION"
+      while [ "$GATE" = wait ]; do
+        if [ "$(now_hhmm)" -ge "$ORDER_LAST" ]; then
+          log "${ORDER_LAST:0:2}:${ORDER_LAST:2} 까지 장이 열리지 않음(장운영 $SESSION) — 이번 주 주문을 내지 않는다"
+          exit 0
+        fi
+        if [ "$SESSION" = error ]; then
+          sleep 30 # 읽기 실패는 바로 되풀이하지 않는다 — 같은 오류가 로그를 채우지 않게
+          read_session
+        else
+          read_session 60
+        fi
+        if [ "$SESSION" != "$SEEN" ]; then
+          log "장운영 $SEEN → $SESSION${SESSION_DETAIL:+ · $SESSION_DETAIL}"
+          SEEN="$SESSION"
+        fi
+        order_gate
+      done
+    fi
+    case "$GATE" in
+      wait)
+        log "장 시작 전(장운영 $SESSION) — 건너뜀, 다음 회차가 다시 본다"
         exit 0
         ;;
       closed)
         log "정규장이 끝남(키움 장운영 신호) — 건너뜀"
         exit 0
         ;;
-      unknown) log "장운영 신호 없음 — 정해진 시각에 진행" ;;
     esac
+    [ -z "$GATE_WHY" ] || log "$GATE_WHY"
     # shellcheck disable=SC2046  # 플래그가 없을 때 빈 인자를 넘기지 않는다
     wr execute --workdir "$S07_WORKDIR" --plan "$PLAN" --phase "$PHASE" --send $(approval_flag)
     ;;
@@ -152,10 +224,14 @@ case "$PHASE" in
     fi
     # 정규장이 끝난 뒤에 잰다 — 마감이 늦는 날(수능일 16:30) 15:40 은 장중이다. 1분마다 본다.
     while true; do
-      SESSION="$(session_phase)"
+      read_session
       [ "$SESSION" = closed ] && break
       if [ "$SESSION" = unknown ]; then
         log "장운영 신호 없음 — 정해진 시각에 잰다"
+        break
+      fi
+      if [ "$SESSION" = error ]; then
+        log "장 상태를 읽지 못함($SESSION_DETAIL) — 정해진 시각에 잰다"
         break
       fi
       if ! recorder_running; then

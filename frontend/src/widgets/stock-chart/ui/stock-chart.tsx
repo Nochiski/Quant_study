@@ -43,8 +43,10 @@ import {
   AutoLinesPanel,
   ConfluenceBrackets,
   FinderPanels,
+  PreviewAnchors,
   previewOverlays,
   useLevelFinder,
+  useWindowSweep,
   visibleWindow,
 } from "../../../features/find-chart-levels";
 import { useChartNavigation } from "../../../features/navigate-chart";
@@ -238,6 +240,12 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
     ),
   );
 
+  const creating = panel.view === "create";
+  // 판정·분석 구간 바꾸기(테두리 끌기·Shift+끌기 공통)
+  const editWindow = (window: DateRange) => finder.dispatch({ type: "edit", input: { window } });
+  // 생성 패널이 열려 있으면 Shift+끌기로 판정·분석 구간을 새로 긋는다
+  const sweep = useWindowSweep({ scale, completed, enabled: creating, onChange: editWindow });
+
   if (candlesQuery.isError)
     return (
       <FailureNotice
@@ -268,7 +276,6 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
     if (tool !== "select" && mode === "auto") changeMode("manual");
     drawing.dispatch({ type: "pickTool", tool });
   };
-  const creating = panel.view === "create";
   // 포인터를 올린 선은 선택 도구일 때만 본다(그리기 도구로 바꾸면 선의 누를 자리가 사라져 떠남이 오지 않는다)
   const badgeLine =
     shownLines.find((line) => line.line_id === drawing.state.selectedId) ??
@@ -340,6 +347,7 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                 // 키보드 줌·이동(+/−·←/→·Home)을 받는 Tab 정지
                 tabIndex={0}
                 {...navigation.svgProps}
+                {...sweep.svgProps}
                 // 고른 선 지우기 키가 먼저고, 아니면 줌·이동 키다
                 onKeyDown={(event) => {
                   if (!drawing.onChartKeyDown(event, shownLines)) navigation.svgProps.onKeyDown(event);
@@ -374,12 +382,17 @@ const ChartBody = ({ target, search, timeframe, focusRequest, onViewRange }: Cha
                     // 미리보기 후보는 저장 선과 같은 그리기·라벨 배치에 넣는다(라벨끼리 밀어낸다)
                     overlays={creating ? previewOverlays(finder.results.previews, scale) : []}
                   />
+                  {/* 미리보기 후보가 어느 점에서 그어졌는지(기준점) */}
+                  {creating ? (
+                    <PreviewAnchors previews={finder.results.previews} scale={scale} />
+                  ) : null}
                   {creating ? (
                     <AnalysisWindowOverlay
                       scale={scale}
                       completed={completed}
                       window={finder.results.window}
-                      onChange={(window) => finder.dispatch({ type: "edit", input: { window } })}
+                      sweep={sweep.window}
+                      onChange={editWindow}
                       onEscape={() => finder.dispatch({ type: "close" })}
                     />
                   ) : null}

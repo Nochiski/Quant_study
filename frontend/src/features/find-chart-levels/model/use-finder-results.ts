@@ -27,6 +27,8 @@ export type PreviewLine = {
   created: string | null;
   extendRight: boolean;
   levels: readonly number[] | null;
+  /** 채널 방향(기준점 이름·자리를 정한다). 채널이 아니면 null. */
+  direction: TrendDirection | null;
 };
 
 /** 중첩 응답·차트 그림에서 미리보기 후보를 가리키는 이름 앞머리(저장 선 id와 겹치지 않는다). */
@@ -40,6 +42,10 @@ const seriesQuery = (target: ChartTarget, timeframe: Timeframe, draft: FinderDra
   ...(draft.candidateSensitivity === null ? {} : { candidate_sensitivity: draft.candidateSensitivity }),
   ...(draft.structureSensitivity === null ? {} : { structure_sensitivity: draft.structureSensitivity }),
 });
+
+/** 지금 입력의 응답(앞 입력의 응답을 잠깐 보이는 중이면 없다). 차트 미리보기는 이것만 그린다. */
+const current = <T,>(query: { data: T | undefined; isPlaceholderData: boolean }): T | undefined =>
+  query.isPlaceholderData ? undefined : query.data;
 
 /** 앞 입력의 응답을 잠깐 보이는 중이거나 아직 응답이 없다 — 그 결과로 고르거나 저장하지 않는다. */
 const settled = (query: { data: unknown; isPlaceholderData: boolean; isFetching: boolean }) =>
@@ -55,6 +61,7 @@ const settled = (query: { data: unknown; isPlaceholderData: boolean; isFetching:
  * - 결과가 앞 입력의 것(placeholder)이거나 다시 받는 중이면 `ready`가 거짓이다. 그동안 후보 고르기·구간 빼기·추가를
  *   막는다 — 고른 자리(index)가 새 결과의 다른 항목에 붙지 않게.
  * - 판정 구간은 서버가 봉 시작일로 맞춘 응답 구간을 쓰고, 응답을 기다리는 동안만 고친 날짜를 쓴다.
+ * - 차트 미리보기는 지금 입력의 응답만 그린다 — 구간·조건을 바꾼 뒤 앞 응답의 채널·되돌림·띠가 새 구간 위에 남지 않는다.
  */
 export const useFinderResults = (target: ChartTarget, timeframe: Timeframe, panel: FinderPanel) => {
   const draft = panel.view === "create" ? panel.draft : null;
@@ -102,28 +109,30 @@ export const useFinderResults = (target: ChartTarget, timeframe: Timeframe, pane
   if (tool === "fib_channel" && draft !== null) {
     answered = regime.data?.window ?? null;
     ready = judged !== undefined && direction !== null && settled(channels);
-    const picked = direction === null ? undefined : channels.data?.candidates[draft.candidate];
+    const picked = direction === null ? undefined : current(channels)?.candidates[draft.candidate];
     if (picked !== undefined)
-      previews.push({ key: "channel", kind: "fib_channel", drawing: picked.drawing, created: picked.created, extendRight: true, levels: null });
+      previews.push({ key: "channel", kind: "fib_channel", drawing: picked.drawing, created: picked.created, extendRight: true, levels: null, direction });
   } else if (tool === "fib_retracement" && draft !== null) {
     answered = retracement.data?.window ?? null;
     ready = settled(retracement);
-    const drawing = retracement.data?.drawing ?? null;
+    const shown = current(retracement);
+    const drawing = shown?.drawing ?? null;
     if (drawing !== null)
       previews.push({
         key: "retracement",
         kind: "fib_retracement",
         drawing,
-        created: retracement.data?.created ?? null,
+        created: shown?.created ?? null,
         extendRight: draft.extendRight,
         levels: draft.levels,
+        direction: null,
       });
   } else if (tool === "hline" && draft !== null) {
     answered = zones.data?.window ?? null;
     ready = settled(zones);
-    zones.data?.zones.forEach((zone, index) => {
+    current(zones)?.zones.forEach((zone, index) => {
       if (!draft.excludedZones.includes(index))
-        previews.push({ key: `zone-${index}`, kind: "hline", drawing: zone.drawing, created: zone.formed, extendRight: true, levels: null });
+        previews.push({ key: `zone-${index}`, kind: "hline", drawing: zone.drawing, created: zone.formed, extendRight: true, levels: null, direction: null });
     });
   }
   const anyQuery = tool === "fib_channel" ? regime : tool === "fib_retracement" ? retracement : zones;

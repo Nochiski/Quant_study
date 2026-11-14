@@ -2539,8 +2539,8 @@ EG20(원주가 불변)은 **`basis='krx'` 행만** 대조한다 — 저녁 행�
 | 항목 | 내용 |
 |---|---|
 | 왜 | 문서층(`stg_doc_meta`)이 뒤처지면 신규 재무 그룹이 `period_end` 정본을 잃고 `corp.fiscal_month` 추정으로 폴백한다. 결산월이 어긋나거나 없는 법인은 후보가 0개가 되어 `period_unresolved` 로 격리 — `fin_std` 에서 **행째로 사라진다**. 기존 게이트는 전부 못 잡는다(EG7 격리 비율 1.28% < 임계 3% · `n_by_period_end_basis` 는 임계 없음 · `n_period_end_not_document` 는 정의상 0) |
-| 폐기형 | `ratio_period_end_inferred_recent` > `fin_std.fin_std_inferred_recent_ratio_max`(= 0.2) 이면 FAIL. 분모는 `available_date > D − recent_days`(30일) 인 채택 행, 분자는 그중 `period_end_basis='inferred'` |
-| 기록형 | `n_period_end_inferred_recent` · `n_recent_rows` · `recent_from` |
+| 폐기형 | `ratio_period_end_inferred_recent` > `fin_std.fin_std_inferred_recent_ratio_max`(= 0.2) 이면 FAIL. 분모는 `available_date > D − recent_days`(30일) 인 채택 행, 분자는 그중 `period_end_basis='inferred'` 이고 `available_date < D` 인 행 — 가장 최근 접수일(D)의 추정 행은 **본문 대기**로 보고 뺀다(2026-11-14: 본문 파일은 접수 뒤 1~3시간 지나 열린다. 11-13 저녁 22.5% 로 저녁 판이 전 거래일 공시로 나감. 수집기가 접수 7일 안의 014 를 다시 부르므로 하루 지난 추정 행은 그대로 센다) |
+| 기록형 | `n_period_end_inferred_recent`(분자) · `n_period_end_inferred_pending`(가장 최근 접수일의 추정 행 — 분자 밖) · `n_recent_rows` · `recent_from` |
 | 상수 | `fin_std.fin_std_inferred_recent_ratio_max` = 0.2 · `fin_std.inferred_recent_days` = 30. 미등재면 `skip(no_baseline)` |
 | **배포 순서** | 문서층 따라잡기(프리패스 전량 재생성 → `stg_doc_*` 4표 재빌드) **뒤에** 서버에 반영해야 한다. 문서층이 8/31 에 멈춘 상태에서 이 게이트를 켜면 최근 구간이 100% `inferred` 라 `fin_std` 가 매일 폐기된다 |
 

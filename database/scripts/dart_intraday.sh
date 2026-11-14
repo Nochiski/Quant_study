@@ -45,7 +45,7 @@ elif [ "$TD" -eq 1 ]; then
   exit 0
 fi
 if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
-  . scripts/raw_lock.sh   # LOCK(원장 락 경로)만 쓴다 — 대기형 raw_lock_acquire 는 부르지 않는다
+  . scripts/raw_lock.sh   # LOCK(원장 락 경로)만 쓴다 — 대기형 획득 함수는 부르지 않는다
   exec 9>"$LOCK"
   if ! flock -n 9; then
     echo "  원장 락을 다른 작업이 쥐고 있다($LOCK) — 이번 회차 건너뜀 $(kst)" >> "$LOG"

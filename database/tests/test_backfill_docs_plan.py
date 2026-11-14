@@ -93,3 +93,21 @@ def test_daily_gate_and_health_count_the_same_documents_the_collector_takes(tmp_
     assert dd._gate_docs(con, SimpleNamespace(date=d)).metrics["n_target"] == len(taken)
     health = {c.name: c for c in lh.check_dart(con, d, True, "2026-10-28T15:00:00")}["dart.docs"]
     assert health.value["target"] == len(taken)
+
+
+def test_014_within_seven_days_of_filing_is_retried_and_older_is_not(tmp_path, monkeypatch):
+    """본문 파일은 접수 뒤 1~3시간 지나 열린다(11-13 실측: 16:15 뒤 접수 299건이 19:30 에 014, 자정에 20건 중
+    19건 000). 접수 당일 저녁의 014 를 영구 실패로 굳히면 그 본문은 다시 받지 않아 fin_std 기말일이 추정으로
+    남는다(11-13 저녁 · 11-14 아침 확정 빌드 EG3 실패). 접수 7일 안의 014 는 다시 부른다."""
+    m = _load(tmp_path, monkeypatch)
+    con = _db(tmp_path)
+    con.executemany("INSERT INTO dart_disclosure VALUES (?,?,?,?)", [
+        ("20261113000001", "20261113", "005930", "분기보고서 (2026.09)"),    # 접수 당일 014 → 다시 부른다
+        ("20261107000001", "20261107", "005930", "분기보고서 (2026.09)"),    # 7일째 → 다시 부른다
+        ("20261106000001", "20261106", "005930", "분기보고서 (2026.09)")])   # 8일째 → 영구 실패로 본다
+    con.executemany("INSERT INTO doc_store VALUES (?,?,?,?,?,?,?)", [
+        ("20261113000001", 0, "s", 0, 0, "014", "t"),
+        ("20261107000001", 0, "s", 0, 0, "014", "t"),
+        ("20261106000001", 0, "s", 0, 0, "014", "t")])
+    plan = m.build_plan(con, [2, 3], today="20261114")
+    assert [r for _, r in plan] == ["20261113000001", "20261107000001", "20260901000003"]

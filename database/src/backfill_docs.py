@@ -43,6 +43,7 @@ URL   = "https://opendart.fss.or.kr/api/document.xml?crtfc_key={key}&rcept_no={r
 PACE  = 0.3               # 응답이 평균 0.5MB 라 조회 API 보다 한 박자 느리게
 QUOTA_LIMIT = 40_000      # 평일 실측 한도. 주말 완화는 미검증이라 기대하지 않는다
 RETRY_MAX, RETRY_BASE = 3, 5.0
+RETRY_014_DAYS = 7        # 접수 뒤 이 일수 안의 014(문서 없음)는 다시 부른다 — 그 뒤에만 영구 실패로 본다
 
 DDL = """CREATE TABLE IF NOT EXISTS doc_store (
   rcept_no    TEXT PRIMARY KEY,
@@ -119,16 +120,23 @@ def fetch(key: str, rno: str) -> tuple[str, bytes]:
 
 
 def build_plan(con: sqlite3.Connection, priorities: list[int],
-               retry_014: bool = False) -> list[tuple[int, str]]:
+               retry_014: bool = False, today: str | None = None) -> list[tuple[int, str]]:
     """(우선순위, rcept_no) 리스트. zip_ok=1 로 이미 받은 것은 뺀다.
 
     2026-09-09: `http_status='014'`(DART "해당 문서 없음")도 뺀다 — 영구 실패라 재시도해도 같은 답이 오는데
     3,130건이 매 실행 3,000콜·18분을 태웠다(P2 실측). `retry_014=True` 로만 다시 시도한다.
+
+    2026-11-14: 단, 접수 `RETRY_014_DAYS` 일 안의 014 는 다시 부른다 — 본문 파일은 접수 뒤 1~3시간 지나 열려
+    접수 당일 저녁의 014 는 일시 응답이다(11-13 실측: 299건 014, 자정에 20건 중 19건 000). `today` 는 KST
+    YYYYMMDD(기본 = 지금).
     """
     done = {r[0] for r in con.execute("SELECT rcept_no FROM doc_store WHERE zip_ok = 1")}
     if not retry_014:
+        day = datetime.strptime(today, "%Y%m%d") if today else datetime.utcnow() + timedelta(hours=9)  # noqa: DTZ003, DTZ007  # reason: 접수번호 앞 8자리(KST 날짜)와 견주는 naive KST 날짜
+        cutoff = (day - timedelta(days=RETRY_014_DAYS)).strftime("%Y%m%d")
         done |= {r[0] for r in con.execute(
-            "SELECT rcept_no FROM doc_store WHERE zip_ok = 0 AND http_status = '014'")}
+            "SELECT rcept_no FROM doc_store WHERE zip_ok = 0 AND http_status = '014' "
+            "AND substr(rcept_no, 1, 8) < ?", (cutoff,))}
     plan, seen = [], set()
     for p in priorities:
         label, cond = PRIORITIES[p]

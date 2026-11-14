@@ -1194,21 +1194,25 @@ def test_기준이_바뀌면_직전_기준이_남아_가짜_성장률을_막는�
 # ── DEFECT-F01: period_end 추정 폴백 가시화 (감사 09-19) ──────────────────────
 
 
-def _recent_reports() -> tuple[list[tuple[str, str | None]],
+def _recent_reports(inferred_dt: date = date(2026, 3, 27)) -> tuple[list[tuple[str, str | None]],
                                list[tuple[str, str, str, str, date, date | None, str | None]],
                                list[dict[str, object]]]:
-    """같은 접수일의 그룹 둘 — 하나는 문서 정본, 하나는 문서가 없어 추정 폴백."""
+    """최근 구간의 그룹 둘 — 하나는 문서 정본, 하나는 문서가 없어 추정 폴백.
+
+    추정 그룹의 접수일 기본값은 가장 최근 접수일(03-30)보다 앞이다 — 가장 최근 접수일의 추정 행은
+    '본문 대기'로 임계 판정에서 빠진다."""
+    inferred_rcept = f"{inferred_dt:%Y%m%d}000002"
     corps = [("00000001", "12"), ("00000002", "12")]
     reports = [
         ("20260330000001", "00000001", "2025", "11011", date(2026, 3, 30),
          date(2025, 12, 31), "11011"),
         # 문서 짝이 없다 — `corp.fiscal_month` 추정으로 폴백한다(period_end_basis='inferred')
-        ("20260330000002", "00000002", "2025", "11011", date(2026, 3, 30), None, None),
+        (inferred_rcept, "00000002", "2025", "11011", inferred_dt, None, None),
     ]
     fin = [
         _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
                  account_id="ifrs-full_Revenue", account_nm="매출액", amount=100.0),
-        _fin_row("00000002", "2025", "11011", "20260330000002", sj="IS",
+        _fin_row("00000002", "2025", "11011", inferred_rcept, sj="IS",
                  account_id="ifrs-full_Revenue", account_nm="매출액", amount=200.0),
     ]
     return corps, reports, fin
@@ -1255,6 +1259,23 @@ def test_추정_폴백이_임계_아래면_통과한다(make_stage_tree, tmp_pat
                     fin_std_inferred_recent_ratio_max=0.6, inferred_recent_days=30)
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
     assert _gate(r, "EG3_fin_std").metrics["n_period_end_inferred_recent_over_max"] == 0
+
+
+def test_가장_최근_접수일의_추정_행은_본문_대기로_보고_임계_판정에서_뺀다(make_stage_tree,
+                                                                    tmp_path: Path) -> None:
+    """본문 파일은 접수 뒤 1~3시간 지나 열려 접수 당일 저녁에는 정상적으로 없다. 분기보고서가 몰린 11-13 저녁
+    (247/1,098 = 22.5%)에 그날 접수분만으로 임계 20% 를 넘어 저녁 판이 통째로 전 거래일 공시로 나갔다.
+    가장 최근 접수일의 추정 행은 '본문 대기'로 세어 기록만 하고 분자에서 뺀다 — 하루 지난 추정 행은 그대로 센다."""
+    corps, reports, fin = _recent_reports(inferred_dt=date(2026, 3, 30))
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "period_end_basis", "document"),
+                    fin_std_inferred_recent_ratio_max=0.2, inferred_recent_days=30)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    m = _gate(r, "EG3_fin_std").metrics
+    assert m["n_recent_rows"] == 2
+    assert m["n_period_end_inferred_recent"] == 0
+    assert m["n_period_end_inferred_pending"] == 1
+    assert m["n_period_end_inferred_recent_over_max"] == 0
 
 
 # ── DQ-8: 유형자산 취득을 자산별로 나눠 적는 회사 (2026-09-26 실측) ─────────────

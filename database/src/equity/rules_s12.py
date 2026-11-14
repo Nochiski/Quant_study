@@ -431,28 +431,36 @@ def _inferred_recent(ctx: EquityGateContext) -> dict[str, object]:
     baseline 에 없으면 `over_max = 0` 으로 두어 **기록형**으로만 남는다 — 상수를 등재하는 순간
     폐기형이 된다. **배포 순서 주의**: 문서층이 뒤처진 상태에서 임계를 켜면 최근 구간이 100%
     `inferred` 라 `fin_std` 가 매일 폐기된다.
+
+    가장 최근 접수일(`available_date = max`)의 추정 행은 **본문 대기**로 보고 분자에서 뺀다(`n_pending`,
+    기록형). 본문 파일은 접수 뒤 1~3시간 지나 열려 접수 당일 저녁에는 정상적으로 없다 — 분기보고서가 몰린
+    2026-11-13 저녁에 그날 접수분만으로 22.5% 가 되어 저녁 판이 전 거래일 공시로 나갔다. 수집기는 접수 7일
+    안의 014 를 다시 부르므로(`backfill_docs.RETRY_014_DAYS`) 하루 지나서도 추정으로 남은 행은 그대로 센다.
     """
     v = ctx.out_view
     days = ctx.baseline.get(ctx.rule.name, "inferred_recent_days")
     n_days = int(str(days)) if days is not None else _INFERRED_RECENT_DAYS_DEFAULT
     ratio_max = ctx.baseline.get(ctx.rule.name, "fin_std_inferred_recent_ratio_max")
     row = ctx.con.execute(
-        f'WITH w AS (SELECT max(available_date) - INTERVAL {n_days} DAY AS lo '
-        f'FROM "{v}") '
+        f'WITH w AS (SELECT max(available_date) - INTERVAL {n_days} DAY AS lo, '
+        f'max(available_date) AS hi FROM "{v}") '
         'SELECT CAST((SELECT CAST(lo AS DATE) FROM w) AS VARCHAR), '
         'count(*) FILTER (WHERE o.available_date > (SELECT lo FROM w)), '
         'count(*) FILTER (WHERE o.available_date > (SELECT lo FROM w) '
+        "AND o.available_date < (SELECT hi FROM w) AND o.period_end_basis = 'inferred'), "
+        'count(*) FILTER (WHERE o.available_date = (SELECT hi FROM w) '
         "AND o.period_end_basis = 'inferred') "
         f'FROM "{v}" o').fetchone()
     if row is None:
         raise RuntimeError(f"gate query returned no row — table={ctx.rule.name} "
                            "metric=inferred_recent")
     recent_from, n_recent, n_inferred = str(row[0]), int(str(row[1])), int(str(row[2]))
+    n_pending = int(str(row[3]))
     ratio = (n_inferred / n_recent) if n_recent else None
     over = int(ratio_max is not None and ratio is not None
                and ratio > float(str(ratio_max)))
     return {"recent_from": recent_from, "days": n_days, "n_recent": n_recent,
-            "n_inferred": n_inferred, "ratio": ratio,
+            "n_inferred": n_inferred, "n_pending": n_pending, "ratio": ratio,
             "ratio_max": None if ratio_max is None else float(str(ratio_max)),
             "over_max": over}
 
@@ -625,6 +633,7 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
         "inferred_recent_days": inferred["days"],
         "n_recent_rows": inferred["n_recent"],
         "n_period_end_inferred_recent": inferred["n_inferred"],
+        "n_period_end_inferred_pending": inferred["n_pending"],
         "ratio_period_end_inferred_recent": inferred["ratio"],
         "fin_std_inferred_recent_ratio_max": inferred["ratio_max"],
         "n_by_revenue_basis": _counts(ctx, "revenue_basis"),

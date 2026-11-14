@@ -40,7 +40,11 @@ BUDGET_S_DEFAULT = 2400          # C5 — 스냅샷 3.8분 + 전량 빌드 22.5�
 # 문서층 파싱 로그는 파싱 순서·소요가 행에 들어가 소스가 동결돼도 해시가 흔들린다 (v1 Task 4.3)
 # stg_wise_coverage 의 원장 `ws_coverage` 는 종목당 한 행을 매일 덮어쓴다(checked_at 이동, 행수 2,614 불변) —
 # 계수가 그대로인데 내용이 바뀌는 것이 정상이라 C4 의 "동결" 술어가 맞지 않는다(09-17 00:14 진단 실측).
-C4_EXCLUDE = frozenset({"stg_doc_parse_log", "stg_wise_coverage"})
+# stg_doc_index 의 원장 `doc_store` 는 본문을 다시 받으면 같은 접수번호 행을 제자리에서 바꾼다(014 → 000 — 접수 7일 안의
+# 014 는 매 런 다시 부른다, backfill_docs.RETRY_014_DAYS). 새 본문 대상이 없는 날이나 같은 D 재빌드에서는 계수가 그대로인데
+# 내용이 바뀐다(11-14 실측: 재수집 334건 뒤 177089 → 177089 · 해시 불일치로 확정판 폐기). 받은 본문은 stg_doc_* 4표의
+# 계수를 움직이므로 그쪽 재현성 대조는 그대로 남는다.
+C4_EXCLUDE = frozenset({"stg_doc_parse_log", "stg_wise_coverage", "stg_doc_index"})
 
 
 class Status(str, Enum):

@@ -37,6 +37,9 @@ WARN_STATUSES: dict[str, frozenset[str]] = {
     SILENT_LOSS: frozenset({"unexplained", "undecidable"}),
     # 저녁 DART 판 실패·DART 갈래 실패 — 장 마감 판은 전 거래일 공시로 나간다(D13 갈래 1)
     POSTCLOSE_DART: frozenset({"fallback"}),
+    # 낮 분할 수집(`daily.dart_daily --intraday`) — 받지 못한 유닛 · 도구 실패는 18:05 저녁 런이 다시 부른다.
+    # 한도 초과 · v3 키 사용은 그대로 실패(crit)다
+    "dart_intraday": frozenset({"gate_failed", "tool_failed"}),
 }
 # 장 마감 판(`scripts/postclose_chain.sh`, 컷오버 PR-8)이 ①(수집 — 수집기가 `kiwoom_postclose` 로 남김) 뒤 단계마다 남기는
 # source, 체인 순서. D13(N-62)부터 15:41 close 는 stage 까지(`POSTCLOSE_CLOSE_STEPS` — 16:30 워치독 postclose_board 가 본다),

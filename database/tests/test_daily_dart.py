@@ -1072,6 +1072,57 @@ def test_second_run_follows_late_filings_first_seen_by_the_first_run(tmp_path, m
         assert r.status is dd.RunStatus.GATE_FAILED and "holder_followed" in r.detail
 
 
+def _prior_run(home, source, started):
+    """그 D 의 앞선 런 1행(source 지정) — 시작 시각 원문만 고정한다('…Z' UTC)."""
+    db = f"{home}/data/raw/daily_run.db"
+    rid = runlog.start(db, date=D, source=source)
+    con = sqlite3.connect(db)
+    con.execute("UPDATE run SET started=? WHERE run_id=?", (started, rid))
+    con.commit()
+    con.close()
+
+
+def test_intraday_run_does_not_judge_volume_and_logs_under_its_own_source(tmp_path,
+                                                                          monkeypatch) -> None:
+    """낮 분할 수집(12:30 · 14:30 · 16:15 · 17:15) — 낮에는 그날 공시가 덜 쌓여 물량 관문(n_filings >= 400)을
+    넘지 못한다. 낮 런은 물량을 판정하지 않고, 런 로그도 `dart_intraday` 로 따로 남긴다(일일 리포트 · 회복
+    판정이 보는 `dart` 런은 저녁 · 새벽 둘 그대로)."""
+    home = _make_home(tmp_path, rows=[("20260908000001", D, C1, "005930", "기타시장안내")])
+    _fake_exec(monkeypatch)
+
+    evening = dd.run(D, home=home, sweep_from="2026Q3")
+    assert evening.status is dd.RunStatus.GATE_FAILED and "filings" in evening.detail
+
+    r = dd.run(D, home=home, sweep_from="2026Q3", intraday=True)
+    assert r.status is dd.RunStatus.OK, r.detail
+    assert "filings" not in {g.name for g in r.gates}
+    rows = sqlite3.connect(f"{home}/data/raw/daily_run.db").execute(
+        "SELECT source, status FROM run ORDER BY run_id").fetchall()
+    assert rows == [("dart", "gate_failed"), ("dart_intraday", "ok")]
+
+
+def test_evening_run_follows_late_filings_first_seen_by_an_intraday_run(tmp_path,
+                                                                        monkeypatch) -> None:
+    """낮 스윕(12:30 KST)이 처음 본 늦은 공시 L 의 유닛이 낮에 실패했으면 18:05 런이 다시 부른다. 늦은 공시
+    창을 `dart` 런의 첫 시작으로만 잡으면 L 은 18:05 런의 plan 에서 빠져(n_late 0) 영영 따라가지 않는다."""
+    noon = "2026-09-08T03:30:00"                               # 12:30 KST 낮 런 시작, UTC
+    late = ("20260824000001", "20260824", C2, "005930", "주식등의대량보유상황보고서(약식)",
+            "2026-09-08T03:31:00")                             # 낮 스윕이 처음 봤다
+    home = _make_home(tmp_path, rows=[*_busy_day_rows(500)[:-2], late])
+    _prior_run(home, "dart_intraday", f"{noon}Z")
+    con = _con(home)
+    _log(con, _per_corp(dd.HOLDER_ENDPOINTS, C2), status="error", ts="2026-09-08T03:40:00")
+    con.commit()
+    con.close()
+    seen = _fake_backfill(monkeypatch, home, status="ok")
+
+    r = dd.run(D, home=home, sweep_from="2026Q3")
+    assert (r.plan.n_late, r.plan.holder_corps) == (1, (C2,))
+    assert (r.late_since, r.late_source) == (noon, "첫 런 시작")
+    assert [(c[c.index("--only") + 1], corps) for c, corps in seen] == [
+        ("elestock,majorstock", [C2])]
+
+
 def test_run_skip_sweep_and_default_window(tmp_path, monkeypatch) -> None:
     home = _make_home(tmp_path, rows=[("20260908000001", D, C1, "005930", "기타")])
     seen = _fake_exec(monkeypatch)

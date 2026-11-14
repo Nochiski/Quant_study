@@ -282,6 +282,19 @@ def test_c4_ignores_the_daily_overwritten_wise_coverage_table(tmp_path: Path,
     assert c4.status is health.Status.PASS and c4.metrics["mismatched"] == []
 
 
+def test_c4_ignores_the_doc_index_whose_rows_are_refetched_in_place(tmp_path: Path,
+                                                                   make_stage_tree) -> None:
+    """doc_store 는 본문을 다시 받으면 같은 접수번호 행을 제자리에서 바꾼다(014 → 000) — 계수는 그대로, 해시는 다르다.
+    11-14 실측: 014 재수집 334건 뒤 같은 D 확정판을 다시 짓자 C4 가 판을 버렸다(177089 → 177089 · 해시 불일치).
+    접수 7일 안의 014 를 매번 다시 부르면(#719) 새 본문 대상이 없는 날에도 같은 일이 난다. C4 대상이 아니다."""
+    root = _all(tmp_path, make_stage_tree)
+    _tree(tmp_path, make_stage_tree, "stg_doc_index")
+    _commit(root / "stg_doc_index", CUR_BID, n_rows=10, content_hash="10:zz", n_src=10,
+            built_at_utc=CUR_BUILT_AT)
+    c4 = _check(_run(root, tables={**TABLES, "stg_doc_index": "append_only"}), "C4")
+    assert c4.status is health.Status.PASS and c4.metrics["mismatched"] == []
+
+
 def test_c4_skips_tables_whose_source_grew(tmp_path: Path, make_stage_tree) -> None:
     """계수가 움직인 표는 해시가 달라야 정상이라 판정 대상이 아니다."""
     c4 = _check(_run(_all(tmp_path, make_stage_tree)), "C4")

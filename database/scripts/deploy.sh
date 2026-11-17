@@ -19,6 +19,8 @@
 #   ⑤ 서버 빌드 락(/tmp/quant_ledger_build.lock — build_chain·model_daily·gc 등이 쓰는 것)을 비차단으로 잡고
 #      rsync 와 DEPLOYED.json 쓰기를 마칠 때까지 쥔다. 못 잡으면 다른 빌드·배포가 실행 중이라 거부한다 — 기다리거나
 #      다시 시도하지 않는다(P9). 체인이 빌드하는 도중에 코드가 바뀌면 한 판 안에 옛 코드·새 코드가 섞인다.
+#      원장 락(/tmp/quant_ledger_raw.lock — 06:00 · 18:05 체인과 DART 낮 분할 수집이 쓰는 것)도 같은 방식으로 잡고
+#      쥔다. 낮 수집(12:30 · 14:30)이 배포 창 안에서 돌므로 수집 도중에 코드가 바뀌지 않게 한다.
 #   ⑦ 서버 DEPLOYED.json 의 rev 가 HEAD 의 조상이어야 한다(K1-1e). main 을 역병합한 브랜치는 ② 를 늘
 #      통과하므로, 다른 브랜치에서 먼저 민 핫픽스를 모르고 덮는 일은 ② 로 못 막는다. 의도한 되돌림은
 #      `--allow-rollback <서버 rev>` 로만 허용하고 DEPLOYED.json 에 rollback_from 으로 남긴다.
@@ -159,7 +161,8 @@ esac
 
 # ⑤ 빌드 락 — 원격에서 비차단으로 잡고 LOCKED 를 찍은 뒤 stdin 이 닫힐 때까지 쥔다. 못 잡으면 BUSY.
 BUILD_LOCK="${QL_BUILD_LOCK_FILE:-/tmp/quant_ledger_build.lock}"   # QL_BUILD_LOCK_FILE 은 테스트 전용(model_daily.sh 와 같다)
-LOCK_CMD="exec 9>$BUILD_LOCK || exit 4; if flock -n 9; then echo LOCKED; cat >/dev/null; else echo BUSY; fi"
+RAW_LOCK="${QL_RAW_LOCK_FILE:-/tmp/quant_ledger_raw.lock}"         # QL_RAW_LOCK_FILE 은 테스트 전용(raw_lock.sh 와 같다)
+LOCK_CMD="exec 9>$BUILD_LOCK || exit 4; exec 6>$RAW_LOCK || exit 4; if ! flock -n 9; then echo BUSY; elif ! flock -n 6; then echo BUSY_RAW; else echo LOCKED; cat >/dev/null; fi"
 LOCK_STATE=""
 if [ "$APPLY" -eq 1 ]; then
   # ssh 하나가 락을 쥔 채 FIFO 로 받은 stdin 을 기다린다. 이 스크립트가 어떻게 끝나든 FIFO 의 쓰는 쪽
@@ -177,14 +180,19 @@ case "$LOCK_STATE" in
   LOCKED)
     if [ "$APPLY" -eq 1 ]; then
       echo "== 빌드 락: $REMOTE:$BUILD_LOCK 비어 있음 — rsync·DEPLOYED.json 기록을 마칠 때까지 쥔다"
+      echo "== 원장 락: $REMOTE:$RAW_LOCK 비어 있음 — 같이 쥔다"
     else
       echo "== 빌드 락: $REMOTE:$BUILD_LOCK 비어 있음"
+      echo "== 원장 락: $REMOTE:$RAW_LOCK 비어 있음"
     fi ;;
   BUSY)
     verdict_fail "서버 빌드 락($REMOTE:$BUILD_LOCK)을 다른 작업이 쥐고 있다 — 다른 빌드·배포가 실행 중이다." \
                  "기다리지 않는다(P9). 그 빌드·배포가 끝난 뒤 다시 실행한다." ;;
+  BUSY_RAW)
+    verdict_fail "서버 원장 락($REMOTE:$RAW_LOCK)을 다른 작업이 쥐고 있다 — 수집이 실행 중이다(06:00 · 18:05 체인 또는 DART 낮 분할 수집)." \
+                 "기다리지 않는다(P9). 그 수집이 끝난 뒤 다시 실행한다." ;;
   *)
-    verdict_fail "서버 빌드 락($REMOTE:$BUILD_LOCK)을 확인하지 못했다(ssh 실패 또는 락 파일 열기 실패, 응답='$LOCK_STATE') — 체인과 겹치는지 판정할 수 없다." ;;
+    verdict_fail "서버 빌드 락($REMOTE:$BUILD_LOCK) · 원장 락($REMOTE:$RAW_LOCK)을 확인하지 못했다(ssh 실패 또는 락 파일 열기 실패, 응답='$LOCK_STATE') — 체인과 겹치는지 판정할 수 없다." ;;
 esac
 
 # ⑦ 서버 rev — 서버 DEPLOYED.json 의 rev 가 HEAD 의 조상이 아니면 그 판에만 있는 커밋(핫픽스)이 되돌아간다

@@ -79,6 +79,7 @@ for a in "$@"; do
 done
 state="$("$FAKE_PY" "$FAKE_BIN/_probe.py" "$QL_BUILD_LOCK_FILE")"
 printf '%s\\t%s\\t%s\\n' "$mode" "$state" "$*" >> "$FAKE_LOG/rsync.log"
+printf '%s\\t%s\\n' "$mode" "$("$FAKE_PY" "$FAKE_BIN/_probe.py" "$QL_RAW_LOCK_FILE")" >> "$FAKE_LOG/rsync_raw.log"
 if [ "$mode" = push ] && [ -n "${FAKE_RSYNC_FAIL:-}" ]; then
   case "$*" in *"$FAKE_RSYNC_FAIL"*) exit 23 ;; esac
 fi
@@ -146,6 +147,7 @@ def _scenario(tmp_path: Path) -> Scenario:
                GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com",
                QL_REMOTE="fake-host", QL_REMOTE_ROOT=ROOT, QL_BUILD_LOCK_FILE=str(lock),
+               QL_RAW_LOCK_FILE=str(tmp_path / "raw.lock"),
                FAKE_PY=sys.executable, FAKE_BIN=str(fakebin), FAKE_LOG=str(log),
                FAKE_REMOTE_HOME=str(remote))
     for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "FAKE_RSYNC_FAIL"):
@@ -328,6 +330,49 @@ def test_apply_rsync_failure_midway_releases_lock_and_keeps_deployed(tmp_path: P
     assert len(r.pushes) == 2 and all(s == "held" for _m, s, _a in r.pushes)
     assert r.writes == []
     assert r.deployed is not None and r.deployed["rev"] == sc.base
+    assert _lock_free(sc.lock)
+
+
+# ── 원장 락(수집) ────────────────────────────────────────────────────────────
+def test_apply_refuses_when_raw_lock_held(tmp_path: Path) -> None:
+    """수집(06:00 · 18:05 체인, DART 낮 분할 수집)이 원장 락을 쥐고 있으면 기다리지 않고(P9) 거부한다 —
+    rsync 실전송 0 · DEPLOYED.json 그대로 · 빌드 락은 남기지 않는다. 옛 코드는 빌드 락만 봐서
+    수집 도중에 코드를 바꿨다(배포 창 10:30~15:10 안에 12:30 · 14:30 낮 수집이 생긴 뒤의 구멍)."""
+    sc = _scenario(tmp_path)
+    _server_rev(sc, sc.base)
+    raw = Path(sc.env["QL_RAW_LOCK_FILE"])
+    with _held(raw):
+        r = _deploy(sc, "--apply", "--skip-tests")
+    assert r.rc == 2, r.out + r.err
+    assert "수집이 실행 중" in r.err and str(raw) in r.err
+    assert r.pushes == [] and r.writes == []
+    assert r.deployed is not None and r.deployed["rev"] == sc.base
+    assert _lock_free(sc.lock)
+
+
+def test_apply_holds_raw_lock_until_done(tmp_path: Path) -> None:
+    """배포는 rsync 실전송 내내 원장 락도 쥔다(그 사이 시작한 낮 수집은 비대기라 건너뛰고, 06:00 · 18:05
+    체인은 기다렸다 이어서 돈다) — 끝나면 풀린다."""
+    sc = _scenario(tmp_path)
+    _server_rev(sc, sc.base)
+    raw = Path(sc.env["QL_RAW_LOCK_FILE"])
+    r = _deploy(sc, "--apply", "--skip-tests")
+    assert r.rc == 0, r.out + r.err
+    rows = [ln.split("\t") for ln in (sc.log / "rsync_raw.log").read_text(encoding="utf-8").splitlines()]
+    states = [state for mode, state in rows if mode == "push"]
+    assert len(states) == PUSHES and all(s == "held" for s in states), rows
+    assert _lock_free(raw)
+
+
+def test_dry_run_reports_raw_lock_held(tmp_path: Path) -> None:
+    """dry-run 은 원장 락이 쥐여 있으면 거부 사유만 출력하고(rc 0) 아무것도 쓰지 않는다."""
+    sc = _scenario(tmp_path)
+    _server_rev(sc, sc.base)
+    with _held(Path(sc.env["QL_RAW_LOCK_FILE"])):
+        r = _deploy(sc)
+    assert r.rc == 0, r.out + r.err
+    assert "(dry-run) --apply 라면 거부" in r.out and "수집이 실행 중" in r.out
+    assert r.pushes == [] and r.writes == []
     assert _lock_free(sc.lock)
 
 

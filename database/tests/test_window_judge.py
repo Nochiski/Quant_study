@@ -453,6 +453,8 @@ def test_진짜_일일_리포트와_notify_sh_가_남긴_줄을_읽는다(
     ("점수 대조 D=20261014 실패 rc=2", "excluded"),
     ("일일 리포트 20261013", "excluded"),
     ("⚠ 알림 실패 1 · 일일 리포트 20261013", "excluded"),
+    # 낮 분할 수집 — 수집 단계라 판정 밖
+    ("dart_intraday 중단 — 캘린더 판정 불가", "excluded"),
     # 주말 보강판(N-45) — 정규 판 판정 밖
     ("주말 보강판 실패: factor_inputs(rc=2)", "excluded"),
     ("주말 보강판 실패: 완료 판정 불가", "excluded"),

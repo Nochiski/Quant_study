@@ -110,6 +110,8 @@ KAEL_KEY_ID = "kael"           # v3 프로덕션 키. 1콜이라도 나가면 cr
 GATE_MIN_FILINGS = 400
 GATE_MIN_LISTED = 290
 DEFAULT_MAX_DOCS = 3000        # `backfill_docs.sleep_to_kst_midnight()` 진입 방지
+RUN_SOURCE = "dart"            # 런 로그 source — 18:05 저녁 · 06:00 새벽 런(물량까지 판정한다)
+RUN_SOURCE_INTRADAY = "dart_intraday"   # 낮 분할 수집 런(12:30 · 14:30 · 16:15 · 17:15) — 물량은 판정하지 않는다
 LATE_SAMPLE_MAX = 20           # 늦게 등장한 공시의 rcept_no 표본 상한(로그용). 수는 n_late 가 센다
 
 
@@ -663,20 +665,23 @@ def budget(con: sqlite3.Connection, *, since_ts: str,
 
 # ── 5. 완료 판정 (findings B §7-1 ① · §7-2 · §7-3) ────────────────────────────────
 def check(con: sqlite3.Connection, daily_plan: DailyPlan, *,
-          trading_day: bool = True) -> tuple[Gate, ...]:
+          trading_day: bool = True, volume_gate: bool = True) -> tuple[Gate, ...]:
     """"하루가 끝났는가" 판정. 근거는 **원장 행과 상세 유닛 수신**(`received()`)이다.
 
     plan 의 전 유닛 — 정기 7종 · DS005 15종 · 지분 2종 — 이 받았는지 본다(N-24 3.4: DS005
     '아무 1종' 통과는 폐지). 콜 기록(`dart_call_log`)은 근거로 쓰지 않는다 — 실패한 콜·한도(020)
     콜도 기록은 남고, 같은 D 의 두 번째 런은 받은 유닛을 다시 부르지 않는다(T13). 어제 이미 ok
     였던 유닛이 통과하는 것(DEFECT-B01 의 우려)은 `received()` 의 `ts ≥ 최초 관측` 이 막는다.
+
+    `volume_gate=False`(낮 분할 수집)면 물량 관문 `filings` 를 뺀다 — 낮에는 그날 공시가 덜 쌓였다.
     """
     rec = received(con, daily_plan)
 
     def of(endpoints: tuple[str, ...]) -> list[Unit]:
         return [u for u in daily_plan.units if u.endpoint in endpoints]
 
-    return (_gate_filings(con, daily_plan, trading_day=trading_day),
+    volume = (_gate_filings(con, daily_plan, trading_day=trading_day),) if volume_gate else ()
+    return (*volume,
             _gate_received("periodic_followed", of(PERIODIC_ENDPOINTS), rec,
                            unresolved=daily_plan.unresolved),
             _gate_received("major_followed", of(DS005_ENDPOINTS), rec),
@@ -862,7 +867,8 @@ def default_home() -> str:
 
 def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
         sweep_from: str | None = None, max_docs: int = DEFAULT_MAX_DOCS,
-        dry_run: bool = False, limit: int = 5, trading_day: bool = True) -> DartDailyResult:
+        dry_run: bool = False, limit: int = 5, trading_day: bool = True,
+        intraday: bool = False) -> DartDailyResult:
     """D일 증분 1회. 순서 = 스윕 → 계획 → 다시 부를 유닛 → 종결 해제 → 상세 재호출 → 문서 → 판정.
 
     다시 부를 유닛은 받지 않은 유닛 + 재무 반영 지연 재확인 + 재무 자료없음 재확인뿐이다
@@ -872,6 +878,11 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
     `dry_run` 은 플랜 §4 공통 정의를 따른다 — 콜은 `limit` 만큼 실제로 하되 원장·`daily_run.db`
     에 쓰지 않는다. 여기서 "쓰지 않는다" 는 `unlock`(= `ingest_log` 삭제)과 runlog 기록을
     건너뛰는 것이다. 종결 해제가 없으므로 백필은 이미 `ok` 인 유닛을 그냥 건너뛴다.
+
+    `intraday` 는 낮 분할 수집이다(2026-11-14 — 정기보고서의 94~97% 가 17:30 전에 접수돼 18:05 한 번에 받으면
+    기한 전날 88분이 걸렸다). 하는 일은 같고 물량 관문을 판정하지 않으며 런 로그 source 가
+    `RUN_SOURCE_INTRADAY` 다. 늦은 공시 창의 '그 D 의 첫 런'은 두 source 를 합쳐 가장 이른 런이다 — 낮 스윕이
+    처음 본 늦은 공시를 뒤 런이 놓치지 않는다.
     """
     db = os.path.join(home, "data", "raw", "dart.db")
     con = _open_dart(db)
@@ -888,12 +899,15 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
                                    detail=f"{reason}: {pre.describe()}")
 
         # 이번 런을 기록하기 전에 읽어야 앞선 런만 보인다. 형식은 runlog 가 맞춰 준다(Z 없는 UTC)
-        prior_ts = runlog.first_started_utc(os.path.join(home, "data", "raw", "daily_run.db"),
-                                            source="dart", date=date_yyyymmdd)
+        run_db = os.path.join(home, "data", "raw", "daily_run.db")
+        prior = [ts for ts in (runlog.first_started_utc(run_db, source=src, date=date_yyyymmdd)
+                               for src in (RUN_SOURCE, RUN_SOURCE_INTRADAY)) if ts is not None]
+        prior_ts = min(prior) if prior else None
         run_id: int | None = None
         if not dry_run:
             run_id = runlog.start(os.path.join(home, "data", "raw", "daily_run.db"),
-                                  date=date_yyyymmdd, source="dart")
+                                  date=date_yyyymmdd,
+                                  source=RUN_SOURCE_INTRADAY if intraday else RUN_SOURCE)
         rc_sweep: int | None = None
         rc_backfill: list[int] = []
         rc_docs: int | None = None
@@ -938,7 +952,7 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
             post = budget(con, since_ts=window_ts)
             n_calls = int(con.execute("SELECT COUNT(*) FROM dart_call_log WHERE ts > ?",
                                       (started_ts,)).fetchone()[0])
-            gates = check(con, daily_plan, trading_day=trading_day)
+            gates = check(con, daily_plan, trading_day=trading_day, volume_gate=not intraday)
             lagged = fin_still_lagging(con, daily_plan, recall.fin_lag, after_rowid=fin_rowid)
             bad_rc = [rc for rc in (rc_sweep, rc_docs, *rc_backfill) if rc not in (None, 0)]
             status, detail = _verdict(post, gates, bad_rc, dry_run=dry_run)
@@ -1038,6 +1052,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     help="콜은 --limit 만큼 하되 ingest_log·daily_run.db 에 쓰지 않는다")
     ap.add_argument("--limit", type=int, default=5, help="dry-run 의 그룹당 corp 수 (기본 5)")
     ap.add_argument("--json", action="store_true", help="게이트 지표를 JSON 으로도 출력")
+    ap.add_argument("--intraday", action="store_true",
+                    help="낮 분할 수집 — 물량 관문을 판정하지 않고 런 로그 source 는 dart_intraday")
     a = ap.parse_args(argv)
 
     home = default_home()
@@ -1051,7 +1067,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     result = run(date_yyyymmdd, home=home, skip_sweep=a.skip_sweep,
                  sweep_from=a.sweep_from or None, max_docs=a.max_docs,
-                 dry_run=a.dry_run, limit=a.limit, trading_day=trading_day)
+                 dry_run=a.dry_run, limit=a.limit, trading_day=trading_day, intraday=a.intraday)
     print(report(result))
     if a.json:
         payload: dict[str, object] = {g.name: {"ok": g.ok, **g.metrics} for g in result.gates}

@@ -320,6 +320,19 @@ def test_두_판_대조_불일치는_crit_이_아니라_warn(tmp_path: Path) -> 
     assert "postclose_compare mismatch" in r.text and "수집 실패 런" not in r.text
 
 
+@pytest.mark.parametrize(("status", "level"), [("gate_failed", "WARN"), ("tool_failed", "WARN"),
+                                               ("budget_exceeded", "CRIT")])
+def test_낮_분할_수집_실패는_warn_이고_한도_초과는_crit(tmp_path: Path, status: str,
+                                                    level: str) -> None:
+    """낮 런(`dart_intraday`)이 받지 못한 유닛 · 도구 실패는 18:05 저녁 런이 다시 부르므로 warn 이다. 한도 초과는
+    저녁 런까지 막으므로 그대로 crit."""
+    home = _full(tmp_path)
+    _runs(home, rows=(("ledger_chain", "ok"), ("dart_intraday", status), ("evening_chain", "ok")))
+    r = _build(home)
+    assert r.status is dr.ReportStatus[level], r.text
+    assert ("수집 실패 런 dart_intraday" in r.text) is (level == "CRIT")
+
+
 def test_런이_아직_running_이면_warn(tmp_path: Path) -> None:
     home = _home(tmp_path)
     _ledger(home)

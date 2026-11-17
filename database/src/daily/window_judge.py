@@ -133,7 +133,9 @@ COUNTED_CRIT_PREFIXES: tuple[str, ...] = (
 EXCLUDED_CRIT_PREFIXES: tuple[str, ...] = (
     # 수집 단계 — daily_evening.sh(18:05~21:05) · daily_ledger.sh(06:00, 휴장 달력 갱신 포함) · daily_wise.sh
     # (daily_master) · wics_weekly.sh · 그 원장 락(raw_lock.sh 의 이름) · 저녁 원장·WICS 워치독
+    # · dart_intraday.sh(낮 분할 수집 — 18:05 저녁 체인이 받지 않은 유닛을 다시 부른다)
     "daily_evening ", "daily_ledger ", "daily_master ", "wics_weekly ", "휴장 달력 갱신", "WICS 주간 스냅샷",
+    "dart_intraday ",
     "watchdog: HH:MM 까지 저녁 원장", "watchdog: 토 HH:MM 까지 WICS",
     # 06:00 daily_ledger.sh 의 v3·uni 휴장 파일 내보내기(daily.calendar_export) — 점수 경로 밖(T-48)
     "휴장 파일 내보내기",

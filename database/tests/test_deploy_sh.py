@@ -351,7 +351,7 @@ def test_apply_refuses_when_raw_lock_held(tmp_path: Path) -> None:
 
 
 def test_apply_holds_raw_lock_until_done(tmp_path: Path) -> None:
-    """배포는 rsync 실전송 내내 원장 락도 쥔다(그 사이 시작한 낮 수집은 비대기라 건너뛰고, 06:00 · 18:05
+    """배포는 rsync 실전송 내내 원장 락도 쥔다(그 사이 시작한 낮 수집과 06:00 · 18:05
     체인은 기다렸다 이어서 돈다) — 끝나면 풀린다."""
     sc = _scenario(tmp_path)
     _server_rev(sc, sc.base)

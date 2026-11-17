@@ -604,15 +604,48 @@ def test_wise_request_budget_follows_the_run_date():
 # ── K1-7b: 필수 검사 SKIP = 실패(N-42 Q4) ──────────────────────────────────────────
 
 
-def _dart(tmp_path, n=410):
-    """공시 목록 D 행 n 건 + 빈 문서 저장소(문서 대상 0 → dart.docs 통과)."""
+def _dart(tmp_path, n=410, sweep="open", swept="2026-09-08T09:10:00"):
+    """공시 목록 D 행 n 건 + 빈 문서 저장소(문서 대상 0 → dart.docs 통과) + 목록 스윕 기록(D 의 분기 창 2026Q3 ·
+    상태 sweep · 기록 시각 swept = 18:10 KST. sweep 이 None 이면 기록 없음)."""
     con = sqlite3.connect(tmp_path / "dart.db")
     con.execute("CREATE TABLE dart_disclosure (rcept_no TEXT, rcept_dt TEXT, stock_code TEXT, report_nm TEXT)")
     con.executemany("INSERT INTO dart_disclosure VALUES (?,?,?,?)",
                     [(f"{D}{i:06d}", D, f"{i:06d}", "임원ㆍ주요주주특정증권등소유상황보고서") for i in range(n)])
     con.execute("CREATE TABLE doc_store (rcept_no TEXT, zip_ok INTEGER, http_status TEXT)")
+    con.execute("CREATE TABLE ingest_log (name TEXT, corp_code TEXT, bsns_year TEXT, reprt_code TEXT, fs_div TEXT, "
+                "status TEXT, n_rows INTEGER, note TEXT, ts TEXT)")
+    if sweep is not None:
+        con.execute("INSERT INTO ingest_log VALUES ('disclosure','','20260701','20260930','',?,?,?,?)",
+                    (sweep, n, json.dumps({"total_count": n}), swept))
     con.commit(); con.close()
     return str(tmp_path / "dart.db")
+
+
+def _dart_rows_check(tmp_path, **kw):
+    con = sqlite3.connect(_dart(tmp_path, **kw))
+    try:
+        return {c.name: c for c in lh.check_dart(con, D, True, "2026-09-07T15:00:00")}["dart.disclosure.rows"]
+    finally:
+        con.close()
+
+
+def test_dart_공시_목록은_건수가_아니라_스윕_대조로_판정한다(tmp_path):
+    """11-17(분기보고서 기한 다음 거래일) 접수 334건 — 목록 스윕은 DART 총건수와 대조를 통과했는데 옛 하한
+    (400건)에 걸리면 08:10 체인이 그 D 의 확정판을 짓지 않고, 다음 날 장 마감 판(고정 판 확인)까지 막힌다.
+    건수는 값으로 기록만 한다."""
+    c = _dart_rows_check(tmp_path, n=334)
+    assert (c.status, c.value) == (lh.Status.PASS, 334)
+
+
+@pytest.mark.parametrize("kw", [{"sweep": "partial"}, {"sweep": "mismatch"}, {"sweep": None},
+                                {"swept": "2026-09-07T14:59:59"}],
+                         ids=["도중에 멈춤", "대조 불일치", "기록 없음", "D 전날 기록"])
+def test_dart_공시_목록_스윕이_대조를_못_마쳤으면_건수가_많아도_실패(tmp_path, kw):
+    """목록을 도중까지만 받았거나 대조가 어긋났거나, D 당일 이후에 돈 스윕이 없으면 그 D 의 목록을 다 받았다고 볼
+    수 없다. 옛 판정은 400건만 넘으면 통과했다."""
+    c = _dart_rows_check(tmp_path, n=900, **kw)
+    assert c.status is lh.Status.FAIL and "window=20260701-20260930" in c.detail     # 실패 줄에 스윕 기록을 싣는다
+
 
 
 def _skip_rows(tmp_path):

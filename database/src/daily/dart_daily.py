@@ -4,7 +4,9 @@
 
   · B01 열린 분기 창(스윕 유닛)은 구조적으로 영구 `mismatch` 라 그 `ingest_log.status` 로 "오늘이
     끝났는가" 를 판정할 수 없다 → 완료 판정은 원장 행(`dart_disclosure.rcept_dt=D`)과 **상세 유닛을
-    받았는가**로 한다. '받았다' = 그 유닛의 `ingest_log` 최종 행이 ok 또는 no_data(013 은 DART 의
+    받았는가**로 한다. (B01 은 2026-09-10 에 고쳐져 열린 창도 대조를 통과하면 `open` 으로 남는다. 그래서
+    공시 목록을 다 받았는지는 2026-11-17 부터 건수 하한이 아니라 그 스윕 기록으로 본다 — `daily.dart_list`.)
+    '받았다' = 그 유닛의 `ingest_log` 최종 행이 ok 또는 no_data(013 은 DART 의
     확정 답)이고 `ts` 가 계기 공시 최초 관측 이후(`received()`, N-24 3.1·3.2). 어제 이미 ok 였던
     유닛은 이 `ts` 조건이 막는다. 콜 기록(`dart_call_log`)은 실패·한도 콜도 남아 근거가 못 된다
     (배포 묶음 3 A-05).
@@ -65,7 +67,7 @@ if _SRC not in sys.path:
 
 import doc_targets
 from daily import calendar as daily_calendar
-from daily import runlog
+from daily import dart_list, runlog
 
 # ── 엔드포인트 (SoT = `backfill_dart.py` STAGES·SPEC. 드리프트는 테스트가 잡는다) ──────────
 # stage 2 + stage 3 의 corp_year 축 6종. 정기보고서 하나가 이 7개를 되살린다.
@@ -106,12 +108,9 @@ _OFFSET_REPRT: dict[int, str] = {3: "11013", 9: "11014", 6: "11012"}
 # ── 예산 (findings B §3-1·§7-5) ────────────────────────────────────────────────────
 OUR_QUOTA_LIMIT = 40_000       # 우리 키(k2+k3) 합계 상한. 넘으면 중단한다
 KAEL_KEY_ID = "kael"           # v3 프로덕션 키. 1콜이라도 나가면 crit
-# 완료 판정 기대치 (findings B §7-1 ① — 실측 08-18~09-01 범위)
-GATE_MIN_FILINGS = 400
-GATE_MIN_LISTED = 290
 DEFAULT_MAX_DOCS = 3000        # `backfill_docs.sleep_to_kst_midnight()` 진입 방지
-RUN_SOURCE = "dart"            # 런 로그 source — 18:05 저녁 · 06:00 새벽 런(물량까지 판정한다)
-RUN_SOURCE_INTRADAY = "dart_intraday"   # 낮 분할 수집 런(12:30 · 14:30 · 16:15 · 17:15) — 물량은 판정하지 않는다
+RUN_SOURCE = "dart"            # 런 로그 source — 18:05 저녁 · 06:00 새벽 런(공시 목록 대조까지 판정한다)
+RUN_SOURCE_INTRADAY = "dart_intraday"   # 낮 분할 수집 런(12:30 · 14:30 · 16:15 · 17:15) — 목록 대조는 판정하지 않는다
 LATE_SAMPLE_MAX = 20           # 늦게 등장한 공시의 rcept_no 표본 상한(로그용). 수는 n_late 가 센다
 
 
@@ -175,8 +174,8 @@ class Trigger:
 class DailyPlan:
     """D일 공시가 만들어 낸 재호출 계획. 콜은 아직 하나도 나가지 않았다.
 
-    `n_rows`·`n_filings` 는 **접수일이 D 인 공시만** 센다 — 완료 판정의 `filings` 게이트가
-    쓰는 값이라 늦게 등장한 공시를 섞으면 하한 400 의 의미가 흐려진다. 늦게 등장한 쪽은
+    `n_rows`·`n_filings` 는 **접수일이 D 인 공시만** 센다 — 그날 물량의 기록이라 늦게 등장한 공시를
+    섞지 않는다(판정에는 쓰지 않는다 — `filings` 게이트는 목록 스윕 대조를 본다). 늦게 등장한 쪽은
     `n_late` 로 따로 센다(게이트가 아니라 기록용).
     """
 
@@ -665,7 +664,8 @@ def budget(con: sqlite3.Connection, *, since_ts: str,
 
 # ── 5. 완료 판정 (findings B §7-1 ① · §7-2 · §7-3) ────────────────────────────────
 def check(con: sqlite3.Connection, daily_plan: DailyPlan, *,
-          trading_day: bool = True, volume_gate: bool = True) -> tuple[Gate, ...]:
+          trading_day: bool = True, list_gate: bool = True,
+          swept_since: str | None = None) -> tuple[Gate, ...]:
     """"하루가 끝났는가" 판정. 근거는 **원장 행과 상세 유닛 수신**(`received()`)이다.
 
     plan 의 전 유닛 — 정기 7종 · DS005 15종 · 지분 2종 — 이 받았는지 본다(N-24 3.4: DS005
@@ -673,15 +673,19 @@ def check(con: sqlite3.Connection, daily_plan: DailyPlan, *,
     콜도 기록은 남고, 같은 D 의 두 번째 런은 받은 유닛을 다시 부르지 않는다(T13). 어제 이미 ok
     였던 유닛이 통과하는 것(DEFECT-B01 의 우려)은 `received()` 의 `ts ≥ 최초 관측` 이 막는다.
 
-    `volume_gate=False`(낮 분할 수집)면 물량 관문 `filings` 를 뺀다 — 낮에는 그날 공시가 덜 쌓였다.
+    `filings` 는 공시 목록을 다 받았는지다 — 건수가 아니라 목록 스윕이 DART 총건수와 대조를 통과했는지로
+    본다(`daily.dart_list`). `swept_since` 는 이번 런 스윕의 시작 시각이고(그 뒤의 기록이어야 한다), 스윕 없는
+    런은 None 이다. `list_gate=False`(낮 분할 수집)면 `filings` 를 뺀다 — 낮 스윕이 못 마쳐도 18:05 저녁 런이
+    다시 받고 거기서 판정한다.
     """
     rec = received(con, daily_plan)
 
     def of(endpoints: tuple[str, ...]) -> list[Unit]:
         return [u for u in daily_plan.units if u.endpoint in endpoints]
 
-    volume = (_gate_filings(con, daily_plan, trading_day=trading_day),) if volume_gate else ()
-    return (*volume,
+    listed = ((_gate_filings(con, daily_plan, trading_day=trading_day, swept_since=swept_since),)
+              if list_gate else ())
+    return (*listed,
             _gate_received("periodic_followed", of(PERIODIC_ENDPOINTS), rec,
                            unresolved=daily_plan.unresolved),
             _gate_received("major_followed", of(DS005_ENDPOINTS), rec),
@@ -689,8 +693,9 @@ def check(con: sqlite3.Connection, daily_plan: DailyPlan, *,
             _gate_docs(con, daily_plan))
 
 
-def _gate_filings(con: sqlite3.Connection, daily_plan: DailyPlan, *, trading_day: bool) -> Gate:
-    # 상장사 건수는 고유 공시로 센다 — 재스윕이 같은 공시를 다른 req_page_no 로 한 번 더
+def _gate_filings(con: sqlite3.Connection, daily_plan: DailyPlan, *, trading_day: bool,
+                  swept_since: str | None) -> Gate:
+    # 건수는 기록만 한다. 상장사 건수는 고유 공시로 센다 — 재스윕이 같은 공시를 다른 req_page_no 로 한 번 더
     # 적재한다(09-30 행 1,262 · 고유 725, N-24 3.5)
     row = con.execute(
         "SELECT COUNT(DISTINCT rcept_no), "
@@ -701,10 +706,9 @@ def _gate_filings(con: sqlite3.Connection, daily_plan: DailyPlan, *, trading_day
     if not trading_day:
         return Gate("filings", True, f"non-trading day, n_filings={n_filings} (0 is normal)",
                     metrics)
-    ok = n_filings >= GATE_MIN_FILINGS and n_listed >= GATE_MIN_LISTED
-    return Gate("filings", ok,
-                f"n_filings={n_filings} (>= {GATE_MIN_FILINGS}) "
-                f"n_listed={n_listed} (>= {GATE_MIN_LISTED}) date={daily_plan.date}",
+    sweep = dart_list.list_sweep(con, daily_plan.date, since_ts=swept_since)
+    return Gate("filings", sweep.ok,
+                f"{sweep.describe()} n_filings={n_filings} n_listed={n_listed} date={daily_plan.date}",
                 metrics)
 
 
@@ -880,7 +884,7 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
     건너뛰는 것이다. 종결 해제가 없으므로 백필은 이미 `ok` 인 유닛을 그냥 건너뛴다.
 
     `intraday` 는 낮 분할 수집이다(2026-11-14 — 정기보고서의 94~97% 가 17:30 전에 접수돼 18:05 한 번에 받으면
-    기한 전날 88분이 걸렸다). 하는 일은 같고 물량 관문을 판정하지 않으며 런 로그 source 가
+    기한 전날 88분이 걸렸다). 하는 일은 같고 공시 목록 대조(`filings`)를 판정하지 않으며 런 로그 source 가
     `RUN_SOURCE_INTRADAY` 다. 늦은 공시 창의 '그 D 의 첫 런'은 두 source 를 합쳐 가장 이른 런이다 — 낮 스윕이
     처음 본 늦은 공시를 뒤 런이 놓치지 않는다.
     """
@@ -952,7 +956,8 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
             post = budget(con, since_ts=window_ts)
             n_calls = int(con.execute("SELECT COUNT(*) FROM dart_call_log WHERE ts > ?",
                                       (started_ts,)).fetchone()[0])
-            gates = check(con, daily_plan, trading_day=trading_day, volume_gate=not intraday)
+            gates = check(con, daily_plan, trading_day=trading_day, list_gate=not intraday,
+                          swept_since=sweep_started_ts)
             lagged = fin_still_lagging(con, daily_plan, recall.fin_lag, after_rowid=fin_rowid)
             bad_rc = [rc for rc in (rc_sweep, rc_docs, *rc_backfill) if rc not in (None, 0)]
             status, detail = _verdict(post, gates, bad_rc, dry_run=dry_run)

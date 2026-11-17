@@ -26,6 +26,7 @@ from backfill_wise import (  # 종목당 일일 요청 수·실패 회복 규칙
     req_covered_on,
 )
 from daily import calendar as _cal
+from daily import dart_list  # 공시 목록을 다 받았는지의 정본(일일 DART 게이트와 같은 판정)
 from doc_targets import TARGETS_ON_DATE_SQL  # 원문 대상 술어의 정본(수집기 · 일일 DART 게이트와 같은 술어)
 
 KST = dt.timezone(dt.timedelta(hours=9))
@@ -450,9 +451,13 @@ def check_kis(con: sqlite3.Connection, d_prev: str, d_prev3: str, d_minus40: str
 def check_dart(con: sqlite3.Connection, d: str, trading_day: bool, kst_day_start_utc: str) -> list[Check]:
     out: list[Check] = []
     if _has_table(con, "dart_disclosure"):
+        # 건수(값)는 기록만 한다 — 다 받았는지는 목록 스윕이 DART 총건수와 대조를 통과했는지로 본다(2026-11-17).
         n = _count(con, "SELECT COUNT(DISTINCT rcept_no) FROM dart_disclosure WHERE rcept_dt=?", (d,))
-        exp = "영업일 >= 400 (실측 410~2,148)" if trading_day else "휴장일 0 허용"
-        out.append(Check("dart.disclosure.rows", Level.REQUIRED, Status.PASS if (n >= 400 or not trading_day) else Status.FAIL, n, exp))
+        sweep = dart_list.list_sweep(con, d)
+        listed = sweep.ok or not trading_day
+        exp = "영업일: D 당일 이후 목록 스윕이 대조 통과(ok·open·no_data)" if trading_day else "휴장일 0 허용"
+        out.append(Check("dart.disclosure.rows", Level.REQUIRED, Status.PASS if listed else Status.FAIL, n, exp,
+                         "" if listed else sweep.describe()))
         if _has_table(con, "doc_store"):
             row = con.execute(
                 f"WITH tgt AS ({TARGETS_ON_DATE_SQL}) "

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib
+import json
 import sqlite3
 import sys
 
@@ -116,16 +117,26 @@ D = "20260908"
 # rows 에 `collected_at` 을 안 주면 이 값이 붙는다 — D 당일 수집분이라 어느 런의 스윕 시작
 # 시각보다도 과거다(실제 시계는 D 이후). 그래서 "늦게 등장" 판정에 걸리지 않는다.
 _SEEN_BEFORE = "2026-09-08T12:00:00"
+# 목록 스윕이 D 의 분기 창(2026Q3)을 대조까지 마치고 기록을 남긴 시각 — 18:10 KST, D 00:00 KST 뒤다.
+_SWEPT = "2026-09-08T09:10:00"
+_WINDOW = ("20260701", "20260930")
+
+
+def _sweep(con, status, *, ts=_SWEPT, total=0):
+    """목록 스윕이 D 의 분기 창에 남기는 기록 1행(`sweep_disclosure.mark` 와 같은 열)."""
+    con.execute("INSERT OR REPLACE INTO ingest_log VALUES ('disclosure','',?,?,'',?,?,?,?)",
+                (*_WINDOW, status, total, json.dumps({"total_count": total}), ts))
 
 
 def _corp_for(i: int) -> str:
     return (C1, C2, C3)[i % 3]
 
 
-def _make_home(tmp_path, *, rows=None):
+def _make_home(tmp_path, *, rows=None, sweep="open"):
     """표본 20건이 든 dart.db 를 tmp home 에 만든다. rows 를 주면 그것으로 대체한다.
 
     rows 한 건은 `(rcept_no, rcept_dt, corp_code, stock_code, report_nm[, collected_at])` 다.
+    목록 스윕은 D 의 분기 창을 sweep 상태로 기록한 것으로 만든다(기본 open = 대조 통과, None 이면 기록 없음).
     """
     db = tmp_path / "data" / "raw" / "dart.db"
     db.parent.mkdir(parents=True, exist_ok=True)
@@ -139,6 +150,8 @@ def _make_home(tmp_path, *, rows=None):
         "INSERT INTO dart_disclosure VALUES (?,?,?,?,?,?,?)",
         [(f"h{i}", *r, *((_SEEN_BEFORE,) if len(r) == 5 else ()))
          for i, r in enumerate(rows)])
+    if sweep is not None:
+        _sweep(con, sweep, total=len({r[0] for r in rows}))
     con.commit()
     con.close()
     return str(tmp_path)
@@ -340,7 +353,7 @@ def test_group_units_folds_endpoints_sharing_the_same_corp_set() -> None:
 
 # ── unlock ──────────────────────────────────────────────────────────────────────
 def test_unlock_deletes_by_axis_key(tmp_path) -> None:
-    home = _make_home(tmp_path)
+    home = _make_home(tmp_path, sweep=None)
     con = _con(home)
     ts = "2026-09-01T00:00:00"
     con.executemany("INSERT INTO ingest_log VALUES (?,?,?,?,?,?,?,NULL,?)", [
@@ -432,16 +445,60 @@ def test_gates_pass_on_units_received_after_first_seen_without_calls_this_run(tm
     con.close()
 
 
-def test_gates_fail_on_thin_ledger_and_missing_recalls(tmp_path) -> None:
-    home = _make_home(tmp_path, rows=_busy_day_rows(10))          # 12건 < 하한 400
+def test_gates_fail_on_missing_recalls_but_not_on_a_thin_day(tmp_path) -> None:
+    home = _make_home(tmp_path, rows=_busy_day_rows(10))          # 12건 — 적은 것만으로는 실패가 아니다
     con = _con(home)
     p = dd.plan(con, D)
     gates = _gates(con, p)
-    assert not gates["filings"].ok and gates["filings"].metrics["n_filings"] == 12
+    assert gates["filings"].ok and gates["filings"].metrics["n_filings"] == 12
     assert not gates["periodic_followed"].ok      # 정기 7종 미수신
     assert not gates["major_followed"].ok         # DS005 15종 미수신
     assert not gates["documents"].ok              # doc_store 에 행 없음 → n_never_tried=1
     assert gates["documents"].metrics["n_never_tried"] == 1
+    con.close()
+
+
+def test_filings_gate_passes_a_quiet_day_when_the_list_sweep_reconciled(tmp_path) -> None:
+    """건수가 적어도 목록 스윕이 DART 총건수와 대조를 통과했으면 그날 목록은 다 받은 것이다.
+
+    11-17(분기보고서 기한 다음 거래일) 접수 334건 · 상장사 293건 — 스윕은 정상인데 옛 하한(400 · 290)에 걸려
+    저녁 판이 그날 공시 없이 나갔다. 같은 하한이 08:10 원장 건전성에도 있어 다음 날 확정판까지 막을 뻔했다.
+    """
+    listed = [(f"20260908{i:06d}", D, C1, "005930", "기타시장안내") for i in range(293)]
+    unlisted = [(f"20260908{i:06d}", D, C1, "", "기타시장안내") for i in range(293, 334)]
+    home = _make_home(tmp_path, rows=[*listed, *unlisted], sweep="open")
+    con = _con(home)
+    g = _gates(con, dd.plan(con, D))["filings"]
+    assert g.ok, g.detail
+    assert g.metrics == {"n_filings": 334, "n_listed": 293}          # 건수는 기록만 한다
+    con.close()
+
+
+@pytest.mark.parametrize("status", ["partial", "mismatch", None])
+def test_filings_gate_fails_a_busy_day_when_the_list_sweep_did_not_reconcile(tmp_path,
+                                                                            status) -> None:
+    """목록을 도중까지만 받았거나(partial) 대조가 어긋났거나(mismatch) 스윕 기록이 없으면 건수가 많아도 실패다.
+    옛 판정은 400건만 넘으면 통과했다 — 스윕은 이렇게 끝나도 종료 코드가 0 이다."""
+    home = _make_home(tmp_path, rows=_busy_day_rows(500), sweep=status)
+    con = _con(home)
+    g = _gates(con, dd.plan(con, D))["filings"]
+    assert not g.ok and g.metrics["n_filings"] == 502
+    con.close()
+
+
+def test_filings_gate_needs_a_reconciled_sweep_from_this_run_or_from_day_d(tmp_path) -> None:
+    """이번 런이 스윕을 돌렸으면 그 스윕이 남긴 기록이어야 한다 — 앞선 런의 통과 기록으로 넘어가지 않는다.
+    스윕 없는 런(`--skip-sweep`)은 D 당일(00:00 KST) 이후의 통과 기록이면 된다 — 전날 기록은 안 된다."""
+    home = _make_home(tmp_path, rows=_busy_day_rows(500))          # 기록 시각 _SWEPT(D 18:10 KST)
+    con = _con(home)
+    p = dd.plan(con, D)
+    assert _gates(con, p, swept_since=_SWEPT)["filings"].ok
+    assert not _gates(con, p, swept_since="2026-09-08T09:10:01")["filings"].ok
+    assert _gates(con, p)["filings"].ok
+    _sweep(con, "open", ts="2026-09-07T14:59:59")                  # D 00:00 KST 1초 전
+    g = _gates(con, p)["filings"]
+    assert not g.ok
+    assert "window=20260701-20260930 status=open ts=2026-09-07T14:59:59" in g.detail   # 진단에 기록을 싣는다
     con.close()
 
 
@@ -588,14 +645,13 @@ def test_filings_gate_counts_listed_filings_once_not_resweep_rows(tmp_path) -> N
     """N-24 3.5 — 재스윕은 같은 공시를 다른 `req_page_no` 로 한 번 더 적재한다.
 
     09-30 실측 행 1,262 · 고유 725. 상장사 공시 고유 200건이 두 벌씩 적재된 날: 행으로 세면
-    400(하한 290 통과), 공시로 세면 200(실패).
+    400, 공시로 세면 200 — 기록하는 건수는 고유 공시다(건수는 판정에 쓰지 않는다).
     """
     listed = [(f"20260908{i:06d}", D, C1, "005930", "기타시장안내") for i in range(200)]
     unlisted = [(f"20260908{i:06d}", D, C1, "", "기타시장안내") for i in range(200, 450)]
     home = _make_home(tmp_path, rows=[*listed, *listed, *unlisted])
     con = _con(home)
     g = _gates(con, dd.plan(con, D))["filings"]
-    assert not g.ok
     assert g.metrics == {"n_filings": 450, "n_listed": 200}
     con.close()
 
@@ -766,7 +822,7 @@ def test_run_stops_when_kael_production_key_was_used(tmp_path, monkeypatch) -> N
 def test_run_sweeps_unlocks_and_calls_backfill_per_group(tmp_path, monkeypatch) -> None:
     rows = [("20260908000001", D, C1, "005930", "반기보고서 (2026.06)"),
             ("20260908000002", D, C2, "005930", "주요사항보고서(유상증자결정)")]
-    home = _make_home(tmp_path, rows=rows)
+    home = _make_home(tmp_path, rows=rows, sweep=None)
     con = _con(home)
     con.execute("INSERT INTO ingest_log VALUES ('fin',?,'2026','11012','CFS','ok',9,NULL,?)",
                 (C1, "2026-09-01T00:00:00"))
@@ -860,6 +916,12 @@ def _fake_backfill(monkeypatch, home, *, fin_rcept_no=None, status="ok"):
     seen: list[tuple[list[str], list[str]]] = []
 
     def _exec(cmd, *, cwd):
+        if cmd[1].endswith("sweep_disclosure.py"):      # 스윕이 대조를 통과하고 끝난 것처럼 기록을 남긴다
+            c = _con(home)
+            _sweep(c, "open", ts=dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S"))
+            c.commit()
+            c.close()
+            return 0
         if not cmd[1].endswith("backfill_dart.py"):
             return 0
         with open(cmd[cmd.index("--corps") + 1], encoding="utf-8") as f:
@@ -887,7 +949,7 @@ def test_second_run_of_a_received_day_unlocks_and_calls_nothing(tmp_path, monkey
 
     옛 코드는 plan 전 유닛을 지우고(해제 22) 두 그룹(정기·DS005)을 다시 불렀다.
     """
-    rows = [*_busy_day_rows(500)[:-2],                            # 공시 하한(400·290)을 넘기는 평일
+    rows = [*_busy_day_rows(500)[:-2],                            # 공시가 많은 평일
             ("20260908000001", D, C1, "005930", "반기보고서 (2026.06)"),
             ("20260908000002", D, C2, "005930", "주요사항보고서(유상증자결정)")]
     home = _make_home(tmp_path, rows=rows)
@@ -1084,10 +1146,12 @@ def _prior_run(home, source, started):
 
 def test_intraday_run_does_not_judge_volume_and_logs_under_its_own_source(tmp_path,
                                                                           monkeypatch) -> None:
-    """낮 분할 수집(12:30 · 14:30 · 16:15 · 17:15) — 낮에는 그날 공시가 덜 쌓여 물량 관문(n_filings >= 400)을
-    넘지 못한다. 낮 런은 물량을 판정하지 않고, 런 로그도 `dart_intraday` 로 따로 남긴다(일일 리포트 · 회복
-    판정이 보는 `dart` 런은 저녁 · 새벽 둘 그대로)."""
-    home = _make_home(tmp_path, rows=[("20260908000001", D, C1, "005930", "기타시장안내")])
+    """낮 분할 수집(12:30 · 14:30 · 16:15 · 17:15) — 낮 런은 공시 목록 대조(`filings`)를 판정하지 않고(낮 스윕이
+    도중에 멈춰도 18:05 저녁 런이 다시 받고 거기서 판정한다), 런 로그도 `dart_intraday` 로 따로 남긴다(일일
+    리포트 · 회복 판정이 보는 `dart` 런은 저녁 · 새벽 둘 그대로). 가짜 스윕은 기록을 남기지 않는다 — 창은
+    도중에 멈춘 상태(partial) 그대로다."""
+    home = _make_home(tmp_path, rows=[("20260908000001", D, C1, "005930", "기타시장안내")],
+                      sweep="partial")
     _fake_exec(monkeypatch)
 
     evening = dd.run(D, home=home, sweep_from="2026Q3")
@@ -1196,7 +1260,7 @@ def test_run_skip_sweep_does_not_follow_late_filings(tmp_path, monkeypatch) -> N
 def test_dry_run_does_not_touch_ingest_log_or_runlog(tmp_path, monkeypatch) -> None:
     rows = [(f"2026090800{i:04d}", D, c, "005930", "주요사항보고서(유상증자결정)")
             for i, c in enumerate((C1, C2, C3))]
-    home = _make_home(tmp_path, rows=rows)
+    home = _make_home(tmp_path, rows=rows, sweep=None)
     con = _con(home)
     con.executemany("INSERT INTO ingest_log VALUES ('fricDecsn',?,'','','','ok',1,NULL,?)",
                     [(c, "2026-09-01T00:00:00") for c in (C1, C2, C3)])

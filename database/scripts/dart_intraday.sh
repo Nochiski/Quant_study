@@ -5,9 +5,12 @@
 #   하는 일: `daily.dart_daily --date D(오늘 KST) --intraday` 한 번 — 스윕 → 상세 → 본문. 같은 D 를 다시 돌면 받지 않은
 #       유닛만 부른다. 물량 관문은 판정하지 않고 런 로그 source 는 dart_intraday 다.
 #   하지 않는 일: 저녁 인계 파일(ledger_evening.json) · 저녁 판 훅 · 키움 — 18:05 daily_evening.sh 몫 그대로다.
-#   원장 락: 기다리지 않는다. 다른 원장 작업이 쥐고 있으면 이번 회차를 건너뛴다(다음 회차 · 18:05 가 받는다).
-#       이 런이 18:05 를 넘기면 저녁 체인이 원장 락을 기다렸다 이어서 돈다(완료 감지, P9). 락 경로는 scripts/raw_lock.sh.
-#   알림: rc≠0 이면 warn 한 줄(18:05 런이 다시 부른다). 휴장 · 락 건너뜀은 로그에만 남긴다(하루 4번이라 info 를 내지 않는다).
+#   원장 락: 다른 원장 작업(앞 회차 낮 수집 · 배포)이 쥐고 있으면 끝날 때까지 기다렸다 이어서 돈다 — 회차를 건너뛰지
+#       않는다(완료 감지, P9 · scripts/raw_lock.sh 공용 규칙 그대로: 대기자는 하나, 자정을 넘기면 crit).
+#       같은 낮 수집이 이미 기다리는 중이면 rc 3 — 먼저 기다린 회차가 더 늦게 시작해 같은 공시를 다 받는다.
+#       기다리는 사이 그 D 의 18:05 저녁 수집이 먼저 돌았으면 수집 없이 끝낸다(저녁 런이 그날 접수분을 다 받았다).
+#       이 런이 18:05 를 넘기면 저녁 체인이 원장 락을 기다렸다 이어서 돈다.
+#   알림: rc≠0 이면 warn 한 줄(18:05 런이 다시 부른다). 대기는 raw_lock.sh 가 info 를 남긴다. 휴장은 로그에만 남긴다.
 #   사용: dart_intraday.sh [--date YYYYMMDD]
 set -uo pipefail
 cd "$HOME/quant-ledger"
@@ -44,14 +47,20 @@ elif [ "$TD" -eq 1 ]; then
   echo "  D=$D 는 거래일이 아니다 — 건너뜀" >> "$LOG"
   exit 0
 fi
-if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
-  . scripts/raw_lock.sh   # LOCK(원장 락 경로)만 쓴다 — 대기형 획득 함수는 부르지 않는다
-  exec 9>"$LOCK"
-  if ! flock -n 9; then
-    echo "  원장 락을 다른 작업이 쥐고 있다($LOCK) — 이번 회차 건너뜀 $(kst)" >> "$LOG"
+. scripts/raw_lock.sh
+raw_lock_acquire dart_intraday "" || { LRC=$?; echo "  원장 락을 잡지 못함(rc $LRC) — 종료 $(kst)" >> "$LOG"; exit "$LRC"; }
+if [ -n "$LOCK_WAITED" ]; then
+  echo "  원장 락 대기 $LOCK_WAITED" >> "$LOG"
+  # 기다리는 사이 그 D 의 저녁 수집(source dart)이 시작했으면 rc 1 — 그 런이 그날 접수분을 다 받는다
+  $PY -c 'import os, sys
+from daily import runlog
+from daily.dart_daily import RUN_SOURCE
+db = os.path.join(os.environ["QL_HOME"], "data", "raw", "daily_run.db")
+sys.exit(1 if runlog.first_started_utc(db, source=RUN_SOURCE, date=sys.argv[1]) is not None else 0)' "$D" >> "$LOG" 2>&1; EV=$?
+  if [ "$EV" -eq 1 ]; then
+    echo "  기다리는 사이 D=$D 저녁 수집이 먼저 돌았다 — 수집 없이 종료 $(kst)" >> "$LOG"
     exit 0
   fi
-  export QL_RAW_LOCK_HELD=1
 fi
 $PY -m daily.dart_daily --date "$D" --intraday >> "$LOG" 2>&1; RC=$?
 echo "════ 종료 rc=$RC $(kst) ════" >> "$LOG"

@@ -1,5 +1,6 @@
 # 원장 락(raw 락) 획득 — 원장을 쓰는 체인 스크립트가 source 해서 부르는 공용 조각(배포 묶음 5-3, B-52·B-56).
-#   쓰는 곳: daily_ledger.sh(06:00) · daily_build.sh(08:10) · daily_evening.sh(18:05) · daily_wise.sh · wics_weekly.sh
+#   쓰는 곳: daily_ledger.sh(06:00) · daily_build.sh(08:10) · daily_evening.sh(18:05) · daily_wise.sh · wics_weekly.sh ·
+#           dart_intraday.sh(낮 분할 수집)
 #   사용(루트로 cd 하고 인자를 읽은 뒤): . scripts/raw_lock.sh; raw_lock_acquire <이름> "$DRY" [대기 알림 본문] || exit $?
 #   · QL_RAW_LOCK_HELD 가 있으면(부모가 쥐고 물려줌) 원장 락·대기자 락 둘 다 열지 않는다.
 #   · 원장 락(fd 9)이 비었으면 바로 잡는다. 잡혀 있으면 끝날 때까지 기다렸다 이어서 돈다 — 시간 한도·재시도

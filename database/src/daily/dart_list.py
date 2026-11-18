@@ -12,6 +12,11 @@
   mismatch    대조가 어긋났다(페이징 누락 · 적재 유실)
 스윕은 partial · mismatch 로 끝나도 종료 코드가 0 이라 이 기록 말고는 알 방법이 없다.
 
+판정은 상태가 아니라 "이 창이 마지막으로 대조를 통과한 시각"으로 한다(2026-11-18). 스윕은 쪽마다 기록을 partial 로
+덮으므로, 도중에 멈추면 앞선 통과까지 지워진다 — 06:00 재수집의 스윕이 멈추면 전날 18:05 에 다 받은 D 의 목록이
+08:10 에 "못 받음"이 되어 확정판을 짓지 않는다. 그래서 스윕이 note 에 `reconciled_ts` 를 남기고 partial 은 그 값을
+이어받는다(mismatch 는 지운다). 그 칸이 없는 옛 기록은 통과 상태일 때의 기록 시각이 그 값이다.
+
 건수의 많고 적음은 보지 않는다(2026-11-17). 옛 판정은 '접수일 D 공시 400건 이상 · 상장사 290건 이상'이었다.
   · 분기보고서 기한 다음 거래일(11-17)의 334건이 걸려 저녁 판이 그날 공시 없이 나갔다 — 스윕은 정상이었다.
     2019 년 이후 평일 1,940일 중 61일이 400건 미만이다.
@@ -42,10 +47,12 @@ class ListSweep:
     status: str | None = None        # 기록이 없으면 None
     ts: str | None = None            # 기록 시각(Z 없는 UTC)
     total_count: int | None = None   # DART 가 알려준 창 전체 건수
+    reconciled_ts: str | None = None  # 마지막으로 대조를 통과한 시각(Z 없는 UTC). 통과한 적이 없으면 None
 
     def describe(self) -> str:
         return (f"list sweep window={self.window[0]}-{self.window[1]} status={self.status or 'none'} "
-                f"ts={self.ts or '-'} (need one of {'/'.join(RECONCILED)} at or after {self.since_ts}) "
+                f"ts={self.ts or '-'} last_reconciled={self.reconciled_ts or '-'} "
+                f"(need a reconciled sweep — {'/'.join(RECONCILED)} — at or after {self.since_ts}) "
                 f"total_count={'-' if self.total_count is None else self.total_count}")
 
 
@@ -66,7 +73,7 @@ def day_start_utc(date_yyyymmdd: str) -> str:
 
 def list_sweep(con: sqlite3.Connection, date_yyyymmdd: str, *,
                since_ts: str | None = None) -> ListSweep:
-    """D 가 든 분기 창의 마지막 스윕이 대조를 통과했고(`RECONCILED`) 그 기록이 `since_ts` 이후인가.
+    """D 가 든 분기 창이 마지막으로 대조를 통과한(`RECONCILED`) 시각이 `since_ts` 이후인가.
 
     `since_ts` 는 "언제 이후의 스윕이어야 하는가"다. 이번 런이 스윕을 돌렸으면 그 스윕의 시작 시각을 준다 —
     앞선 런의 기록으로 통과하지 않는다. 주지 않으면 D 00:00 KST — D 당일이나 그 뒤에 대조를 통과한 스윕이
@@ -83,8 +90,13 @@ def list_sweep(con: sqlite3.Connection, date_yyyymmdd: str, *,
         return ListSweep(False, window, since)
     status, ts, note = str(row[0]), str(row[1]), row[2]
     try:
-        total = json.loads(note).get("total_count") if note else None
-    except (ValueError, AttributeError):
-        total = None
-    return ListSweep(status in RECONCILED and ts >= since, window, since, status, ts,
-                     int(total) if isinstance(total, int) else None)
+        payload = json.loads(note) if note else {}
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    total = payload.get("total_count")
+    kept = payload.get("reconciled_ts")
+    reconciled = kept if isinstance(kept, str) else (ts if status in RECONCILED else None)
+    return ListSweep(reconciled is not None and reconciled >= since, window, since, status, ts,
+                     int(total) if isinstance(total, int) else None, reconciled)

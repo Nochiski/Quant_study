@@ -173,20 +173,43 @@ def stored_rows(con, bgn, end, below=None, distinct=False):
 def stored_rows_all(con):
     return con.execute(f"SELECT COUNT(*) FROM {TBL}").fetchone()[0] if has_ledger(con) else 0
 
-def mark(con, bgn, end, status, n_rows, total_count, total_page, st, excess=0):
+def mark(con: sqlite3.Connection, bgn: str, end: str, status: str, n_rows: int, total_count: int | None,
+         total_page: int | None, st: str | None, excess: int = 0) -> None:
     """유닛 상태 기록. total_count 를 note 에 JSON 으로 남긴다(§6-1 필수조건 3).
 
-    컬럼을 명시해서 넣는다 — 위치형이면 ingest_log 에 컬럼이 하나 늘 때 조용히 깨진다."""
+    컬럼을 명시해서 넣는다 — 위치형이면 ingest_log 에 컬럼이 하나 늘 때 조용히 깨진다.
+
+    note 의 `reconciled_ts` 는 이 창이 마지막으로 대조를 통과한 시각이다(2026-11-18). 통과 상태(ok · open ·
+    no_data)로 적을 때 지금 시각을 넣고, 쪽을 도는 동안의 partial 은 직전 기록의 값을 이어받는다 — 스윕이 도중에
+    멈춰도 앞선 통과가 지워지지 않는다(`daily.dart_list` 가 읽는다). mismatch 는 이어받지 않는다: 대조가
+    어긋났으면 앞선 통과를 믿을 수 없다."""
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
     payload = {"total_count": total_count, "total_page": total_page, "st": st}
     if excess:
         payload["excess"] = excess
+    if status in (*DONE, "open"):
+        payload["reconciled_ts"] = now
+    elif status == "partial":
+        prev = con.execute("SELECT note FROM ingest_log WHERE name=? AND corp_code='' AND bsns_year=? "
+                           "AND reprt_code=? AND fs_div=''", (NAME, bgn, end)).fetchone()
+        carried = _reconciled_ts(prev[0]) if prev else None
+        if carried:
+            payload["reconciled_ts"] = carried
     note = json.dumps(payload, ensure_ascii=False)
     con.execute("INSERT OR REPLACE INTO ingest_log "
                 "(name, corp_code, bsns_year, reprt_code, fs_div, status, n_rows, note, ts) "
                 "VALUES (?,?,?,?,?,?,?,?,?)",
-                (NAME, "", bgn, end, "", status, n_rows, note,
-                 datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")))
+                (NAME, "", bgn, end, "", status, n_rows, note, now))
     con.commit()
+
+
+def _reconciled_ts(note: str | None) -> str | None:
+    """창 기록의 note 에서 `reconciled_ts` 를 꺼낸다. 없거나(옛 기록) JSON 이 아니면 None."""
+    try:
+        got = json.loads(note).get("reconciled_ts") if note else None
+    except (ValueError, AttributeError):
+        return None
+    return got if isinstance(got, str) else None
 
 
 # ── 콜 ────────────────────────────────────────────────────────────

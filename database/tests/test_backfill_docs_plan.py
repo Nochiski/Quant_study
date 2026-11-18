@@ -111,3 +111,27 @@ def test_014_within_seven_days_of_filing_is_retried_and_older_is_not(tmp_path, m
         ("20261106000001", 0, "s", 0, 0, "014", "t")])
     plan = m.build_plan(con, [2, 3], today="20261114")
     assert [r for _, r in plan] == ["20261113000001", "20261107000001", "20260901000003"]
+
+
+def test_a_repeated_014_keeps_the_time_it_was_first_seen(tmp_path, monkeypatch):
+    """접수 7일 안의 014 는 매 런 다시 부른다(하루 6회). 같은 답이 또 오면 `doc_store` 행을 다시 쓰지 않는다 —
+    `fetched_at` 은 stage `stg_doc_index` 의 관측일이라, 매 런 옮기면 (rcept_no, observed_date) 가 날마다 바뀌어
+    조용한 손실 검사가 '행 삭제'로 센다(11-16~11-18: 위드텍 20261112000288 · 한국특강 20261116002092).
+    답이 바뀌면(다른 실패) 행을 바꾼다."""
+    m = _load(tmp_path, monkeypatch)
+    con = _db(tmp_path)
+    rno = "20261113000001"
+
+    def row() -> tuple:
+        return con.execute("SELECT bytes, zip_ok, http_status, fetched_at FROM doc_store WHERE rcept_no=?",
+                           (rno,)).fetchone()
+
+    monkeypatch.setattr(m, "now_utc", lambda: "2026-11-13T09:30:00")     # 11-13 18:30 KST — 처음 본 014
+    m.record_failure(con, rno, "014", 120)
+    monkeypatch.setattr(m, "now_utc", lambda: "2026-11-13T21:40:00")     # 11-14 06:40 KST — 다시 불러도 014
+    m.record_failure(con, rno, "014", 120)
+    assert row() == (120, 0, "014", "2026-11-13T09:30:00")
+
+    monkeypatch.setattr(m, "now_utc", lambda: "2026-11-14T03:31:00")     # 답이 바뀌었다 — 연결 오류
+    m.record_failure(con, rno, "exc/TimeoutError", 0)
+    assert row() == (0, 0, "exc/TimeoutError", "2026-11-14T03:31:00")

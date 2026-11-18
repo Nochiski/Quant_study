@@ -119,6 +119,22 @@ def fetch(key: str, rno: str) -> tuple[str, bytes]:
     return "exc", b""
 
 
+def record_failure(con: sqlite3.Connection, rno: str, status: str, n_bytes: int) -> None:
+    """실패도 doc_store 에 남긴다(zip_ok=0) — 재실행 시 재시도 대상이 되고, "안 받은 것"과 "받았는데 깨진 것"이
+    로그에서 갈린다.
+
+    같은 실패가 되풀이되면 행을 다시 쓰지 않는다(2026-11-18). 접수 `RETRY_014_DAYS` 일 안의 014 는 매 런 다시
+    부르는데, `fetched_at` 은 stage `stg_doc_index` 의 관측일이다 — 매 런 옮기면 (rcept_no, observed_date) 가
+    날마다 바뀌어 조용한 손실 검사가 '행 삭제'로 센다. 그 답을 처음 본 시각이 남는다. 콜은 `dart_call_log` 에 남는다.
+    """
+    same = con.execute("SELECT 1 FROM doc_store WHERE rcept_no = ? AND zip_ok = 0 AND http_status = ? "
+                       "AND bytes = ?", (rno, status, n_bytes)).fetchone()
+    if same is not None:
+        return
+    con.execute("INSERT OR REPLACE INTO doc_store VALUES (?,?,?,?,?,?,?)",
+                (rno, n_bytes, "", 0, 0, status, now_utc()))
+
+
 def build_plan(con: sqlite3.Connection, priorities: list[int],
                retry_014: bool = False, today: str | None = None) -> list[tuple[int, str]]:
     """(우선순위, rcept_no) 리스트. zip_ok=1 로 이미 받은 것은 뺀다.
@@ -216,10 +232,7 @@ def main() -> None:
             saved += 1
             nbytes += len(blob)
         else:
-            # 실패도 doc_store 에 남긴다(zip_ok=0) — 재실행 시 재시도 대상이 되고,
-            # "안 받은 것"과 "받았는데 깨진 것"이 로그에서 갈린다
-            con.execute("INSERT OR REPLACE INTO doc_store VALUES (?,?,?,?,?,?,?)",
-                        (rno, len(blob), "", 0, 0, st, now_utc()))
+            record_failure(con, rno, st, len(blob))
         con.commit()
 
         if i % 200 == 0:

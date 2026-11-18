@@ -2,7 +2,7 @@
 import os
 import sqlite3
 import tempfile
-from datetime import date
+from datetime import UTC, date, datetime
 
 # sweep_disclosure 는 import 시점에 `api` 를 통해 kael .env 를 읽는다(api.py:35). CI 에는 .env 가 없으므로
 # 임시 .env 를 만들어 QL_ENV 로 가리킨다 — test_api_dart_keys 와 같은 방식. 키 값은 더미다.
@@ -48,9 +48,7 @@ def test_list_sweep_reader_uses_the_sweeps_own_unit_name_states_and_window_id():
         assert sd.windows(q_start, sd.q_end(day)) == [dart_list.quarter_window(day.strftime("%Y%m%d"))]
 
 
-def test_list_sweep_reader_judges_the_record_the_sweep_marks(tmp_path):
-    """스윕의 `mark()` 가 실제로 적은 행을 읽는다: 대조를 통과한 창(open)은 통과, 도중에 멈춘 창(partial) ·
-    대조가 어긋난 창(mismatch)은 실패, 기록이 없는 창도 실패. 건수(여기선 1건)는 판정과 무관하다."""
+def _ingest_log(tmp_path) -> sqlite3.Connection:
     con = sqlite3.connect(tmp_path / "dart.db")
     con.execute("""CREATE TABLE ingest_log(
       name TEXT NOT NULL, corp_code TEXT NOT NULL,
@@ -58,16 +56,78 @@ def test_list_sweep_reader_judges_the_record_the_sweep_marks(tmp_path):
       fs_div TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL, n_rows INTEGER NOT NULL, note TEXT, ts TEXT NOT NULL,
       PRIMARY KEY (name, corp_code, bsns_year, reprt_code, fs_div))""")
+    return con
+
+
+def test_list_sweep_reader_judges_the_record_the_sweep_marks(tmp_path):
+    """스윕의 `mark()` 가 실제로 적은 행을 읽는다: 대조를 통과한 창(open · ok)은 통과, 한 번도 통과하지 못하고
+    멈춘 창(partial) · 대조가 어긋난 창(mismatch)은 실패, 기록이 없는 창도 실패. 건수(여기선 1건)는 판정과 무관하다."""
+    con = _ingest_log(tmp_path)
     day = "20200102"                                    # 과거 날짜 — mark() 는 지금 시각으로 적는다
     assert not dart_list.list_sweep(con, day).ok        # 기록 없음
     window = dart_list.quarter_window(day)
+    sd.mark(con, *window, "partial", 1, 1, 1, "000")
+    assert not dart_list.list_sweep(con, day).ok        # 첫 스윕이 도중에 멈췄다 — 통과한 적이 없다
     sd.mark(con, *window, "open", 1, 1, 1, "000")
     got = dart_list.list_sweep(con, day)
     assert got.ok and (got.status, got.total_count) == ("open", 1)
-    for bad in ("partial", "mismatch"):
-        sd.mark(con, *window, bad, 1, 1, 1, "000")
-        assert not dart_list.list_sweep(con, day).ok
+    sd.mark(con, *window, "mismatch", 1, 1, 1, "000")
+    assert not dart_list.list_sweep(con, day).ok
     sd.mark(con, *window, "ok", 1, 1, 1, "000")
     assert dart_list.list_sweep(con, day).ok
     assert not dart_list.list_sweep(con, day, since_ts="2999-01-01T00:00:00").ok    # 그 뒤에 돈 스윕이 없다
+    con.close()
+
+
+class _Clock:
+    """`sweep_disclosure.mark` 가 읽는 시계 — 기록 시각을 테스트가 정한다."""
+
+    def __init__(self) -> None:
+        self.at = "2026-11-17T09:10:37"
+
+    def now(self, tz: object = None) -> datetime:
+        return datetime.strptime(self.at, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=UTC)
+
+
+def test_a_sweep_that_stops_midway_keeps_the_time_the_window_last_reconciled(tmp_path, monkeypatch):
+    """스윕은 쪽마다 창 기록을 partial 로 덮는다. 06:00 재수집의 스윕이 도중에 멈추면(키 소진 · 응답 오류 ·
+    강제 종료) 전날 18:05 에 대조를 통과한 사실까지 지워져 08:10 원장 건전성 `dart.disclosure.rows` 가 실패하고
+    확정판을 짓지 않는다. 마지막으로 대조를 통과한 시각은 partial 로 덮여도 남아야 한다 — 다만 그 시각은
+    멈춘 런보다 앞이므로, 그 런 자신의 `filings` 관문(이번 스윕 시작 이후를 요구)은 여전히 실패다."""
+    clock = _Clock()
+    monkeypatch.setattr(sd, "datetime", clock)
+    con = _ingest_log(tmp_path)
+    day = "20261117"
+    window = dart_list.quarter_window(day)
+    sd.mark(con, *window, "open", 24357, 24357, 244, "000")       # 11-17 18:10 KST — 대조 통과
+    clock.at = "2026-11-17T21:42:05"                              # 11-18 06:42 KST — 3쪽째에서 멈춤
+    sd.mark(con, *window, "partial", 300, 24364, 244, "000")
+
+    got = dart_list.list_sweep(con, day)                          # 08:10 원장 건전성(기준 = D 00:00 KST)
+    assert got.ok and got.status == "partial"
+    assert got.reconciled_ts == "2026-11-17T09:10:37"
+    assert not dart_list.list_sweep(con, day, since_ts="2026-11-17T21:41:16").ok   # 멈춘 런의 filings 관문
+    assert not dart_list.list_sweep(con, "20261118").ok           # 다음 날(D+1) 것으로는 통과하지 않는다
+    con.close()
+
+
+def test_a_mismatch_forgets_the_earlier_reconciliation(tmp_path, monkeypatch):
+    """대조가 어긋난 창(mismatch — 페이징 누락 · 적재 유실)은 앞선 통과를 이어받지 않는다. 그 뒤 런이 쪽을 도는
+    동안의 partial 도 통과가 아니다 — 다시 대조를 통과해야 한다."""
+    clock = _Clock()
+    monkeypatch.setattr(sd, "datetime", clock)
+    con = _ingest_log(tmp_path)
+    day = "20261117"
+    window = dart_list.quarter_window(day)
+    sd.mark(con, *window, "open", 24357, 24357, 244, "000")
+    clock.at = "2026-11-17T21:45:36"
+    sd.mark(con, *window, "mismatch", 24300, 24364, 244, "000")
+    assert not dart_list.list_sweep(con, day).ok
+    clock.at = "2026-11-18T03:30:40"
+    sd.mark(con, *window, "partial", 100, 24380, 244, "000")
+    got = dart_list.list_sweep(con, day)
+    assert not got.ok and got.reconciled_ts is None
+    clock.at = "2026-11-18T03:37:12"
+    sd.mark(con, *window, "open", 24380, 24380, 244, "000")
+    assert dart_list.list_sweep(con, day).ok
     con.close()

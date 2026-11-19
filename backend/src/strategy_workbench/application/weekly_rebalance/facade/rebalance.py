@@ -38,6 +38,10 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.account impo
     AccountState,
     AccountUnavailableError,
 )
+from strategy_workbench.application.weekly_rebalance.ports.outgoing.exclusions import (
+    ExclusionSource,
+    ExclusionsUnavailableError,
+)
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.market import (
     MarketError,
     MarketSource,
@@ -115,6 +119,8 @@ __all__ = [
     "DayOrder",
     "DayRecord",
     "EarlierClose",
+    "ExclusionSource",
+    "ExclusionsUnavailableError",
     "ExecuteResult",
     "ExecuteStatus",
     "ExecutionEvent",

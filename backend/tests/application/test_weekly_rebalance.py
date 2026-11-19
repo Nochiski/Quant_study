@@ -14,6 +14,8 @@ from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     ApproveStatus,
     DayRecord,
     EarlierClose,
+    ExclusionSource,
+    ExclusionsUnavailableError,
     ExecutionEvent,
     PlanExistsError,
     PlanRecord,
@@ -205,6 +207,7 @@ def service(
     *,
     risk: Risk | None = None,
     log: Log | None = None,
+    exclusions: ExclusionSource | None = None,
 ) -> WeeklyRebalanceService:
     return WeeklyRebalanceService(
         signals or Signals(),
@@ -214,7 +217,22 @@ def service(
         log=log or Log(),
         now=lambda: NOW,
         policy=RebalancePolicy(slots=3, keep_rank=5),
+        exclusions=exclusions,
     )
+
+
+class Exclusions:
+    """신호일마다 제외 목록을 답한다. `error`가 있으면 읽지 못한 목록이다."""
+
+    def __init__(self, active: dict[str, str], error: str = "") -> None:
+        self._active, self._error = active, error
+        self.days: list[date] = []
+
+    def active(self, on: date) -> dict[str, str]:
+        self.days.append(on)
+        if self._error:
+            raise ExclusionsUnavailableError(self._error)
+        return self._active
 
 
 def test_prepare_records_the_signal_and_plan_once() -> None:
@@ -229,6 +247,29 @@ def test_prepare_records_the_signal_and_plan_once() -> None:
     again = service(signals, plans=plans, risk=risk).prepare(DAY)
     assert again.status is PrepareStatus.EXISTS and again.record == record
     assert signals.calls == 1  # 남긴 주문안이 있으면 신호를 다시 읽지 않는다
+
+
+def test_prepare_sells_an_excluded_holding_and_skips_an_excluded_candidate() -> None:
+    # 2026-11-19 사용자 결정: 공개매수 대상은 순위와 관계없이 사지 않고 들고 있으면 판다
+    exclusions = Exclusions({"000001": "공개매수 대상", "000002": "공개매수 대상"})
+    account = Account(AccountState(2_000_000, {"000002": 100}, None))
+    record = service(account=account, exclusions=exclusions).prepare(DAY).record
+    assert record is not None and exclusions.days == [DAY]
+    actions = {line.symbol: line.action for line in record.plan.lines}
+    assert actions["000001"] is RebalanceAction.SKIP
+    assert actions["000002"] is RebalanceAction.SELL
+    # 판 자리와 빈 자리를 1·2위 대신 3·4위로 채운다(점수 받은 종목이 4개뿐이다)
+    assert {s for s, a in actions.items() if a is RebalanceAction.BUY} == {"000003", "000004"}
+
+
+def test_prepare_refuses_when_the_exclusion_list_is_unreadable() -> None:
+    plans = Plans()
+    result = service(plans=plans, exclusions=Exclusions({}, "exclusions.json is not JSON")).prepare(
+        DAY
+    )
+    assert result.status is PrepareStatus.INVALID_INPUT
+    assert "exclusions.json is not JSON" in result.detail
+    assert plans.load("weekly-2026-10-23") is None
 
 
 def test_prepare_reads_the_requested_build_and_records_which() -> None:

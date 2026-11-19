@@ -17,6 +17,10 @@ from strategy_workbench.application.weekly_rebalance.ports.outgoing.account impo
     AccountSource,
     AccountUnavailableError,
 )
+from strategy_workbench.application.weekly_rebalance.ports.outgoing.exclusions import (
+    ExclusionSource,
+    ExclusionsUnavailableError,
+)
 from strategy_workbench.application.weekly_rebalance.ports.outgoing.plans import (
     Approval,
     PlanExistsError,
@@ -102,8 +106,10 @@ class WeeklyRebalanceService:
         log: ExecutionLog,
         now: Callable[[], datetime],
         policy: RebalancePolicy | None = None,
+        exclusions: ExclusionSource | None = None,
     ) -> None:
         self._signals = signals
+        self._exclusions = exclusions
         self._account = account
         self._plans = plans
         self._risk = risk
@@ -160,6 +166,13 @@ class WeeklyRebalanceService:
             prices[symbol] = close.close_krw
             blocked[symbol] = EARLIER_CLOSE_REASON.format(day=close.day.isoformat())
         try:
+            excluded = {} if self._exclusions is None else self._exclusions.active(signal_date)
+        except ExclusionsUnavailableError as error:
+            return PrepareResult(
+                PrepareStatus.INVALID_INPUT,
+                detail=f"cannot read the exclusion list — {error} plan_id={plan_id}",
+            )
+        try:
             plan = plan_rebalance(
                 self._policy,
                 ranks=signal.ranks,
@@ -170,6 +183,7 @@ class WeeklyRebalanceService:
                 previous_ranks=signal.previous_ranks,
                 missing_reasons=signal.exclusion_reasons,
                 stale_prices=frozenset(earlier),
+                excluded=excluded,
             )
         except ValueError as error:
             return PrepareResult(

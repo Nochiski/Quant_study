@@ -103,6 +103,46 @@ def test_blocked_names_are_skipped_for_buying_and_held_ones_are_not_sold() -> No
     assert "000001" not in plan.target_shares()
 
 
+def test_excluded_holding_inside_the_buffer_is_sold_and_its_slot_refilled() -> None:
+    # 2026-11-19: 공개매수 대상(KINX 6위·롯데렌탈 21위)이 30위 안이라 자리를 지켰다
+    codes = _codes(6)
+    plan = plan_rebalance(
+        POLICY,
+        ranks={code: rank for rank, code in enumerate(codes, 1)},
+        holdings={"000001": 98, "000002": 98},  # 둘 다 완충 안
+        prices=dict.fromkeys(codes, 10_000),
+        cash_krw=1_000_000,
+        blocked={},
+        excluded={"000001": "공개매수 대상"},
+    )
+    lines = _lines(plan)
+    assert lines["000001"] == (RebalanceAction.SELL, 98, 0)
+    assert lines["000002"][0] is RebalanceAction.HOLD
+    # 판 자리를 그다음 순위(3·4위)로 채운다
+    assert lines["000003"][0] is lines["000004"][0] is RebalanceAction.BUY
+    [sold] = [line for line in plan.lines if line.symbol == "000001"]
+    assert (sold.cause, sold.reason) == (LineCause.EXCLUDED, "매매 제외 목록 — 공개매수 대상")
+
+
+def test_excluded_candidate_is_skipped_and_a_blocked_excluded_holding_stays() -> None:
+    codes = _codes(6)
+    plan = plan_rebalance(
+        POLICY,
+        ranks={code: rank for rank, code in enumerate(codes, 1)},
+        holdings={"000006": 50},  # 6위라 원래 팔 종목이지만 매매가 막혔다
+        prices=dict.fromkeys(codes, 10_000),
+        cash_krw=2_500_000,
+        blocked={"000006": "정지"},
+        excluded={"000001": "공개매수 대상", "000006": "공개매수 대상"},
+    )
+    lines = _lines(plan)
+    assert lines["000001"] == (RebalanceAction.SKIP, 0, 0)
+    assert lines["000006"] == (RebalanceAction.HOLD, 50, 50)
+    # 남은 자리 두 개를 1위 대신 2·3위로 채운다
+    assert lines["000002"][0] is lines["000003"][0] is RebalanceAction.BUY
+    assert "000004" not in lines
+
+
 def test_no_name_outside_the_buffer_is_bought_to_fill_a_slot() -> None:
     codes = _codes(7)
     plan = plan_rebalance(

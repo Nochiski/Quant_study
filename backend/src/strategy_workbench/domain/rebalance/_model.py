@@ -15,6 +15,8 @@
   차지하므로 그 수만큼 순위가 낮은 새 매수도 그 주는 하지 않는다(`week_targets`).
 - 보유 종목의 신호일 가격 행이 없으면(거래정지 등) 호출자가 직전 종가로 평가하고 매매를 막는다.
   그 종목은 그대로 두고 확인 필요로 표시한다(`stale_prices`).
+- 매매 제외 목록(`excluded`, 2026-11-19 사용자 결정 — 공개매수 대상)에 있는 종목은 순위와 관계없이
+  사지 않고, 들고 있으면 판다. 매매가 막힌 보유 종목은 팔 수 없으니 그대로 둔다.
 
 금액은 원 단위 정수, 비율은 bp 정수로 계산해 부동소수 반올림이 끼지 않는다.
 """
@@ -53,6 +55,7 @@ class LineCause(StrEnum):
     FILL_LOWER = "fill_lower"  # 앞 순위를 살 수 없어 아래 순위로 채움
     NO_PRICE = "no_price"  # 기준가격 없음
     TOO_EXPENSIVE = "too_expensive"  # 1주 가격이 목표 금액보다 크다
+    EXCLUDED = "excluded"  # 매매 제외 목록(공개매수 대상 등)에 있어 팔거나 건너뜀
 
 
 @dataclass(frozen=True)
@@ -137,17 +140,27 @@ def plan_rebalance(
     previous_ranks: Mapping[str, int] | None = None,
     missing_reasons: Mapping[str, str] | None = None,
     stale_prices: Collection[str] = (),
+    excluded: Mapping[str, str] | None = None,
 ) -> RebalancePlan:
     """순위(1이 가장 좋다)·보유 주식 수·기준가격(원)·현금(원)·매매가 막힌 종목과 사유로
-    목표를 정한다. `stale_prices`는 신호일이 아닌 날 종가로 평가한 종목이다."""
+    목표를 정한다. `stale_prices`는 신호일이 아닌 날 종가로 평가한 종목이다. `excluded`는 매매 제외
+    목록의 종목과 사유다."""
     _validate(ranks, holdings, prices, cash_krw)
     equity = cash_krw + sum(shares * prices[symbol] for symbol, shares in holdings.items())
     target_value = equity * (BP - policy.cash_reserve_bp) // BP // policy.slots
     lines: list[RebalanceLine] = []
 
+    excluded = excluded or {}
     kept: list[str] = []
     for symbol, shares in sorted(holdings.items()):
         rank = ranks.get(symbol)
+        if symbol in excluded and symbol not in blocked:
+            reason = f"매매 제외 목록 — {excluded[symbol]}"
+            sell = RebalanceAction.SELL
+            lines.append(
+                _line(symbol, sell, rank, shares, 0, prices, reason, cause=LineCause.EXCLUDED)
+            )
+            continue
         if symbol in blocked or (rank is not None and rank <= policy.keep_rank):
             kept.append(symbol)
             continue
@@ -226,6 +239,8 @@ def plan_rebalance(
         price = prices.get(symbol)
         if symbol in blocked:
             reason, cause = f"매매가 막혀 건너뜀 — {blocked[symbol]}", LineCause.BLOCKED
+        elif symbol in excluded:
+            reason, cause = f"매매 제외 목록 — {excluded[symbol]}", LineCause.EXCLUDED
         elif price is None or price <= 0:
             reason, cause = "기준가격 없음", LineCause.NO_PRICE
         elif policy.shares_for(target_value, price) == 0:

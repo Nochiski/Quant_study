@@ -49,6 +49,9 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.stream import (
     record_fills,
 )
 from strategy_workbench.adapters.outbound.ledger_prices.facade.prices import LedgerPriceHistory
+from strategy_workbench.adapters.outbound.rebalance_files.facade.exclusions import (
+    JsonExclusionList,
+)
 from strategy_workbench.adapters.outbound.rebalance_files.facade.plans import (
     JsonExecutionLog,
     JsonPlanStore,
@@ -150,6 +153,7 @@ def build_weekly_rebalance(workdir: Path, model_root: Path | None) -> WeeklyReba
         risk=JsonRiskStore(root, RISK_LIMITS_FILE),
         log=JsonExecutionLog(root),
         now=lambda: datetime.now(KST),
+        exclusions=JsonExclusionList(root),
     )
 
 

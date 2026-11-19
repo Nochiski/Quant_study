@@ -13,12 +13,16 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from strategy_workbench.adapters.outbound.rebalance_files.facade.exclusions import (
+    JsonExclusionList,
+)
 from strategy_workbench.adapters.outbound.rebalance_files.facade.plans import JsonPlanStore
 from strategy_workbench.adapters.outbound.scope_signal.facade.source import ScopeSignalSource
 from strategy_workbench.application.weekly_rebalance.facade.rebalance import (
     AccountState,
     Approval,
     EarlierClose,
+    ExclusionsUnavailableError,
     PlanExistsError,
     PlanRecord,
     SignalBasis,
@@ -362,3 +366,41 @@ def test_plan_store_keeps_review_flags_anomalies_and_no_trade(tmp_path: Path) ->
     approval = Approval(datetime(2026, 10, 23, 17, 0, tzinfo=KST), "동민", "", ("000009",))
     store.save_approval(record.plan_id, approval)
     assert store.approval(record.plan_id) == approval
+
+
+def _write_exclusions(folder: Path, entries: object) -> None:
+    document = {"schema": "weekly-rebalance-exclusions/1", "exclusions": entries}
+    (folder / "exclusions.json").write_text(json.dumps(document), encoding="utf-8")
+
+
+def test_exclusion_list_is_empty_without_a_file_and_includes_the_until_day(
+    tmp_path: Path,
+) -> None:
+    exclusions = JsonExclusionList(tmp_path)
+    assert exclusions.active(date(2026, 11, 18)) == {}
+    _write_exclusions(
+        tmp_path, [{"symbol": "093320", "reason": "공개매수 합의 발표", "until": "2026-11-18"}]
+    )
+    assert exclusions.active(date(2026, 11, 18)) == {"093320": "공개매수 합의 발표"}
+    assert exclusions.active(date(2026, 11, 19)) == {}
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        [{"symbol": "93320", "reason": "공개매수", "until": "2027-10-28"}],
+        [{"symbol": "093320", "reason": " ", "until": "2027-10-28"}],
+        [{"symbol": "093320", "reason": "공개매수", "until": "2027/10/28"}],
+        [
+            {"symbol": "093320", "reason": "공개매수", "until": "2027-10-28"},
+            {"symbol": "093320", "reason": "중복", "until": "2027-11-28"},
+        ],
+    ],
+    ids=["short-symbol", "blank-reason", "bad-date", "duplicate"],
+)
+def test_malformed_exclusion_list_refuses_instead_of_skipping(
+    tmp_path: Path, entries: object
+) -> None:
+    _write_exclusions(tmp_path, entries)
+    with pytest.raises(ExclusionsUnavailableError):
+        JsonExclusionList(tmp_path).active(date(2026, 11, 18))

@@ -1,7 +1,7 @@
 import { barAtOrBefore, type ChartCandleBody, type DateRange } from "../../../entities/chart";
 
 /**
- * 판정·분석 구간을 차트 위에서 고치는 규칙(테두리 끌기·키보드)의 owner. 구간은 완성 봉 index의 양 끝(포함)이고,
+ * 판정·분석 구간을 차트 위에서 고치는 규칙(테두리 끌기·키보드·Shift+끌기로 새로 긋기)의 owner. 구간은 완성 봉 index의 양 끝(포함)이고,
  * 요청에는 그 봉의 시작일을 싣는다 — 서버가 날짜를 그 날짜가 든 봉으로 옮긴다(`ChartSeries.index_of`). 판정의 최소
  * 봉 수(판정 불가 기준)는 서버 domain이 정하고 여기서는 다시 재지 않는다 — 구간은 시작 < 끝이면 된다.
  */
@@ -32,6 +32,17 @@ export const moveWindowEdge = (
   }
   const end = Math.max(Math.min(at, count - 1), window.start + (MIN_WINDOW_BARS - 1));
   return { ...window, end: Math.min(end, count - 1) };
+};
+
+/**
+ * Shift+끌기로 새로 그은 구간: 누른 봉과 놓은 봉(순서 무관)을 양 끝으로, 완성 봉 범위 안으로 자른다. 폭이
+ * `MIN_WINDOW_BARS`보다 좁으면 null(구간을 바꾸지 않는다).
+ */
+export const sweptWindow = (from: number, to: number, count: number): BarWindow | null => {
+  const clamp = (index: number) => Math.min(Math.max(Math.round(index), 0), count - 1);
+  const start = clamp(Math.min(from, to));
+  const end = clamp(Math.max(from, to));
+  return end - start + 1 >= MIN_WINDOW_BARS ? { start, end } : null;
 };
 
 /**

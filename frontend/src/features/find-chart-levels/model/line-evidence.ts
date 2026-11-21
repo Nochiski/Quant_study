@@ -4,6 +4,7 @@ import {
   type ChartAutoRecordBody,
   type ChartLineBody,
   type Timeframe,
+  type LineKind,
   type TrendDirection,
 } from "../../../entities/chart";
 import { t, tFill, type MessageKey } from "../../../shared/config";
@@ -71,12 +72,16 @@ export const autoLineTitle = (lines: readonly ChartLineBody[], viewTimeframe: Ti
   return first.timeframe === viewTimeframe ? body : `${body} · ${timeframeLabel(first.timeframe)}`;
 };
 
-const anchorRoles = (line: ChartLineBody, direction: TrendDirection | null): MessageKey[] => {
-  if (line.kind === "fib_channel")
+/**
+ * 자동 선 기준점의 이름(채널은 방향별 저점·고점, 되돌림은 먼저·나중 점, 수평 구간은 하단·상단). 근거 패널과 차트의 미리보기
+ * 기준점 표시가 같은 이름을 쓴다.
+ */
+export const anchorRoles = (kind: LineKind, direction: TrendDirection | null): MessageKey[] => {
+  if (kind === "fib_channel")
     return direction === "down"
       ? ["chart.evidence.role.channel.down.0", "chart.evidence.role.channel.down.1", "chart.evidence.role.channel.down.2"]
       : ["chart.evidence.role.channel.up.0", "chart.evidence.role.channel.up.1", "chart.evidence.role.channel.up.2"];
-  if (line.kind === "fib_retracement") return ["chart.anchor.fib_retracement.0", "chart.anchor.fib_retracement.1"];
+  if (kind === "fib_retracement") return ["chart.anchor.fib_retracement.0", "chart.anchor.fib_retracement.1"];
   return ["chart.evidence.role.zone.low", "chart.evidence.role.zone.high"];
 };
 
@@ -88,7 +93,7 @@ export const lineEvidence = (lines: readonly ChartLineBody[], current: number | 
   const [first] = lines;
   const record = first.auto ?? null;
   const direction = channelDirection(first);
-  const roles = anchorRoles(first, direction);
+  const roles = anchorRoles(first.kind, direction);
   const zone = first.kind === "hline";
   return {
     kind: first.kind,

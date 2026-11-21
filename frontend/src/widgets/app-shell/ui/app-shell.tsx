@@ -13,13 +13,13 @@ type AppShellProps = {
 };
 
 const RESEARCH = [
+  { key: "home", label: "nav.home", icon: "home", to: "/", exact: true },
   {
     key: "stockChart",
     label: "nav.stockChart",
     icon: "stockChart",
     to: "/research/chart",
   },
-  { key: "home", label: "nav.home", icon: "home", to: "/", exact: true },
   {
     key: "strategies",
     label: "nav.strategies",
@@ -54,7 +54,7 @@ const OPERATIONS = [
 ] as const;
 
 /**
- * 앱 틀: 브랜드, 연구 묶음(개별종목차트 · 홈 · 전략 · 백테스트 · 실험 · 내 팩터), "향후" 표시를 단 운영 묶음
+ * 앱 틀: 브랜드, 연구 묶음(홈 · 개별종목차트 · 전략 · 백테스트 · 실험 · 내 팩터), "향후" 표시를 단 운영 묶음
  * (배포 · 실시간 · 주문 · 리스크), 접기. 나머지는 라우트 화면이 채운다. 아직 화면이 없는 운영 항목은 보조 기술이
  * "향후 제공, 사용 불가"로 듣는 비활성 글자라, 기능 플래그와 무관하게 실거래처럼 읽히지 않는다.
  */

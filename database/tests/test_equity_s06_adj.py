@@ -705,6 +705,33 @@ def test_합성_ratio_1_은_주식수_불변이라_no_share_change(tmp_path: Pat
     assert f["apply_basis"] == "nominal" and f["apply_date"] == cal[30]
 
 
+def test_합성_감자_결정공시가_재수집_판본으로_두_행이어도_사건은_한_행이다(tmp_path: Path) -> None:
+    """2026-11-21 아침 확정판 실패 재현(EG1 lhs 5,641 ≠ 기대 5,635). stage 사건 표는 재수집 판본이
+    쌓이는 표라 같은 (rcept_no, corp_code) 가 여러 행일 수 있다 — 078130 이 회사명을 바꾼 뒤(국일제지 →
+    에스엠국일) 11-20 수집이 감자 결정 2건을 다시 받아 판본이 둘이 됐다. 유·무상 판정이 그 행 수만큼
+    사건을 불리면 안 된다(옛 식: 가격으로 못 찾은 사건 1건이 4행 — 운영 사례와 같은 꼴).
+    판본 중 하나라도 '유상' 이면 유상이다."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00009", "corp_code": "C0000009", "event_type": "capred",
+           "effective_date": cal[30], "ratio": 0.5, "source": "event_cr", "rcept_no": "R1"},
+          {"ticker": "A00010", "corp_code": "C0000010", "event_type": "capred",
+           "effective_date": cal[30], "ratio": 0.5, "source": "event_cr", "rcept_no": "R2"}]
+    px = flat_prices("A00009", cal, 10000, jumps={}) + flat_prices("A00010", cal, 10000, jumps={})
+    cr = [{"rcept_no": "R1", "corp_code": "C0000009", "cr_mth": "무상감자", "cr_rs": None},
+          {"rcept_no": "R1", "corp_code": "C0000009", "cr_mth": "무상감자", "cr_rs": None},
+          {"rcept_no": "R2", "corp_code": "C0000010", "cr_mth": "무상감자", "cr_rs": None},
+          {"rcept_no": "R2", "corp_code": "C0000010", "cr_mth": "유상감자", "cr_rs": None}]
+    con = duckdb.connect()
+    try:
+        _setup(con, ev, px, cal, cr, None)
+        got = con.execute(f"SELECT event_id, factor_source, factor_ok FROM ({_body()}) "
+                          "ORDER BY event_id").fetchall()
+    finally:
+        con.close()
+    assert got == [(f"A00009:capred:{cal[30]}", "no_price_match", False),
+                   (f"A00010:capred:{cal[30]}", "capred_paid", False)]
+
+
 def test_합성_복합_사건은_계수_곱으로_한_세션에_같이_적용된다(tmp_path: Path) -> None:
     """감자(cr, ratio 0.5) + KRX 액면병합(reverse_split, ratio 0.5) 명목 세션 20·22. 실제 점프는
     세션 26 에 기준가 ×4(= 2 × 2) 한 번 — 개별 비율(×2)로는 어느 날도 안 맞고 곱으로만 맞는다.

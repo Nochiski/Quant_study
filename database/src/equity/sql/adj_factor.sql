@@ -172,13 +172,21 @@ k AS (
            CAST(krx_share_change_tol AS DOUBLE)          AS share_tol
     FROM _const
 ),
+cr_paid AS (
+    -- 감자 결정공시 한 건(rcept_no, corp_code)의 유·무상 축. stage 사건 표는 재수집 판본이 쌓이는 표라
+    -- 같은 키가 여러 행일 수 있다(회사명이 바뀐 뒤 다시 받으면 corp_name_current 만 다른 행 — 078130,
+    -- 2026-11-20). 접지 않고 붙이면 사건이 판본 수만큼 분다(EG1). 판본 중 하나라도 '유상' 이면 유상
+    SELECT rcept_no, corp_code,
+           bool_or(cr_mth LIKE '%유상%' OR cr_rs LIKE '%유상%') AS paid
+    FROM stg_event_cr
+    GROUP BY rcept_no, corp_code
+),
 ev AS (
     SELECT e.event_id, e.ticker, e.corp_code, e.event_type, e.announce_date, e.effective_date,
            e.effective_basis, e.ratio, e.source,
-           coalesce(e.event_type = 'capred' AND e.source = 'event_cr'
-                    AND (cr.cr_mth LIKE '%유상%' OR cr.cr_rs LIKE '%유상%'), FALSE) AS capred_paid
+           coalesce(e.event_type = 'capred' AND e.source = 'event_cr' AND cr.paid, FALSE) AS capred_paid
     FROM corp_event e
-    LEFT JOIN stg_event_cr cr
+    LEFT JOIN cr_paid cr
            ON e.source = 'event_cr' AND cr.rcept_no = e.rcept_no AND cr.corp_code = e.corp_code
     WHERE e.event_type IN ('split', 'reverse_split', 'bonus', 'capred')
 ),

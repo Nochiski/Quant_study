@@ -49,6 +49,19 @@ GATE_MIN_RATIO = 0.98                     # 기대 집합 대비(플랜 2026-09-
 BOOTSTRAP_MIN_RATIO = 0.95                # 기대 집합이 빌 때(첫 수집) 요청 유니버스 대비 — 옛 판정(A §6-3 A)
 EXPECTED_SESSIONS = 5                     # 기대 집합 = 판정일 직전 이만큼의 deal_date 에 행이 있던 종목
 FAILURE_RATIO_MAX = 0.02                  # 이 비율을 넘는 종목 실패는 PARTIAL(rc 0)로 넘기지 않는다(A06)
+# KIS 가 일시 오류로 돌려주는 msg_cd — 같은 요청을 잠깐 뒤 다시 보내면 대개 풀린다(N-71).
+#   첫 줄은 서버에서 실제로 본 코드다(11-24 런 장부 · 로그 전수): EGW00316 '조회 처리 중 오류 … 재 조회 수행 부탁드립니다'
+#   · OPSQ1002 세션 연결 오류 · OPSQ0008 호출 후처리(MCI전송) 오류(11-19 아침 한 실행에 441건).
+#   나머지는 KIS 공식 오류 안내표(GitHub koreainvestment/kis-ai-extensions `shared/commands/kis-help.md`)가 대응을
+#   '재시도'로 적은 코드다. `backfill_kis.classify` 는 이 코드들을 'error' 로 돌려준다 — 백필 코드는 동결(N-23 ③)이라
+#   판정을 거기서 바꾸지 않고 `call` 이 받는다.
+TRANSIENT_CODES = frozenset({
+    "EGW00316", "OPSQ1002", "OPSQ0008",
+    "EGW00001", "EGW00002", "EGW00202", "EGW00203", "EGW00300",
+    "OPSQ0001", "OPSQ0010", "OPSQ0011", "OPSQ2003", "OPSQ3001", "OPSQ3002", "OPSQ3004",
+})
+TRANSIENT_WAITS = (1.0, 3.0)              # 일시 오류 재시도 간격(초) — 콜 하나에 이 횟수까지
+TRANSIENT_BUDGET_S = 900.0                # 한 실행이 일시 오류 대기에 쓰는 시간 상한 — 장애가 길어도 08:10 확정 빌드를 밀지 않게
 KST = dt.timezone(dt.timedelta(hours=9))
 
 
@@ -93,6 +106,7 @@ class CallOutcome:
     code: str
     rows: tuple[dict[str, object], ...]
     n_calls: int
+    transient_wait_s: float = 0.0  # 이 콜이 일시 오류 재시도 대기에 쓴 시간(초) — 실행 상한에서 깎는다
 
 
 @dataclass(frozen=True)
@@ -122,8 +136,12 @@ def window(today: dt.date, days: int = WINDOW_DAYS) -> tuple[str, str]:
     return (today - dt.timedelta(days=days)).strftime("%Y%m%d"), today.strftime("%Y%m%d")
 
 
-def call(url: str, tr: str, params: Mapping[str, str], out_key: str, label: str) -> CallOutcome:
+def call(url: str, tr: str, params: Mapping[str, str], out_key: str, label: str,
+         transient_left_s: float = TRANSIENT_BUDGET_S) -> CallOutcome:
     """KIS 콜 1회. 재시도·토큰 재발급·유량 백오프는 `backfill_kis` 규칙을 그대로 쓴다.
+
+    일시 오류(`TRANSIENT_CODES`)는 `TRANSIENT_WAITS` 간격으로 다시 부른다(N-71). 대기 합이 `transient_left_s`
+    (실행에 남은 대기 시간)를 넘으면 더 부르지 않고 실패로 돌려준다. 쓴 대기 시간은 결과의 `transient_wait_s`.
 
     토큰 만료(EGW00121·EGW00123)는 캐시를 버리고 **1회** 재발급 후 재시도한다. 그래도
     만료면 조용히 넘기지 않고 verdict='token' 으로 올린다(호출부가 rc 2 로 만든다).
@@ -137,6 +155,8 @@ def call(url: str, tr: str, params: Mapping[str, str], out_key: str, label: str)
 
     n_calls = 0
     token_retried = False
+    n_transient = 0
+    transient_wait_s = 0.0
     for attempt in range(RETRY_MAX + 1):
         body: object = None
         status: int | None = 200
@@ -156,10 +176,10 @@ def call(url: str, tr: str, params: Mapping[str, str], out_key: str, label: str)
             if odd:
                 print(f"    ? 응답 형태 이상({odd}) — {label} rows={len(rows)}")
                 code = f"{code}/{odd}"
-            return CallOutcome("ok" if rows else "empty", code, tuple(rows), n_calls)
+            return CallOutcome("ok" if rows else "empty", code, tuple(rows), n_calls, transient_wait_s)
         if verdict == "token":
             if token_retried:
-                return CallOutcome("token", code, (), n_calls)
+                return CallOutcome("token", code, (), n_calls, transient_wait_s)
             token_retried = True
             print(f"    · 토큰 만료({code}) — 재발급 후 1회 재시도 ({label})")
             api._kis_tok = None
@@ -169,6 +189,16 @@ def call(url: str, tr: str, params: Mapping[str, str], out_key: str, label: str)
                 pass
             time.sleep(1.0)
             continue
+        msg = str(body.get("msg1", ""))[:80] if isinstance(body, dict) else ""
+        if verdict == "error" and code in TRANSIENT_CODES and n_transient < len(TRANSIENT_WAITS):
+            wait = TRANSIENT_WAITS[n_transient]
+            if transient_wait_s + wait <= transient_left_s:
+                n_transient += 1
+                transient_wait_s += wait
+                print(f"    · {code} 일시 오류 재시도 {n_transient}/{len(TRANSIENT_WAITS)} — {wait:.0f}초 "
+                      f"({label}) msg1={msg!r}")
+                time.sleep(wait)
+                continue
         cap = QUOTA_RETRY if verdict == "quota" else RETRY_MAX
         if verdict in ("retry", "quota") and attempt < cap:
             wait = max(RETRY_BASE * (2 ** attempt), 30.0) if verdict == "quota" \
@@ -176,19 +206,23 @@ def call(url: str, tr: str, params: Mapping[str, str], out_key: str, label: str)
             print(f"    · {code} 재시도 {attempt + 1}/{cap} — {wait:.0f}초 ({label})")
             time.sleep(wait)
             continue
-        return CallOutcome(verdict, code, (), n_calls)
-    return CallOutcome("error", "retry_exhausted", (), n_calls)
+        if verdict == "error":
+            print(f"    ✖ 콜 오류 {code} — {label} 콜 {n_calls}회 msg1={msg!r}")
+        return CallOutcome(verdict, code, (), n_calls, transient_wait_s)
+    return CallOutcome("error", "retry_exhausted", (), n_calls, transient_wait_s)
 
 
-def fetch_credit(ticker: str, d1: str, d2: str) -> CallOutcome:
-    """종목 1개 = 콜 1회(`call`)."""
+def fetch_credit(ticker: str, d1: str, d2: str,
+                 transient_left_s: float = TRANSIENT_BUDGET_S) -> CallOutcome:
+    """종목 1개 = 콜 1회(`call`). `transient_left_s` = 이 실행에 남은 일시 오류 대기 시간."""
     from backfill_kis import SPEC  # 지연 import 이유는 `call` 주석 참고
 
     spec = SPEC[REQ_NAME]
     # SPEC 은 값 타입이 섞인 평범한 dict 이라 호출·문자열 자리를 여기서 한 번만 좁힌다.
     url, tr, out_key = str(spec["url"]), str(spec["tr"]), str(spec["out"])
     make_params = cast("Callable[[str, str, str], dict[str, str]]", spec["params"])
-    return call(url, tr, make_params(ticker, d1, d2), out_key, f"credit {ticker} {d1}~{d2}")
+    return call(url, tr, make_params(ticker, d1, d2), out_key, f"credit {ticker} {d1}~{d2}",
+                transient_left_s)
 
 
 def _table_exists(con: sqlite3.Connection) -> bool:
@@ -427,8 +461,10 @@ def run(con: sqlite3.Connection, *, date: str, gate_date: str, d1: str, d2: str,
     hit: set[str] = set()                  # 이번 런 응답에 판정일 행이 있던 종목(적재 여부 무관)
     aborted: Status | None = None
     qstreak = 0
+    transient_left_s = TRANSIENT_BUDGET_S    # 실행 전체가 일시 오류 대기에 쓸 수 있는 시간 — 콜마다 쓴 만큼 깎는다
     for i, tk in enumerate(targets, 1):
-        out = fetch_credit(tk, d1, d2)
+        out = fetch_credit(tk, d1, d2, transient_left_s)
+        transient_left_s -= out.transient_wait_s
         n_calls += out.n_calls
         if out.verdict == "token":
             aborted = Status.TOKEN_FAILED
@@ -464,6 +500,8 @@ def run(con: sqlite3.Connection, *, date: str, gate_date: str, d1: str, d2: str,
               f"dup_pairs {dup_before}->{dup_after} failures={len(failures)}")
     if failures:
         detail += f" first_failures={failures[:5]}"
+    if transient_left_s < TRANSIENT_BUDGET_S:
+        detail += f" transient_wait={TRANSIENT_BUDGET_S - transient_left_s:.0f}s/{TRANSIENT_BUDGET_S:.0f}s"
 
     if aborted is not None:
         status = aborted

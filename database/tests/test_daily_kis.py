@@ -329,6 +329,75 @@ def test_isolated_failures_stay_partial(api_mod, monkeypatch, tmp_path):
     assert res.status is kis_daily.Status.PARTIAL and res.rc == 0
 
 
+# ── KIS 일시 오류 재시도 (N-71) ───────────────────────────────────────────────
+def _kis_error(code: str) -> dict[str, object]:
+    return {"rt_cd": "1", "msg_cd": code, "msg1": "조회 처리 중 오류 발생하였습니다. 재 조회 수행 부탁드립니다."}
+
+
+def _scripted_kis(script: dict[str, list[dict[str, object]]], calls: list[str]):
+    """`api.kis` 대역. 대본에 있는 종목은 응답을 앞에서부터 하나씩 주고 마지막 응답을 되풀이한다. 그 밖은 정상 1행."""
+    def kis(url: str, tr_id: str, params: dict[str, str]) -> dict[str, object]:
+        tk = params["FID_INPUT_ISCD"]
+        calls.append(tk)
+        seq = script.get(tk)
+        if seq is None:
+            return _ok([_fact("20260907")])
+        return seq.pop(0) if len(seq) > 1 else seq[0]
+    return kis
+
+
+def _run_100(tmp_path):
+    tickers = tuple(f"{i:06d}" for i in range(100))
+    res = kis_daily.run(_con(tmp_path), date="20260908", gate_date="20260907", d1="20260730",
+                        d2="20260909", tickers=tickers, run_db=tmp_path / "daily_run.db")
+    return res
+
+
+# 서버에서 실제로 본 세 코드(11-24 런 장부 · 로그 전수) — 줄마다 그 사고의 재현이다:
+# EGW00316 · OPSQ1002 는 하루 한 종목씩 빠졌고, OPSQ0008 은 11-19 아침 441건이 빠져 게이트가 떨어졌다.
+@pytest.mark.parametrize("code", ["EGW00316", "OPSQ1002", "OPSQ0008"])
+def test_transient_kis_error_is_retried_and_the_ticker_is_collected(api_mod, monkeypatch, tmp_path, code):
+    calls: list[str] = []
+    monkeypatch.setattr(api_mod, "kis", _scripted_kis(
+        {"000007": [_kis_error(code), _ok([_fact("20260907")])]}, calls))
+    res = _run_100(tmp_path)
+    assert res.status is kis_daily.Status.OK
+    assert "failures=0" in res.detail
+    assert calls.count("000007") == 2
+
+
+def test_error_that_is_not_transient_is_not_retried(api_mod, monkeypatch, tmp_path):
+    # EGW00206(API 사용 권한 없음)은 다시 물어도 같은 답이다 — 재시도 대상에 섞이면 시간만 쓴다.
+    calls: list[str] = []
+    monkeypatch.setattr(api_mod, "kis", _scripted_kis({"000007": [_kis_error("EGW00206")]}, calls))
+    res = _run_100(tmp_path)
+    assert res.status is kis_daily.Status.PARTIAL
+    assert calls.count("000007") == 1
+    assert "first_failures=['000007:EGW00206']" in res.detail
+
+
+def test_transient_error_that_persists_is_given_up_and_counted_as_a_failure(api_mod, monkeypatch, tmp_path):
+    calls: list[str] = []
+    monkeypatch.setattr(api_mod, "kis", _scripted_kis({"000007": [_kis_error("OPSQ0008")]}, calls))
+    res = _run_100(tmp_path)
+    assert res.status is kis_daily.Status.PARTIAL
+    assert calls.count("000007") == 1 + len(kis_daily.TRANSIENT_WAITS)
+    assert "first_failures=['000007:OPSQ0008']" in res.detail
+
+
+def test_run_stops_retrying_once_the_transient_wait_budget_is_spent(api_mod, monkeypatch, tmp_path):
+    # KIS 장애가 길면 재시도 대기가 쌓여 08:10 확정 빌드를 민다 — 한 실행이 쓰는 대기 시간에 상한을 둔다.
+    # 상한을 '한 종목이 두 번 재시도하는 시간'으로 줄이면: 첫 실패 종목이 다 쓰고, 둘째 종목은 재시도하지 않는다.
+    monkeypatch.setattr(kis_daily, "TRANSIENT_BUDGET_S", sum(kis_daily.TRANSIENT_WAITS))
+    calls: list[str] = []
+    monkeypatch.setattr(api_mod, "kis", _scripted_kis(
+        {"000007": [_kis_error("OPSQ0008")], "000008": [_kis_error("OPSQ0008")]}, calls))
+    res = _run_100(tmp_path)
+    assert calls.count("000007") == 1 + len(kis_daily.TRANSIENT_WAITS)
+    assert calls.count("000008") == 1
+    assert "failures=2" in res.detail
+
+
 # ── 완료 판정 재정의 (플랜 2026-09-30 T-K1 · DEFECT-K1·K3) ─────────────────────
 _HISTORY = ("20260831", "20260901", "20260902", "20260903", "20260904")   # 판정일 직전 5세션
 

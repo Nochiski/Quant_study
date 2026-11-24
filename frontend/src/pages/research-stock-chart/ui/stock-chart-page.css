@@ -3,6 +3,16 @@
   gap: var(--space-4);
 }
 
+/* 차트와 레이어 칸이 나란히 놓이는 폭에서는 화면이 창 높이에 꼭 맞고 바깥 스크롤이 없다 — 작업 칸(`.stock-chart`)이 남은
+   높이를 받아 칸마다 안에서 스크롤한다(폭 기준은 위젯 CSS와 같은 1240px). */
+@media (min-width: 1240px) {
+  .stock-chart-page {
+    box-sizing: border-box;
+    height: 100vh;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+}
+
 .stock-chart-page__header {
   display: flex;
   flex-wrap: wrap;

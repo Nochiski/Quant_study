@@ -63,7 +63,7 @@ const windowFields = (page: Page) => ({
 });
 
 test(
-  "US-CS-16 판정 구간을 끌어 국면 판정을 보고, 박스권이면 수평 구간을 권받고, 하락 판정에서 첫 점을 골라 추천 채널을 추가한다",
+  "US-CS-16 판정 구간을 끌거나 Shift+끌기로 새로 그어 국면 판정을 보고, 박스권이면 수평 구간을 권받고, 하락 판정에서 첫 점을 골라 추천 채널을 추가한다",
   { tag: ["@story", "@US-CS-16"] },
   async ({ page }) => {
     await clearLines();
@@ -109,9 +109,40 @@ test(
     expect(dragged < nudged).toBe(true);
     await expect(startEdge).toHaveAttribute("aria-valuetext", dragged);
 
+    // Shift를 누른 채 차트를 끌면 누른 봉부터 놓은 봉까지가 새 판정 구간이다 — 끄는 동안 음영이 따라오고, 놓으면 판정이
+    // 다시 오며, 차트는 옮겨지지 않는다
+    const plot = await chart.locator(".drawing-surface__capture").boundingBox();
+    if (plot === null) throw new Error("plot has no bounding box");
+    const sweepY = plot.y + plot.height / 2;
+    const pressX = plot.x + plot.width * 0.25;
+    const endEdge = chart.getByRole("slider", { name: "판정 구간 끝" });
+    const endBefore = await endEdge.getAttribute("aria-valuetext");
+    const barsBefore = await layers.getByText(/^일봉 \d+개$/u).textContent();
+    await page.mouse.move(pressX, sweepY);
+    await page.keyboard.down("Shift");
+    await page.mouse.down();
+    await page.mouse.move(plot.x + plot.width * 0.55, sweepY, { steps: 8 });
+    await expect(endEdge).not.toHaveAttribute("aria-valuetext", endBefore ?? "");
+    await page.mouse.up();
+    await page.keyboard.up("Shift");
+    await expect.poll(() => windowFields(page).start.inputValue()).not.toBe(dragged);
+    const swept = { start: await windowFields(page).start.inputValue(), end: await windowFields(page).end.inputValue() };
+    expect(swept.start < swept.end).toBe(true);
+    expect(swept.end < regime.window.end).toBe(true);
+    await expect(startEdge).toHaveAttribute("aria-valuetext", swept.start);
+    await expect(endEdge).toHaveAttribute("aria-valuetext", swept.end);
+    await expect(layers.getByText(/^일봉 \d+개$/u)).not.toHaveText(barsBefore ?? "");
+    // 차트가 옮겨졌다면 누른 봉의 테두리가 누른 자리에서 벗어난다(날짜 칸 쓰기는 300ms 늦어 그것으로는 못 본다)
+    const startBox = await startEdge.boundingBox();
+    if (startBox === null) throw new Error("window edge has no bounding box");
+    expect(Math.abs(startBox.x + startBox.width / 2 - pressX)).toBeLessThan(12);
+    // 선도 그어지지 않는다
+    expect(await savedLines()).toHaveLength(0);
+
     // 박스권 구간: 채널을 추천하지 않고(그리지 않음) 수평 구간을 권한다
-    await windowFields(page).start.fill(SIDEWAYS.start);
+    // 앞의 Shift+끌기로 끝이 박스권 시작보다 앞이라 끝부터 옮긴다(시작은 끝을 넘지 못한다)
     await windowFields(page).end.fill(SIDEWAYS.end);
+    await windowFields(page).start.fill(SIDEWAYS.start);
     await expect(layers.getByText("박스권", { exact: true })).toBeVisible();
     await expect(layers.getByRole("radio", { name: "그리지 않음" })).toBeChecked();
     await layers.getByRole("button", { name: "수평 구간 만들기" }).click();
@@ -132,6 +163,22 @@ test(
     await layers.getByRole("radio", { name: /^하락 채널/u }).check();
     await expect(layers.getByText("추천(하락 채널)과 다른 방향이에요.", { exact: false })).toHaveCount(0);
 
+    await expect(chart.locator(".preview-anchor text")).toHaveText(["고점 ①", "고점 ②", "폭 저점"]);
+    // 추천 채널 후보의 기준점이 찍혀 있다. 구간을 바꾸면 새 채널 응답이 오기 전까지 앞 구간의 채널 미리보기(기준점)는 지워진다
+    const channelsRoute = "**/api/v1/stock-chart/channels**";
+    await page.route(channelsRoute, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    const fallingEnd = chart.getByRole("slider", { name: "판정 구간 끝" });
+    await fallingEnd.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(chart.locator(".preview-anchor")).toHaveCount(0);
+    await page.unroute(channelsRoute);
+    await page.keyboard.press("ArrowRight");
+    await expect(windowFields(page).end).toHaveValue(FALLING.end);
+    await expect(chart.locator(".preview-anchor text")).toHaveText(["고점 ①", "고점 ②", "폭 저점"]);
+
     // 첫 점은 판정 응답의 확정 고점 목록에서 고른다 — 후보는 모두 그 점에서 시작한다
     await layers.getByRole("radio", { name: "첫 점은 내가 고르기" }).check();
     // 첫 점 목록은 채널 응답(그 방향의 확정 피벗)이다 — 하락 채널이라 고점만 있다
@@ -143,6 +190,8 @@ test(
     for (const name of await candidates.evaluateAll((items) => items.map((item) => item.parentElement?.textContent ?? "")))
       expect(name).toContain("2024-11-06 →");
     await expect(candidates.first()).toBeChecked();
+    // 고른 후보가 어느 점에서 그어졌는지 차트에 기준점 세 개가 찍힌다(포인터 전용 그림이라 CSS로 본다)
+    await expect(chart.locator(".preview-anchor text")).toHaveText(["고점 ①", "고점 ②", "폭 저점"]);
 
     // 차트에 추가하면 패널이 닫히고 초점이 "채널" 버튼으로 돌아오며, 자동 후보 칸에 한 줄이 생긴다
     await layers.getByRole("button", { name: "차트에 추가 (새 줄로)" }).click();

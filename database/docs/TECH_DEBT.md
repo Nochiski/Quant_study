@@ -1270,6 +1270,8 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 
 ### B-59: fin_std 의 '그룹'은 정정 사슬이 아니라 API 요청 축이다 — 서로 다른 보고서가 한 그룹이면 하나만 남는다
 
+**해결(2026-11-25 · e1.36.0 · DECISIONS N-74)**: 그룹에 보고서 기간(`disclosure_version.period_label`)을 더했다 — 기간이 다른 보고서는 따로 한 행이다. `is_krw_group` · `currency` · 모집단 판정 · EG8 템플릿 플래그도 같은 축으로 본다. 서버 그림자: 운영 판에서 없어지거나 바뀐 행 0 · 앞 기간 행 +14. 아래는 고치기 전 기록이다.
+
 - **상황**: fin_std 그룹 = stg_fin (corp_code, bsns_year, reprt_code, fs_div). 한 사업연도·보고서 종류에 서로 다른 보고서가 둘인 법인(한화리츠 01669226 2026 반기 11012 의 2026.01·2026.07, 결산월 변경 법인)이 한 그룹에 묶인다.
 - **인풋**: 그런 법인의 일일 수집 → equity 빌드.
 - **에러 위치**: `src/equity/sql/fin_std.sql` `grp`(배포 묶음 4-1b G-21 로 min → max rcept_no). 값은 고른 접수만 쓰지만 `is_krw_group`·`currency`·모집단 `HAVING bool_or(account_std)`·EG8 템플릿 플래그(`rules_s12.py`)는 여전히 그룹의 모든 접수를 본다.

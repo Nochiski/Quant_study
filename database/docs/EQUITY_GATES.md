@@ -1098,6 +1098,8 @@ SELECT (SELECT count(*) FROM fin_std)
            FROM stg_fin WHERE account_std))
         - eg1_tail('fin_std')) AS delta;
 ```
+e1.36.0(DECISIONS N-74)부터 그룹 축에 보고서 기간이 든다 — 구현의 우변은 `DISTINCT corp_code, bsns_year, reprt_code,
+fs_div, coalesce(disclosure_version.period_label, '')`(`rules_s12.FIN_STD.eg1_rhs_sql`)이다.
 
 ### ⑬ `disclosure_version`
 ```sql

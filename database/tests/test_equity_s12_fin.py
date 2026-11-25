@@ -681,6 +681,63 @@ def test_같은_접수가_두_사업연도로_오면_기말일_연도_행만_남
 # 다중집합으로 같을 때만 원본 공시일을 잇는다. 원본 줄이 없거나(백필 구간 — API 가 최신 정정본 하나만
 # 줬다) 값이 다르면 정정일이다. 정정 첫 장 항목 낱말(`corr_has_fin_item`)은 판단에 쓰지 않는다
 # (09-30 e1.22.0 의 낱말 규칙을 대체 — 낱말이 놓친 정정이 정정일보다 최대 1,765일 일찍 보였다).
+def _three_stmt(corp: str, year: str, reprt: str, rcept: str, scale: float,
+                observed: date = OBSERVED) -> list[dict[str, object]]:
+    """한 보고서의 손익 · 재무상태 · 현금흐름 한 줄씩 — 값은 `scale` 배라 보고서끼리 섞이면 드러난다."""
+    return [
+        _fin_row(corp, year, reprt, rcept, sj="IS", account_id="ifrs-full_Revenue",
+                 account_nm="매출액", amount=100.0 * scale, observed=observed),
+        _fin_row(corp, year, reprt, rcept, sj="BS", account_id="ifrs-full_Assets",
+                 account_nm="자산총계", amount=1000.0 * scale, observed=observed),
+        _fin_row(corp, year, reprt, rcept, sj="CF",
+                 account_id="ifrs-full_CashFlowsFromUsedInOperatingActivities",
+                 account_nm="영업활동현금흐름", amount=10.0 * scale, observed=observed),
+    ]
+
+
+def test_같은_해_같은_종류의_보고서를_두_번_내면_앞_보고서_행도_남는다(make_stage_tree,
+                                                                tmp_path: Path) -> None:
+    """재현(11-13~11-19 조용한 손실 미설명 · 리츠 등 23사, N-74): 결산 주기가 6개월 · 3개월인 법인은 한 해에 같은
+    종류의 정기보고서를 두 번 이상 낸다 — DART 재무 API 의 요청 키(법인 · 사업연도 · 보고서 종류)가 같아 한 묶음에
+    기간이 다른 보고서가 겹친다. 옛 식은 묶음마다 최신 접수 하나만 골라 뒤 보고서가 들어온 날 앞 보고서 행이 사라졌다.
+
+    법인 1 = 반기보고서 2025.03 · 2025.09(6개월 결산 리츠 꼴) · 법인 2 = 사업보고서 2025.05 · 2025.08(3개월 결산 꼴 —
+    4분기 파생 묶음의 키가 겹친다) · 법인 3 = 대조군. 값은 보고서마다 배수가 달라 섞이면 드러난다."""
+    corps = [("00000001", "12"), ("00000002", "12"), ("00000003", "12")]
+    reports = [
+        ("20250514000001", "00000001", "2025", "11012", date(2025, 5, 14), date(2025, 3, 31), "11012"),
+        ("20251113000002", "00000001", "2025", "11012", date(2025, 11, 13), date(2025, 9, 30), "11012"),
+        ("20250814000003", "00000002", "2025", "11011", date(2025, 8, 14), date(2025, 5, 31), "11011"),
+        ("20251116000004", "00000002", "2025", "11011", date(2025, 11, 16), date(2025, 8, 31), "11011"),
+        ("20250330000005", "00000003", "2024", "11011", date(2025, 3, 30), date(2024, 12, 31), "11011"),
+    ]
+    names = {"20250514000001": "반기보고서 (2025.03)", "20251113000002": "반기보고서 (2025.09)",
+             "20250814000003": "사업보고서 (2025.05)", "20251116000004": "사업보고서 (2025.08)"}
+    starts = {"20250514000001": date(2025, 1, 1), "20251113000002": date(2025, 7, 1),
+              "20250814000003": date(2025, 3, 1), "20251116000004": date(2025, 6, 1)}
+    fin = [row for (rc, corp, year, reprt, *_), k in zip(reports, (1.0, 2.0, 3.0, 4.0, 5.0), strict=True)
+           for row in _three_stmt(corp, year, reprt, rc, k)]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20250330000005", "period_end", "2024-12-31"),
+                    report_names=names, period_from=starts)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert (r.n_rows, r.n_reject) == (5, 0)            # 옛 식 (3, 0) — 앞 보고서 두 행이 없다
+    assert r.out_dir is not None
+    got = {(x["corp_code"], str(x["period_end"])): x for x in _rows(r.out_dir)}
+    expect = {("00000001", "2025-03-31"): ("20250514000001", 1), ("00000001", "2025-09-30"): ("20251113000002", 2),
+              ("00000002", "2025-05-31"): ("20250814000003", 3), ("00000002", "2025-08-31"): ("20251116000004", 4),
+              ("00000003", "2024-12-31"): ("20250330000005", 5)}
+    assert set(got) == set(expect)
+    for key, (rcept, k) in expect.items():
+        row = got[key]
+        assert row["rcept_no"] == rcept and row["bsns_year"] == ("2024" if k == 5 else "2025"), key
+        assert (_num(row["revenue"]), _num(row["total_asset"]), _num(row["cf_operating_ytd"])) == (
+            Decimal(100 * k), Decimal(1000 * k), Decimal(10 * k)), key      # 그 보고서 자신의 값
+        assert row["available_date"] == next(dt for rc, *_x, dt, _pt, _ac in reports if rc == rcept), key
+    for key in (("00000002", "2025-05-31"), ("00000002", "2025-08-31")):     # 4분기 파생 묶음도 보고서마다 따로
+        assert got[key]["q4_derived_n_rows"] == 1 and got[key]["revenue_q4_derived"] is None, key
+
+
 _ORIG = ("20210330000001", date(2021, 3, 30))
 _NONFIN = "VIII. 임원 및 직원 등에 관한 사항 1. 임원 및 직원의 현황"
 
@@ -991,7 +1048,8 @@ def test_부정_사슬이_아닌_다른_보고서의_문서는_빌리지_않는�
                                                          tmp_path: Path) -> None:
     """한화리츠 01669226 — 반기 결산 리츠라 한 (bsns_year, 11012) 그룹에 서로 다른 반기보고서
     (2026.01 · 2026.07)가 묶인다. 최신 접수에 문서가 없어도 남의 기간(2026-01-31)을 빌리면 틀린
-    기간이 되므로 종전대로 추정한다(결산월 12 → 2026-06-30, inferred)."""
+    기간이 되므로 종전대로 추정한다(결산월 12 → 2026-06-30, inferred). 앞 보고서는 보고서 기간이 달라
+    따로 한 행으로 남는다 — 자기 문서 기간 · 자기 값(e1.36.0 · N-74. 옛 식은 최신 접수 하나만 남겼다)."""
     old, new = ("20260320000101", date(2026, 3, 20)), ("20260914000202", date(2026, 9, 14))
     reports = [(old[0], "01669226", "2026", "11012", old[1], date(2026, 1, 31), "11012"),
                (new[0], "01669226", "2026", "11012", new[1], None, None)]
@@ -1004,9 +1062,9 @@ def test_부정_사슬이_아닌_다른_보고서의_문서는_빌리지_않는�
                     fin_std_inferred_recent_ratio_max=None)
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
     out = _rows(r.out_dir)                                       # type: ignore[arg-type]
-    assert len(out) == 1
-    assert (out[0]["rcept_no"], out[0]["period_end_basis"]) == (new[0], "inferred")
-    assert out[0]["period_end"] == date(2026, 6, 30)
+    assert {x["rcept_no"]: (x["period_end"], x["period_end_basis"], _num(x["revenue"])) for x in out} == {
+        new[0]: (date(2026, 6, 30), "inferred", Decimal("20")),
+        old[0]: (date(2026, 1, 31), "document", Decimal("10"))}
 
 
 def test_부정_접수지연_상한_밖은_격리된다(make_stage_tree, tmp_path: Path) -> None:

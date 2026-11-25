@@ -41,7 +41,10 @@ API 가 최신 정정본 하나만 줬다) 증거가 없으므로 정정일이�
 일찍 보였다(디와이에이 2026 반기 ×1000). 낱말은 이제 fin_std 가 읽지 않는다.
 일일 수집은 같은 (corp, bsns_year, reprt_code, fs_div) 에 원본 뒤에 정정을 덧붙이므로 그룹의
 판본은 **최신 접수(max `rcept_no`)** 하나다(G-21, N-25 Q2 — 백필 구간과 같은 '최신 판본 값 +
-그 판의 공개일'). 공개일의 날짜 원천은 stage 공개일 `stg_disclosure.available_date`(원천 rcept_dt
+그 판의 공개일'). 그룹은 그 요청 키에 **보고서 기간**(`disclosure_version.period_label` — 공시 보고서명 끝
+'(YYYY.MM)')을 더한 것이다(e1.36.0 · N-74): 결산 주기가 6개월 · 3개월인 법인(리츠)과 결산기를 바꾼 법인은 한 해에
+같은 종류의 정기보고서를 두 번 이상 내 요청 키가 겹치고, 기간 축이 없으면 뒤 보고서가 들어온 날 앞 보고서 행이
+사라진다. 원본과 정정은 기간 표기가 같아 한 그룹이다. 공개일의 날짜 원천은 stage 공개일 `stg_disclosure.available_date`(원천 rcept_dt
 와 접수번호 날짜 중 늦은 쪽 — J-41 재제출본은 `available_date > rcept_dt`)이고 `rcept_dt` 는
 원천 그대로 기간 판정 축이다.
 
@@ -733,6 +736,7 @@ def _coverage_source_sql(ctx: EquityGateContext) -> str:
     flags = ",\n           ".join(
         f"coalesce(bool_or({concept} = '{tag}') FILTER (WHERE sj_div IN ('IS', 'CIS')), FALSE)"
         f" AS has_{name}" for name, tag in TEMPLATE_TAGS)
+    group_flags = ", ".join(f"bool_or(r.has_{name}) AS has_{name}" for name, _ in TEMPLATE_TAGS)
     case = " ".join(f"WHEN t.has_{name} THEN '{name}'" for name, _ in TEMPLATE_TAGS)
     cols = ", ".join(f'o."{m}"' for m in COVERAGE_METRICS)
     parts = [
@@ -747,11 +751,18 @@ def _coverage_source_sql(ctx: EquityGateContext) -> str:
         if view is not None]
     # `tg` 의 키는 `.sql` 의 `grp`(그룹당 최신 접수 max(rcept_no), G-21)과 같은 자리다 — 산출에는
     # `reprt_code` 가 없고(1Q·3Q 는 `doc_acode` 로 다시 갈린다) `rcept_no` 가 그 그룹의 이름표다.
-    return ("WITH tg AS (\n"
-            "    SELECT corp_code, bsns_year, fs_div, max(rcept_no) AS rcept_no,\n"
+    # 그룹 = 요청 키 + 보고서 기간(`disclosure_version.period_label`, e1.36.0 · N-74) — `grp` 처럼 접수마다 먼저 접는다.
+    return ("WITH tr AS (\n"
+            "    SELECT corp_code, bsns_year, reprt_code, fs_div, rcept_no,\n"
             f"           {flags}\n"
             "    FROM stg_fin\n"
-            "    GROUP BY corp_code, bsns_year, reprt_code, fs_div\n"
+            "    GROUP BY corp_code, bsns_year, reprt_code, fs_div, rcept_no\n"
+            "), tg AS (\n"
+            "    SELECT r.corp_code, r.bsns_year, r.fs_div, max(r.rcept_no) AS rcept_no,\n"
+            f"           {group_flags}\n"
+            "    FROM tr r\n"
+            "    LEFT JOIN disclosure_version p ON p.rcept_no = r.rcept_no\n"
+            "    GROUP BY r.corp_code, r.bsns_year, r.reprt_code, r.fs_div, coalesce(p.period_label, '')\n"
             ")\n" + "\nUNION ALL\n".join(parts))
 
 
@@ -1120,10 +1131,13 @@ FIN_STD = register(EquityTable(
                     " rcept_dt 와 접수번호 날짜 중 늦은 쪽). 원장의 원본 판 줄과 값이 같은 정정본은"
                     " 원본 공개일(available_date < rcept_dt 로 드러난다). 파생 컬럼은 구성 행 max 를"
                     " 동반"),
-    # GATES §3-⑫ — 표준계정 행이 하나라도 있는 (corp, bsns_year, reprt_code, fs_div) 그룹 수
+    # GATES §3-⑫ — 표준계정 행이 하나라도 있는 (corp, bsns_year, reprt_code, fs_div, 보고서 기간) 그룹 수.
+    # 보고서 기간 = 그 접수의 `disclosure_version.period_label`(없으면 빈 값) — `sql/fin_std.sql` `grp` 와 같은 축이다
+    # (e1.36.0 · N-74: 한 해에 같은 종류의 정기보고서를 두 번 이상 내는 법인은 요청 키에 기간이 다른 보고서가 겹친다)
     eg1_lhs_sql='SELECT count(*) FROM "out_pq"',
-    eg1_rhs_sql=("SELECT count(*) FROM (SELECT DISTINCT corp_code, bsns_year, reprt_code, fs_div "
-                 "FROM stg_fin WHERE account_std)"),
+    eg1_rhs_sql=("SELECT count(*) FROM (SELECT DISTINCT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, "
+                 "coalesce(p.period_label, '') FROM stg_fin f "
+                 "LEFT JOIN disclosure_version p ON p.rcept_no = f.rcept_no WHERE f.account_std)"),
     sql_path=SQL_PATH,
     input_columns={
         # `account_detail`·`ord`·`observed_date` 는 재수집 판본을 접는 축이다(자연키 8열 +

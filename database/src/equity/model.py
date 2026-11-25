@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.35.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.36.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -373,6 +373,11 @@ RULES_VERSION = "e1.35.0"                # BuildRecord.rules_version 에 실린�
 # e1.35.0: S27 `fin_prelim` 새 표(N-64 PR ②-1) — 잠정실적 공정공시 판본(stage `stg_doc_prelim` ⋈ `stg_disclosure`).
 #          행을 버리지 않고 `prelim_status` 로 가른다. 메인 엑셀 Earnings 'P' 칸 원천(fi `fi_fin_prelim`), 점수 밖.
 #          다른 표 산출 불변.
+# e1.36.0: `fin_std` 판본 선택 그룹에 보고서 기간 축(N-74) — 그룹 = (corp_code, bsns_year, reprt_code, fs_div) +
+#          `disclosure_version.period_label`. 결산 주기가 6개월 · 3개월인 법인(리츠 22사)과 결산기를 바꾼 법인은 한 해에 같은
+#          종류의 정기보고서를 두 번 이상 내 요청 키가 겹친다 — 옛 식은 최신 접수 하나만 골라 뒤 보고서가 들어온 날 앞
+#          보고서 행이 사라졌다(11-13~11-19 조용한 손실 `fin_std` 행 삭제 미설명). 산출: 겹친 그룹의 앞 기간 행이 더해진다
+#          (원장 `stg_fin` 에 줄이 남은 2026년분). 다른 법인의 행 · 값은 불변 기대(서버 그림자로 확인). grain 은 그대로다.
 
 # 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a, 규약은 `stage.model.RULES_CHANGED`) — 판본을 올리면 한 줄을 더한다.
 # 그 표를 입력으로 읽는 하류 표는 적지 않는다(읽는 쪽이 `RULES[t].inputs` 를 따라 닫는다). 선언 시작은 e1.31.0 이다 —
@@ -394,6 +399,8 @@ RULES_CHANGED: dict[str, frozenset[str]] = {
     "e1.34.0": frozenset({"fin_std"}),
     # S27 새 표 — 다른 표는 그대로다
     "e1.35.0": frozenset({"fin_prelim"}),
+    # 판본 선택 그룹에 보고서 기간 축 — 겹친 그룹의 앞 기간 행이 더해진다(N-74)
+    "e1.36.0": frozenset({"fin_std"}),
 }
 
 

@@ -1,8 +1,13 @@
 -- fin_std (S12) — 재무 PIT 표준화. DESIGN v1.2 §4-4 · GATES v1.0 §3-⑫ · EG7-P04.
 -- grain (corp_code, period_end, report_code, fs_div, vintage_kind) · receipt_axis.
--- 모집단 = `stg_fin` 의 (corp_code, bsns_year, reprt_code, fs_div) 중 표준계정 행이 하나라도
+-- 모집단 = `stg_fin` 의 (corp_code, bsns_year, reprt_code, fs_div, 보고서 기간 `rp`) 중 표준계정 행이 하나라도
 -- 있는 그룹(= EG1 우변). 그룹의 판본은 **최신 접수(max `rcept_no`) 하나**다 — API 는 요청한 보고서의
 -- 최신 정정본 하나를 돌려주지만, 일일 수집은 같은 그룹에 원본 뒤에 정정을 덧붙인다(G-21, `grp`).
+-- 보고서 기간 `rp` = 그 접수의 `disclosure_version.period_label`(공시 보고서명 끝 '(YYYY.MM)' — 읽기는 S11 한 곳,
+-- 표기가 없으면 빈 값). 결산 주기가 6개월 · 3개월인 법인(리츠)과 결산기를 바꾼 법인은 한 해에 같은 종류의 정기보고서를
+-- 두 번 이상 내, API 요청 키(법인 · 사업연도 · 보고서 종류)에 기간이 다른 보고서가 겹친다. 기간 축 없이 최신 접수를
+-- 고르면 뒤 보고서가 들어온 날 앞 보고서 행이 사라진다(e1.36.0 · N-74). 원본과 정정은 표기가 같아 한 그룹이다.
+-- 그룹 축을 잇는 조인 · 집계는 모두 `rp` 까지 맞춘다 — 한 요청 키의 두 보고서 줄이 섞이지 않게.
 --
 -- 계정 대응표 `_acct` 는 `src/fin_map.py` 가 정본이고 `rules_s12.py:acct_values_sql()` 이 만든
 -- 문자열을 그대로 옮겼다(tests 가 대조). 탐색 순서는 tier(a_concept → b_concept_alt → c_nm →
@@ -137,16 +142,24 @@ grp AS (
     -- 고정하면 정정 값이 영영 안 들어오고, 줄 순서(ord)를 바꾼 계정은 두 판의 줄이 다 살아 `pick` 이
     -- 모호 NULL 이 된다(이오플로우 01274310 total_equity). 백필 구간(API = 최신 정정본 하나)과 같은
     -- 정책이다 — 정정 값 + 그 판의 공개일(B-41 결정 A). 원본 구간의 원본 값은 4C 몫이다.
-    SELECT corp_code, bsns_year, reprt_code, fs_div,
-           max(rcept_no)                                        AS rcept_no,
-           min(currency)                                        AS currency,
-           bool_and(is_krw)                                     AS is_krw_group
-    FROM stg_fin
-    GROUP BY corp_code, bsns_year, reprt_code, fs_div
-    HAVING bool_or(account_std)
+    -- 그룹 = 요청 키 + 보고서 기간(`rp`, e1.36.0 · N-74 — 머리말). 접수마다 먼저 접고(원장 줄 수가 많다) 기간 표기를 붙인다.
+    SELECT r.corp_code, r.bsns_year, r.reprt_code, r.fs_div,
+           coalesce(p.period_label, '')                         AS rp,
+           max(r.rcept_no)                                      AS rcept_no,
+           min(r.currency)                                      AS currency,
+           bool_and(r.is_krw_group)                             AS is_krw_group
+    FROM (SELECT corp_code, bsns_year, reprt_code, fs_div, rcept_no,
+                 min(currency)                                  AS currency,
+                 bool_and(is_krw)                               AS is_krw_group,
+                 bool_or(account_std)                           AS has_std
+          FROM stg_fin
+          GROUP BY corp_code, bsns_year, reprt_code, fs_div, rcept_no) r
+    LEFT JOIN disclosure_version p ON p.rcept_no = r.rcept_no
+    GROUP BY r.corp_code, r.bsns_year, r.reprt_code, r.fs_div, coalesce(p.period_label, '')
+    HAVING bool_or(r.has_std)
 ),
 fin AS (
-    SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.sj_div,
+    SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, g.rp, f.sj_div,
            regexp_replace(f.account_id, '^(ifrs-full_|ifrs_|dart_)', '')  AS concept,
            -- 계정명은 **원문과 공백 뗀 판**을 함께 싣는다(F-A2). DART 계정명의 공백은 회사마다
            -- 임의라('영업활동으로 인한 순현금흐름' · '유형자산 및 투자부동산의 취득', CF
@@ -163,14 +176,15 @@ fin AS (
            -- 사업보고서·재무상태표·현금흐름표 줄은 원천에서 비어 있다.
            f.thstrm_add_amount
     FROM stg_fin f
-    SEMI JOIN grp g
+    -- (요청 키, 접수번호)는 `grp` 에서 유일하다(접수 하나의 보고서 기간은 하나) — 줄이 늘지 않는다
+    JOIN grp g
       ON g.corp_code = f.corp_code AND g.bsns_year = f.bsns_year
      AND g.reprt_code = f.reprt_code AND g.fs_div = f.fs_div
      AND g.rcept_no = f.rcept_no                -- 그룹의 최신 판본 줄만(G-21) — 판끼리 섞지 않는다
     -- 자연키 8열(rules_dart.STG_FIN natural_key)당 1행 — 같은 접수의 재수집 판본을 접는다.
     -- first_write_wins(`observed_date` 최소).
     QUALIFY row_number() OVER (
-        PARTITION BY f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.sj_div,
+        PARTITION BY f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, g.rp, f.sj_div,
                      f.account_id, f.account_detail, f.ord
         ORDER BY f.observed_date NULLS LAST, f.thstrm_amount NULLS LAST,
                  f.thstrm_add_amount NULLS LAST) = 1
@@ -197,7 +211,7 @@ ver AS (
     -- '회계오류수정' 정정이 정정일보다 최대 1,765일 일찍 보였다). 값이 같으면 사유가 재작성·재감사여도 잇는다.
     -- **값 대조는 이 그룹들로 먼저 좁힌 뒤 stg_fin 을 읽는다**(`vside` 등호 조인) — fin_std 빌드의 메모리
     -- 상한이 빠듯하다(서버 최대 RSS 7.2GB / 8GB).
-    SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div, g.rcept_no, c.orig_rcept_no,
+    SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div, g.rp, g.rcept_no, c.orig_rcept_no,
            od.available_date                                    AS orig_avail_dt
     FROM grp g
     JOIN disclosure_version c ON c.rcept_no = g.rcept_no
@@ -209,15 +223,15 @@ ver AS (
 ),
 vside AS (
     -- 대조할 두 판의 접수번호와 부호 — 정정 판(그룹의 판) +1 · 원본 판 −1
-    SELECT corp_code, bsns_year, reprt_code, fs_div, rcept_no, 1 AS side FROM ver
+    SELECT corp_code, bsns_year, reprt_code, fs_div, rp, rcept_no, 1 AS side FROM ver
     UNION ALL
-    SELECT corp_code, bsns_year, reprt_code, fs_div, orig_rcept_no, -1 FROM ver
+    SELECT corp_code, bsns_year, reprt_code, fs_div, rp, orig_rcept_no, -1 FROM ver
 ),
 vline AS (
     -- 두 판의 줄. fin_std 가 읽는 네 표만(`_acct` 의 sjs) — 자본변동표 구성요소 표기 변경은 값과 무관하다.
     -- 같은 판 재수집 줄은 `fin` 과 같은 자연키 + first_write_wins 로 접는다. 원본 줄은 같은 그룹
     -- (corp_code · bsns_year · reprt_code · fs_div)에 있어야 한다.
-    SELECT s.corp_code, s.bsns_year, s.reprt_code, s.fs_div, s.side,
+    SELECT s.corp_code, s.bsns_year, s.reprt_code, s.fs_div, s.rp, s.side,
            f.sj_div, f.account_id, f.account_detail, f.account_nm, f.thstrm_amount, f.currency
     FROM stg_fin f
     JOIN vside s
@@ -235,34 +249,34 @@ same_val AS (
     -- NULL 은 NULL 끼리만 같고(GROUP BY 가 한 묶음으로 본다), 단위는 보정하지 않으며(×1000 은 다름),
     -- 줄 순서(ord)는 보지 않는다. 원본 줄이 없으면(백필 구간) 정정 줄의 +1 이 남아 빠지고, 두 판 모두
     -- 네 표 줄이 없으면 그룹이 여기 없다 — 증거가 없으면 정정일이다.
-    SELECT corp_code, bsns_year, reprt_code, fs_div
-    FROM (SELECT corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_detail,
+    SELECT corp_code, bsns_year, reprt_code, fs_div, rp
+    FROM (SELECT corp_code, bsns_year, reprt_code, fs_div, rp, sj_div, account_id, account_detail,
                  account_nm, thstrm_amount, currency, sum(side) AS d
           FROM vline
-          GROUP BY corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, account_detail,
+          GROUP BY corp_code, bsns_year, reprt_code, fs_div, rp, sj_div, account_id, account_detail,
                    account_nm, thstrm_amount, currency) x
-    GROUP BY corp_code, bsns_year, reprt_code, fs_div
+    GROUP BY corp_code, bsns_year, reprt_code, fs_div, rp
     HAVING bool_and(d = 0)
 ),
 redate AS (
     -- 승계 그룹과 원본 공개일. 그룹 축이다 — 같은 정정의 CFS 는 같고 OFS 는 다를 수 있다.
-    SELECT v.corp_code, v.bsns_year, v.reprt_code, v.fs_div, v.orig_avail_dt
+    SELECT v.corp_code, v.bsns_year, v.reprt_code, v.fs_div, v.rp, v.orig_avail_dt
     FROM ver v
     SEMI JOIN same_val s
       ON s.corp_code = v.corp_code AND s.bsns_year = v.bsns_year
-     AND s.reprt_code = v.reprt_code AND s.fs_div = v.fs_div
+     AND s.reprt_code = v.reprt_code AND s.fs_div = v.fs_div AND s.rp = v.rp
 ),
 req AS (
     -- 대체 규칙의 발동 조건(fin_map.REVENUE_FALLBACK.require) — 태그 존재 여부
-    SELECT corp_code, bsns_year, reprt_code, fs_div,
+    SELECT corp_code, bsns_year, reprt_code, fs_div, rp,
            bool_or(concept = 'InvestmentIncome')                 AS has_investment_income,
            bool_or(concept = 'RevenueFromInterest')              AS has_interest_revenue
     FROM fin
     WHERE sj_div IN ('IS', 'CIS')
-    GROUP BY corp_code, bsns_year, reprt_code, fs_div
+    GROUP BY corp_code, bsns_year, reprt_code, fs_div, rp
 ),
 hit AS (
-    SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div,
+    SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.rp,
            a.metric, a.tier, a.agg, a.basis, a.family,
            list_position(a.sjs, f.sj_div)                        AS sj_rank,
            -- 0 = 공백 정규화 없이도 걸리던 줄(태그 히트 포함) · 1 = 공백을 떼야 걸린 줄.
@@ -284,7 +298,7 @@ hit AS (
            AND list_contains(a.tokens, f.account_nm_norm)))
     LEFT JOIN req r
       ON r.corp_code = f.corp_code AND r.bsns_year = f.bsns_year
-     AND r.reprt_code = f.reprt_code AND r.fs_div = f.fs_div
+     AND r.reprt_code = f.reprt_code AND r.fs_div = f.fs_div AND r.rp = f.rp
     WHERE f.thstrm_amount IS NOT NULL
       AND (a.require_tag IS NULL
            OR (a.require_tag = 'InvestmentIncome' AND r.has_investment_income)
@@ -292,23 +306,23 @@ hit AS (
 ),
 best_tier AS (
     -- 우선순위 ① tier — 앞선 tier 가 한 건이라도 있으면 거기서 끝난다(fin_map concept_alt·nm 규칙)
-    SELECT corp_code, bsns_year, reprt_code, fs_div, metric, min(tier) AS tier
+    SELECT corp_code, bsns_year, reprt_code, fs_div, rp, metric, min(tier) AS tier
     FROM hit
-    GROUP BY corp_code, bsns_year, reprt_code, fs_div, metric
+    GROUP BY corp_code, bsns_year, reprt_code, fs_div, rp, metric
 ),
 best AS (
     -- 우선순위 ② 같은 tier 안에서 sj 순서(IS → CIS)
-    SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.metric, h.tier,
+    SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.rp, h.metric, h.tier,
            min(h.sj_rank)                                        AS sj_rank
     FROM hit h
     JOIN best_tier b
       ON b.corp_code = h.corp_code AND b.bsns_year = h.bsns_year
-     AND b.reprt_code = h.reprt_code AND b.fs_div = h.fs_div AND b.metric = h.metric
+     AND b.reprt_code = h.reprt_code AND b.fs_div = h.fs_div AND b.rp = h.rp AND b.metric = h.metric
      AND b.tier = h.tier
-    GROUP BY h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.metric, h.tier
+    GROUP BY h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.rp, h.metric, h.tier
 ),
 val AS (
-    SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.metric,
+    SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.rp, h.metric,
            min(h.family)                                         AS family,
            min(h.basis)                                          AS basis,
            -- `sum_abs` 는 **크기의 합**이다(F-A4) — 자산별 취득 줄은 한 표 안에서도 부호가
@@ -347,9 +361,9 @@ val AS (
     FROM hit h
     JOIN best b
       ON b.corp_code = h.corp_code AND b.bsns_year = h.bsns_year
-     AND b.reprt_code = h.reprt_code AND b.fs_div = h.fs_div AND b.metric = h.metric
+     AND b.reprt_code = h.reprt_code AND b.fs_div = h.fs_div AND b.rp = h.rp AND b.metric = h.metric
      AND b.tier = h.tier AND b.sj_rank = h.sj_rank
-    GROUP BY h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.metric
+    GROUP BY h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.rp, h.metric
 ),
 doc AS (
     SELECT rcept_no, period_from, period_to, doc_acode
@@ -369,7 +383,7 @@ chain_doc AS (
     -- 전제: disclosure_version 이 정정 체인을 평평하게 접는다(정정의 orig_rcept_no 는 언제나 원본) —
     -- S11 EG3 `n_link_orig_invalid`·`n_is_correction_prefix_mismatch` 가 지킨다.
     -- 사슬 문서가 판보다 늦은 접수일 수 있으나 기간은 보고서의 고정 속성이라 값이 새지 않는다.
-    SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div,
+    SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div, g.rp,
            m.period_from, m.period_to, m.doc_acode
     FROM grp g
     JOIN disclosure_version s ON s.rcept_no = g.rcept_no
@@ -378,7 +392,7 @@ chain_doc AS (
     JOIN doc m ON m.rcept_no = x.rcept_no
     WHERE NOT EXISTS (SELECT 1 FROM doc o WHERE o.rcept_no = g.rcept_no)
     -- 유효한 사슬 안에서는 기간이 같아 어느 판을 골라도 결과가 같다 — 정렬은 결정성을 위한 것이다.
-    QUALIFY row_number() OVER (PARTITION BY g.corp_code, g.bsns_year, g.reprt_code, g.fs_div
+    QUALIFY row_number() OVER (PARTITION BY g.corp_code, g.bsns_year, g.reprt_code, g.fs_div, g.rp
                                ORDER BY x.rcept_no DESC) = 1
 ),
 head AS (
@@ -398,16 +412,16 @@ head AS (
     LEFT JOIN dt d ON d.rcept_no = g.rcept_no
     LEFT JOIN redate rd
       ON rd.corp_code = g.corp_code AND rd.bsns_year = g.bsns_year
-     AND rd.reprt_code = g.reprt_code AND rd.fs_div = g.fs_div
+     AND rd.reprt_code = g.reprt_code AND rd.fs_div = g.fs_div AND rd.rp = g.rp
     LEFT JOIN doc m ON m.rcept_no = g.rcept_no
     LEFT JOIN chain_doc cd
       ON cd.corp_code = g.corp_code AND cd.bsns_year = g.bsns_year
-     AND cd.reprt_code = g.reprt_code AND cd.fs_div = g.fs_div
+     AND cd.reprt_code = g.reprt_code AND cd.fs_div = g.fs_div AND cd.rp = g.rp
     LEFT JOIN corp c ON c.corp_code = g.corp_code
 ),
 pe_cand AS (
     -- 문서 없는 그룹의 후보 기간 말일 — 결산월 말일(bsns_year · bsns_year+1)에서 보고서 종류만큼 당긴다
-    SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div,
+    SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.rp,
            last_day(make_date(CAST(h.bsns_year AS INTEGER) + y.off, h.fiscal_month, 1)
                     - INTERVAL (CASE h.reprt_code WHEN '11011' THEN 0
                                                   WHEN '11012' THEN k.half_months
@@ -419,19 +433,19 @@ pe_cand AS (
     WHERE h.period_to IS NULL AND h.fiscal_month IS NOT NULL AND h.rcept_dt IS NOT NULL
 ),
 pe_inf AS (
-    SELECT c.corp_code, c.bsns_year, c.reprt_code, c.fs_div,
+    SELECT c.corp_code, c.bsns_year, c.reprt_code, c.fs_div, c.rp,
            count(*)                                              AS n_cand,
            min(c.pe)                                             AS pe
     FROM pe_cand c
     JOIN head h
       ON h.corp_code = c.corp_code AND h.bsns_year = c.bsns_year
-     AND h.reprt_code = c.reprt_code AND h.fs_div = c.fs_div
+     AND h.reprt_code = c.reprt_code AND h.fs_div = c.fs_div AND h.rp = c.rp
     CROSS JOIN _const k
     WHERE date_diff('day', c.pe, h.rcept_dt) BETWEEN 0 AND CAST(k.period_end_lag_max_days AS BIGINT)
-    GROUP BY c.corp_code, c.bsns_year, c.reprt_code, c.fs_div
+    GROUP BY c.corp_code, c.bsns_year, c.reprt_code, c.fs_div, c.rp
 ),
 resolved AS (
-    SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.rcept_no, h.rcept_dt,
+    SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.rp, h.rcept_no, h.rcept_dt,
            h.avail_dt,
            h.currency, h.is_krw_group,
            h.period_from                                         AS period_start,
@@ -450,7 +464,7 @@ resolved AS (
     CROSS JOIN _const k
     LEFT JOIN pe_inf i
       ON i.corp_code = h.corp_code AND i.bsns_year = h.bsns_year
-     AND i.reprt_code = h.reprt_code AND i.fs_div = h.fs_div
+     AND i.reprt_code = h.reprt_code AND i.fs_div = h.fs_div AND i.rp = h.rp
 ),
 judged0 AS (
     -- 격리 1차 — 원 단위 축 · 기간 · 접수 지연. 접수 지연은 **정정 사슬의 원본 접수일**로 잰다(e1.32.0 연구 DB
@@ -479,7 +493,7 @@ judged0 AS (
 ),
 ta AS (
     -- 자산총계 — 값 품질 격리(S1-c)의 축. 그룹당 한 값(`val` 의 pick, 모호하면 NULL).
-    SELECT corp_code, bsns_year, reprt_code, fs_div, CAST(v AS DOUBLE) AS v
+    SELECT corp_code, bsns_year, reprt_code, fs_div, rp, CAST(v AS DOUBLE) AS v
     FROM val
     WHERE metric = 'total_asset'
 ),
@@ -491,19 +505,19 @@ scale AS (
     -- 계단 변화(합병)는 창의 과반이 새 수준이 되면 따라간다. 창 폭 넷 = 한 회계연도의 보고서 판본 수(`_rcode`)
     -- — ROWS 틀 폭도 숫자 리터럴 금지 규약(tests/test_equity_build.py)을 따른다.
     -- 판정에 필요한 열만 창에 싣는다(fin_std 빌드 메모리 상한이 빠듯하다 — 서버 최대 RSS 7.2GB / 8GB).
-    SELECT corp_code, bsns_year, reprt_code, fs_div,
+    SELECT corp_code, bsns_year, reprt_code, fs_div, rp,
            abs(log10(v / median(v) OVER w))                      AS dev,
            count(*) OVER w                                       AS n_win
-    FROM (SELECT j.corp_code, j.bsns_year, j.reprt_code, j.fs_div, j.period_end, j.report_code,
+    FROM (SELECT j.corp_code, j.bsns_year, j.reprt_code, j.fs_div, j.rp, j.period_end, j.report_code,
                  t.v, n.n_side
           FROM judged0 j
           JOIN ta t
             ON t.corp_code = j.corp_code AND t.bsns_year = j.bsns_year
-           AND t.reprt_code = j.reprt_code AND t.fs_div = j.fs_div
+           AND t.reprt_code = j.reprt_code AND t.fs_div = j.fs_div AND t.rp = j.rp
           CROSS JOIN (SELECT count(*) AS n_side FROM _rcode) n
           WHERE j.pre_reject IS NULL AND t.v > 0) s
     WINDOW w AS (PARTITION BY corp_code, fs_div
-                 ORDER BY period_end, report_code, bsns_year, reprt_code
+                 ORDER BY period_end, report_code, bsns_year, reprt_code, rp
                  ROWS BETWEEN n_side PRECEDING AND n_side FOLLOWING)
 ),
 judged AS (
@@ -523,10 +537,10 @@ judged AS (
     CROSS JOIN _const k
     LEFT JOIN ta t
       ON t.corp_code = j.corp_code AND t.bsns_year = j.bsns_year
-     AND t.reprt_code = j.reprt_code AND t.fs_div = j.fs_div
+     AND t.reprt_code = j.reprt_code AND t.fs_div = j.fs_div AND t.rp = j.rp
     LEFT JOIN scale s
       ON s.corp_code = j.corp_code AND s.bsns_year = j.bsns_year
-     AND s.reprt_code = j.reprt_code AND s.fs_div = j.fs_div
+     AND s.reprt_code = j.reprt_code AND s.fs_div = j.fs_div AND s.rp = j.rp
 ),
 dup AS (
     -- 같은 grain 이 둘 이상이면 어느 판본이 옳은지 규칙이 못 고르므로 전부 `duplicate_vintage` 로 격리한다. 예외 하나 —
@@ -549,7 +563,7 @@ kept AS (
     -- 2021-06·09·12 분기가 둘 다 2021). 같은 회계연도는 결산월 말일에서 보고서 종류만큼 당긴
     -- 달의 말일로 찾는다(`pe_cand` 와 같은 달력 규약).
     -- 공개일은 원천 `rcept_dt` 가 아니라 stage 보정 공개일 `avail_dt` 를 싣는다(Q-4 병합 — `head` 주석).
-    SELECT j.corp_code, j.bsns_year, j.reprt_code, j.fs_div, j.period_end, j.report_code,
+    SELECT j.corp_code, j.bsns_year, j.reprt_code, j.fs_div, j.rp, j.period_end, j.report_code,
            j.avail_dt
     FROM judged j
     JOIN dup d
@@ -559,9 +573,10 @@ kept AS (
 ),
 q4member AS (
     -- 사업보고서 행과 같은 회계연도의 1Q·반기·3Q 행
-    SELECT a.corp_code, a.bsns_year, a.fs_div,
+    SELECT a.corp_code, a.bsns_year, a.fs_div, a.rp,
            m.bsns_year                                           AS m_bsns_year,
            m.reprt_code                                          AS m_reprt_code,
+           m.rp                                                  AS m_rp,
            m.report_code                                         AS m_report_code,
            m.avail_dt                                            AS m_avail_dt
     FROM kept a
@@ -579,26 +594,26 @@ q4member AS (
 q4src AS (
     -- 같은 회계연도 1Q·반기·3Q 의 3개월 손익 값 수와 3분기 보고서의 9개월 누계(`val.v_ytd`, e1.32.0 연구 DB S1-d).
     -- 4분기는 누계만 빼지만 셋이 다 있어야(n_q = 3) 선다 — 성립 조건(부분합 금지)·구성 수·공개일 축은 그대로다.
-    SELECT q.corp_code, q.bsns_year, q.fs_div, v.metric,
+    SELECT q.corp_code, q.bsns_year, q.fs_div, q.rp, v.metric,
            count(v.v)                                            AS n_q,
            max(v.v_ytd) FILTER (WHERE q.m_report_code = '11014') AS ytd_9m
     FROM q4member q
     JOIN val v
       ON v.corp_code = q.corp_code AND v.bsns_year = q.m_bsns_year
-     AND v.reprt_code = q.m_reprt_code AND v.fs_div = q.fs_div
+     AND v.reprt_code = q.m_reprt_code AND v.fs_div = q.fs_div AND v.rp = q.m_rp
     WHERE v.family = 'flow'
-    GROUP BY q.corp_code, q.bsns_year, q.fs_div, v.metric
+    GROUP BY q.corp_code, q.bsns_year, q.fs_div, q.rp, v.metric
 ),
 q4 AS (
     -- 4분기 = 연간 − 9개월 누계(e1.32.0 연구 DB S1-d). 1분기·반기 '3개월' 칸을 더하던 옛 식은 3분기 보고서가
     -- 재분류·분할을 반영해 다시 적은 9개월과 기준이 섞였다(동진쎄미켐 FY2025 매출 1,493억 → 누계 식 3,092억 =
     -- WISE). 누계가 없으면 대체식 없이 NULL. 연간·누계 모두 그룹 최신 판(`api_restated`)이라 같은 규약이다.
-    SELECT a.corp_code, a.bsns_year, a.fs_div, a.metric,
+    SELECT a.corp_code, a.bsns_year, a.fs_div, a.rp, a.metric,
            a.v - q.ytd_9m                                        AS v
     FROM val a
     JOIN q4src q
       ON q.corp_code = a.corp_code AND q.bsns_year = a.bsns_year
-     AND q.fs_div = a.fs_div AND q.metric = a.metric
+     AND q.fs_div = a.fs_div AND q.rp = a.rp AND q.metric = a.metric
     WHERE a.reprt_code = '11011' AND a.family = 'flow' AND a.v IS NOT NULL
       AND q.n_q = (SELECT count(*) FROM _qcode)
 ),
@@ -607,22 +622,23 @@ q4meta AS (
     -- 공개시점(DESIGN §3). 구성 행은 회계기간 축(#236), 공개일은 stage 보정 공개일 `avail_dt`
     -- (J-41·C-11)다 — 구성 행 각자의 `available_date` 와 같은 축이어야 파생 값이 구성 행보다
     -- 먼저 공개되지 않는다(Q-4 병합, e1.27.0).
-    SELECT a.corp_code, a.bsns_year, a.fs_div,
+    SELECT a.corp_code, a.bsns_year, a.fs_div, a.rp,
            1 + count(DISTINCT q.m_report_code)                   AS n_rows,
            greatest(a.avail_dt, coalesce(max(q.m_avail_dt), a.avail_dt)) AS available_date
     FROM kept a
     LEFT JOIN q4member q
-      ON q.corp_code = a.corp_code AND q.bsns_year = a.bsns_year AND q.fs_div = a.fs_div
+      ON q.corp_code = a.corp_code AND q.bsns_year = a.bsns_year AND q.fs_div = a.fs_div AND q.rp = a.rp
     WHERE a.reprt_code = '11011'
-    GROUP BY a.corp_code, a.bsns_year, a.fs_div, a.avail_dt
+    GROUP BY a.corp_code, a.bsns_year, a.fs_div, a.rp, a.avail_dt
 ),
 cfprev AS (
     -- 현금흐름 분기값의 직전 보고서 — 같은 회계연도 바로 앞 분기(기간 말일 = 자기 말일에서
     -- `quarter_months` 당긴 달의 말일)이고 보고서 종류가 대응표(`rules_s12.CF_PRIOR_REPORT`)대로다.
     -- 공개일은 두 행 모두 `avail_dt`(Q-4 병합).
-    SELECT s.corp_code, s.bsns_year, s.reprt_code, s.fs_div, s.report_code, s.avail_dt,
+    SELECT s.corp_code, s.bsns_year, s.reprt_code, s.fs_div, s.rp, s.report_code, s.avail_dt,
            p.bsns_year                                           AS p_bsns_year,
            p.reprt_code                                          AS p_reprt_code,
+           p.rp                                                  AS p_rp,
            p.avail_dt                                            AS p_avail_dt
     FROM kept s
     CROSS JOIN _const k
@@ -634,20 +650,21 @@ cfprev AS (
      AND p.period_end = last_day(s.period_end - INTERVAL (k.quarter_months) MONTH)
 ),
 cfq AS (
-    SELECT c.corp_code, c.bsns_year, c.reprt_code, c.fs_div, s.metric,
+    SELECT c.corp_code, c.bsns_year, c.reprt_code, c.fs_div, c.rp, s.metric,
            CASE WHEN c.report_code = '11013' THEN s.v
                 ELSE s.v - p.v END                               AS v
     FROM cfprev c
     JOIN val s
       ON s.corp_code = c.corp_code AND s.bsns_year = c.bsns_year
-     AND s.reprt_code = c.reprt_code AND s.fs_div = c.fs_div
+     AND s.reprt_code = c.reprt_code AND s.fs_div = c.fs_div AND s.rp = c.rp
     LEFT JOIN val p
       ON p.corp_code = c.corp_code AND p.bsns_year = c.p_bsns_year
-     AND p.reprt_code = c.p_reprt_code AND p.fs_div = c.fs_div AND p.metric = s.metric
+     AND p.reprt_code = c.p_reprt_code AND p.fs_div = c.fs_div AND p.rp = c.p_rp
+     AND p.metric = s.metric
     WHERE s.family = 'cf'
 ),
 cfqmeta AS (
-    SELECT corp_code, bsns_year, reprt_code, fs_div,
+    SELECT corp_code, bsns_year, reprt_code, fs_div, rp,
            CASE WHEN report_code = '11013' THEN 1
                 WHEN p_reprt_code IS NOT NULL THEN 2 ELSE 1 END  AS n_rows,
            CASE WHEN report_code = '11013' THEN avail_dt
@@ -659,11 +676,11 @@ ytd3m AS (
     -- 하나라도 3개월 값 = 누계 ≠ 0 이고 같은 회계연도 바로 앞 보고서가 있다(`cfprev` 대응표 — 그래야 누계가
     -- 3개월보다 길다. 반기만 내는 리츠는 앞 보고서가 없어 빠진다). 값은 고치지 않는다(누계 − 직전 누계로 보정하면
     -- 보고서 사이 기준이 섞인다) — 표식만 싣고 `v_fin_latest` 가 그 분기를 품은 TTM 을 비운다(바이오비쥬 2026 반기).
-    SELECT DISTINCT c.corp_code, c.bsns_year, c.reprt_code, c.fs_div
+    SELECT DISTINCT c.corp_code, c.bsns_year, c.reprt_code, c.fs_div, c.rp
     FROM cfprev c
     JOIN val v
       ON v.corp_code = c.corp_code AND v.bsns_year = c.bsns_year
-     AND v.reprt_code = c.reprt_code AND v.fs_div = c.fs_div
+     AND v.reprt_code = c.reprt_code AND v.fs_div = c.fs_div AND v.rp = c.rp
     WHERE c.report_code IN ('11012', '11014') AND c.p_reprt_code IS NOT NULL
       AND v.metric IN ('revenue', 'op_profit', 'net_income')
       AND v.v = v.v_ytd AND v.v <> 0
@@ -672,7 +689,7 @@ wide_acct AS (
     -- **그룹 축이 정본**이다 — 대응표 24 계정 중 하나도 안 걸린 그룹(표준계정 행은 있지만 전부
     -- 다른 계정)도 행을 가져야 `basis` 라벨이 「왜 값이 없는가」 를 말할 수 있다(T-H). `val` 로만
     -- 몰면 그런 그룹이 `wide` 에서 빠져 최종 SELECT 가 라벨을 지어내야 한다.
-    SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div,
+    SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div, g.rp,
            max(a.v) FILTER (WHERE a.metric = 'revenue')              AS revenue,
            max(a.basis) FILTER (WHERE a.metric = 'revenue' AND a.v IS NOT NULL) AS revenue_basis,
            max(a.v) FILTER (WHERE a.metric = 'cost_of_sales')        AS cost_of_sales,
@@ -704,8 +721,8 @@ wide_acct AS (
     FROM grp g
     LEFT JOIN val a
       ON a.corp_code = g.corp_code AND a.bsns_year = g.bsns_year
-     AND a.reprt_code = g.reprt_code AND a.fs_div = g.fs_div
-    GROUP BY g.corp_code, g.bsns_year, g.reprt_code, g.fs_div
+     AND a.reprt_code = g.reprt_code AND a.fs_div = g.fs_div AND a.rp = g.rp
+    GROUP BY g.corp_code, g.bsns_year, g.reprt_code, g.fs_div, g.rp
 ),
 capex_zero AS (
     -- **유형자산 취득 줄이 없는 그룹**(F-A3) — 값 있는 PPE 취득 줄이 하나도 없는 현금흐름표.
@@ -720,14 +737,14 @@ capex_zero AS (
     -- 안 되기 때문이다. 합산 줄도 여기 들어 0 을 막는다(값이 있으면 tier e 가 이미 채운다).
     -- 금액이 빈 줄은 「샀다」 는 증거가 아니라서 막지 않는다.
     -- 현금흐름표 자체가 있는지(소계가 잡혔는지)는 `wide` 에서 본다.
-    SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div
+    SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.rp
     FROM fin f
     LEFT JOIN _acct a
       ON a.metric = 'capex_ytd'
      AND ((a.kind = 'concept' AND list_contains(a.tokens, f.concept))
        OR (a.kind <> 'concept' AND list_contains(a.tokens, f.account_nm_norm)))
     WHERE f.sj_div = 'CF'
-    GROUP BY f.corp_code, f.bsns_year, f.reprt_code, f.fs_div
+    GROUP BY f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.rp
     HAVING NOT bool_or(coalesce(
         f.thstrm_amount IS NOT NULL
         AND (a.metric IS NOT NULL
@@ -762,10 +779,10 @@ wide AS (
     FROM wide_acct w
     LEFT JOIN capex_zero z
       ON z.corp_code = w.corp_code AND z.bsns_year = w.bsns_year
-     AND z.reprt_code = w.reprt_code AND z.fs_div = w.fs_div
+     AND z.reprt_code = w.reprt_code AND z.fs_div = w.fs_div AND z.rp = w.rp
     LEFT JOIN req r
       ON r.corp_code = w.corp_code AND r.bsns_year = w.bsns_year
-     AND r.reprt_code = w.reprt_code AND r.fs_div = w.fs_div
+     AND r.reprt_code = w.reprt_code AND r.fs_div = w.fs_div AND r.rp = w.rp
 ),
 basis_prev AS (
     -- 직전 회계연도(`bsns_year` − 1) 의 같은 `report_code`·`fs_div` 행이 어떤 매출 기준으로
@@ -786,7 +803,7 @@ basis_prev AS (
      AND d.report_code = j.report_code AND d.fs_div = j.fs_div
     LEFT JOIN wide w
       ON w.corp_code = j.corp_code AND w.bsns_year = j.bsns_year
-     AND w.reprt_code = j.reprt_code AND w.fs_div = j.fs_div
+     AND w.reprt_code = j.reprt_code AND w.fs_div = j.fs_div AND w.rp = j.rp
     WHERE j.pre_reject IS NULL AND (d.n_grain = 1 OR d.keep_year = j.bsns_year)
     GROUP BY j.corp_code, TRY_CAST(j.bsns_year AS INTEGER), j.report_code, j.fs_div
 ),
@@ -800,23 +817,23 @@ q4gate AS (
     --     실제 손실이라 부호만으로는 못 가르고, 같은 신호가 그 계정도 흔들므로 함께 비운다.
     --   ytd_9m — 그 밖(누계가 없어 값이 빈 계정 포함 — 대체식은 없다).
     -- 구성이 모자란 행(`q4_derived_n_rows` < 4)은 라벨이 없다 — 그 사유는 구성 수가 말한다.
-    SELECT m.corp_code, m.bsns_year, m.fs_div,
+    SELECT m.corp_code, m.bsns_year, m.fs_div, m.rp,
            CASE WHEN wa.revenue_basis IS DISTINCT FROM w3.revenue_basis THEN 'revenue_basis_mismatch'
                 WHEN r.v < 0                                          THEN 'negative_revenue'
                 ELSE 'ytd_9m' END                                AS basis
     FROM q4meta m
     JOIN q4member t
       ON t.corp_code = m.corp_code AND t.bsns_year = m.bsns_year AND t.fs_div = m.fs_div
-     AND t.m_report_code = '11014'
+     AND t.rp = m.rp AND t.m_report_code = '11014'
     JOIN wide wa
       ON wa.corp_code = m.corp_code AND wa.bsns_year = m.bsns_year
-     AND wa.reprt_code = '11011' AND wa.fs_div = m.fs_div
+     AND wa.reprt_code = '11011' AND wa.fs_div = m.fs_div AND wa.rp = m.rp
     JOIN wide w3
       ON w3.corp_code = t.corp_code AND w3.bsns_year = t.m_bsns_year
-     AND w3.reprt_code = t.m_reprt_code AND w3.fs_div = t.fs_div
+     AND w3.reprt_code = t.m_reprt_code AND w3.fs_div = t.fs_div AND w3.rp = t.m_rp
     LEFT JOIN q4 r
       ON r.corp_code = m.corp_code AND r.bsns_year = m.bsns_year AND r.fs_div = m.fs_div
-     AND r.metric = 'revenue'
+     AND r.rp = m.rp AND r.metric = 'revenue'
     WHERE m.n_rows = 1 + (SELECT count(*) FROM _qcode)
 ),
 q4ok AS (
@@ -824,10 +841,11 @@ q4ok AS (
     SELECT q.*
     FROM q4 q
     JOIN q4gate g ON g.corp_code = q.corp_code AND g.bsns_year = q.bsns_year AND g.fs_div = q.fs_div
+                 AND g.rp = q.rp
     WHERE g.basis = 'ytd_9m' OR (g.basis = 'revenue_basis_mismatch' AND q.metric <> 'revenue')
 ),
 q4wide AS (
-    SELECT corp_code, bsns_year, fs_div,
+    SELECT corp_code, bsns_year, fs_div, rp,
            max(v) FILTER (WHERE metric = 'revenue')              AS revenue_q4_derived,
            max(v) FILTER (WHERE metric = 'cost_of_sales')        AS cost_of_sales_q4_derived,
            max(v) FILTER (WHERE metric = 'gross_profit')         AS gross_profit_q4_derived,
@@ -839,16 +857,16 @@ q4wide AS (
            max(v) FILTER (WHERE metric = 'depreciation')         AS depreciation_q4_derived,
            max(v) FILTER (WHERE metric = 'interest_expense')     AS interest_expense_q4_derived
     FROM q4ok
-    GROUP BY corp_code, bsns_year, fs_div
+    GROUP BY corp_code, bsns_year, fs_div, rp
 ),
 cfqwide AS (
-    SELECT corp_code, bsns_year, reprt_code, fs_div,
+    SELECT corp_code, bsns_year, reprt_code, fs_div, rp,
            max(v) FILTER (WHERE metric = 'cf_operating_ytd')     AS cf_operating_q,
            max(v) FILTER (WHERE metric = 'cf_investing_ytd')     AS cf_investing_q,
            max(v) FILTER (WHERE metric = 'cf_financing_ytd')     AS cf_financing_q,
            max(v) FILTER (WHERE metric = 'capex_ytd')            AS capex_q
     FROM cfq
-    GROUP BY corp_code, bsns_year, reprt_code, fs_div
+    GROUP BY corp_code, bsns_year, reprt_code, fs_div, rp
 )
 SELECT
     j.corp_code,
@@ -890,24 +908,25 @@ SELECT
 FROM judged j
 LEFT JOIN wide w
   ON w.corp_code = j.corp_code AND w.bsns_year = j.bsns_year
- AND w.reprt_code = j.reprt_code AND w.fs_div = j.fs_div
+ AND w.reprt_code = j.reprt_code AND w.fs_div = j.fs_div AND w.rp = j.rp
 LEFT JOIN q4wide q
   ON j.reprt_code = '11011' AND q.corp_code = j.corp_code AND q.bsns_year = j.bsns_year
- AND q.fs_div = j.fs_div
+ AND q.fs_div = j.fs_div AND q.rp = j.rp
 LEFT JOIN q4meta qm
   ON qm.corp_code = j.corp_code AND qm.bsns_year = j.bsns_year AND qm.fs_div = j.fs_div
+ AND qm.rp = j.rp
 LEFT JOIN q4gate qg
   ON j.reprt_code = '11011' AND qg.corp_code = j.corp_code AND qg.bsns_year = j.bsns_year
- AND qg.fs_div = j.fs_div
+ AND qg.fs_div = j.fs_div AND qg.rp = j.rp
 LEFT JOIN ytd3m y
   ON y.corp_code = j.corp_code AND y.bsns_year = j.bsns_year
- AND y.reprt_code = j.reprt_code AND y.fs_div = j.fs_div
+ AND y.reprt_code = j.reprt_code AND y.fs_div = j.fs_div AND y.rp = j.rp
 LEFT JOIN cfqwide cq
   ON cq.corp_code = j.corp_code AND cq.bsns_year = j.bsns_year
- AND cq.reprt_code = j.reprt_code AND cq.fs_div = j.fs_div
+ AND cq.reprt_code = j.reprt_code AND cq.fs_div = j.fs_div AND cq.rp = j.rp
 LEFT JOIN cfqmeta cm
   ON cm.corp_code = j.corp_code AND cm.bsns_year = j.bsns_year
- AND cm.reprt_code = j.reprt_code AND cm.fs_div = j.fs_div
+ AND cm.reprt_code = j.reprt_code AND cm.fs_div = j.fs_div AND cm.rp = j.rp
 LEFT JOIN basis_prev bp
   ON bp.corp_code = j.corp_code
  AND bp.fy = TRY_CAST(j.bsns_year AS INTEGER) - 1

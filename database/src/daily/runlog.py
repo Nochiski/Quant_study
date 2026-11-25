@@ -40,6 +40,9 @@ WARN_STATUSES: dict[str, frozenset[str]] = {
     # 낮 분할 수집(`daily.dart_daily --intraday`) — 받지 못한 유닛 · 도구 실패는 18:05 저녁 런이 다시 부른다.
     # 한도 초과 · v3 키 사용은 그대로 실패(crit)다
     "dart_intraday": frozenset({"gate_failed", "tool_failed"}),
+    # 신용잔고 일일 수집 — 일부 종목만 못 받고 완료 기준(판정일 행 비율)은 통과. 빠진 종목은 다음 날 40일 창 재수집이
+    # 채운다(N-71 · N-73). 완료 기준을 못 넘긴 gate_failed 는 그대로 실패(crit)다
+    "kis_credit": frozenset({"partial"}),
 }
 # 장 마감 판(`scripts/postclose_chain.sh`, 컷오버 PR-8)이 ①(수집 — 수집기가 `kiwoom_postclose` 로 남김) 뒤 단계마다 남기는
 # source, 체인 순서. D13(N-62)부터 15:41 close 는 stage 까지(`POSTCLOSE_CLOSE_STEPS` — 16:30 워치독 postclose_board 가 본다),

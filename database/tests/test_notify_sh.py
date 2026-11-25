@@ -90,7 +90,7 @@ def test_대조_켜면_가짜_curl_이_한_번_불린다(tmp_path: Path) -> None
     assert proc.returncode == 1               # 가짜 curl 이 실패 응답을 낸다
     calls = curl_log.read_text(encoding="utf-8").splitlines()
     assert len(calls) == 1 and "api.telegram.org/botfake-token/sendMessage" in calls[0]
-    assert not notify_log.exists()
+    assert len(notify_log.read_text(encoding="utf-8").splitlines()) == 1   # 보내는 날도 기록은 남는다(N-73)
 
 
 @pytest.mark.parametrize("level", ["crit", "warn", "info"])
@@ -110,4 +110,101 @@ def test_텔레그램_분기는_QL_ENV_없으면_옛_파일로_넘어가지_않�
     assert proc.returncode == 2
     assert "QL_ENV" in proc.stderr
     assert not curl_log.exists()
-    assert not notify_log.exists()
+    assert len(notify_log.read_text(encoding="utf-8").splitlines()) == 1   # 못 보내도 기록은 남는다(N-73)
+
+
+# ── 서버 전용 설정(local/notify.env)이 고른 등급만 텔레그램으로(N-73 — 11-21 사용자 '실패도 ai playground 채널에') ──────
+_FAKE_CURL_OK = _FAKE_CURL.replace('{"ok":false}', '{"ok":true}')
+_CONF = "QL_NOTIFY_TELEGRAM_LEVELS=crit\nQL_NOTIFY_CHAT_VAR=CHAT_ID_AIPLAYGROUND\n"
+_ENV = "BOT_TOKEN=fake-token\nCHAT_ID_LOG=12345\nCHAT_ID_AIPLAYGROUND=-100777\n"
+
+
+class Box:
+    """임시 QL_HOME 하나 — 같은 상자에서 notify.sh 를 여러 번 부른다(쿨다운 · 로그 줄 수)."""
+
+    def __init__(self, tmp_path: Path, *, conf: str | None = _CONF, env_text: str = _ENV, curl_ok: bool = True):
+        self.home, self.ql, bin_dir = tmp_path / "home", tmp_path / "ql", tmp_path / "bin"
+        self.stamps = tmp_path / "stamps"
+        for d in (self.home, self.ql, bin_dir, self.stamps):
+            d.mkdir()
+        if conf is not None:
+            (self.ql / "local").mkdir()
+            (self.ql / "local" / "notify.env").write_text(conf, encoding="utf-8")
+        self.env_file = tmp_path / "fake.env"
+        self.env_file.write_text(env_text, encoding="utf-8")
+        curl = bin_dir / "curl"
+        curl.write_text(_FAKE_CURL_OK if curl_ok else _FAKE_CURL, encoding="utf-8")
+        curl.chmod(0o755)
+        self.curl_log = tmp_path / "curl_calls.txt"
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith("QL_")}
+        self.env.update(HOME=str(self.home), QL_HOME=str(self.ql), QL_ENV=str(self.env_file),
+                        QL_NOTIFY_STAMP_DIR=str(self.stamps), FAKE_CURL_LOG=str(self.curl_log),
+                        PATH=f"{bin_dir}{os.pathsep}{self.env.get('PATH', '')}")
+
+    def call(self, level: str, title: str = "daily_build 실패: build_morning(rc=2)",
+             body: str = "로그 logs/daily_build_20261121.log") -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["bash", str(SCRIPT), level, title, body], env=self.env, capture_output=True,
+                              text=True, errors="replace", timeout=60, check=False)
+
+    @property
+    def curls(self) -> list[str]:
+        return self.curl_log.read_text(encoding="utf-8").splitlines() if self.curl_log.exists() else []
+
+    def lines(self, name: str = "notify.log") -> list[str]:
+        f = self.ql / "logs" / name
+        return f.read_text(encoding="utf-8").splitlines() if f.exists() else []
+
+
+def test_설정이_고른_등급_crit_만_그_채널로_보내고_기록은_등급마다_남긴다(tmp_path: Path) -> None:
+    """재현(11-21 아침 확정판 실패 · 11-24 저녁 엑셀 미발송): 실패가 notify.log 에만 남아 사람이 몇 시간 뒤에야 알았다.
+    옛 코드는 설정 파일을 읽지 않아 crit 도 보내지 않는다."""
+    box = Box(tmp_path)
+    for level in ("crit", "warn", "info"):
+        assert box.call(level, title=f"제목 {level}").returncode == 0
+    assert len(box.curls) == 1
+    assert "api.telegram.org/botfake-token/sendMessage" in box.curls[0]
+    assert "chat_id=-100777" in box.curls[0] and "12345" not in box.curls[0]     # 설정이 가리킨 채팅 변수의 값
+    assert "[quant-ledger] 제목 crit" in box.curls[0] and "KST" in box.curls[0]   # 본문 앞에 KST 시각
+    assert [ln.split(" ")[1] for ln in box.lines()] == ["crit", "warn", "info"]
+    assert box.lines("notify_failed.log") == []
+
+
+def test_같은_제목은_crit_도_30분에_한_번만_보내고_기록은_매번_남긴다(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    first, second = box.call("crit"), box.call("crit")
+    assert first.returncode == 0 and second.returncode == 0
+    assert len(box.curls) == 1 and "cooldown" in second.stdout
+    assert len(box.lines()) == 2
+    assert box.call("crit", title="다른 제목").returncode == 0 and len(box.curls) == 2
+
+
+def test_건너뛸_제목_정규식에_맞으면_보내지_않는다(tmp_path: Path) -> None:
+    """일일 리포트 crit 은 다른 crit 의 요약이라 겹친다 — 서버 설정의 정규식으로 뺀다."""
+    box = Box(tmp_path, conf=_CONF + "QL_NOTIFY_SKIP_TITLES='^일일 리포트'\n")
+    assert box.call("crit", title="일일 리포트 20261124").returncode == 0
+    assert box.curls == [] and len(box.lines()) == 1
+    assert box.call("crit", title="저녁 판 실패").returncode == 0 and len(box.curls) == 1
+
+
+def test_비밀_파일에_그_채팅_변수가_없으면_rc_2_이고_실패_장부와_기록이_남는다(tmp_path: Path) -> None:
+    box = Box(tmp_path, env_text="BOT_TOKEN=fake-token\nCHAT_ID_LOG=12345\n")
+    proc = box.call("crit")
+    assert proc.returncode == 2 and "CHAT_ID_AIPLAYGROUND" in proc.stderr
+    assert box.curls == [] and len(box.lines()) == 1 and len(box.lines("notify_failed.log")) == 1
+    assert "fake-token" not in proc.stderr + proc.stdout + "".join(box.lines("notify_failed.log"))
+
+
+def test_전송_실패는_rc_1_이고_실패_장부에_남으며_다음_호출은_다시_보낸다(tmp_path: Path) -> None:
+    box = Box(tmp_path, curl_ok=False)
+    assert box.call("crit").returncode == 1 and box.call("crit").returncode == 1
+    assert len(box.curls) == 2 and len(box.lines()) == 2 and len(box.lines("notify_failed.log")) == 2
+
+
+@pytest.mark.parametrize("conf", [None, "QL_NOTIFY_CHAT_VAR=CHAT_ID_AIPLAYGROUND\n"])
+def test_설정_파일이_없거나_등급이_비면_지금처럼_기록만_한다(tmp_path: Path, conf: str | None) -> None:
+    """배포만으로는 동작이 바뀌지 않는다 — 서버 전용 파일을 놓아야 보내고, 지우면 곧바로 꺼진다."""
+    box = Box(tmp_path, conf=conf)
+    box.env["QL_NOTIFY_TELEGRAM_LEVELS"] = "crit"                 # 환경 변수로는 켜지지 않는다 — 파일만 본다
+    proc = box.call("crit")
+    assert proc.returncode == 0 and "logged only" in proc.stdout
+    assert box.curls == [] and len(box.lines()) == 1

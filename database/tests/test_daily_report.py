@@ -270,6 +270,21 @@ def test_장_마감_수집의_정상_종료_상태는_crit_이_아니라_warn(tm
     assert f"kiwoom_postclose {status}" in r.text and "수집 실패 런" not in r.text
 
 
+def test_신용잔고_일부_종목_실패는_crit_이_아니라_warn(tmp_path: Path) -> None:
+    """재현(11-12 · 11-24 아침): 신용잔고 수집이 한두 종목만 못 받고 완료 기준은 통과한 날(`partial`)을 일일 리포트가
+    '수집 실패 런'으로 세어 crit 이 됐다. 빠진 종목은 다음 날 40일 창 재수집이 채운다 — 주의 런이다(N-73).
+    완료 기준을 못 넘긴 날(gate_failed)은 그대로 crit."""
+    home = _full(tmp_path)
+    _runs(home, rows=(("ledger_chain", "ok"), ("evening_chain", "ok"), ("kis_credit", "partial")))
+    r = _build(home)
+    assert r.status is dr.ReportStatus.WARN
+    assert "주의 런 kis_credit partial" in r.text and "수집 실패 런" not in r.text
+    home2 = _full(tmp_path / "b")
+    _runs(home2, rows=(("ledger_chain", "ok"), ("evening_chain", "ok"), ("kis_credit", "gate_failed")))
+    r2 = _build(home2)
+    assert r2.status is dr.ReportStatus.CRIT and "수집 실패 런 kis_credit" in r2.text
+
+
 def test_장_마감_수집은_같은_날_재실행이_ok_면_회복(tmp_path: Path) -> None:
     """kiwoom_postclose 는 런마다 그날 대상 전체를 다시 본다(이미 받은 종목만 빼고 남은 종목을 받는다)
     — 첫 런 error 뒤 같은 날 재실행이 ok 면 마지막 런 기준으로 회복이다(LAST_RUN_SOURCES)."""

@@ -273,15 +273,18 @@ def test_supplement_step_failure_stops_later_steps_and_is_crit(tmp_path: Path, f
     ({"date": "20261007", "basis": "morning", "stage_builds": {"a": "m_x"},
       "equity_builds": {"b": "m_y"}, "health": {"stage": "ok", "equity": "ok"}}, "date=20261007"),
 ])
-def test_supplement_without_a_usable_d_board_is_a_warn(tmp_path: Path, history: dict,
+def test_supplement_without_a_usable_d_board_is_a_crit(tmp_path: Path, history: dict,
                                                        why: str) -> None:
-    """D 아침 확정판 이력이 없거나 health 실패·다른 날짜면 아무 단계도 돌지 않는다 — warn 1건 · 런 로그 failed · rc 1
-    (정규 판 실패 알림은 08:10 체인 몫)."""
+    """D 아침 확정판 이력이 없거나 health 실패·다른 날짜면 아무 단계도 돌지 않는다 — crit 1건 · 런 로그 failed · rc 1.
+    11-21(토) 이 줄이 warn 이라 묻혔고 보강 엑셀과 모의 운용 주문안이 23:00 마감에 걸렸다 — 무엇이 막혔는지 · 마감 ·
+    복구 명령을 본문에 싣는다(N-73)."""
     _home(tmp_path, history=history)
     r = _run(tmp_path, "weekend_supplement.sh", "--date", D, "--wise-asof", W)
     assert r.rc == 1, r.out
     assert r.calls == []
-    assert r.titles() == ["주말 보강판 안 지음 — D 확정판 없음"] and why in r.notify[0]
+    assert r.titles("crit") == r.titles() == ["주말 보강판 안 지음 — D 확정판 없음"] and why in r.notify[0]
+    for word in ("주말 보강 엑셀", "모의 운용 주문안", "23:00", f"scripts/daily_build.sh --date {D}"):
+        assert word in r.notify[0], (word, r.notify[0])
     assert [b[1] for b in r.board] == ["failed"]
 
 

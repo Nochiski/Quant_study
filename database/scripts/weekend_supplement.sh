@@ -162,8 +162,9 @@ BOARD_WHY=$(printf '%s\n' "$BOARD_WHY" | tail -1)
 if [ "$BOARD_RC" -ne 0 ]; then
   echo "주말 보강판 안 지음 — D 아침 확정판이 없다: $BOARD_WHY D=$D"
   finish_run failed "W=$W 고정 판 없음: $BOARD_WHY"
-  scripts/notify.sh warn "주말 보강판 안 지음 — D 확정판 없음" \
-    "D=$D W=$W | $BOARD_WHY — 정규 판 실패는 08:10 체인 알림을 본다. 확정판을 다시 지은 뒤 scripts/weekend_supplement.sh --date $D --wise-asof $W"
+  # crit — 11-21(토) warn 이라 묻혀 사람이 저녁에야 알았다. 막힌 것 · 마감 · 복구 명령을 싣는다(N-73)
+  scripts/notify.sh crit "주말 보강판 안 지음 — D 확정판 없음" \
+    "D=$D W=$W | $BOARD_WHY — 주말 보강 엑셀과 scope 상위 10 모의 운용 주문안(다음 거래일 장 시작 주문)이 막혔다. 모의 운용은 23:00 KST 까지 확정판을 기다린다. 정규 판 실패 원인은 08:10 체인 알림을 본다. 복구: 원인을 고친 뒤 scripts/daily_build.sh --date $D (약 100분 · 끝나면 보강판이 이어진다). 확정판만 있고 보강판이 안 이어졌으면 scripts/weekend_supplement.sh --date $D --wise-asof $W"
   exit 1
 fi
 echo "  $BOARD_WHY"

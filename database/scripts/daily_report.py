@@ -12,7 +12,7 @@
          · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB
   warn — 건전성 warn 항목 실패, 아직 `running` 인 런, 러너가 정상 종료로 정한 상태
          (`daily.runlog.WARN_STATUSES` — 장 마감 수집 cutoff·late·session_exception · 두 판 대조 mismatch ·
-         조용한 손실 기록형 unexplained·undecidable)
+         조용한 손실 기록형 unexplained·undecidable · 신용잔고 일부 종목 실패 partial)
   info — 그 밖의 일일 요약
 WISE 수집은 06:00 체인 몫이다(N-53) — 그 실패는 06:00 체인 알림(rc≠0 crit · 일부 콜 실패 warn)과 원장
 건전성 `wise.*`(이 리포트의 원장 절)이 맡고, 저녁 원장 절에는 없다.

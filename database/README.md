@@ -245,7 +245,7 @@ crontab 복구용 원문 16줄(10-14 장 마감 2줄 추가 · 잠정 빌드 2�
   `bash scripts/postclose_chain.sh close --date T`. 계획만 보려면 `--dry-run`(락·단계·런 로그·알림 없음, 꺼져 있어도 계획은 보인다).
   원천 전환 뒤(PR-9)에는 손으로 다시 돌리기 전에 두 장부(장 마감 `data/model_db/deliver/sent_model_daily.jsonl`·아침
   `data/deliver/sent_model_daily.jsonl`)와 텔레그램을 먼저 확인한다. ⑤ 는 아침 장부를 보지 않아 이미 대체 발송된 D 를 다시 보낸다.
-- 알림은 `notify.sh`(기록만): 준비 info · 단계 실패 crit · 휴장·꺼짐 info · 세션 예외일 warn · 락 경합 warn · 게이트 경고 warn ·
+- 알림은 `notify.sh`: 준비 info · 단계 실패 crit · 휴장·꺼짐 info · 세션 예외일 warn · 락 경합 warn · 게이트 경고 warn ·
   설정 오류 crit.
 
 ### 주말 보강판 — `scripts/weekend_supplement.sh` (N-45 · DECISIONS §7 #8 · 엑셀 확정분 E5)
@@ -287,7 +287,7 @@ crontab 복구용 원문 16줄(10-14 장 마감 2줄 추가 · 잠정 빌드 2�
 - 손 재실행: `bash scripts/weekend_supplement.sh --date D --wise-asof W [--force]`(W = D 다음 첫 휴일 = 그 휴일 수집일, 체인과 같은
   환경). `--force`(또는 `QL_FORCE=1`)는 이미 완료한 D 를 다시 짓고 W 검사도 건너뛴다(손 복구) — 엑셀을 다시 보낼지는 deliver 발송
   장부가 정한다.
-- 알림(`notify.sh` — 기록만): 수집 실패·일부 실패·대상일 판정 불가 warn · 보강판 완료 info · 단계 실패 crit · D 확정판 없음 warn ·
+- 알림(`notify.sh`): 수집 실패·일부 실패·대상일 판정 불가 warn · 보강판 완료 info · 단계 실패 crit · D 확정판 없음 crit(막힌 것 · 23:00 마감 · 복구 명령, N-73) ·
   빌드 락 실패 crit · 이미 완료·꺼짐 info · fi 게이트 경고 warn · 스크립트가 0·1·3 밖 rc(인자·홈 이동 오류 — 스스로 알림을
   못 남김)로 끝나면 `daily_build` 가 warn(한 사건에 한 줄).
 
@@ -406,9 +406,14 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 
 | 등급 | 조건 | 행동 |
 |---|---|---|
-| crit (즉시) | 수집 실패(런 `failed`·저녁 원장 rc≠0) · 게이트 폐기(stage·빌드 health 실패) · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB. 단 같은 D 의 dart 는 **마지막 런**으로 판정한다 — 앞 런 실패가 뒤 런 ok 로 회복됐으면 '회복'으로 표시하고 crit 이 아니다(kael 키 런이 있으면 회복 아님). DART 하나로만 실패한 `evening_chain`(그 런 detail 의 다른 `*_rc` 가 모두 0)과 저녁 원장 dart_rc 도 같다(N-24 3.15). 장 마감 수집(`kiwoom_postclose`)·장 마감 체인 단계(`postclose_*`, PR-8)도 마지막 런으로 판정한다 | `notify.sh crit` (쿨다운 없음) |
-| warn | 건전성 warn 항목 실패, 아직 `running` 인 런, 러너가 정한 주의 상태(`daily.runlog.WARN_STATUSES` — 장 마감 수집 cutoff·late·session_exception · 두 판 대조 mismatch). WISE 부분 실패는 06:00 체인이 직접 warn 을 남긴다(N-53 — 일일 리포트는 원장 `wise.*` 로 본다) | `notify.sh warn` |
+| crit (즉시) | 수집 실패(런 `failed`·저녁 원장 rc≠0) · 게이트 폐기(stage·빌드 health 실패) · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB. 단 같은 D 의 dart 는 **마지막 런**으로 판정한다 — 앞 런 실패가 뒤 런 ok 로 회복됐으면 '회복'으로 표시하고 crit 이 아니다(kael 키 런이 있으면 회복 아님). DART 하나로만 실패한 `evening_chain`(그 런 detail 의 다른 `*_rc` 가 모두 0)과 저녁 원장 dart_rc 도 같다(N-24 3.15). 장 마감 수집(`kiwoom_postclose`)·장 마감 체인 단계(`postclose_*`, PR-8)도 마지막 런으로 판정한다 | `notify.sh crit` |
+| warn | 건전성 warn 항목 실패, 아직 `running` 인 런, 러너가 정한 주의 상태(`daily.runlog.WARN_STATUSES` — 장 마감 수집 cutoff·late·session_exception · 두 판 대조 mismatch · 신용잔고 일부 종목 실패 partial). WISE 부분 실패는 06:00 체인이 직접 warn 을 남긴다(N-53 — 일일 리포트는 원장 `wise.*` 로 본다) | `notify.sh warn` |
 | info | 그 밖의 일일 요약 | `notify.sh info` |
+
+`notify.sh` 는 모든 등급을 `logs/notify.log` 에 적는다. 텔레그램은 서버 전용 `local/notify.env`(배포가 건드리지 않는 자리)가 고른
+등급만 보낸다(N-73): `QL_NOTIFY_TELEGRAM_LEVELS`(보낼 등급) · `QL_NOTIFY_CHAT_VAR`(비밀 파일에서 읽을 채팅 변수 이름) ·
+`QL_NOTIFY_SKIP_TITLES`(보내지 않을 제목 정규식 — 일일 리포트 crit 은 다른 crit 의 요약이라 뺀다). 같은 제목은 30분에 한 번만
+보낸다. 파일을 지우면 곧바로 기록만 하는 상태로 돌아간다. 전송 실패는 `logs/notify_failed.log` 에 남고 일일 리포트 제목에 건수가 붙는다.
 
 입력 파일이 없거나 날짜가 D 와 다르면 메시지 끝 "없음" 목록에만 적고 **등급을 올리지 않는다** —
 보고 누락 판정은 워치독(`watchdog.sh`)의 몫이다(플랜 v2 §2-1).
@@ -552,7 +557,7 @@ quant-ledger 는 API 키·텔레그램 토큰을 **자기 파일 하나**에서�
 - 경로 = 환경변수 `QL_ENV`. 크론 진입점(`daily_ledger`·`daily_build`·`daily_evening`·`build_evening`·`watchdog`·`backup_raw`·`gc`·`wics_weekly`·`postclose_chain`)과
   손으로 단독 실행하는 `model_daily.sh`·`daily_wise.sh`·`dart_company_gap.sh` 가 `cd` 직후 `export QL_ENV="$HOME/quant-ledger/.env"` 로 **고정**한다(바깥 값을 물려받지 않는다). 크론 줄은 그대로다.
   그 밖의 손 명령(`python -m daily.dart_daily`·`python -m deliver`·`daily_dart.sh` 등)은 앞에 `QL_ENV="$HOME/quant-ledger/.env"` 를 붙인다.
-- 읽는 곳: `src/api.py`(import 시점) · `src/deliver/telegram.py`(`--env-file` > `QL_ENV`) · `scripts/notify.sh`(`QL_NOTIFY_TELEGRAM=1` 분기만 — 기본 로그 분기는 파일 없이 돈다).
+- 읽는 곳: `src/api.py`(import 시점) · `src/deliver/telegram.py`(`--env-file` > `QL_ENV`) · `scripts/notify.sh`(텔레그램으로 보낼 때만 — 기록만 하는 호출은 파일 없이 돈다).
   경로가 비었거나 가리킨 파일이 없으면 셋 다 실패한다 — `import api`·`telegram.env_path` 는 FileNotFoundError, `python -m deliver` 는 설정 오류 rc 2, notify 텔레그램 분기는 rc 2.
 - 배포 순서: 이 파일을 **먼저** 만든 뒤 배포한다 — `deploy.sh` 가 rsync 전에 원격 파일의 존재·권한 600·소유자를 확인하고, 아니면 멈춘다(아래 "배포").
 - 위치: 운영 루트 바로 아래 — `deploy.sh` 의 `rsync --delete` 대상(`src/`·`scripts/`·`config/`·`_engine/`) 밖이라 배포가 지우지 않는다. `config/` 아래에 두지 않는다.
@@ -573,7 +578,7 @@ quant-ledger 는 API 키·텔레그램 토큰을 **자기 파일 하나**에서�
   | `DART_API_KEY_2` ~ `DART_API_KEY_5` | `api.dart_keys()` — 번호순이 소진 순서 | 지금 쓰는 번호 그대로(하나 이상) |
   | `BOT_TOKEN` · `CHAT_ID_AIPLAYGROUND` | `deliver/telegram.py` — 모델 엑셀 발송 | 필수 |
   | `KRX_ID` · `KRX_PW` | `api.py` 가 환경변수로 내보내기만 한다(저장소 코드에 소비처 없음) | 선택 |
-  | `CHAT_ID_LOG` | `notify.sh` 텔레그램 분기만(`QL_NOTIFY_TELEGRAM=1` — 로그 알림 텔레그램 금지, 10-01) | 넣지 않아도 된다 |
+  | `CHAT_ID_LOG` | `notify.sh` 옛 스위치(`QL_NOTIFY_TELEGRAM=1` — 모든 등급)만. 평소 알림은 서버 전용 `local/notify.env` 의 `QL_NOTIFY_CHAT_VAR` 가 가리키는 변수를 쓴다(N-73) | 넣지 않아도 된다 |
   | `DART_API_KEY` | v3 프로덕션 키 — `api.dart_keys()` 가 쓰지 않는다 | **넣지 않는다** |
 
   `DART_API_KEY_2`~`_5` 의 **값**도 v3 프로덕션 `DART_API_KEY` 값과 달라야 한다 — 이름만 바꾼 같은 키 금지(그 키를 쓰면 v3 한도를 같이 태운다).

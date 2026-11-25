@@ -449,7 +449,9 @@ def test_유상감자_결정공시는_capred_paid로_factor_ok_false(tmp_path: P
     for d in STAGE_SLICE.iterdir():
         if d.is_dir() and d.name != "stg_event_cr":
             os.symlink(d, stage_root / d.name)
-    make_stage_tree(tmp_path, "stg_event_cr", HAND_CR, "receipt_axis", build_id="b_hand_cr")
+    # `observed_date` = stage 가 싣는 관측일 — corp_event 가 재수집 판본을 접는 축이다(e1.37.0 · N-75)
+    make_stage_tree(tmp_path, "stg_event_cr", [{**r, "observed_date": date(2026, 9, 1)} for r in HAND_CR],
+                    "receipt_axis", build_id="b_hand_cr")
     r = build_chain(stage_root, tmp_path / "equity", seed())
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
     assert r.n_rows == N_EVENTS + 1 and r.out_dir is not None

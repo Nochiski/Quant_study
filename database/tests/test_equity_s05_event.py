@@ -95,25 +95,27 @@ _STG_TYPES: dict[str, dict[str, str]] = {
                        "nstk_ascnt_ps_ostk_ratio": "DOUBLE", "nstk_ascnt_ps_estk_ratio": "DOUBLE",
                        "nstk_ostk_cnt": "DOUBLE", "nstk_estk_cnt": "DOUBLE",
                        "bfic_tisstk_ostk": "DOUBLE", "available_date": "DATE",
-                       "available_basis": "VARCHAR"},
+                       "available_basis": "VARCHAR", "observed_date": "DATE"},
     "stg_event_pifric": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "fric_nstk_asstd": "DATE",
                          "fric_nstk_ascnt_ps_ostk_ratio": "DOUBLE",
                          "fric_nstk_ascnt_ps_estk_ratio": "DOUBLE", "fric_nstk_ostk_cnt": "DOUBLE",
                          "fric_nstk_estk_cnt": "DOUBLE", "fric_bfic_tisstk_ostk": "DOUBLE",
-                         "available_date": "DATE", "available_basis": "VARCHAR"},
+                         "available_date": "DATE", "available_basis": "VARCHAR",
+                         "observed_date": "DATE"},
     "stg_event_cr": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "cr_std": "DATE",
                      "bfcr_tisstk_ostk": "DOUBLE", "atcr_tisstk_ostk": "DOUBLE",
                      "cr_rt_ostk_pct": "DOUBLE", "bfcr_tisstk_estk": "DOUBLE",
                      "atcr_tisstk_estk": "DOUBLE", "cr_rt_estk_pct": "DOUBLE",
                      "crstk_estk_cnt": "DOUBLE", "available_date": "DATE",
-                     "available_basis": "VARCHAR"},
+                     "available_basis": "VARCHAR", "observed_date": "DATE"},
     "stg_event_tsstk_aq": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "aq_dd": "DATE",
                            "aqpln_stk_ostk": "DOUBLE", "aqpln_stk_estk": "DOUBLE",
                            "aqpln_prc_ostk": "DOUBLE", "aqpln_prc_estk": "DOUBLE",
-                           "available_date": "DATE", "available_basis": "VARCHAR"},
+                           "available_date": "DATE", "available_basis": "VARCHAR",
+                           "observed_date": "DATE"},
     "stg_event_cvbd_is": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "bddd": "DATE",
                           "bd_fta": "DOUBLE", "available_date": "DATE",
-                          "available_basis": "VARCHAR"},
+                          "available_basis": "VARCHAR", "observed_date": "DATE"},
     "stg_capital": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "isu_dcrs_de": "DATE",
                     "isu_dcrs_stle": "VARCHAR", "isu_dcrs_stock_knd": "VARCHAR",
                     "available_date": "DATE", "available_basis": "VARCHAR"},
@@ -136,7 +138,8 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                   corp_ticker: list[dict[str, object]] | None = None,
                   spans: list[dict[str, object]] | None = None,
                   const: dict[str, object] | None = None,
-                  scope_out: dict[str, int] | None = None) -> dict[str, dict[str, object]]:
+                  scope_out: dict[str, int] | None = None,
+                  raw: list[dict[str, object]] | None = None) -> dict[str, dict[str, object]]:
     """`sql/corp_event.sql` 을 합성 입력 뷰 위에서 그대로 실행한다(프레임·게이트 없이 산출식만).
 
     `listing` 은 (ticker, date, list_shrs[, par_value_krw]) 를 주면 되고 corp_ticker·security_span
@@ -149,7 +152,8 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
     `security.sec_type` 은 `etf_tickers` 면 'etf', 아니면 'stock'(C-04 기준가 후보에서 ETF 제외).
     `scope_out` 을 주면 같은 입력의 pool 범위 판정(`rules_s05.pool_sql`, EG3 `n_pool_by_scope` 와 같은
     질의)을 사유별 건수로 채운다(범위 안은 'in_scope') — 범위 밖은 행을 내지 않아 산출만으로는 사유를
-    가를 수 없다.
+    가를 수 없다. `raw` 를 주면 산출 행 전부(격리 포함)를 거기에 싣는다 — 반환 dict 는 event_id 가 키라
+    같은 사건의 격리 행 여럿을 못 센다.
     """
     con = duckdb.connect()
     try:
@@ -192,8 +196,11 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
         _view(con, "_const", [k], dict.fromkeys(k, "DOUBLE"))
         rel = con.execute(_EVENT_SQL)
         cols = [d[0] for d in rel.description]
+        fetched = rel.fetchall()
+        if raw is not None:
+            raw.extend(dict(zip(cols, r, strict=True)) for r in fetched)
         out = {str(r[cols.index("event_id")]): dict(zip(cols, r, strict=True))
-               for r in rel.fetchall()}
+               for r in fetched}
         if scope_out is not None:
             scope_out.update({str(s): int(n) for s, n in con.execute(rules_s05.pool_sql(
                 "coalesce(scope_out, 'in_scope'), count(*) FROM pool GROUP BY 1")).fetchall()})
@@ -600,7 +607,9 @@ def test_손픽스처_FX_2_003과_범위_밖_4종과_격리_3종(tmp_path: Path,
     for d in STAGE_SLICE.iterdir():
         if d.is_dir() and d.name not in ("stg_event_fric", "stg_capital"):
             os.symlink(d, stage_root / d.name)
-    make_stage_tree(tmp_path, "stg_event_fric", HAND_FRIC, "receipt_axis", build_id="b_hand_fric")
+    make_stage_tree(tmp_path, "stg_event_fric",
+                    [{**r, "observed_date": date(2026, 9, 1)} for r in HAND_FRIC],
+                    "receipt_axis", build_id="b_hand_fric")
     make_stage_tree(tmp_path, "stg_capital", HAND_CAPITAL, "receipt_axis", build_id="b_hand_cap")
     fx = tmp_path / "corp_event.json"
     fx.write_text(json.dumps(HAND_FIXTURES, ensure_ascii=False), encoding="utf-8")
@@ -705,24 +714,26 @@ _DART_EMPTY: dict[str, str] = {
     "stg_event_tsstk_aq": ("rcept_no VARCHAR, corp_code VARCHAR, aq_dd DATE, "
                            "aqpln_stk_ostk DECIMAL(10,0), aqpln_stk_estk DECIMAL(10,0), "
                            "aqpln_prc_ostk DECIMAL(18,0), aqpln_prc_estk DECIMAL(18,0), "
-                           "available_date DATE, available_basis VARCHAR"),
+                           "available_date DATE, available_basis VARCHAR, observed_date DATE"),
     "stg_event_cvbd_is": ("rcept_no VARCHAR, corp_code VARCHAR, bddd DATE, "
-                          "bd_fta DECIMAL(18,0), available_date DATE, available_basis VARCHAR"),
+                          "bd_fta DECIMAL(18,0), available_date DATE, available_basis VARCHAR, "
+                          "observed_date DATE"),
     "stg_event_fric": ("rcept_no VARCHAR, corp_code VARCHAR, nstk_asstd DATE, "
                        "nstk_ascnt_ps_ostk_ratio DECIMAL(14,10), nstk_ascnt_ps_estk_ratio "
                        "DECIMAL(5,2), nstk_ostk_cnt DECIMAL(11,0), nstk_estk_cnt DECIMAL(10,0), "
                        "bfic_tisstk_ostk DECIMAL(11,0), available_date DATE, "
-                       "available_basis VARCHAR"),
+                       "available_basis VARCHAR, observed_date DATE"),
     "stg_event_pifric": ("rcept_no VARCHAR, corp_code VARCHAR, fric_nstk_asstd DATE, "
                          "fric_nstk_ascnt_ps_ostk_ratio DECIMAL(13,10), "
                          "fric_nstk_ascnt_ps_estk_ratio DECIMAL(11,8), fric_nstk_ostk_cnt "
                          "DECIMAL(10,0), fric_nstk_estk_cnt DECIMAL(8,0), fric_bfic_tisstk_ostk "
-                         "DECIMAL(11,0), available_date DATE, available_basis VARCHAR"),
+                         "DECIMAL(11,0), available_date DATE, available_basis VARCHAR, "
+                         "observed_date DATE"),
     "stg_event_cr": ("rcept_no VARCHAR, corp_code VARCHAR, cr_std DATE, bfcr_tisstk_ostk "
                      "DECIMAL(12,0), atcr_tisstk_ostk DECIMAL(11,0), cr_rt_ostk_pct "
                      "DECIMAL(15,10), bfcr_tisstk_estk DECIMAL(10,0), atcr_tisstk_estk "
                      "DECIMAL(10,0), cr_rt_estk_pct DECIMAL(8,3), crstk_estk_cnt DECIMAL(10,0), "
-                     "available_date DATE, available_basis VARCHAR"),
+                     "available_date DATE, available_basis VARCHAR, observed_date DATE"),
     "stg_capital": ("rcept_no VARCHAR, corp_code VARCHAR, isu_dcrs_de DATE, isu_dcrs_stle "
                     "VARCHAR, isu_dcrs_stock_knd VARCHAR, available_date DATE, "
                     "available_basis VARCHAR"),
@@ -982,6 +993,32 @@ def test_자사주_취득과_CB_발행은_금액을_싣고_비율은_없다() ->
     c = out[f"A00001:cb_issue:{cal[30]}"]
     assert c["ratio"] is None and c["amount_krw"] == 30_000_000_000
     assert c["source"] == "event_cvbd_is" and c["effective_date"] == cal[30]
+
+
+def test_재수집_판본이_쌓인_사건_표는_접수마다_한_줄로_접는다() -> None:
+    """재현(11-21 계획 B-1 · N-75): stage 사건 표는 재수집 판본이 쌓인다 — 회사명이 바뀐 뒤 다시 받으면 내용 칸은 같고
+    `corp_name_current` · `observed_date` 만 다른 행이 같은 (rcept_no, corp_code) 로 하나 더 온다(서버 11-21 판
+    사건 표 다섯에 44건). 옛 식은 접지 않아 ① 격리 행이 판본 수만큼 불고 ② 통과 사건의 `n_src_rows` 가 판본까지 셌다.
+    같은 꼴이 `adj_factor` 를 멈춘 적이 있다(N-70). 가장 이른 판본 하나로 접는다."""
+    cal = sessions(60)
+    listing = flat_listing("A00001", cal, 1_000_000)
+    seen = (date(2026, 9, 1), date(2026, 11, 20))          # 처음 받은 날 · 회사명이 바뀐 뒤 다시 받은 날
+    cvbd = [{"rcept_no": "20210301000002", "corp_code": "CA00001", "bddd": None,     # 결정일 없음 → 격리
+             "bd_fta": 30_000_000_000.0, "available_date": cal[30], "observed_date": d} for d in seen]
+    fric = [{"rcept_no": "20210301000003", "corp_code": "CA00001", "nstk_asstd": cal[40],
+             "nstk_ascnt_ps_ostk_ratio": 0.5, "available_date": cal[20], "observed_date": d} for d in seen]
+    tsstk = [{"rcept_no": "20210301000001", "corp_code": "CA00001", "aq_dd": cal[10],
+              "aqpln_prc_ostk": 5_000_000_000.0, "available_date": cal[10], "observed_date": d} for d in seen]
+    raw: list[dict[str, object]] = []
+    scope: dict[str, int] = {}
+    out = run_event_sql(cal, listing, cvbd=cvbd, fric=fric, tsstk=tsstk, raw=raw, scope_out=scope)
+    rejected = [r for r in raw if r["reject_reason"] is not None]
+    assert [(r["source"], r["reject_reason"]) for r in rejected] == [("event_cvbd_is", "effective_unresolved")]
+    assert len(raw) == 3 and scope == {"in_scope": 3}       # 옛 식: 산출 4행(격리 2) · 범위 안 후보 6
+    bonus = next(r for r in out.values() if r["event_type"] == "bonus")
+    assert bonus["n_src_rows"] == 1 and bonus["ratio"] == pytest.approx(1.5)   # 옛 식 n_src_rows 2
+    buy = next(r for r in out.values() if r["event_type"] == "treasury_buy")
+    assert buy["n_src_rows"] == 1 and buy["amount_krw"] == 5_000_000_000
 
 
 def test_새_유형은_방향_불변식에도_조정계수에도_걸리지_않는다() -> None:

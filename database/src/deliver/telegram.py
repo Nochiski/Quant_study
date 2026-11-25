@@ -5,12 +5,14 @@
 그 안에서 `BOT_TOKEN` 과 채팅 키 **두 줄만**. 토큰·채팅 ID 는 로그·예외·반환값
 어디에도 싣지 않는다(오류 문자열은 가림 처리). 전송은 표준 라이브러리 `urllib`(curl 없음).
 `transport` 를 주입하면 네트워크 대신 그것을 부른다(테스트는 가짜 전송만 쓴다).
+요청을 다 올리기 전에 끊긴 전송(연결 실패 · 올리기 시간 초과)은 `RETRY_WAITS_S` 만큼 기다렸다 다시 보낸다(N-72).
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -26,6 +28,8 @@ TOKEN_KEY = "BOT_TOKEN"
 DEFAULT_CHAT_KEY = "CHAT_ID_AIPLAYGROUND"
 CAPTION_MAX = 1024          # 텔레그램 문서 caption 한도
 TIMEOUT_S = 60
+# 요청을 다 올리기 전에 끊긴 전송을 다시 보내기 전 기다리는 초 — 시도는 모두 1 + len 번(N-72 · 11-24 저녁 엑셀 미발송)
+RETRY_WAITS_S = (10, 30)
 REDACTED = "***"
 # 캡션 첫 줄 basis 자리에 쓰는 말 — 없으면 basis 이름 그대로(morning · evening). 주말 보강판은
 # '주말 보강'(N-45 · DECISIONS §7 #8)
@@ -104,6 +108,16 @@ def urllib_transport(url: str, fields: Mapping[str, str], file_name: str,
             return {"ok": False, "description": f"HTTP {e.code}"}
 
 
+def _not_sent(e: Exception) -> bool:
+    """요청이 텔레그램에 다 올라가기 전에 난 실패인가 — 이때만 다시 보내도 같은 문서가 두 번 가지 않는다.
+
+    urllib 은 연결 · 요청 올리기 단계의 오류를 `URLError` 로 싸서 올리고(`AbstractHTTPHandler.do_open`),
+    다 올린 뒤 답을 읽는 단계의 오류(읽기 시간 초과 · 연결 끊김)는 싸지 않고 그대로 올린다. 뒤쪽은 텔레그램이
+    이미 받았을 수 있어 다시 보내지 않는다. HTTP 오류 응답(`HTTPError`)은 `urllib_transport` 가 본문으로 돌려준다.
+    """
+    return isinstance(e, urllib.error.URLError) and not isinstance(e, urllib.error.HTTPError)
+
+
 def send_document(path: str | Path, caption: str, *, env_file: str | Path | None = None,
                   chat_key: str = DEFAULT_CHAT_KEY, transport: Transport | None = None,
                   dry_run: bool = False) -> dict[str, object]:
@@ -134,12 +148,23 @@ def send_document(path: str | Path, caption: str, *, env_file: str | Path | None
         return {"ok": False, "description": desc}
     url = f"{API}/bot{token}/sendDocument"
     send = transport or urllib_transport
-    try:
-        resp = send(url, {"chat_id": chat, "caption": caption}, p.name, p.read_bytes())
-    except Exception as e:  # noqa: BLE001 — 어떤 예외든 비밀을 가려 반환한다(경로·URL 에 토큰)
-        desc = redact(f"전송 예외 {type(e).__name__}: {e}", (token, chat))
-        log.warning("telegram %s", desc)
-        return {"ok": False, "description": desc}
+    tries = 1 + len(RETRY_WAITS_S)
+    for attempt in range(1, tries + 1):
+        try:
+            resp = send(url, {"chat_id": chat, "caption": caption}, p.name, p.read_bytes())
+            break
+        except Exception as e:  # noqa: BLE001 — 어떤 예외든 비밀을 가려 반환한다(경로·URL 에 토큰)
+            desc = redact(f"전송 예외 {type(e).__name__}: {e}", (token, chat))
+            if not _not_sent(e):
+                log.warning("telegram %s", desc)
+                return {"ok": False, "description": desc}
+            if attempt == tries:
+                desc = f"{desc} · {tries}회 시도"
+                log.warning("telegram %s", desc)
+                return {"ok": False, "description": desc}
+            wait = RETRY_WAITS_S[attempt - 1]
+            log.warning("telegram %s — %d초 뒤 다시 보낸다(시도 %d/%d)", desc, wait, attempt, tries)
+            time.sleep(wait)
     ok = bool(resp.get("ok"))
     desc = redact(resp.get("description") or ("sent" if ok else "응답에 ok 없음"), (token, chat))
     log.info("telegram sendDocument %s → %s: %s", p.name, chat_key, "ok" if ok else desc)

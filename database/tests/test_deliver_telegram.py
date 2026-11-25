@@ -4,7 +4,10 @@
 """
 from __future__ import annotations
 
+import http.client
 import logging
+import time
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -112,6 +115,81 @@ def test_transport_exception_is_redacted(env: Path, doc: Path,
     assert res["ok"] is False
     assert "ConnectionError" in str(res["description"]) and tg.REDACTED in str(res["description"])
     _clean(res, caplog.text)
+
+
+class Flaky:
+    """앞의 몇 번은 예외를 내고, 그 뒤로는 ok 를 답하는 가짜 전송."""
+
+    def __init__(self, excs: list[Exception]):
+        self.excs = list(excs)
+        self.calls = 0
+
+    def __call__(self, url: str, fields, name: str, data: bytes):
+        self.calls += 1
+        if self.excs:
+            raise self.excs.pop(0)
+        return {"ok": True, "result": {}}
+
+
+@pytest.fixture
+def waits(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """다시 보내기 전 기다린 초 — 테스트는 실제로 자지 않는다."""
+    got: list[float] = []
+    monkeypatch.setattr(time, "sleep", got.append)
+    return got
+
+
+def _upload_timeout() -> urllib.error.URLError:
+    """11-24 저녁 로그 그대로 — 파일을 올리던 중 60초를 넘겼다(urllib 은 연결 · 올리기 단계 오류를 URLError 로 싼다)."""
+    return urllib.error.URLError(TimeoutError("The write operation timed out"))
+
+
+def test_upload_cut_before_request_is_sent_is_retried(env: Path, doc: Path, waits: list[float],
+                                                      caplog: pytest.LogCaptureFixture) -> None:
+    """재현(11-24 저녁 엑셀 미발송): 올리기가 한 번 시간 초과로 끊겨도 잠시 뒤 다시 보내 발송한다.
+    옛 코드는 한 번 실패로 끝냈다 — 엑셀도, 그 뒤 상위 20 보고서 · v3 반영도 안 나갔다."""
+    flaky = Flaky([_upload_timeout()])
+    with caplog.at_level(logging.DEBUG, logger="deliver.telegram"):
+        res = tg.send_document(doc, "c", env_file=env, transport=flaky)
+    assert res == {"ok": True, "description": "sent"}
+    assert flaky.calls == 2 and waits == [10]
+    assert "다시 보낸다" in caplog.text
+    _clean(res, caplog.text)
+
+
+def test_upload_retry_waits_10s_then_30s_and_gives_up_after_three(env: Path, doc: Path,
+                                                                  waits: list[float]) -> None:
+    flaky = Flaky([_upload_timeout(), urllib.error.URLError(ConnectionRefusedError(111, "refused"))])
+    assert tg.send_document(doc, "c", env_file=env, transport=flaky)["ok"] is True
+    assert flaky.calls == 3 and waits == [10, 30] == list(tg.RETRY_WAITS_S)
+    waits.clear()
+    token_in_msg = urllib.error.URLError(f"failed https://api.telegram.org/bot{TOKEN}/sendDocument chat={CHAT}")
+    flaky = Flaky([_upload_timeout(), _upload_timeout(), token_in_msg, _upload_timeout()])
+    res = tg.send_document(doc, "c", env_file=env, transport=flaky)
+    assert res["ok"] is False and flaky.calls == 3 and waits == [10, 30]
+    assert "URLError" in str(res["description"]) and "3회 시도" in str(res["description"])
+    _clean(res)
+
+
+@pytest.mark.parametrize("exc", [
+    TimeoutError("The read operation timed out"),                          # 다 올린 뒤 답을 기다리다 시간 초과
+    http.client.RemoteDisconnected("Remote end closed connection without response"),
+    ConnectionResetError(104, "Connection reset by peer"),
+])
+def test_failure_after_upload_is_not_retried(env: Path, doc: Path, waits: list[float],
+                                             exc: Exception) -> None:
+    """요청을 다 올린 뒤(답을 읽는 단계)의 실패는 다시 보내지 않는다 — 텔레그램이 이미 받았을 수 있어
+    다시 보내면 같은 엑셀이 두 번 간다. urllib 은 이 단계 예외를 URLError 로 싸지 않고 그대로 올린다."""
+    flaky = Flaky([exc])
+    res = tg.send_document(doc, "c", env_file=env, transport=flaky)
+    assert res["ok"] is False and flaky.calls == 1 and waits == []
+    assert type(exc).__name__ in str(res["description"]) and "회 시도" not in str(res["description"])
+
+
+def test_api_error_response_is_not_retried(env: Path, doc: Path, waits: list[float]) -> None:
+    fake = Fake({"ok": False, "description": "Bad Request: chat not found"})
+    assert tg.send_document(doc, "c", env_file=env, transport=fake)["ok"] is False
+    assert len(fake.calls) == 1 and waits == []
 
 
 def test_api_error_description_is_redacted(env: Path, doc: Path) -> None:

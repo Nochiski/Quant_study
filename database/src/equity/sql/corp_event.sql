@@ -71,6 +71,31 @@ legs AS (
     FROM corp_ticker
     WHERE corp_code IS NOT NULL
 ),
+-- ── 재수집 판본 접기 (e1.37.0 · N-75) ────────────────────────────────────────
+-- stage 사건 표는 재수집 판본이 쌓인다(`write_mode='append_only'` · `key_unique=False`) — 회사명이 바뀐 뒤 그 법인의
+-- 결정공시를 다시 받으면 내용 칸은 같고 `corp_name_current` · `observed_date` 만 다른 행이 같은 (rcept_no, corp_code) 로
+-- 하나 더 온다. 접지 않으면 격리 행이 판본 수만큼 불고 `n_src_rows` 가 판본까지 센다(같은 꼴이 `adj_factor` 를 멈췄다 —
+-- N-70). 접수마다 **가장 이른 판본 하나**다(first_write_wins — `audit_opinion` 등과 같은 규약).
+ev_fric AS (
+    SELECT * FROM stg_event_fric
+    QUALIFY row_number() OVER (PARTITION BY rcept_no, corp_code ORDER BY observed_date NULLS LAST) = 1
+),
+ev_pifric AS (
+    SELECT * FROM stg_event_pifric
+    QUALIFY row_number() OVER (PARTITION BY rcept_no, corp_code ORDER BY observed_date NULLS LAST) = 1
+),
+ev_cr AS (
+    SELECT * FROM stg_event_cr
+    QUALIFY row_number() OVER (PARTITION BY rcept_no, corp_code ORDER BY observed_date NULLS LAST) = 1
+),
+ev_tsstk_aq AS (
+    SELECT * FROM stg_event_tsstk_aq
+    QUALIFY row_number() OVER (PARTITION BY rcept_no, corp_code ORDER BY observed_date NULLS LAST) = 1
+),
+ev_cvbd_is AS (
+    SELECT * FROM stg_event_cvbd_is
+    QUALIFY row_number() OVER (PARTITION BY rcept_no, corp_code ORDER BY observed_date NULLS LAST) = 1
+),
 -- ── DART class-row (원천별 1~2행) ────────────────────────────────────────────
 fric AS (
     SELECT rcept_no, corp_code, 'event_fric' AS source, 'bonus' AS event_type, 'common' AS cls,
@@ -78,12 +103,12 @@ fric AS (
            CASE WHEN nstk_ascnt_ps_ostk_ratio IS NOT NULL THEN 1 + nstk_ascnt_ps_ostk_ratio
                 WHEN bfic_tisstk_ostk > 0 THEN 1 + nstk_ostk_cnt / bfic_tisstk_ostk END AS ratio,
            TRUE AS ratio_given, available_date, available_basis
-    FROM stg_event_fric
+    FROM ev_fric
     UNION ALL
     SELECT rcept_no, corp_code, 'event_fric', 'bonus', 'preferred', nstk_asstd,
            CASE WHEN nstk_ascnt_ps_estk_ratio IS NOT NULL THEN 1 + nstk_ascnt_ps_estk_ratio END,
            TRUE, available_date, available_basis
-    FROM stg_event_fric
+    FROM ev_fric
     WHERE coalesce(nstk_estk_cnt, 0) > 0 OR nstk_ascnt_ps_estk_ratio IS NOT NULL
 ),
 pifric AS (
@@ -93,13 +118,13 @@ pifric AS (
                 WHEN fric_bfic_tisstk_ostk > 0
                      THEN 1 + fric_nstk_ostk_cnt / fric_bfic_tisstk_ostk END AS ratio,
            TRUE AS ratio_given, available_date, available_basis
-    FROM stg_event_pifric
+    FROM ev_pifric
     UNION ALL
     SELECT rcept_no, corp_code, 'event_pifric', 'bonus', 'preferred', fric_nstk_asstd,
            CASE WHEN fric_nstk_ascnt_ps_estk_ratio IS NOT NULL
                 THEN 1 + fric_nstk_ascnt_ps_estk_ratio END,
            TRUE, available_date, available_basis
-    FROM stg_event_pifric
+    FROM ev_pifric
     WHERE coalesce(fric_nstk_estk_cnt, 0) > 0 OR fric_nstk_ascnt_ps_estk_ratio IS NOT NULL
 ),
 cr AS (
@@ -110,12 +135,12 @@ cr AS (
            cr_std AS basis_date,
            CASE WHEN bfcr_tisstk_ostk > 0 THEN atcr_tisstk_ostk / bfcr_tisstk_ostk END AS ratio,
            TRUE AS ratio_given, available_date, available_basis
-    FROM stg_event_cr
+    FROM ev_cr
     UNION ALL
     SELECT rcept_no, corp_code, 'event_cr', 'capred', 'preferred', cr_std,
            CASE WHEN bfcr_tisstk_estk > 0 THEN atcr_tisstk_estk / bfcr_tisstk_estk END,
            TRUE, available_date, available_basis
-    FROM stg_event_cr
+    FROM ev_cr
     WHERE coalesce(crstk_estk_cnt, 0) > 0 OR cr_rt_estk_pct IS NOT NULL
 ),
 capital AS (
@@ -219,7 +244,7 @@ tsstk_estk AS (
                                AND s.end_reason <> 'coverage_gap') AS dead
                   FROM legs l
                   WHERE l.corp_code = t.corp_code AND l.cls = 'preferred') p) AS pref
-    FROM stg_event_tsstk_aq t
+    FROM ev_tsstk_aq t
     WHERE coalesce(t.aqpln_prc_estk, 0) > 0 OR coalesce(t.aqpln_stk_estk, 0) > 0
 ),
 tsstk_aq AS (
@@ -228,7 +253,7 @@ tsstk_aq AS (
            NULL::DOUBLE AS ratio, FALSE AS ratio_given, available_date, available_basis,
            aqpln_prc_ostk AS amount_raw, (aqpln_prc_ostk IS NOT NULL) AS amount_given,
            NULL::VARCHAR AS leg_ticker
-    FROM stg_event_tsstk_aq
+    FROM ev_tsstk_aq
     WHERE coalesce(aqpln_prc_ostk, 0) > 0 OR coalesce(aqpln_stk_ostk, 0) > 0
        OR NOT (coalesce(aqpln_prc_estk, 0) > 0 OR coalesce(aqpln_stk_estk, 0) > 0)
     UNION ALL
@@ -247,7 +272,7 @@ cvbd_is AS (
            NULL::DOUBLE AS ratio, FALSE AS ratio_given, available_date, available_basis,
            coalesce(bd_fta, 0) AS amount_raw, (bd_fta IS NOT NULL) AS amount_given,
            NULL::VARCHAR AS leg_ticker
-    FROM stg_event_cvbd_is
+    FROM ev_cvbd_is
 ),
 dart AS (
     SELECT *, NULL::DOUBLE AS amount_raw, FALSE AS amount_given, NULL::VARCHAR AS leg_ticker

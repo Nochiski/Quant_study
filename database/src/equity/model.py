@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.36.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.37.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -378,6 +378,10 @@ RULES_VERSION = "e1.36.0"                # BuildRecord.rules_version 에 실린�
 #          종류의 정기보고서를 두 번 이상 내 요청 키가 겹친다 — 옛 식은 최신 접수 하나만 골라 뒤 보고서가 들어온 날 앞
 #          보고서 행이 사라졌다(11-13~11-19 조용한 손실 `fin_std` 행 삭제 미설명). 산출: 겹친 그룹의 앞 기간 행이 더해진다
 #          (원장 `stg_fin` 에 줄이 남은 2026년분). 다른 법인의 행 · 값은 불변 기대(서버 그림자로 확인). grain 은 그대로다.
+# e1.37.0: `corp_event` 가 stage 사건 표 다섯(`stg_event_fric` · `pifric` · `cr` · `tsstk_aq` · `cvbd_is`)의 재수집 판본을 접수
+#          (rcept_no, corp_code)마다 가장 이른 판본 하나로 접는다(N-75). 회사명이 바뀐 뒤 다시 받은 결정공시는 내용이 같고
+#          `corp_name_current` · `observed_date` 만 다른 행으로 쌓인다 — 옛 식은 격리 행이 판본 수만큼 불고 `n_src_rows` 가
+#          판본까지 셌다. 산출: 통과 사건의 값은 그대로이고 `n_src_rows` 와 격리 행 수만 준다(하류 `adj_factor` 는 통과 사건만 읽는다).
 
 # 판본마다 산출이 **직접** 바뀐 표(연구 DB S1-a, 규약은 `stage.model.RULES_CHANGED`) — 판본을 올리면 한 줄을 더한다.
 # 그 표를 입력으로 읽는 하류 표는 적지 않는다(읽는 쪽이 `RULES[t].inputs` 를 따라 닫는다). 선언 시작은 e1.31.0 이다 —
@@ -401,6 +405,8 @@ RULES_CHANGED: dict[str, frozenset[str]] = {
     "e1.35.0": frozenset({"fin_prelim"}),
     # 판본 선택 그룹에 보고서 기간 축 — 겹친 그룹의 앞 기간 행이 더해진다(N-74)
     "e1.36.0": frozenset({"fin_std"}),
+    # 사건 표 재수집 판본 접기 — `n_src_rows` 와 격리 행 수만 준다(N-75)
+    "e1.37.0": frozenset({"corp_event"}),
 }
 
 

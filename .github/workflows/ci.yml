@@ -13,10 +13,12 @@ concurrency:
 
 jobs:
   # job 마다 제한 시간을 둔다(#599 리뷰 P3-3). 배정 루프의 라이브락 같은 회귀가 들어오면 GitHub 기본값
-  # 360분 동안 멈춘다. 값은 최근 main 실행 시간의 약 3배다(backend 15~25분, frontend 약 5분, 나머지 2분 안).
+  # 360분 동안 멈춘다. 값은 최근 main 실행 시간의 약 3배다(frontend 약 5분, 나머지 2분 안).
+  # backend 는 2026-11 기준 33~49분이 걸리고 같은 코드도 러너에 따라 15분쯤 다르다. 50분 제한에서는 테스트가 모두
+  # 통과한 실행이 끊겼다(#736 첫 실행). 최근 최댓값의 약 1.5배인 75분으로 둔다.
   backend:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 75
     defaults:
       run:
         working-directory: backend
